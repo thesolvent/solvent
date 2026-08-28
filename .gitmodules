@@ -1,0 +1,3 @@
+[submodule "contracts/lib/UniswapX"]
+	path = contracts/lib/UniswapX
+	url = https://github.com/Uniswap/UniswapX

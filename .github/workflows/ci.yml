@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive # Uniswap deps (UniswapX/permit2) are git submodules
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+          cache-dependency-path: contracts/yarn.lock
+
+      # 1inch Aqua/SwapVM deps resolve via npm into node_modules/
+      - run: yarn install --frozen-lockfile
+
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - run: forge fmt --check
+      - run: forge build
+      - run: forge test
+        # Fork tests are opt-in: they run only when a MAINNET_RPC_URL secret is configured.
+        env:
+          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+
+  # backend job is added when the backend phase begins (cargo fmt/clippy/test).

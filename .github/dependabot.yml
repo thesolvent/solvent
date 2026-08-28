@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # 1inch Aqua/SwapVM stack (npm)
+  - package-ecosystem: npm
+    directory: /contracts
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Uniswap UniswapX/permit2 (git submodules)
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly
+
+  # CI actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

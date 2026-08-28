@@ -1,0 +1,8 @@
+{
+  "lib/UniswapX": {
+    "tag": {
+      "name": "v2.1.0",
+      "rev": "df1dbfe2439c3c648ab5e3089953780ab7fc40b7"
+    }
+  }
+}

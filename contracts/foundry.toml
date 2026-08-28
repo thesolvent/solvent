@@ -1,0 +1,21 @@
+[profile.default]
+solc = "0.8.30"
+optimizer = true
+optimizer_runs = 10_000_000
+via_ir = true
+src = "src"
+test = "test"
+script = "script"
+libs = ["lib"]
+
+# Fork tests hit the REAL deployed UniswapX / SwapVM / Aqua. Set MAINNET_RPC_URL in the env
+# (or a .env), then `forge test --fork-url mainnet`.
+[rpc_endpoints]
+mainnet = "${MAINNET_RPC_URL}"
+
+[fmt]
+single_line_statement_blocks = "multi"
+multiline_func_header = "all"
+bracket_spacing = true
+int_types = "long"
+number_underscore = "thousands"
