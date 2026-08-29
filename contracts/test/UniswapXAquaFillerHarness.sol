@@ -13,7 +13,6 @@ import { V2DutchOrderReactor } from "uniswapx/reactors/V2DutchOrderReactor.sol";
 import { V2DutchOrder, V2DutchOrderLib, CosignerData } from "uniswapx/lib/V2DutchOrderLib.sol";
 import { DutchInput, DutchOutput } from "uniswapx/lib/DutchOrderLib.sol";
 import { OrderInfo, SignedOrder } from "uniswapx/base/ReactorStructs.sol";
-import { IReactor } from "uniswapx/interfaces/IReactor.sol";
 import { IPermit2 } from "permit2/src/interfaces/IPermit2.sol";
 import { ERC20 as SolERC20 } from "solmate/src/tokens/ERC20.sol";
 
