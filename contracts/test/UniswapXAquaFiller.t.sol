@@ -12,10 +12,11 @@ import { OrderInfoBuilder } from "uniswapx-test/util/OrderInfoBuilder.sol";
 import { V2DutchOrderReactor } from "uniswapx/reactors/V2DutchOrderReactor.sol";
 import { V2DutchOrder, V2DutchOrderLib, CosignerData } from "uniswapx/lib/V2DutchOrderLib.sol";
 import { DutchInput, DutchOutput } from "uniswapx/lib/DutchOrderLib.sol";
-import { OrderInfo, SignedOrder } from "uniswapx/base/ReactorStructs.sol";
+import { OrderInfo, SignedOrder, ResolvedOrder } from "uniswapx/base/ReactorStructs.sol";
 import { IReactor } from "uniswapx/interfaces/IReactor.sol";
 import { IPermit2 } from "permit2/src/interfaces/IPermit2.sol";
 import { ERC20 as SolERC20 } from "solmate/src/tokens/ERC20.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 import { UniswapXAquaFiller } from "../src/UniswapXAquaFiller.sol";
 
@@ -36,6 +37,8 @@ contract UniswapXAquaFillerTest is AquaStrategyBuilders, PermitSignature, Deploy
 
     // tokenA = input the swapper pays (USDC-like); tokenB = output the maker sources (WETH-like).
     uint256 internal nonce;
+
+    event Swept(address indexed token, address indexed to, uint256 amount);
 
     constructor() AquaStrategyBuilders(address(aqua)) { }
 
@@ -175,8 +178,272 @@ contract UniswapXAquaFillerTest is AquaStrategyBuilders, PermitSignature, Deploy
     }
 
     // --------------------------------------------------------------------------------------------
+    // Boundaries — the guards are inclusive/exclusive exactly where intended
+    // --------------------------------------------------------------------------------------------
+
+    function test_fill_atExactMaxInput() public {
+        (ISwapVM.Order memory order,) = _shipXycMaker(maker, tokenA, tokenB, 3_000_000 ether, 1000 ether, 10 ether);
+        uint256 amountIn = _quoteAmountIn(order, address(tokenA), address(tokenB), 1 ether);
+
+        SignedOrder memory signed = _signOrder(3100 ether, _outputs(tokenB, 1 ether, swapper));
+        UniswapXAquaFiller.SourceSwap[] memory sources = new UniswapXAquaFiller.SourceSwap[](1);
+        sources[0] = _source(order, tokenA, tokenB, 1 ether, amountIn); // cap == exact cost (inclusive)
+
+        _mintSwapper(3100 ether);
+        filler.fill(IReactor(address(reactor)), signed, sources);
+        assertEq(tokenB.balanceOf(swapper), 1 ether, "fills when input hits the cap exactly");
+    }
+
+    function test_revert_legExceedsAmountInMaximum() public {
+        (ISwapVM.Order memory order,) = _shipXycMaker(maker, tokenA, tokenB, 3_000_000 ether, 1000 ether, 10 ether);
+        uint256 amountIn = _quoteAmountIn(order, address(tokenA), address(tokenB), 1 ether);
+
+        SignedOrder memory signed = _signOrder(3100 ether, _outputs(tokenB, 1 ether, swapper));
+        UniswapXAquaFiller.SourceSwap[] memory sources = new UniswapXAquaFiller.SourceSwap[](1);
+        sources[0] = _source(order, tokenA, tokenB, 1 ether, amountIn - 1); // 1 wei below cost
+
+        _mintSwapper(3100 ether);
+        vm.expectRevert(); // SwapVM taker-traits threshold: amountIn > amountInMaximum
+        filler.fill(IReactor(address(reactor)), signed, sources);
+    }
+
+    function test_fill_breakEven() public {
+        (ISwapVM.Order memory order,) = _shipXycMaker(maker, tokenA, tokenB, 3_000_000 ether, 1000 ether, 10 ether);
+        uint256 amountIn = _quoteAmountIn(order, address(tokenA), address(tokenB), 1 ether);
+
+        uint256 seed = 1000 ether;
+        tokenA.mint(address(filler), seed); // pre-existing spread inventory
+
+        SignedOrder memory signed = _signOrder(amountIn, _outputs(tokenB, 1 ether, swapper)); // input == cost
+        UniswapXAquaFiller.SourceSwap[] memory sources = new UniswapXAquaFiller.SourceSwap[](1);
+        sources[0] = _source(order, tokenA, tokenB, 1 ether, amountIn);
+
+        _mintSwapper(amountIn);
+        filler.fill(IReactor(address(reactor)), signed, sources); // net zero -> guard passes (>=)
+        assertEq(tokenA.balanceOf(address(filler)), seed, "break-even leaves inventory exactly intact");
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Profitability guard — protects the treasury against a bad plan
+    // --------------------------------------------------------------------------------------------
+
+    function test_fill_preservesExistingInventory() public {
+        (ISwapVM.Order memory order,) = _shipXycMaker(maker, tokenA, tokenB, 3_000_000 ether, 1000 ether, 10 ether);
+        uint256 seed = 1000 ether;
+        tokenA.mint(address(filler), seed);
+
+        uint256 input = 3100 ether;
+        SignedOrder memory signed = _signOrder(input, _outputs(tokenB, 1 ether, swapper));
+        UniswapXAquaFiller.SourceSwap[] memory sources = new UniswapXAquaFiller.SourceSwap[](1);
+        sources[0] = _source(order, tokenA, tokenB, 1 ether, input);
+
+        _mintSwapper(input);
+        filler.fill(IReactor(address(reactor)), signed, sources);
+
+        uint256 paid = tokenA.balanceOf(maker);
+        assertEq(tokenA.balanceOf(address(filler)), seed + input - paid, "seed preserved, spread added on top");
+        assertGt(tokenA.balanceOf(address(filler)), seed, "spread accrues above the seed");
+    }
+
+    function test_revert_profitabilityGuard() public {
+        (ISwapVM.Order memory order,) = _shipXycMaker(maker, tokenA, tokenB, 3_000_000 ether, 1000 ether, 10 ether);
+        uint256 amountIn = _quoteAmountIn(order, address(tokenA), address(tokenB), 1 ether);
+
+        tokenA.mint(address(filler), 1000 ether); // treasury the bad plan would eat into
+        uint256 input = amountIn - 100; // swapper pays less than the maker charges
+
+        SignedOrder memory signed = _signOrder(input, _outputs(tokenB, 1 ether, swapper));
+        UniswapXAquaFiller.SourceSwap[] memory sources = new UniswapXAquaFiller.SourceSwap[](1);
+        sources[0] = _source(order, tokenA, tokenB, 1 ether, amountIn); // cap lets the router charge full cost
+
+        _mintSwapper(input);
+        // The input token snapshots at the seed and ends 100 below it (amountIn cancels out).
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                UniswapXAquaFiller.ProfitabilityGuard.selector,
+                address(tokenA),
+                uint256(1000 ether),
+                uint256(1000 ether) - 100
+            )
+        );
+        filler.fill(IReactor(address(reactor)), signed, sources);
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Output sourcing + settlement
+    // --------------------------------------------------------------------------------------------
+
+    function test_revert_outputNotSourced() public {
+        _shipXycMaker(maker, tokenA, tokenB, 3_000_000 ether, 1000 ether, 10 ether);
+        SignedOrder memory signed = _signOrder(3100 ether, _outputs(tokenB, 1 ether, swapper));
+
+        // A plan that sources nothing for the required output token.
+        UniswapXAquaFiller.SourceSwap[] memory none = new UniswapXAquaFiller.SourceSwap[](0);
+
+        _mintSwapper(3100 ether);
+        vm.expectRevert(abi.encodeWithSelector(UniswapXAquaFiller.OutputNotSourced.selector, address(tokenB)));
+        filler.fill(IReactor(address(reactor)), signed, none);
+    }
+
+    function test_revert_underSourcedPlan() public {
+        (ISwapVM.Order memory order,) = _shipXycMaker(maker, tokenA, tokenB, 3_000_000 ether, 1000 ether, 10 ether);
+        SignedOrder memory signed = _signOrder(3100 ether, _outputs(tokenB, 1 ether, swapper));
+
+        UniswapXAquaFiller.SourceSwap[] memory sources = new UniswapXAquaFiller.SourceSwap[](1);
+        sources[0] = _source(order, tokenA, tokenB, 0.5 ether, 3100 ether); // sources only half the output
+
+        _mintSwapper(3100 ether);
+        vm.expectRevert(); // reactor _fill pulls 1 ether from a filler holding 0.5
+        filler.fill(IReactor(address(reactor)), signed, sources);
+    }
+
+    function test_revert_makerRealBalanceInsufficient_rollsBackAtomically() public {
+        address makerA = maker;
+        address makerB = vm.addr(0x4444);
+
+        (ISwapVM.Order memory orderA,) = _shipXycMaker(makerA, tokenA, tokenB, 1_200_000 ether, 400 ether, 1 ether);
+        // Maker B ships a position but holds NO real output -> its Aqua pull will revert.
+        (ISwapVM.Order memory orderB,) = _shipXycMaker(makerB, tokenA, tokenB, 1_800_000 ether, 600 ether, 0);
+
+        SignedOrder memory signed = _signOrder(3100 ether, _outputs(tokenB, 1 ether, swapper));
+        UniswapXAquaFiller.SourceSwap[] memory sources = new UniswapXAquaFiller.SourceSwap[](2);
+        sources[0] = _source(orderA, tokenA, tokenB, 0.4 ether, 3100 ether);
+        sources[1] = _source(orderB, tokenA, tokenB, 0.6 ether, 3100 ether);
+
+        _mintSwapper(3100 ether);
+        uint256 makerAbefore = tokenB.balanceOf(makerA);
+
+        vm.expectRevert(); // Aqua pull from maker B (zero real balance)
+        filler.fill(IReactor(address(reactor)), signed, sources);
+
+        assertEq(tokenB.balanceOf(makerA), makerAbefore, "maker A's leg rolled back");
+        assertEq(tokenA.balanceOf(swapper), 3100 ether, "swapper funds untouched");
+        assertEq(tokenB.balanceOf(swapper), 0, "no partial delivery");
+    }
+
+    function test_fill_resetsRouterAllowance() public {
+        (ISwapVM.Order memory order,) = _shipXycMaker(maker, tokenA, tokenB, 3_000_000 ether, 1000 ether, 10 ether);
+        SignedOrder memory signed = _signOrder(3100 ether, _outputs(tokenB, 1 ether, swapper));
+        UniswapXAquaFiller.SourceSwap[] memory sources = new UniswapXAquaFiller.SourceSwap[](1);
+        sources[0] = _source(order, tokenA, tokenB, 1 ether, 3100 ether);
+
+        _mintSwapper(3100 ether);
+        filler.fill(IReactor(address(reactor)), signed, sources);
+        assertEq(tokenA.allowance(address(filler), address(swapVM)), 0, "router allowance cleared after the fill");
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Access control + admin
+    // --------------------------------------------------------------------------------------------
+
+    function test_revert_reactorCallback_unauthorized() public {
+        ResolvedOrder[] memory empty = new ResolvedOrder[](0);
+        // Direct call with no fill in flight: _reactorInFlight == 0, so any caller is rejected.
+        vm.expectRevert(
+            abi.encodeWithSelector(UniswapXAquaFiller.CallbackUnauthorized.selector, address(this), address(0))
+        );
+        filler.reactorCallback(empty, "");
+    }
+
+    function test_revert_onlyOwner() public {
+        address attacker = address(0xBAD);
+        UniswapXAquaFiller.SourceSwap[] memory none = new UniswapXAquaFiller.SourceSwap[](0);
+        SignedOrder memory dummy;
+        SignedOrder[] memory dummyBatch = new SignedOrder[](0);
+
+        vm.startPrank(attacker);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
+        filler.fill(IReactor(address(reactor)), dummy, none);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
+        filler.fillBatch(IReactor(address(reactor)), dummyBatch, none);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
+        filler.sweep(address(tokenA), attacker);
+        vm.stopPrank();
+    }
+
+    function test_ownership_twoStepTransfer() public {
+        address newOwner = address(0xA11CE);
+        filler.transferOwnership(newOwner);
+        assertEq(filler.pendingOwner(), newOwner, "pending owner set");
+        assertEq(filler.owner(), address(this), "owner unchanged until accepted");
+
+        vm.prank(address(0xBAD));
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xBAD)));
+        filler.acceptOwnership();
+
+        vm.prank(newOwner);
+        filler.acceptOwnership();
+        assertEq(filler.owner(), newOwner, "ownership transferred on accept");
+    }
+
+    function test_sweep_collectsSpreadAndEmits() public {
+        address treasury = address(0x7EA);
+        tokenA.mint(address(filler), 500 ether);
+
+        vm.expectEmit(true, true, false, true, address(filler));
+        emit Swept(address(tokenA), treasury, 500 ether);
+        filler.sweep(address(tokenA), treasury);
+
+        assertEq(tokenA.balanceOf(treasury), 500 ether, "spread swept out");
+        assertEq(tokenA.balanceOf(address(filler)), 0, "filler emptied");
+
+        filler.sweep(address(tokenB), treasury); // zero balance is a no-op, not a revert
+        assertEq(tokenB.balanceOf(treasury), 0);
+    }
+
+    function test_revert_sweep_zeroRecipient() public {
+        tokenA.mint(address(filler), 1 ether);
+        vm.expectRevert(UniswapXAquaFiller.ZeroAddress.selector);
+        filler.sweep(address(tokenA), address(0));
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Fuzz — arbitrary splits of one order's output across two makers settle correctly
+    // --------------------------------------------------------------------------------------------
+
+    function testFuzz_sourceSplit(uint256 splitBps) public {
+        splitBps = bound(splitBps, 100, 9900); // 1%..99% to maker A
+        uint256 out = 1 ether;
+        uint256 outA = (out * splitBps) / 10_000;
+        uint256 outB = out - outA;
+        uint256 input = 5000 ether;
+
+        address makerA = maker;
+        address makerB = vm.addr(0x4444);
+        (ISwapVM.Order memory orderA,) = _shipXycMaker(makerA, tokenA, tokenB, 3_000_000 ether, 1000 ether, 100 ether);
+        (ISwapVM.Order memory orderB,) = _shipXycMaker(makerB, tokenA, tokenB, 3_000_000 ether, 1000 ether, 100 ether);
+
+        SignedOrder memory signed = _signOrder(input, _outputs(tokenB, out, swapper));
+        UniswapXAquaFiller.SourceSwap[] memory sources = new UniswapXAquaFiller.SourceSwap[](2);
+        sources[0] = _source(orderA, tokenA, tokenB, outA, input);
+        sources[1] = _source(orderB, tokenA, tokenB, outB, input);
+
+        _mintSwapper(input);
+        filler.fill(IReactor(address(reactor)), signed, sources);
+
+        assertEq(tokenB.balanceOf(swapper), out, "swapper receives the full output for any split");
+        assertEq(tokenB.balanceOf(address(filler)), 0, "no output inventory");
+        assertGt(tokenA.balanceOf(address(filler)), 0, "spread retained");
+    }
+
+    // --------------------------------------------------------------------------------------------
     // Harness helpers
     // --------------------------------------------------------------------------------------------
+
+    /// @dev Exact input the SwapVM would charge for an exact-out swap — 22 zero bytes = exact-out taker
+    ///      traits with no threshold/hooks. Uses the Simulator's `asView()` staticcall wrapper.
+    function _quoteAmountIn(
+        ISwapVM.Order memory order,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountOut
+    )
+        internal
+        returns (uint256 amountIn)
+    {
+        bytes memory takerData = new bytes(22);
+        (amountIn,,) = swapVM.asView().quote(order, tokenIn, tokenOut, amountOut, takerData);
+    }
 
     /// @dev Ship an XYC Aqua strategy for `mkr` with the given virtual reserves, and mint it `realOut`
     ///      of the output token so Aqua's `pull` can settle.
