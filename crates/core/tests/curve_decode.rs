@@ -7,7 +7,7 @@
 use alloy_primitives::{Address, Bytes, B256, U256};
 use serde::Deserialize;
 use solvent_core::primitives::registry::{
-    decode_strategy, AquaEvent, CurveSpec, EventCursor, PeggedParams, Snapshot, StrategyKey,
+    decode_strategy, AquaEvent, Curve, CurveSpec, EventCursor, PeggedParams, Snapshot, StrategyKey,
 };
 use solvent_core::primitives::{MakerId, StrategyHash};
 use solvent_core::registry::{price, Pricing, SharedSnapshot, XycPool};
@@ -17,6 +17,7 @@ use solvent_core::registry::{price, Pricing, SharedSnapshot, XycPool};
 struct Strat {
     curve: String,
     strategy_hex: String,
+    fees_in_bps: Vec<u32>,
     sqrt_price_min: Option<String>,
     sqrt_price_max: Option<String>,
     x0: Option<String>,
@@ -52,28 +53,32 @@ fn decodes_real_shipped_strategies() {
 
     for s in &fixture.strategies {
         let spec = decode_strategy(&bytes(&s.strategy_hex));
-        match s.curve.as_str() {
-            "xyc" => assert_eq!(spec, CurveSpec::Xyc),
-            "concentrate" => assert_eq!(
-                spec,
-                CurveSpec::Concentrate {
-                    sqrt_price_min: field(&s.sqrt_price_min),
-                    sqrt_price_max: field(&s.sqrt_price_max),
-                }
-            ),
-            "pegged" => assert_eq!(
-                spec,
-                CurveSpec::Pegged(PeggedParams {
-                    x0: field(&s.x0),
-                    y0: field(&s.y0),
-                    linear_width: field(&s.linear_width),
-                    rate_lt: field(&s.rate_lt),
-                    rate_gt: field(&s.rate_gt),
-                })
-            ),
-            "unsupported" => assert_eq!(spec, CurveSpec::Unsupported),
+        let curve = match s.curve.as_str() {
+            "xyc" => Curve::Xyc,
+            "concentrate" => Curve::Concentrate {
+                sqrt_price_min: field(&s.sqrt_price_min),
+                sqrt_price_max: field(&s.sqrt_price_max),
+            },
+            "pegged" => Curve::Pegged(PeggedParams {
+                x0: field(&s.x0),
+                y0: field(&s.y0),
+                linear_width: field(&s.linear_width),
+                rate_lt: field(&s.rate_lt),
+                rate_gt: field(&s.rate_gt),
+            }),
+            "unsupported" => {
+                assert_eq!(spec, CurveSpec::Unsupported);
+                continue;
+            }
             other => panic!("unknown curve {other}"),
-        }
+        };
+        assert_eq!(
+            spec,
+            CurveSpec::Priceable {
+                curve,
+                fees_in_bps: s.fees_in_bps.clone(),
+            }
+        );
     }
 }
 
@@ -136,7 +141,13 @@ fn prices_a_real_strategy_through_the_shared_snapshot() {
     let shared = SharedSnapshot::new(snap);
     let snapshot = shared.load();
     let strategy = snapshot.strategy(&key).expect("strategy present");
-    assert_eq!(strategy.curve, CurveSpec::Xyc);
+    assert_eq!(
+        strategy.curve,
+        CurveSpec::Priceable {
+            curve: Curve::Xyc,
+            fees_in_bps: vec![],
+        }
+    );
 
     let got = price(strategy, t_in, t_out, e18(100), true).unwrap();
     let expected = XycPool::from_reserves(e18(1000), e18(1000))

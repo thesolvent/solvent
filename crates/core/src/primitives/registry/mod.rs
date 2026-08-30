@@ -5,7 +5,7 @@ pub mod event;
 pub mod snapshot;
 pub mod strategy;
 
-pub use curve::{decode_strategy, CurveSpec, PeggedParams};
+pub use curve::{decode_strategy, Curve, CurveSpec, PeggedParams};
 pub use event::{AquaEvent, EventCursor, StrategyKey};
 pub use snapshot::Snapshot;
 pub use strategy::{MakerStrategy, TokenPair};

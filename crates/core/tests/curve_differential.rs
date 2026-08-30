@@ -9,7 +9,10 @@
 use alloy_primitives::{Address, U256};
 use serde::Deserialize;
 use solvent_core::primitives::registry::PeggedParams;
-use solvent_core::registry::{ConcentratePool, CurveError, PeggedPool, Pricing, XycPool};
+use solvent_core::registry::{
+    apply_flat_fee_in, apply_flat_fee_out, ConcentratePool, CurveError, PeggedPool, Pricing,
+    XycPool,
+};
 
 #[derive(Deserialize)]
 struct Corpus {
@@ -25,6 +28,7 @@ struct Vector {
     balance_out: String,
     exact_in: bool,
     amount: String,
+    fee_bps: u32,
     sqrt_price_min: Option<String>,
     sqrt_price_max: Option<String>,
     x0: Option<String>,
@@ -56,11 +60,22 @@ fn quote_vector(v: &Vector) -> Result<U256, CurveError> {
     let (balance_in, balance_out) = (u(&v.balance_in), u(&v.balance_out));
     let amount = u(&v.amount);
     let (token_in, token_out) = tokens(v.token_in_is_lt);
-    let run = |p: &dyn Pricing| {
+    // A flat fee shrinks the curve's input (exact-in) or grosses it up (exact-out).
+    let run = |p: &dyn Pricing| -> Result<U256, CurveError> {
         if v.exact_in {
-            p.quote_exact_in(amount)
+            let net_in = if v.fee_bps > 0 {
+                apply_flat_fee_in(amount, v.fee_bps)?
+            } else {
+                amount
+            };
+            p.quote_exact_in(net_in)
         } else {
-            p.quote_exact_out(amount)
+            let curve_in = p.quote_exact_out(amount)?;
+            if v.fee_bps > 0 {
+                apply_flat_fee_out(curve_in, v.fee_bps)
+            } else {
+                Ok(curve_in)
+            }
         }
     };
     match v.curve.as_str() {
