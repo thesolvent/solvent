@@ -1,18 +1,18 @@
 //! Live E2E — strategy *breadth*: ships every Tier-0 variant and asserts the
-//! real pipeline (`AlloyChainSource` → `RegistrySync` → `PgStore` →
+//! real pipeline (`AlloyChainSource` → `RegistrySync` → `SqliteStore` →
 //! `SharedSnapshot` → `price`) backfills, prices each curve bit-exactly against
 //! on-chain `quote()`, dedupes re-scans, and recovers — all at the initial state.
 //! State-change-over-time is covered by `e2e_watcher`.
 //!
-//! Gated on `TEST_DATABASE_URL` + a spawnable `anvil`. Run:
-//!   scripts/with-postgres.sh cargo test -p solvent-adapters --test e2e_registry
+//! Gated on a spawnable `anvil` (the SQLite store needs nothing external). Run:
+//!   PATH=~/.foundry/bin:$PATH cargo test -p solvent-adapters --test e2e_registry
 
 mod common;
 
 use std::sync::Arc;
 
 use common::{pipeline, strategy_key, Harness, StrategySpec, CHAIN};
-use solvent_adapters::registry::PgStore;
+use solvent_adapters::registry::SqliteStore;
 use solvent_core::{
     primitives::{registry::Snapshot, ChainConfig},
     registry::{price, PriceError, RegistrySync, SharedSnapshot},
@@ -20,13 +20,13 @@ use solvent_core::{
 
 #[tokio::test]
 async fn e2e_registry_full_pipeline() {
-    let Some(db_url) = common::db_url_or_skip() else {
+    if common::skip_without_anvil() {
         return;
-    };
+    }
 
     let h = Harness::setup().await;
     h.ship_all().await;
-    let (sync, snapshot, pool) = pipeline(&h, &db_url, CHAIN).await;
+    let (sync, snapshot, pool, _db) = pipeline(&h, CHAIN).await;
     let to_block = h.latest_block().await;
     sync.sync_once(to_block).await.expect("sync");
 
@@ -69,7 +69,7 @@ async fn e2e_registry_full_pipeline() {
     // E2 — restart recovery rebuilds an identical snapshot from the store.
     {
         let config = ChainConfig::new(CHAIN, 0, 25, 15);
-        let store = PgStore::new(pool.clone());
+        let store = SqliteStore::new(pool.clone());
         let recovered = Arc::new(SharedSnapshot::default());
         let restart = RegistrySync::new(
             &config,

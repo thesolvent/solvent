@@ -1,10 +1,6 @@
-//! Drives one chain's registry: fetch a block range, drop events already seen,
-//! insert the rest, fold the newly-inserted ones into the shared snapshot, and
-//! only then advance the cursor. Correctness rests on the store's unique key (only
-//! genuinely-new rows come back to apply, so overlap re-scans and late RPC
-//! re-deliveries are exactly once); the moka cache is a pre-filter that spares the
-//! store the redundant overlap writes each cycle. Reorg handling is a later
-//! addition — the provenance it needs is already carried and stored.
+//! Drives one chain's registry: fetch, drop already-seen events, insert, fold the new ones into the
+//! snapshot, then advance the cursor. The store's unique key makes application exactly-once; the moka
+//! cache pre-filters overlap re-scans.
 
 use std::sync::Arc;
 
@@ -57,15 +53,20 @@ impl RegistrySync {
 
     /// One sync cycle, scanning up to `to_block`.
     pub async fn sync_once(&self, to_block: u64) -> Result<(), SolventError> {
-        let from_block = self.resume_from().await?;
+        let resume = self.store.cursor(self.chain).await?;
+        // Scan from the cursor rewound by the overlap window (or the start block on the first cycle).
+        let from_block = resume.map_or(self.start_block, |c| {
+            c.block_number.saturating_sub(self.overlap_blocks)
+        });
         let fetched = self.source.fetch(from_block, to_block).await?;
 
+        // The `seen` cache keys on `(block, log)`, not the block hash, so it can't spot a reorg replacement.
         let fresh: Vec<_> = fetched
             .into_iter()
             .filter(|event| event.cursor().is_some_and(|c| self.seen.get(&c).is_none()))
             .collect();
 
-        let inserted = self.store.insert(self.chain, &fresh).await?;
+        let mut inserted = self.store.insert(self.chain, &fresh).await?;
 
         // Everything scanned is now known; only the newly-inserted rows change the
         // snapshot (the store deduplicated the rest).
@@ -75,6 +76,8 @@ impl RegistrySync {
             }
         }
         if !inserted.is_empty() {
+            // Fold in cursor order so a `Shipped` precedes its `Pushed`, whatever order the source gave.
+            inserted.sort_by_key(|event| (event.block_number, event.log_index));
             let mut snapshot = (*self.snapshot.load()).clone();
             for event in inserted {
                 snapshot.apply(event.event);
@@ -82,23 +85,18 @@ impl RegistrySync {
             self.snapshot.store(snapshot);
         }
 
-        // Commit progress last: the events are durable and the snapshot reflects
-        // them, so advancing the cursor can't skip unprocessed work.
-        let cursor = EventCursor {
-            block_number: to_block,
-            log_index: 0,
-        };
-        self.store.save_cursor(self.chain, cursor).await?;
+        // Commit progress last, never below the recorded cursor (a stale tip can't rewind it).
+        let progress = resume.map_or(to_block, |c| to_block.max(c.block_number));
+        self.store
+            .save_cursor(
+                self.chain,
+                EventCursor {
+                    block_number: progress,
+                    log_index: 0,
+                },
+            )
+            .await?;
         Ok(())
-    }
-
-    /// Where the next scan starts: the cursor rewound by the overlap window, or
-    /// the configured start block before the first cycle.
-    async fn resume_from(&self) -> Result<u64, SolventError> {
-        let cursor = self.store.cursor(self.chain).await?;
-        Ok(cursor.map_or(self.start_block, |c| {
-            c.block_number.saturating_sub(self.overlap_blocks)
-        }))
     }
 }
 
@@ -225,15 +223,16 @@ mod tests {
         }
     }
 
-    fn sync_with(source: Arc<FakeSource>) -> (RegistrySync, Arc<SharedSnapshot>) {
+    fn sync_with(source: Arc<FakeSource>) -> (RegistrySync, Arc<SharedSnapshot>, Arc<FakeStore>) {
         let snapshot = Arc::new(SharedSnapshot::default());
+        let store = Arc::new(FakeStore::default());
         let sync = RegistrySync::new(
             &ChainConfig::ethereum(0),
             source,
-            Arc::new(FakeStore::default()),
+            store.clone(),
             snapshot.clone(),
         );
-        (sync, snapshot)
+        (sync, snapshot, store)
     }
 
     #[tokio::test]
@@ -243,7 +242,7 @@ mod tests {
             ext(10, 1, pushed(1, 1, 1000)),
             ext(10, 2, pushed(1, 2, 1000)),
         ])));
-        let (sync, snapshot) = sync_with(source);
+        let (sync, snapshot, _store) = sync_with(source);
 
         sync.sync_once(10).await.unwrap();
         let s = snapshot.load();
@@ -267,7 +266,7 @@ mod tests {
             ext(10, 0, shipped(1)),
             ext(10, 2, pushed(1, 2, 1000)),
         ])));
-        let (sync, snapshot) = sync_with(source.clone());
+        let (sync, snapshot, _store) = sync_with(source.clone());
 
         sync.sync_once(10).await.unwrap();
         let s = snapshot.load();
@@ -293,6 +292,41 @@ mod tests {
         assert_eq!(
             s.strategy(&key(1)).unwrap().balance(&token(2)),
             U256::from(1000u64)
+        );
+    }
+
+    #[tokio::test]
+    async fn folds_inserted_in_cursor_order_regardless_of_source_order() {
+        // The source hands the Pushed back before its Shipped; the fold must still register the
+        // strategy first, or the balance is lost.
+        let source = Arc::new(FakeSource(Mutex::new(vec![
+            ext(10, 1, pushed(1, 1, 500)),
+            ext(10, 0, shipped(1)),
+        ])));
+        let (sync, snapshot, _store) = sync_with(source);
+        sync.sync_once(10).await.unwrap();
+        assert_eq!(
+            snapshot
+                .load()
+                .strategy(&key(1))
+                .unwrap()
+                .balance(&token(1)),
+            U256::from(500u64)
+        );
+    }
+
+    #[tokio::test]
+    async fn does_not_regress_the_cursor_on_a_stale_to_block() {
+        let source = Arc::new(FakeSource(Mutex::new(vec![ext(20, 0, shipped(1))])));
+        let (sync, _snapshot, store) = sync_with(source);
+        sync.sync_once(20).await.unwrap();
+        sync.sync_once(10).await.unwrap(); // a stale tip must not rewind progress
+        assert_eq!(
+            store.cursor.lock().unwrap().clone(),
+            Some(EventCursor {
+                block_number: 20,
+                log_index: 0,
+            })
         );
     }
 }

@@ -1,11 +1,6 @@
-//! The derived liquidity snapshot and the pure `apply()` fold.
-//!
-//! `Snapshot` is a deterministic function of the ordered Aqua event stream:
-//! replaying the same events always yields the same snapshot, so it can be
-//! rebuilt from the log on restart. It keeps a dual index — strategies by their
-//! identity key, and active two-token strategies by traded pair — so the router
-//! can fetch every maker on a pair without scanning. The fold is curve-agnostic:
-//! `Shipped` registers, `Pushed`/`Pulled` move balances, `Docked` tombstones.
+//! The derived liquidity snapshot and its pure `apply()` fold — a deterministic function of the
+//! ordered Aqua event stream, rebuildable from the log on restart. A dual index (by key, by pair)
+//! lets the router fetch a pair's makers without scanning.
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -4,4 +4,5 @@
 //! `EventExt` bridge); `registry` is the Aqua `ChainSource` adapter that composes it.
 
 pub mod events;
+pub mod ledger;
 pub mod registry;

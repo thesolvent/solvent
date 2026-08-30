@@ -5,8 +5,8 @@
 //! handling (overlap re-scan, full replay), restart recovery of the accumulated
 //! state, on-chain immutability, app-filter scoping, and multi-maker on one pair.
 //!
-//! Gated on `TEST_DATABASE_URL` + a spawnable `anvil`. Run:
-//!   scripts/with-postgres.sh cargo test -p solvent-adapters --test e2e_watcher
+//! Gated on a spawnable `anvil` (the SQLite store needs nothing external). Run:
+//!   PATH=~/.foundry/bin:$PATH cargo test -p solvent-adapters --test e2e_watcher
 
 mod common;
 
@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use alloy::primitives::{Address, U256};
 use common::{pipeline, strategy_key, Harness, StrategySpec};
-use solvent_adapters::registry::PgStore;
+use solvent_adapters::registry::SqliteStore;
 use solvent_core::{
     primitives::{registry::TokenPair, ChainConfig, ChainId},
     registry::{RegistrySync, SharedSnapshot},
@@ -42,13 +42,13 @@ async fn assert_matches_chain(h: &Harness, snapshot: &SharedSnapshot) {
 
 #[tokio::test]
 async fn e2e_watcher_lifecycle() {
-    let Some(db_url) = common::db_url_or_skip() else {
+    if common::skip_without_anvil() {
         return;
-    };
+    }
 
     let h = Harness::setup().await;
     h.ship_all().await;
-    let (sync, snapshot, pool) = pipeline(&h, &db_url, ChainId(41337)).await;
+    let (sync, snapshot, pool, _db) = pipeline(&h, ChainId(41337)).await;
 
     // S0 — ship: backfill matches chain.
     sync.sync_once(h.latest_block().await).await.expect("s0");
@@ -109,7 +109,7 @@ async fn e2e_watcher_lifecycle() {
     );
     // …and a FULL re-delivery (reset the cursor so the next scan re-fetches from
     // block 0) is deduped by the store's unique key — the snapshot is unchanged.
-    sqlx::query("DELETE FROM registry_cursor WHERE chain = $1")
+    sqlx::query("DELETE FROM registry_cursor WHERE chain = ?")
         .bind(41337i64)
         .execute(&pool)
         .await
@@ -121,7 +121,7 @@ async fn e2e_watcher_lifecycle() {
 
     // R — restart recovery rebuilds the accumulated snapshot from the store alone.
     {
-        let store = PgStore::new(pool.clone());
+        let store = SqliteStore::new(pool.clone());
         let recovered = Arc::new(SharedSnapshot::default());
         let config = ChainConfig::new(ChainId(41337), 0, 25, 15);
         let restart = RegistrySync::new(
@@ -156,9 +156,9 @@ async fn e2e_watcher_lifecycle() {
 
 #[tokio::test]
 async fn e2e_watcher_app_filter() {
-    let Some(db_url) = common::db_url_or_skip() else {
+    if common::skip_without_anvil() {
         return;
-    };
+    }
 
     let h = Harness::setup().await;
     h.ship_all().await;
@@ -205,7 +205,7 @@ async fn e2e_watcher_app_filter() {
         .await
         .expect("ship foreign mined");
 
-    let (sync, snapshot, _pool) = pipeline(&h, &db_url, ChainId(41338)).await;
+    let (sync, snapshot, _pool, _db) = pipeline(&h, ChainId(41338)).await;
     sync.sync_once(h.latest_block().await).await.expect("sync");
 
     let snap = snapshot.load();
@@ -223,16 +223,16 @@ async fn e2e_watcher_app_filter() {
 
 #[tokio::test]
 async fn e2e_watcher_multi_maker() {
-    let Some(db_url) = common::db_url_or_skip() else {
+    if common::skip_without_anvil() {
         return;
-    };
+    }
 
     let h = Harness::setup().await;
     // Two makers ship an XYC on the same pair: maker #0 (fixture[0]) and maker #1.
     h.ship(&h.fx.strategies[0]).await;
     h.ship_second_maker().await;
 
-    let (sync, snapshot, _pool) = pipeline(&h, &db_url, ChainId(41339)).await;
+    let (sync, snapshot, _pool, _db) = pipeline(&h, ChainId(41339)).await;
     sync.sync_once(h.latest_block().await).await.expect("sync");
 
     let snap = snapshot.load();
