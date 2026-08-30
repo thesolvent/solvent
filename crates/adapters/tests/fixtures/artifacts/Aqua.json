@@ -1,0 +1,1158 @@
+{
+ "abi": [
+  {
+   "type": "function",
+   "name": "dock",
+   "inputs": [
+    {
+     "name": "app",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "internalType": "bytes32"
+    },
+    {
+     "name": "tokens",
+     "type": "address[]",
+     "internalType": "address[]"
+    }
+   ],
+   "outputs": [],
+   "stateMutability": "nonpayable"
+  },
+  {
+   "type": "function",
+   "name": "pull",
+   "inputs": [
+    {
+     "name": "maker",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "internalType": "bytes32"
+    },
+    {
+     "name": "token",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "amount",
+     "type": "uint256",
+     "internalType": "uint256"
+    },
+    {
+     "name": "to",
+     "type": "address",
+     "internalType": "address"
+    }
+   ],
+   "outputs": [],
+   "stateMutability": "nonpayable"
+  },
+  {
+   "type": "function",
+   "name": "push",
+   "inputs": [
+    {
+     "name": "maker",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "app",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "internalType": "bytes32"
+    },
+    {
+     "name": "token",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "amount",
+     "type": "uint256",
+     "internalType": "uint256"
+    }
+   ],
+   "outputs": [],
+   "stateMutability": "nonpayable"
+  },
+  {
+   "type": "function",
+   "name": "rawBalances",
+   "inputs": [
+    {
+     "name": "maker",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "app",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "internalType": "bytes32"
+    },
+    {
+     "name": "token",
+     "type": "address",
+     "internalType": "address"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "balance",
+     "type": "uint248",
+     "internalType": "uint248"
+    },
+    {
+     "name": "tokensCount",
+     "type": "uint8",
+     "internalType": "uint8"
+    }
+   ],
+   "stateMutability": "view"
+  },
+  {
+   "type": "function",
+   "name": "safeBalances",
+   "inputs": [
+    {
+     "name": "maker",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "app",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "internalType": "bytes32"
+    },
+    {
+     "name": "token0",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "token1",
+     "type": "address",
+     "internalType": "address"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "balance0",
+     "type": "uint256",
+     "internalType": "uint256"
+    },
+    {
+     "name": "balance1",
+     "type": "uint256",
+     "internalType": "uint256"
+    }
+   ],
+   "stateMutability": "view"
+  },
+  {
+   "type": "function",
+   "name": "ship",
+   "inputs": [
+    {
+     "name": "app",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "strategy",
+     "type": "bytes",
+     "internalType": "bytes"
+    },
+    {
+     "name": "tokens",
+     "type": "address[]",
+     "internalType": "address[]"
+    },
+    {
+     "name": "amounts",
+     "type": "uint256[]",
+     "internalType": "uint256[]"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "internalType": "bytes32"
+    }
+   ],
+   "stateMutability": "nonpayable"
+  },
+  {
+   "type": "event",
+   "name": "Docked",
+   "inputs": [
+    {
+     "name": "maker",
+     "type": "address",
+     "indexed": false,
+     "internalType": "address"
+    },
+    {
+     "name": "app",
+     "type": "address",
+     "indexed": false,
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "indexed": false,
+     "internalType": "bytes32"
+    }
+   ],
+   "anonymous": false
+  },
+  {
+   "type": "event",
+   "name": "Pulled",
+   "inputs": [
+    {
+     "name": "maker",
+     "type": "address",
+     "indexed": false,
+     "internalType": "address"
+    },
+    {
+     "name": "app",
+     "type": "address",
+     "indexed": false,
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "indexed": false,
+     "internalType": "bytes32"
+    },
+    {
+     "name": "token",
+     "type": "address",
+     "indexed": false,
+     "internalType": "address"
+    },
+    {
+     "name": "amount",
+     "type": "uint256",
+     "indexed": false,
+     "internalType": "uint256"
+    }
+   ],
+   "anonymous": false
+  },
+  {
+   "type": "event",
+   "name": "Pushed",
+   "inputs": [
+    {
+     "name": "maker",
+     "type": "address",
+     "indexed": false,
+     "internalType": "address"
+    },
+    {
+     "name": "app",
+     "type": "address",
+     "indexed": false,
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "indexed": false,
+     "internalType": "bytes32"
+    },
+    {
+     "name": "token",
+     "type": "address",
+     "indexed": false,
+     "internalType": "address"
+    },
+    {
+     "name": "amount",
+     "type": "uint256",
+     "indexed": false,
+     "internalType": "uint256"
+    }
+   ],
+   "anonymous": false
+  },
+  {
+   "type": "event",
+   "name": "Shipped",
+   "inputs": [
+    {
+     "name": "maker",
+     "type": "address",
+     "indexed": false,
+     "internalType": "address"
+    },
+    {
+     "name": "app",
+     "type": "address",
+     "indexed": false,
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "indexed": false,
+     "internalType": "bytes32"
+    },
+    {
+     "name": "strategy",
+     "type": "bytes",
+     "indexed": false,
+     "internalType": "bytes"
+    }
+   ],
+   "anonymous": false
+  },
+  {
+   "type": "error",
+   "name": "DockingShouldCloseAllTokens",
+   "inputs": [
+    {
+     "name": "app",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "internalType": "bytes32"
+    }
+   ]
+  },
+  {
+   "type": "error",
+   "name": "MaxNumberOfTokensExceeded",
+   "inputs": [
+    {
+     "name": "tokensCount",
+     "type": "uint256",
+     "internalType": "uint256"
+    },
+    {
+     "name": "maxTokensCount",
+     "type": "uint256",
+     "internalType": "uint256"
+    }
+   ]
+  },
+  {
+   "type": "error",
+   "name": "PushToNonActiveStrategyPrevented",
+   "inputs": [
+    {
+     "name": "maker",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "app",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "internalType": "bytes32"
+    },
+    {
+     "name": "token",
+     "type": "address",
+     "internalType": "address"
+    }
+   ]
+  },
+  {
+   "type": "error",
+   "name": "SafeBalancesForTokenNotInActiveStrategy",
+   "inputs": [
+    {
+     "name": "maker",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "app",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "internalType": "bytes32"
+    },
+    {
+     "name": "token",
+     "type": "address",
+     "internalType": "address"
+    }
+   ]
+  },
+  {
+   "type": "error",
+   "name": "SafeCastOverflowedUintDowncast",
+   "inputs": [
+    {
+     "name": "bits",
+     "type": "uint8",
+     "internalType": "uint8"
+    },
+    {
+     "name": "value",
+     "type": "uint256",
+     "internalType": "uint256"
+    }
+   ]
+  },
+  {
+   "type": "error",
+   "name": "SafeTransferFromFailed",
+   "inputs": []
+  },
+  {
+   "type": "error",
+   "name": "StrategiesMustBeImmutable",
+   "inputs": [
+    {
+     "name": "app",
+     "type": "address",
+     "internalType": "address"
+    },
+    {
+     "name": "strategyHash",
+     "type": "bytes32",
+     "internalType": "bytes32"
+    }
+   ]
+  }
+ ],
+ "bytecode": {
+  "object": "0x60808060405234601557610f33908161001a8239f35b5f80fdfe60806040526004361015610011575f80fd5b5f3560e01c806328defc1714610af757806347d727681461089557806365f2fe141461070a5780636d58b4cc14610623578063b00bbd10146104205763f50b870f1461005b575f80fd5b3461041c5760807ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261041c57610092610c60565b60243567ffffffffffffffff811161041c573660238201121561041c5780600401359167ffffffffffffffff831161041c576024820191602484369201011161041c5760443567ffffffffffffffff811161041c576100f5903690600401610cec565b60643567ffffffffffffffff811161041c57610115903690600401610cec565b9190927fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0601f8801166040517fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0603f830116810181811067ffffffffffffffff8211176103ef576040528881526020810190898983375f60208b830101525190209760ff84116103be5760ff841660ff811461038e57506040519182913383528073ffffffffffffffffffffffffffffffffffffffff8a169a8b60208601528c6040860152606085016080905281608086015260a0850137820160a0015f905281010360a0017fdc3622e06fb145651f567d421c9ef261d71d43e3778b761907bc0d70d42e52b091a15f958260f81b7fff0000000000000000000000000000000000000000000000000000000000000016965b83811061025a57602089604051908152f35b335f525f60205260405f20825f5260205260405f20895f5260205260405f2073ffffffffffffffffffffffffffffffffffffffff6102a161029c848888610d1d565b610d5a565b165f526020528860405f20805460f81c61035e578291896103558a610313868f61030d61029c8f929b8f8f7f3f18354abbd5306dd1665c2c90f614a4559e39dd620d04fbe5458e613b6588f39c60019f6103056102ff868a8e610d1d565b35610de7565b179055610d1d565b93610d1d565b6040805133815273ffffffffffffffffffffffffffffffffffffffff9586166020820152908101959095529216606084015290356080830152819060a0820190565b0390a101610248565b50827f879f237b000000000000000000000000000000000000000000000000000000005f5260045260245260445ffd5b7f7ea50f64000000000000000000000000000000000000000000000000000000005f5260045260fe60245260445ffd5b837f6dfcc650000000000000000000000000000000000000000000000000000000005f52600860045260245260445ffd5b7f4e487b71000000000000000000000000000000000000000000000000000000005f52604160045260245ffd5b5f80fd5b3461041c5760a07ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261041c57610457610c60565b6024356044359173ffffffffffffffffffffffffffffffffffffffff831680840361041c57606435610487610cc9565b9473ffffffffffffffffffffffffffffffffffffffff84165f525f60205260405f2073ffffffffffffffffffffffffffffffffffffffff33165f5260205260405f20855f5260205260405f20835f5260205260405f208054967effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff61050985610de7565b167effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff891603907effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff82116105f657866105f1966105ab9487947fff000000000000000000000000000000000000000000000000000000000000007f3ad61047071575417c75e3311e5d46ff042e292b5dd8769ff18b4b254098ca7a9d16179055610e61565b604051948594339086919360809373ffffffffffffffffffffffffffffffffffffffff80939897968160a087019a16865216602085015260408401521660608201520152565b0390a1005b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b3461041c5760807ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261041c5761065a610c60565b610662610c83565b73ffffffffffffffffffffffffffffffffffffffff61067f610ca6565b92165f525f60205273ffffffffffffffffffffffffffffffffffffffff60405f2091165f5260205260405f206044355f5260205273ffffffffffffffffffffffffffffffffffffffff60405f2091165f526020526040805f20548151907effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8116825260f81c6020820152f35b3461041c5760a07ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261041c576040610743610c60565b7effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff61076b610c83565b9161086e6044359361077b610ca6565b94610784610cc9565b9173ffffffffffffffffffffffffffffffffffffffff8516805f525f602052885f2073ffffffffffffffffffffffffffffffffffffffff83165f52602052885f20835f52602052885f2073ffffffffffffffffffffffffffffffffffffffff89165f52602052610809895f2054988484898c60f81c8015159081610889575b50610d7b565b5f525f602052875f2073ffffffffffffffffffffffffffffffffffffffff82165f52602052875f20825f52602052875f2073ffffffffffffffffffffffffffffffffffffffff84165f52602052875f2054948560f81c801515908161087d5750610d7b565b81845193168352166020820152f35b60ff915014158a610803565b60ff915014158f610803565b3461041c5760a07ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261041c576108cc610c60565b6108d4610c83565b604435916108e0610ca6565b9260843573ffffffffffffffffffffffffffffffffffffffff83165f525f60205260405f2073ffffffffffffffffffffffffffffffffffffffff85165f5260205260405f20825f5260205260405f2073ffffffffffffffffffffffffffffffffffffffff86165f5260205260405f20948554928360f81c8015159081610aeb575b5015610a8c577effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff61099084610de7565b167effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff851601967effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff88116105f6577f3f18354abbd5306dd1665c2c90f614a4559e39dd620d04fbe5458e613b6588f3977fff000000000000000000000000000000000000000000000000000000000000006105f19616179055610a4883863373ffffffffffffffffffffffffffffffffffffffff8616610e61565b60405195869586919360809373ffffffffffffffffffffffffffffffffffffffff80939897968160a087019a16865216602085015260408401521660608201520152565b6040517f69f7b4f200000000000000000000000000000000000000000000000000000000815273ffffffffffffffffffffffffffffffffffffffff86811660048301528781166024830152604482019290925291166064820152608490fd5b60ff9150141588610961565b3461041c5760607ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261041c57610b2e610c60565b6024359060443567ffffffffffffffff811161041c57610b52903690600401610cec565b929073ffffffffffffffffffffffffffffffffffffffff5f9316925b848110610bae577fd173a1d140c154eb1ce9298d251d5eb8c4089cc2d16e70f1067bdc810c6fe004606085856040519133835260208301526040820152a1005b335f525f60205260405f20845f5260205260405f20835f5260205260405f2073ffffffffffffffffffffffffffffffffffffffff610bf061029c848987610d1d565b165f5260205260405f2085815460f81c03610c30577fff000000000000000000000000000000000000000000000000000000000000009055600101610b6e565b83857fbbe8d44d000000000000000000000000000000000000000000000000000000005f5260045260245260445ffd5b6004359073ffffffffffffffffffffffffffffffffffffffff8216820361041c57565b6024359073ffffffffffffffffffffffffffffffffffffffff8216820361041c57565b6064359073ffffffffffffffffffffffffffffffffffffffff8216820361041c57565b6084359073ffffffffffffffffffffffffffffffffffffffff8216820361041c57565b9181601f8401121561041c5782359167ffffffffffffffff831161041c576020808501948460051b01011161041c57565b9190811015610d2d5760051b0190565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52603260045260245ffd5b3573ffffffffffffffffffffffffffffffffffffffff8116810361041c5790565b93919392909215610d8c5750505050565b6040517fb63386a600000000000000000000000000000000000000000000000000000000815273ffffffffffffffffffffffffffffffffffffffff938416600482015293831660248501526044840152166064820152608490fd5b7effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8111610e31577effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1690565b7f6dfcc650000000000000000000000000000000000000000000000000000000005f5260f860045260245260445ffd5b925f91606491602094604051927f23b872dd00000000000000000000000000000000000000000000000000000000845260048401526024830152604482015282855af19081610edb575b5015610eb357565b7ff4059071000000000000000000000000000000000000000000000000000000005f5260045ffd5b90503d15610ef5575060015f5114601f3d11165b5f610eab565b3b1515610eef56fea264697066735822122024a1c68b8021bafd0029c1276a1622fed5eaa60f8088b0143efc4c95df4a358464736f6c634300081e0033",
+  "sourceMap": "546:3614:45:-:0;;;;;;;;;;;;;;;;;",
+  "linkReferences": {}
+ },
+ "deployedBytecode": {
+  "object": "0x60806040526004361015610011575f80fd5b5f3560e01c806328defc1714610af757806347d727681461089557806365f2fe141461070a5780636d58b4cc14610623578063b00bbd10146104205763f50b870f1461005b575f80fd5b3461041c5760807ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261041c57610092610c60565b60243567ffffffffffffffff811161041c573660238201121561041c5780600401359167ffffffffffffffff831161041c576024820191602484369201011161041c5760443567ffffffffffffffff811161041c576100f5903690600401610cec565b60643567ffffffffffffffff811161041c57610115903690600401610cec565b9190927fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0601f8801166040517fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0603f830116810181811067ffffffffffffffff8211176103ef576040528881526020810190898983375f60208b830101525190209760ff84116103be5760ff841660ff811461038e57506040519182913383528073ffffffffffffffffffffffffffffffffffffffff8a169a8b60208601528c6040860152606085016080905281608086015260a0850137820160a0015f905281010360a0017fdc3622e06fb145651f567d421c9ef261d71d43e3778b761907bc0d70d42e52b091a15f958260f81b7fff0000000000000000000000000000000000000000000000000000000000000016965b83811061025a57602089604051908152f35b335f525f60205260405f20825f5260205260405f20895f5260205260405f2073ffffffffffffffffffffffffffffffffffffffff6102a161029c848888610d1d565b610d5a565b165f526020528860405f20805460f81c61035e578291896103558a610313868f61030d61029c8f929b8f8f7f3f18354abbd5306dd1665c2c90f614a4559e39dd620d04fbe5458e613b6588f39c60019f6103056102ff868a8e610d1d565b35610de7565b179055610d1d565b93610d1d565b6040805133815273ffffffffffffffffffffffffffffffffffffffff9586166020820152908101959095529216606084015290356080830152819060a0820190565b0390a101610248565b50827f879f237b000000000000000000000000000000000000000000000000000000005f5260045260245260445ffd5b7f7ea50f64000000000000000000000000000000000000000000000000000000005f5260045260fe60245260445ffd5b837f6dfcc650000000000000000000000000000000000000000000000000000000005f52600860045260245260445ffd5b7f4e487b71000000000000000000000000000000000000000000000000000000005f52604160045260245ffd5b5f80fd5b3461041c5760a07ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261041c57610457610c60565b6024356044359173ffffffffffffffffffffffffffffffffffffffff831680840361041c57606435610487610cc9565b9473ffffffffffffffffffffffffffffffffffffffff84165f525f60205260405f2073ffffffffffffffffffffffffffffffffffffffff33165f5260205260405f20855f5260205260405f20835f5260205260405f208054967effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff61050985610de7565b167effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff891603907effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff82116105f657866105f1966105ab9487947fff000000000000000000000000000000000000000000000000000000000000007f3ad61047071575417c75e3311e5d46ff042e292b5dd8769ff18b4b254098ca7a9d16179055610e61565b604051948594339086919360809373ffffffffffffffffffffffffffffffffffffffff80939897968160a087019a16865216602085015260408401521660608201520152565b0390a1005b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b3461041c5760807ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261041c5761065a610c60565b610662610c83565b73ffffffffffffffffffffffffffffffffffffffff61067f610ca6565b92165f525f60205273ffffffffffffffffffffffffffffffffffffffff60405f2091165f5260205260405f206044355f5260205273ffffffffffffffffffffffffffffffffffffffff60405f2091165f526020526040805f20548151907effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8116825260f81c6020820152f35b3461041c5760a07ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261041c576040610743610c60565b7effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff61076b610c83565b9161086e6044359361077b610ca6565b94610784610cc9565b9173ffffffffffffffffffffffffffffffffffffffff8516805f525f602052885f2073ffffffffffffffffffffffffffffffffffffffff83165f52602052885f20835f52602052885f2073ffffffffffffffffffffffffffffffffffffffff89165f52602052610809895f2054988484898c60f81c8015159081610889575b50610d7b565b5f525f602052875f2073ffffffffffffffffffffffffffffffffffffffff82165f52602052875f20825f52602052875f2073ffffffffffffffffffffffffffffffffffffffff84165f52602052875f2054948560f81c801515908161087d5750610d7b565b81845193168352166020820152f35b60ff915014158a610803565b60ff915014158f610803565b3461041c5760a07ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261041c576108cc610c60565b6108d4610c83565b604435916108e0610ca6565b9260843573ffffffffffffffffffffffffffffffffffffffff83165f525f60205260405f2073ffffffffffffffffffffffffffffffffffffffff85165f5260205260405f20825f5260205260405f2073ffffffffffffffffffffffffffffffffffffffff86165f5260205260405f20948554928360f81c8015159081610aeb575b5015610a8c577effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff61099084610de7565b167effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff851601967effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff88116105f6577f3f18354abbd5306dd1665c2c90f614a4559e39dd620d04fbe5458e613b6588f3977fff000000000000000000000000000000000000000000000000000000000000006105f19616179055610a4883863373ffffffffffffffffffffffffffffffffffffffff8616610e61565b60405195869586919360809373ffffffffffffffffffffffffffffffffffffffff80939897968160a087019a16865216602085015260408401521660608201520152565b6040517f69f7b4f200000000000000000000000000000000000000000000000000000000815273ffffffffffffffffffffffffffffffffffffffff86811660048301528781166024830152604482019290925291166064820152608490fd5b60ff9150141588610961565b3461041c5760607ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261041c57610b2e610c60565b6024359060443567ffffffffffffffff811161041c57610b52903690600401610cec565b929073ffffffffffffffffffffffffffffffffffffffff5f9316925b848110610bae577fd173a1d140c154eb1ce9298d251d5eb8c4089cc2d16e70f1067bdc810c6fe004606085856040519133835260208301526040820152a1005b335f525f60205260405f20845f5260205260405f20835f5260205260405f2073ffffffffffffffffffffffffffffffffffffffff610bf061029c848987610d1d565b165f5260205260405f2085815460f81c03610c30577fff000000000000000000000000000000000000000000000000000000000000009055600101610b6e565b83857fbbe8d44d000000000000000000000000000000000000000000000000000000005f5260045260245260445ffd5b6004359073ffffffffffffffffffffffffffffffffffffffff8216820361041c57565b6024359073ffffffffffffffffffffffffffffffffffffffff8216820361041c57565b6064359073ffffffffffffffffffffffffffffffffffffffff8216820361041c57565b6084359073ffffffffffffffffffffffffffffffffffffffff8216820361041c57565b9181601f8401121561041c5782359167ffffffffffffffff831161041c576020808501948460051b01011161041c57565b9190811015610d2d5760051b0190565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52603260045260245ffd5b3573ffffffffffffffffffffffffffffffffffffffff8116810361041c5790565b93919392909215610d8c5750505050565b6040517fb63386a600000000000000000000000000000000000000000000000000000000815273ffffffffffffffffffffffffffffffffffffffff938416600482015293831660248501526044840152166064820152608490fd5b7effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8111610e31577effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1690565b7f6dfcc650000000000000000000000000000000000000000000000000000000005f5260f860045260245260445ffd5b925f91606491602094604051927f23b872dd00000000000000000000000000000000000000000000000000000000845260048401526024830152604482015282855af19081610edb575b5015610eb357565b7ff4059071000000000000000000000000000000000000000000000000000000005f5260045ffd5b90503d15610ef5575060015f5114601f3d11165b5f610eab565b3b1515610eef56fea264697066735822122024a1c68b8021bafd0029c1276a1622fed5eaa60f8088b0143efc4c95df4a358464736f6c634300081e0033",
+  "sourceMap": "546:3614:45:-:0;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:::i;:::-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:::i;:::-;;;;;;;;;;;;;;;:::i;:::-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;2023:19;;16868:23:22;546:3614:45;16868:23:22;;16864:101;;546:3614:45;;;;2113:22;;546:3614;;;;;2213:10;;;;546:3614;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;2205:48;546:3614;2205:48;;;;546:3614;1819:137:49;;546:3614:45;1819:137:49;;;2263:382:45;2283:17;;;;;;546:3614;;;;;;;;2302:3;2213:10;546:3614;;;;;;;;;;;;;;;;;;;;;;;;;2388:9;;;;;;:::i;:::-;;:::i;:::-;546:3614;;;;;;;;;;;;;;;2519:10;;;2574:60;2519:10;2623;2519;;2612:9;;2519:10;;;;;2574:60;2519:10;2186:1;2519:10;:22;:10;;;;;:::i;:::-;546:3614;2519:22;:::i;:::-;1819:137:49;;;2612:9:45;:::i;:::-;2623:10;;:::i;:::-;546:3614;;;2213:10;546:3614;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;2574:60;;;;546:3614;2268:13;;546:3614;;;;;;;;;;;;;;;;;;;;;;;;;16864:101:22;16914:40;;546:3614:45;16914:40:22;16945:1;546:3614:45;;;;;;16914:40:22;546:3614:45;;;;;;;;;;;;;;;;;;;;;;;;;;;:::i;:::-;;;;;;;;;;;;;;;;;;:::i;:::-;;;;;;;;;;;;;;3264:10;546:3614;-1:-1:-1;546:3614:45;;;;-1:-1:-1;546:3614:45;;;;;;;;;;-1:-1:-1;546:3614:45;;;;-1:-1:-1;546:3614:45;1167:228:49;;3401:18:45;1167:228:49;3401:18:45;;;:::i;:::-;546:3614;1167:228:49;;;546:3614:45;;1167:228:49;546:3614:45;;;;1819:137:49;3508:54:45;1819:137:49;3486:6:45;1819:137:49;;;;3508:54:45;1819:137:49;;;;;3486:6:45;:::i;:::-;546:3614;;3264:10;;;;3508:54;;546:3614;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;3508:54;;;;546:3614;;;;;;;;;;;;;;;;;;;;;;;;:::i;:::-;;;:::i;:::-;;;;:::i;:::-;;;;;;;;;;;;1083:21;546:3614;-1:-1:-1;546:3614:45;;;;-1:-1:-1;546:3614:45;;;;;;;;;;;1083:42;546:3614;-1:-1:-1;546:3614:45;;;;;-1:-1:-1;546:3614:45;1167:228:49;546:3614:45;;1167:228:49;;;;546:3614:45;;1167:228:49;;546:3614:45;;;;;;;;;;;;;;;;;;;:::i;:::-;1167:228:49;546:3614:45;;:::i;:::-;;1684:127;546:3614;;;;;:::i;:::-;;;;:::i;:::-;;;;;;;;;;;;;;;;;-1:-1:-1;546:3614:45;;;;-1:-1:-1;546:3614:45;;;;;;;;;;;;-1:-1:-1;546:3614:45;;;1418:127;546:3614;-1:-1:-1;546:3614:45;1167:228:49;;;;;;;;1426:16:45;;;:43;;;;546:3614;1418:127;;:::i;:::-;546:3614;;;;;;;;;;;-1:-1:-1;546:3614:45;;;;-1:-1:-1;546:3614:45;;;;;;;;;;;;-1:-1:-1;546:3614:45;;;;-1:-1:-1;546:3614:45;1167:228:49;;;;;1692:16:45;;;:43;;;;1684:127;;:::i;:::-;546:3614;;;1167:228:49;;546:3614:45;;1167:228:49;546:3614:45;;;;;1692:43;546:3614;1712:23;;;;1692:43;;;1426;546:3614;1446:23;;;;1426:43;;;546:3614;;;;;;;;;;;;;:::i;:::-;;;:::i;:::-;;;;;;:::i;:::-;;;;;;;;;;;;;;;;;;-1:-1:-1;546:3614:45;;;;-1:-1:-1;546:3614:45;;;;;;;;;;;;-1:-1:-1;546:3614:45;;;;-1:-1:-1;546:3614:45;1167:228:49;;;;;;;3842:15:45;;;:41;;;;546:3614;;;;;1167:228:49;3989:18:45;;;:::i;:::-;546:3614;1167:228:49;;;546:3614:45;;1167:228:49;546:3614:45;;;;4104:47;1819:137:49;;4104:47:45;1819:137:49;;;;;4082:6:45;4063:10;;;546:3614;;;4082:6;:::i;:::-;546:3614;;4104:47;;;;546:3614;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;3842:41;546:3614;3861:22;;;;3842:41;;;546:3614;;;;;;;;;;;;;:::i;:::-;;;;;;;;;;;;;;;;;;:::i;:::-;2757:13;;546:3614;;;;2752:292;2772:17;;;;;;3058:37;546:3614;;;;;2846:10;;546:3614;;;707:4;;546:3614;;707:4;;546:3614;3058:37;546:3614;2791:3;2846:10;546:3614;;;;;;;;;-1:-1:-1;546:3614:45;;;;-1:-1:-1;546:3614:45;;;;;;;;;;2877:9;;;;;;:::i;:::-;546:3614;-1:-1:-1;546:3614:45;;;;-1:-1:-1;546:3614:45;;;;;;2909:36;546:3614;;1819:137:49;;;546:3614:45;;2757:13;;546:3614;;;;;;;;;;;;;;;;;;;;;;;;:::o;:::-;;;;;;;;;;;:::o;:::-;;;;;;;;;;;:::o;:::-;;;;;;;;;;;:::o;:::-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;:::o;:::-;;;;;;;;;;;;:::o;:::-;;;;;;;;;;;;;;;;;;;;:::o;:::-;;;;;;;;;;;;;;:::o;:::-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;1629:218:22;546:3614:45;1709:25:22;;1705:105;;546:3614:45;;1629:218:22;:::o;1705:105::-;1757:42;;;1788:3;1757:42;546:3614:45;;;;1757:42:22;;4642:923:7;;-1:-1:-1;4642:923:7;4858:646;4642:923;4858:646;4642:923;4858:646;;;546:3614:45;4858:646:7;;;;;;;;;;;;;;;;;;;;;;4642:923;5517:8;;5513:45;;4642:923::o;5513:45::-;5534:24;-1:-1:-1;5534:24:7;4858:646;-1:-1:-1;5534:24:7;4858:646;;-1:-1:-1;4858:646:7;;;;;;-1:-1:-1;4858:646:7;;;;;;;;;;;;;;;",
+  "linkReferences": {}
+ },
+ "methodIdentifiers": {
+  "dock(address,bytes32,address[])": "28defc17",
+  "pull(address,bytes32,address,uint256,address)": "b00bbd10",
+  "push(address,address,bytes32,address,uint256)": "47d72768",
+  "rawBalances(address,address,bytes32,address)": "6d58b4cc",
+  "safeBalances(address,address,bytes32,address,address)": "65f2fe14",
+  "ship(address,bytes,address[],uint256[])": "f50b870f"
+ },
+ "rawMetadata": "{\"compiler\":{\"version\":\"0.8.30+commit.73712a01\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"}],\"name\":\"DockingShouldCloseAllTokens\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"tokensCount\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"maxTokensCount\",\"type\":\"uint256\"}],\"name\":\"MaxNumberOfTokensExceeded\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"maker\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"}],\"name\":\"PushToNonActiveStrategyPrevented\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"maker\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"}],\"name\":\"SafeBalancesForTokenNotInActiveStrategy\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"uint8\",\"name\":\"bits\",\"type\":\"uint8\"},{\"internalType\":\"uint256\",\"name\":\"value\",\"type\":\"uint256\"}],\"name\":\"SafeCastOverflowedUintDowncast\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"SafeTransferFromFailed\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"}],\"name\":\"StrategiesMustBeImmutable\",\"type\":\"error\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"maker\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"}],\"name\":\"Docked\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"maker\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"Pulled\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"maker\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"Pushed\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"maker\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"},{\"indexed\":false,\"internalType\":\"bytes\",\"name\":\"strategy\",\"type\":\"bytes\"}],\"name\":\"Shipped\",\"type\":\"event\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"},{\"internalType\":\"address[]\",\"name\":\"tokens\",\"type\":\"address[]\"}],\"name\":\"dock\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"maker\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"to\",\"type\":\"address\"}],\"name\":\"pull\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"maker\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"push\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"maker\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"}],\"name\":\"rawBalances\",\"outputs\":[{\"internalType\":\"uint248\",\"name\":\"balance\",\"type\":\"uint248\"},{\"internalType\":\"uint8\",\"name\":\"tokensCount\",\"type\":\"uint8\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"maker\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"token0\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"token1\",\"type\":\"address\"}],\"name\":\"safeBalances\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"balance0\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"balance1\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"app\",\"type\":\"address\"},{\"internalType\":\"bytes\",\"name\":\"strategy\",\"type\":\"bytes\"},{\"internalType\":\"address[]\",\"name\":\"tokens\",\"type\":\"address[]\"},{\"internalType\":\"uint256[]\",\"name\":\"amounts\",\"type\":\"uint256[]\"}],\"name\":\"ship\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"strategyHash\",\"type\":\"bytes32\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}],\"devdoc\":{\"errors\":{\"DockingShouldCloseAllTokens(address,bytes32)\":[{\"params\":{\"app\":\"The app address of the strategy\",\"strategyHash\":\"The hash of the strategy being docked\"}}],\"MaxNumberOfTokensExceeded(uint256,uint256)\":[{\"params\":{\"maxTokensCount\":\"The maximum number of tokens allowed\",\"tokensCount\":\"The actual number of tokens provided\"}}],\"PushToNonActiveStrategyPrevented(address,address,bytes32,address)\":[{\"params\":{\"app\":\"The app address\",\"maker\":\"The maker address\",\"strategyHash\":\"The hash of the strategy\",\"token\":\"The token being pushed\"}}],\"SafeBalancesForTokenNotInActiveStrategy(address,address,bytes32,address)\":[{\"params\":{\"app\":\"The app address\",\"maker\":\"The maker address\",\"strategyHash\":\"The hash of the strategy\",\"token\":\"The token being queried\"}}],\"SafeCastOverflowedUintDowncast(uint8,uint256)\":[{\"details\":\"Value doesn't fit in an uint of `bits` size.\"}],\"StrategiesMustBeImmutable(address,bytes32)\":[{\"params\":{\"app\":\"The app address of the strategy\",\"strategyHash\":\"The hash of the existing strategy\"}}]},\"events\":{\"Docked(address,address,bytes32)\":{\"params\":{\"app\":\"The app address associated with the strategy being docked\",\"maker\":\"The address of the maker revoking the strategy\",\"strategyHash\":\"The hash of the strategy being revoked\"}},\"Pulled(address,address,bytes32,address,uint256)\":{\"details\":\"The tokens are transferred from the maker's balance to the specified recipient\",\"params\":{\"amount\":\"The amount of tokens being pulled\",\"app\":\"The app address that initiated the pull\",\"maker\":\"The address of the maker whose tokens are being pulled\",\"strategyHash\":\"The hash of the strategy being pulled from\",\"token\":\"The token address being pulled\"}},\"Pushed(address,address,bytes32,address,uint256)\":{\"details\":\"The tokens are transferred from the caller to the maker's balance\",\"params\":{\"amount\":\"The amount of tokens being pushed and added to the strategy's balance\",\"app\":\"The app address whose balance gets increased\",\"maker\":\"The address of the maker whose balance receives the tokens\",\"strategyHash\":\"The hash of the strategy being pushed to\",\"token\":\"The token address being pushed\"}},\"Shipped(address,address,bytes32,bytes)\":{\"params\":{\"app\":\"The app address associated with the strategy\",\"maker\":\"The address of the maker shipping the strategy\",\"strategy\":\"The strategy being shipped (abi encoded)\",\"strategyHash\":\"The hash of the strategy being shipped\"}}},\"kind\":\"dev\",\"methods\":{\"dock(address,bytes32,address[])\":{\"details\":\"Sets balances to 0 for all specified tokens\",\"params\":{\"app\":\"The app address associated with the strategy\",\"strategyHash\":\"The hash of the strategy being docked\",\"tokens\":\"Array of token addresses to clear\"}},\"pull(address,bytes32,address,uint256,address)\":{\"details\":\"Decrements the balance and transfers tokens. Caller must be an approved app\",\"params\":{\"amount\":\"The amount to pull\",\"maker\":\"The maker to pull tokens from\",\"strategyHash\":\"The hash of the strategy being used\",\"to\":\"The recipient address\",\"token\":\"The token address to pull\"}},\"push(address,address,bytes32,address,uint256)\":{\"details\":\"Transfers tokens from caller to maker and increases the app's balance\",\"params\":{\"amount\":\"The amount to push and add to balance\",\"app\":\"The address of the app/strategy receiving the tokens\",\"maker\":\"The maker whose balance receives the tokens\",\"strategyHash\":\"The hash of the strategy being pushed\",\"token\":\"The token address to push\"}},\"rawBalances(address,address,bytes32,address)\":{\"params\":{\"app\":\"The address of the app/strategy that can pull tokens\",\"maker\":\"The address of the maker who granted the balance\",\"strategyHash\":\"The hash of the strategy being used\",\"token\":\"The address of the token\"},\"returns\":{\"balance\":\"The current balance amount\",\"tokensCount\":\"The number of tokens in the strategy\"}},\"safeBalances(address,address,bytes32,address,address)\":{\"params\":{\"app\":\"The address of the app/strategy that can pull tokens\",\"maker\":\"The address of the maker who granted the balances\",\"strategyHash\":\"The hash of the strategy being used\",\"token0\":\"The address of the first token\",\"token1\":\"The address of the second token\"},\"returns\":{\"balance0\":\"The current balance amount for the first token\",\"balance1\":\"The current balance amount for the second token\"}},\"ship(address,bytes,address[],uint256[])\":{\"details\":\"Parameter `strategy` is presented fully instead of being pre-hashed for data availability\",\"params\":{\"amounts\":\"Array of balance amounts for each token\",\"app\":\"The implementation contract\",\"strategy\":\"Initialization data passed to the strategy\",\"tokens\":\"Array of token addresses to approve\"}}},\"title\":\"Aqua - Shared Liquidity Layer\",\"version\":1},\"userdoc\":{\"errors\":{\"DockingShouldCloseAllTokens(address,bytes32)\":[{\"notice\":\"Thrown when docking doesn't include all tokens from the strategy\"}],\"MaxNumberOfTokensExceeded(uint256,uint256)\":[{\"notice\":\"Thrown when the number of tokens in a strategy exceeds the maximum allowed\"}],\"PushToNonActiveStrategyPrevented(address,address,bytes32,address)\":[{\"notice\":\"Thrown when attempting to push tokens to a non-active or docked strategy\"}],\"SafeBalancesForTokenNotInActiveStrategy(address,address,bytes32,address)\":[{\"notice\":\"Thrown when querying safe balances for a token not part of an active strategy\"}],\"StrategiesMustBeImmutable(address,bytes32)\":[{\"notice\":\"Thrown when attempting to modify an already existing strategy\"}]},\"events\":{\"Docked(address,address,bytes32)\":{\"notice\":\"Emitted when a maker revokes (deactivates) a strategy\"},\"Pulled(address,address,bytes32,address,uint256)\":{\"notice\":\"Emitted when a strategy pulls tokens from a maker\"},\"Pushed(address,address,bytes32,address,uint256)\":{\"notice\":\"Emitted when tokens are pushed into a maker's balance\"},\"Shipped(address,address,bytes32,bytes)\":{\"notice\":\"Emitted when a new strategy is shipped (deployed) and initialized with balances\"}},\"kind\":\"user\",\"methods\":{\"dock(address,bytes32,address[])\":{\"notice\":\"Docks (deactivates) a strategy by clearing balances for specified tokens\"},\"pull(address,bytes32,address,uint256,address)\":{\"notice\":\"Allows a strategy to pull tokens from a maker's wallet\"},\"push(address,address,bytes32,address,uint256)\":{\"notice\":\"Pushes tokens and increases an app balance\"},\"rawBalances(address,address,bytes32,address)\":{\"notice\":\"Returns the balance amount for a specific maker, app, and token combination\"},\"safeBalances(address,address,bytes32,address,address)\":{\"notice\":\"Returns balances of multiple tokens in a strategy, reverts if any of the tokens is not part of the active strategy\"},\"ship(address,bytes,address[],uint256[])\":{\"notice\":\"Ships a new strategy as of an app and sets initial balances\"}},\"version\":1}},\"settings\":{\"compilationTarget\":{\"src/Aqua.sol\":\"Aqua\"},\"evmVersion\":\"prague\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":true,\"runs\":10000000},\"remappings\":[\":@1inch/solidity-utils/=node_modules/@1inch/solidity-utils/\",\":@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/\",\":forge-std/=node_modules/forge-std/src/\",\":hardhat-deploy/=node_modules/hardhat-deploy/\",\":hardhat/=node_modules/hardhat/\"],\"viaIR\":true},\"sources\":{\"node_modules/@1inch/solidity-utils/contracts/interfaces/IDaiLikePermit.sol\":{\"keccak256\":\"0xf8636c1c4631641c7b40ac65cd69e6ae04a99cf3358426c642dec02c6c774c82\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://ac24b4e38c3eba11303a78e1d9558a348b045593653bbe71cd569dfe9ab7c343\",\"dweb:/ipfs/QmdZQ3Eznk1ccEPpxhb68tVJLVYoxnJaj18L9ngvck4a2t\"]},\"node_modules/@1inch/solidity-utils/contracts/interfaces/IERC7597Permit.sol\":{\"keccak256\":\"0xaf148ecd4db0f44989a7417f6945bcfd18273c5096bc2b364e314e42c85c78cd\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://174772debe2ffb231d722cf59de7107e7248dad0cdeda88b8108a19df2494cdb\",\"dweb:/ipfs/QmY3usmJswW97qPMfYfbghsDBAKQ7H6rUxJjSS3KmvaXDL\"]},\"node_modules/@1inch/solidity-utils/contracts/interfaces/IPermit2.sol\":{\"keccak256\":\"0x2ac37c62bb4a4941c1d353df6ac08750542c540234aa24409ac67373651a478a\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://9389ffd404b3b7d9ce89d021943771521e379611d94c8c7c121991eede96d57d\",\"dweb:/ipfs/QmYWqcxoGJX9EMj7kdfk3igDctR1z3gWPHuf1kbE6U8tbm\"]},\"node_modules/@1inch/solidity-utils/contracts/interfaces/IWETH.sol\":{\"keccak256\":\"0x32989b79850e8a1ac6aab74878de2883f9537656ca06910dc0ae76833cc446e2\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://c0dc26b14df9a1fd2ce184299a37c8c3bbaad534c04818c946142d4f4fc4e8d7\",\"dweb:/ipfs/QmaQ4rcitKKqvZ9cUF8ZwWt4dni4faSyAjBnqQMoL9sB5K\"]},\"node_modules/@1inch/solidity-utils/contracts/libraries/RevertReasonForwarder.sol\":{\"keccak256\":\"0x97d8c950981f4da44ae1b01d9e597c4f99377797ec7ff7b1ef9648e4ecc1baa4\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://6609e53701ca057e7996902f876d061d815402e235cdeac5e490c11e1925f5db\",\"dweb:/ipfs/QmZhBhxUvBhb3Tph194yEYyXLeSticArTVra6ryaPPJH5B\"]},\"node_modules/@1inch/solidity-utils/contracts/libraries/SafeERC20.sol\":{\"keccak256\":\"0xc756a120ac3a0271cdfd89db133335deaf31523a06a91ff00eb2be8656e9f85a\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://eb2bf2824633770792b6c977ba707a7e6dda2a63deb2878aff814d56ccfc002a\",\"dweb:/ipfs/QmX7JhxY7sU4Eexvt1aFPG7W7aszLKFdX7KB7f1JNR7ayp\"]},\"node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol\":{\"keccak256\":\"0x74ed01eb66b923d0d0cfe3be84604ac04b76482a55f9dd655e1ef4d367f95bc2\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://5282825a626cfe924e504274b864a652b0023591fa66f06a067b25b51ba9b303\",\"dweb:/ipfs/QmeCfPykghhMc81VJTrHTC7sF6CRvaA1FXVq2pJhwYp1dV\"]},\"node_modules/@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol\":{\"keccak256\":\"0x2fa0657dd7b8bc75475a47f64bc04a9adb42236b15d65e6781594ea69a46c3e4\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://7496f42681aed94bf0142a077324e50b86046610c1724e7c12e96cf1c365914a\",\"dweb:/ipfs/QmZvhNdSAAbN4PKPdheAqwpXukUiXp3Q3TdQccDMg2NDTV\"]},\"node_modules/@openzeppelin/contracts/utils/math/SafeCast.sol\":{\"keccak256\":\"0x195533c86d0ef72bcc06456a4f66a9b941f38eb403739b00f21fd7c1abd1ae54\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://b1d578337048cad08c1c03041cca5978eff5428aa130c781b271ad9e5566e1f8\",\"dweb:/ipfs/QmPFKL2r9CBsMwmUqqdcFPfHZB2qcs9g1HDrPxzWSxomvy\"]},\"src/Aqua.sol\":{\"keccak256\":\"0x670d826c30cf284d0e2a6e24445e3bc8a41ab4ac986be7bc9824032a4269af91\",\"license\":\"LicenseRef-Degensoft-Aqua-Source-1.1\",\"urls\":[\"bzz-raw://ebee87087d196690cc350e7e6c8e894f5bbec55f16369feca81126a6dfbfb0b1\",\"dweb:/ipfs/QmbTZap5eAk2J6sFyXEQ7PRam7gDfF4EFGr7yvdZDNkMXR\"]},\"src/interfaces/IAqua.sol\":{\"keccak256\":\"0x9352f466ae2352bc842f038a2883a90202cd1abfcbeb7058570c8ae100f6ab19\",\"license\":\"LicenseRef-Degensoft-Aqua-Source-1.1\",\"urls\":[\"bzz-raw://83df76aaacc3bd0dd88153e1c24f48a636d1b968c27979016fd2c6bc35de3508\",\"dweb:/ipfs/Qmbj3xhimX6MpqbQzLFZn4uHnjDPFtUMNyJ6uTkynD4UGZ\"]},\"src/libs/Balance.sol\":{\"keccak256\":\"0xc51b834388b73c90de18b6e6cb1dbef90c167939d11c749dc7c6d9cf1a431a0d\",\"license\":\"LicenseRef-Degensoft-Aqua-Source-1.1\",\"urls\":[\"bzz-raw://1bc782886510c74449025724d4c88fccd9b47a4752adda9063441516046a12d4\",\"dweb:/ipfs/QmeUhCKsoF6ysjE36Qmji9DjrAw17Wdx741BXbweo9tgzU\"]}},\"version\":1}",
+ "metadata": {
+  "compiler": {
+   "version": "0.8.30+commit.73712a01"
+  },
+  "language": "Solidity",
+  "output": {
+   "abi": [
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32"
+      }
+     ],
+     "type": "error",
+     "name": "DockingShouldCloseAllTokens"
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "uint256",
+       "name": "tokensCount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "uint256",
+       "name": "maxTokensCount",
+       "type": "uint256"
+      }
+     ],
+     "type": "error",
+     "name": "MaxNumberOfTokensExceeded"
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "maker",
+       "type": "address"
+      },
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "address",
+       "name": "token",
+       "type": "address"
+      }
+     ],
+     "type": "error",
+     "name": "PushToNonActiveStrategyPrevented"
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "maker",
+       "type": "address"
+      },
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "address",
+       "name": "token",
+       "type": "address"
+      }
+     ],
+     "type": "error",
+     "name": "SafeBalancesForTokenNotInActiveStrategy"
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "uint8",
+       "name": "bits",
+       "type": "uint8"
+      },
+      {
+       "internalType": "uint256",
+       "name": "value",
+       "type": "uint256"
+      }
+     ],
+     "type": "error",
+     "name": "SafeCastOverflowedUintDowncast"
+    },
+    {
+     "inputs": [],
+     "type": "error",
+     "name": "SafeTransferFromFailed"
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32"
+      }
+     ],
+     "type": "error",
+     "name": "StrategiesMustBeImmutable"
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "maker",
+       "type": "address",
+       "indexed": false
+      },
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address",
+       "indexed": false
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32",
+       "indexed": false
+      }
+     ],
+     "type": "event",
+     "name": "Docked",
+     "anonymous": false
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "maker",
+       "type": "address",
+       "indexed": false
+      },
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address",
+       "indexed": false
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32",
+       "indexed": false
+      },
+      {
+       "internalType": "address",
+       "name": "token",
+       "type": "address",
+       "indexed": false
+      },
+      {
+       "internalType": "uint256",
+       "name": "amount",
+       "type": "uint256",
+       "indexed": false
+      }
+     ],
+     "type": "event",
+     "name": "Pulled",
+     "anonymous": false
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "maker",
+       "type": "address",
+       "indexed": false
+      },
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address",
+       "indexed": false
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32",
+       "indexed": false
+      },
+      {
+       "internalType": "address",
+       "name": "token",
+       "type": "address",
+       "indexed": false
+      },
+      {
+       "internalType": "uint256",
+       "name": "amount",
+       "type": "uint256",
+       "indexed": false
+      }
+     ],
+     "type": "event",
+     "name": "Pushed",
+     "anonymous": false
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "maker",
+       "type": "address",
+       "indexed": false
+      },
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address",
+       "indexed": false
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32",
+       "indexed": false
+      },
+      {
+       "internalType": "bytes",
+       "name": "strategy",
+       "type": "bytes",
+       "indexed": false
+      }
+     ],
+     "type": "event",
+     "name": "Shipped",
+     "anonymous": false
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "address[]",
+       "name": "tokens",
+       "type": "address[]"
+      }
+     ],
+     "stateMutability": "nonpayable",
+     "type": "function",
+     "name": "dock"
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "maker",
+       "type": "address"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "address",
+       "name": "token",
+       "type": "address"
+      },
+      {
+       "internalType": "uint256",
+       "name": "amount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "address",
+       "name": "to",
+       "type": "address"
+      }
+     ],
+     "stateMutability": "nonpayable",
+     "type": "function",
+     "name": "pull"
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "maker",
+       "type": "address"
+      },
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "address",
+       "name": "token",
+       "type": "address"
+      },
+      {
+       "internalType": "uint256",
+       "name": "amount",
+       "type": "uint256"
+      }
+     ],
+     "stateMutability": "nonpayable",
+     "type": "function",
+     "name": "push"
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "maker",
+       "type": "address"
+      },
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "address",
+       "name": "token",
+       "type": "address"
+      }
+     ],
+     "stateMutability": "view",
+     "type": "function",
+     "name": "rawBalances",
+     "outputs": [
+      {
+       "internalType": "uint248",
+       "name": "balance",
+       "type": "uint248"
+      },
+      {
+       "internalType": "uint8",
+       "name": "tokensCount",
+       "type": "uint8"
+      }
+     ]
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "maker",
+       "type": "address"
+      },
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address"
+      },
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32"
+      },
+      {
+       "internalType": "address",
+       "name": "token0",
+       "type": "address"
+      },
+      {
+       "internalType": "address",
+       "name": "token1",
+       "type": "address"
+      }
+     ],
+     "stateMutability": "view",
+     "type": "function",
+     "name": "safeBalances",
+     "outputs": [
+      {
+       "internalType": "uint256",
+       "name": "balance0",
+       "type": "uint256"
+      },
+      {
+       "internalType": "uint256",
+       "name": "balance1",
+       "type": "uint256"
+      }
+     ]
+    },
+    {
+     "inputs": [
+      {
+       "internalType": "address",
+       "name": "app",
+       "type": "address"
+      },
+      {
+       "internalType": "bytes",
+       "name": "strategy",
+       "type": "bytes"
+      },
+      {
+       "internalType": "address[]",
+       "name": "tokens",
+       "type": "address[]"
+      },
+      {
+       "internalType": "uint256[]",
+       "name": "amounts",
+       "type": "uint256[]"
+      }
+     ],
+     "stateMutability": "nonpayable",
+     "type": "function",
+     "name": "ship",
+     "outputs": [
+      {
+       "internalType": "bytes32",
+       "name": "strategyHash",
+       "type": "bytes32"
+      }
+     ]
+    }
+   ],
+   "devdoc": {
+    "kind": "dev",
+    "methods": {
+     "dock(address,bytes32,address[])": {
+      "details": "Sets balances to 0 for all specified tokens",
+      "params": {
+       "app": "The app address associated with the strategy",
+       "strategyHash": "The hash of the strategy being docked",
+       "tokens": "Array of token addresses to clear"
+      }
+     },
+     "pull(address,bytes32,address,uint256,address)": {
+      "details": "Decrements the balance and transfers tokens. Caller must be an approved app",
+      "params": {
+       "amount": "The amount to pull",
+       "maker": "The maker to pull tokens from",
+       "strategyHash": "The hash of the strategy being used",
+       "to": "The recipient address",
+       "token": "The token address to pull"
+      }
+     },
+     "push(address,address,bytes32,address,uint256)": {
+      "details": "Transfers tokens from caller to maker and increases the app's balance",
+      "params": {
+       "amount": "The amount to push and add to balance",
+       "app": "The address of the app/strategy receiving the tokens",
+       "maker": "The maker whose balance receives the tokens",
+       "strategyHash": "The hash of the strategy being pushed",
+       "token": "The token address to push"
+      }
+     },
+     "rawBalances(address,address,bytes32,address)": {
+      "params": {
+       "app": "The address of the app/strategy that can pull tokens",
+       "maker": "The address of the maker who granted the balance",
+       "strategyHash": "The hash of the strategy being used",
+       "token": "The address of the token"
+      },
+      "returns": {
+       "balance": "The current balance amount",
+       "tokensCount": "The number of tokens in the strategy"
+      }
+     },
+     "safeBalances(address,address,bytes32,address,address)": {
+      "params": {
+       "app": "The address of the app/strategy that can pull tokens",
+       "maker": "The address of the maker who granted the balances",
+       "strategyHash": "The hash of the strategy being used",
+       "token0": "The address of the first token",
+       "token1": "The address of the second token"
+      },
+      "returns": {
+       "balance0": "The current balance amount for the first token",
+       "balance1": "The current balance amount for the second token"
+      }
+     },
+     "ship(address,bytes,address[],uint256[])": {
+      "details": "Parameter `strategy` is presented fully instead of being pre-hashed for data availability",
+      "params": {
+       "amounts": "Array of balance amounts for each token",
+       "app": "The implementation contract",
+       "strategy": "Initialization data passed to the strategy",
+       "tokens": "Array of token addresses to approve"
+      }
+     }
+    },
+    "version": 1
+   },
+   "userdoc": {
+    "kind": "user",
+    "methods": {
+     "dock(address,bytes32,address[])": {
+      "notice": "Docks (deactivates) a strategy by clearing balances for specified tokens"
+     },
+     "pull(address,bytes32,address,uint256,address)": {
+      "notice": "Allows a strategy to pull tokens from a maker's wallet"
+     },
+     "push(address,address,bytes32,address,uint256)": {
+      "notice": "Pushes tokens and increases an app balance"
+     },
+     "rawBalances(address,address,bytes32,address)": {
+      "notice": "Returns the balance amount for a specific maker, app, and token combination"
+     },
+     "safeBalances(address,address,bytes32,address,address)": {
+      "notice": "Returns balances of multiple tokens in a strategy, reverts if any of the tokens is not part of the active strategy"
+     },
+     "ship(address,bytes,address[],uint256[])": {
+      "notice": "Ships a new strategy as of an app and sets initial balances"
+     }
+    },
+    "version": 1
+   }
+  },
+  "settings": {
+   "remappings": [
+    "@1inch/solidity-utils/=node_modules/@1inch/solidity-utils/",
+    "@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/",
+    "forge-std/=node_modules/forge-std/src/",
+    "hardhat-deploy/=node_modules/hardhat-deploy/",
+    "hardhat/=node_modules/hardhat/"
+   ],
+   "optimizer": {
+    "enabled": true,
+    "runs": 10000000
+   },
+   "metadata": {
+    "bytecodeHash": "ipfs"
+   },
+   "compilationTarget": {
+    "src/Aqua.sol": "Aqua"
+   },
+   "evmVersion": "prague",
+   "libraries": {},
+   "viaIR": true
+  },
+  "sources": {
+   "node_modules/@1inch/solidity-utils/contracts/interfaces/IDaiLikePermit.sol": {
+    "keccak256": "0xf8636c1c4631641c7b40ac65cd69e6ae04a99cf3358426c642dec02c6c774c82",
+    "urls": [
+     "bzz-raw://ac24b4e38c3eba11303a78e1d9558a348b045593653bbe71cd569dfe9ab7c343",
+     "dweb:/ipfs/QmdZQ3Eznk1ccEPpxhb68tVJLVYoxnJaj18L9ngvck4a2t"
+    ],
+    "license": "MIT"
+   },
+   "node_modules/@1inch/solidity-utils/contracts/interfaces/IERC7597Permit.sol": {
+    "keccak256": "0xaf148ecd4db0f44989a7417f6945bcfd18273c5096bc2b364e314e42c85c78cd",
+    "urls": [
+     "bzz-raw://174772debe2ffb231d722cf59de7107e7248dad0cdeda88b8108a19df2494cdb",
+     "dweb:/ipfs/QmY3usmJswW97qPMfYfbghsDBAKQ7H6rUxJjSS3KmvaXDL"
+    ],
+    "license": "MIT"
+   },
+   "node_modules/@1inch/solidity-utils/contracts/interfaces/IPermit2.sol": {
+    "keccak256": "0x2ac37c62bb4a4941c1d353df6ac08750542c540234aa24409ac67373651a478a",
+    "urls": [
+     "bzz-raw://9389ffd404b3b7d9ce89d021943771521e379611d94c8c7c121991eede96d57d",
+     "dweb:/ipfs/QmYWqcxoGJX9EMj7kdfk3igDctR1z3gWPHuf1kbE6U8tbm"
+    ],
+    "license": "MIT"
+   },
+   "node_modules/@1inch/solidity-utils/contracts/interfaces/IWETH.sol": {
+    "keccak256": "0x32989b79850e8a1ac6aab74878de2883f9537656ca06910dc0ae76833cc446e2",
+    "urls": [
+     "bzz-raw://c0dc26b14df9a1fd2ce184299a37c8c3bbaad534c04818c946142d4f4fc4e8d7",
+     "dweb:/ipfs/QmaQ4rcitKKqvZ9cUF8ZwWt4dni4faSyAjBnqQMoL9sB5K"
+    ],
+    "license": "MIT"
+   },
+   "node_modules/@1inch/solidity-utils/contracts/libraries/RevertReasonForwarder.sol": {
+    "keccak256": "0x97d8c950981f4da44ae1b01d9e597c4f99377797ec7ff7b1ef9648e4ecc1baa4",
+    "urls": [
+     "bzz-raw://6609e53701ca057e7996902f876d061d815402e235cdeac5e490c11e1925f5db",
+     "dweb:/ipfs/QmZhBhxUvBhb3Tph194yEYyXLeSticArTVra6ryaPPJH5B"
+    ],
+    "license": "MIT"
+   },
+   "node_modules/@1inch/solidity-utils/contracts/libraries/SafeERC20.sol": {
+    "keccak256": "0xc756a120ac3a0271cdfd89db133335deaf31523a06a91ff00eb2be8656e9f85a",
+    "urls": [
+     "bzz-raw://eb2bf2824633770792b6c977ba707a7e6dda2a63deb2878aff814d56ccfc002a",
+     "dweb:/ipfs/QmX7JhxY7sU4Eexvt1aFPG7W7aszLKFdX7KB7f1JNR7ayp"
+    ],
+    "license": "MIT"
+   },
+   "node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol": {
+    "keccak256": "0x74ed01eb66b923d0d0cfe3be84604ac04b76482a55f9dd655e1ef4d367f95bc2",
+    "urls": [
+     "bzz-raw://5282825a626cfe924e504274b864a652b0023591fa66f06a067b25b51ba9b303",
+     "dweb:/ipfs/QmeCfPykghhMc81VJTrHTC7sF6CRvaA1FXVq2pJhwYp1dV"
+    ],
+    "license": "MIT"
+   },
+   "node_modules/@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol": {
+    "keccak256": "0x2fa0657dd7b8bc75475a47f64bc04a9adb42236b15d65e6781594ea69a46c3e4",
+    "urls": [
+     "bzz-raw://7496f42681aed94bf0142a077324e50b86046610c1724e7c12e96cf1c365914a",
+     "dweb:/ipfs/QmZvhNdSAAbN4PKPdheAqwpXukUiXp3Q3TdQccDMg2NDTV"
+    ],
+    "license": "MIT"
+   },
+   "node_modules/@openzeppelin/contracts/utils/math/SafeCast.sol": {
+    "keccak256": "0x195533c86d0ef72bcc06456a4f66a9b941f38eb403739b00f21fd7c1abd1ae54",
+    "urls": [
+     "bzz-raw://b1d578337048cad08c1c03041cca5978eff5428aa130c781b271ad9e5566e1f8",
+     "dweb:/ipfs/QmPFKL2r9CBsMwmUqqdcFPfHZB2qcs9g1HDrPxzWSxomvy"
+    ],
+    "license": "MIT"
+   },
+   "src/Aqua.sol": {
+    "keccak256": "0x670d826c30cf284d0e2a6e24445e3bc8a41ab4ac986be7bc9824032a4269af91",
+    "urls": [
+     "bzz-raw://ebee87087d196690cc350e7e6c8e894f5bbec55f16369feca81126a6dfbfb0b1",
+     "dweb:/ipfs/QmbTZap5eAk2J6sFyXEQ7PRam7gDfF4EFGr7yvdZDNkMXR"
+    ],
+    "license": "LicenseRef-Degensoft-Aqua-Source-1.1"
+   },
+   "src/interfaces/IAqua.sol": {
+    "keccak256": "0x9352f466ae2352bc842f038a2883a90202cd1abfcbeb7058570c8ae100f6ab19",
+    "urls": [
+     "bzz-raw://83df76aaacc3bd0dd88153e1c24f48a636d1b968c27979016fd2c6bc35de3508",
+     "dweb:/ipfs/Qmbj3xhimX6MpqbQzLFZn4uHnjDPFtUMNyJ6uTkynD4UGZ"
+    ],
+    "license": "LicenseRef-Degensoft-Aqua-Source-1.1"
+   },
+   "src/libs/Balance.sol": {
+    "keccak256": "0xc51b834388b73c90de18b6e6cb1dbef90c167939d11c749dc7c6d9cf1a431a0d",
+    "urls": [
+     "bzz-raw://1bc782886510c74449025724d4c88fccd9b47a4752adda9063441516046a12d4",
+     "dweb:/ipfs/QmeUhCKsoF6ysjE36Qmji9DjrAw17Wdx741BXbweo9tgzU"
+    ],
+    "license": "LicenseRef-Degensoft-Aqua-Source-1.1"
+   }
+  },
+  "version": 1
+ },
+ "id": 45
+}

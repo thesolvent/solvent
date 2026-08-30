@@ -16,17 +16,20 @@ fi
 #    dev-process, code history, or a future roadmap. Comments describe the code as it is.
 added=$(git diff --cached --unified=0 --diff-filter=AM -- '*.rs' \
         | grep -E '^\+[^+]' | grep -E '//' || true)
-[ -z "$added" ] && exit 0
+if [ -z "$added" ]; then exit 0; fi
 
 violations=""
 check() {
   local hits
   hits=$(printf '%s\n' "$added" | grep -inE "$2" || true)
-  [ -n "$hits" ] && violations+=$'\n'"  ✗ $1"$'\n'"$(printf '%s\n' "$hits" | sed 's/^/      /')"$'\n'
+  if [ -n "$hits" ]; then
+    violations+=$'\n'"  ✗ $1"$'\n'"$(printf '%s\n' "$hits" | sed 's/^/      /')"$'\n'
+  fi
 }
 check "dev-process breadcrumb (Task/Step/Phase N)" '//.*\b(task|step|phase)[[:space:]]+[0-9]'
 check "code-history narration" '//.*\b(used to|formerly|refactored|was renamed|was moved)\b'
 check "future-promise / roadmap reference" '//.*(grows in phase|arrives (later|in phase)|will (grow|arrive|land|be added))'
+check "design/plan doc reference (§ / design § / Lab vector)" '//.*(§|design[[:space:]]+§|\blab vector\b)'
 
 if [ -n "$violations" ]; then
   printf '%s\n' "✗ commit blocked — comments violate the standard:$violations"

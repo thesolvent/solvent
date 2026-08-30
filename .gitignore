@@ -26,3 +26,6 @@ node_modules/
 .idea/
 .vscode/
 *.swp
+
+# --- proptest failure-seed artifacts (regenerable, not tracked) ---
+proptest-regressions/
