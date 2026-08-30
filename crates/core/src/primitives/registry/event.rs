@@ -12,8 +12,9 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use crate::primitives::{MakerId, StrategyHash};
 
 /// A decoded Aqua event. `app` is the SwapVM router the strategy runs on; there
-/// is no typed id for it (one router per deployment in the MVP).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// is no typed id for it (one router per deployment in the MVP). `serde` is the
+/// on-disk form: the event log persists each as a JSONB payload.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum AquaEvent {
     /// A maker registered a strategy. `strategy` is the raw shipped bytes
@@ -102,12 +103,13 @@ pub struct EventCursor {
     pub log_index: u64,
 }
 
-/// An event carrying the provenance of the log it was decoded from. The
-/// chain-source port yields these: the fold reads `cursor()` to order and
-/// dedupe, the sync/store layer reads `block_hash`/`removed` to spot reorgs.
-/// Provenance is `Option` because a pending (not-yet-mined) log has no position;
+/// A decoded event with the full on-chain provenance of the log it came from.
+/// The chain-source port yields these and the store persists them whole: the
+/// sync loop derives the `EventCursor` (`block_number`+`log_index`) to order and
+/// dedupe, and the richer fields (`block_hash`, `removed`, tx info) are kept for
+/// reorg handling. Provenance is `Option` because a pending log has no position;
 /// the chain source only ever yields mined logs. Adapted from garden-rs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EventExt<T> {
     pub event: T,
     /// The contract that emitted the log.
@@ -134,6 +136,17 @@ impl<T> EventExt<T> {
             transaction_index: self.transaction_index,
             log_index: self.log_index,
             removed: self.removed,
+        }
+    }
+
+    /// The fold/dedup position, present once the log is mined.
+    pub fn cursor(&self) -> Option<EventCursor> {
+        match (self.block_number, self.log_index) {
+            (Some(block_number), Some(log_index)) => Some(EventCursor {
+                block_number,
+                log_index,
+            }),
+            _ => None,
         }
     }
 }

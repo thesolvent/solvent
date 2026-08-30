@@ -5,6 +5,6 @@ pub mod registry;
 pub mod shared;
 
 pub use shared::{
-    Bps, FillId, IntentId, LeaseId, MakerId, ReservationId, SolventError, StrategyHash,
-    SystemConfig, Usd, UsdPrice,
+    Bps, ChainConfig, ChainId, FillId, IntentId, LeaseId, MakerId, ReservationId, SolventError,
+    StrategyHash, SystemConfig, Usd, UsdPrice,
 };

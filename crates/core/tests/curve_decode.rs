@@ -7,7 +7,7 @@
 use alloy_primitives::{Address, Bytes, B256, U256};
 use serde::Deserialize;
 use solvent_core::primitives::registry::{
-    decode_strategy, AquaEvent, Curve, CurveSpec, EventCursor, PeggedParams, Snapshot, StrategyKey,
+    decode_strategy, AquaEvent, Curve, CurveSpec, PeggedParams, Snapshot, StrategyKey,
 };
 use solvent_core::primitives::{MakerId, StrategyHash};
 use solvent_core::registry::{price, Pricing, SharedSnapshot, XycPool};
@@ -101,42 +101,29 @@ fn prices_a_real_strategy_through_the_shared_snapshot() {
         strategy_hash,
     };
     let (t_in, t_out) = (Address::from([0x01; 20]), Address::from([0x02; 20]));
-    let cur = |log: u64| EventCursor {
-        block_number: 1,
-        log_index: log,
-    };
 
     // Fold a real Shipped (decoded in-fold) + the two initial Pushed legs.
     let mut snap = Snapshot::default();
-    snap.apply(
-        cur(0),
-        AquaEvent::Shipped {
-            maker,
-            app,
-            strategy_hash,
-            strategy: Bytes::from(bytes(&xyc.strategy_hex)),
-        },
-    );
-    snap.apply(
-        cur(1),
-        AquaEvent::Pushed {
-            maker,
-            app,
-            strategy_hash,
-            token: t_in,
-            amount: e18(1000),
-        },
-    );
-    snap.apply(
-        cur(2),
-        AquaEvent::Pushed {
-            maker,
-            app,
-            strategy_hash,
-            token: t_out,
-            amount: e18(1000),
-        },
-    );
+    snap.apply(AquaEvent::Shipped {
+        maker,
+        app,
+        strategy_hash,
+        strategy: Bytes::from(bytes(&xyc.strategy_hex)),
+    });
+    snap.apply(AquaEvent::Pushed {
+        maker,
+        app,
+        strategy_hash,
+        token: t_in,
+        amount: e18(1000),
+    });
+    snap.apply(AquaEvent::Pushed {
+        maker,
+        app,
+        strategy_hash,
+        token: t_out,
+        amount: e18(1000),
+    });
 
     let shared = SharedSnapshot::new(snap);
     let snapshot = shared.load();
