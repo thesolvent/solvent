@@ -10,7 +10,7 @@
 //! `void`/`expire` release it. `budget` is fed from outside, so the engine owns `pending`/`consumed`,
 //! derives `available`, and the compartments always reconcile to the budget.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use alloy_primitives::U256;
 use thiserror::Error;
@@ -83,16 +83,22 @@ impl Ledger {
         self.budgets.insert(account, budget);
     }
 
-    /// Admit a reservation, holding each source at both ceilings — atomically. Succeeds only if
-    /// every touched account has room for the aggregate demand (sources drawing the same wallet
-    /// token sum); on any shortfall nothing is held. The stored reservation is forced `Pending`.
+    /// Admit a reservation, holding each source at both ceilings — atomically. `can_reserve` then
+    /// `restore`; on any shortfall nothing is held. The durable-first service splits these across a
+    /// persist, so a crash mid-way leaves the durable record as the single source of truth.
     pub fn reserve(&mut self, reservation: Reservation) -> Result<(), LedgerError> {
+        self.can_reserve(&reservation)?;
+        self.restore(reservation);
+        Ok(())
+    }
+
+    /// Test the two-ceiling admission without mutating: rejects a duplicate id or any account short
+    /// of the aggregate demand (sources drawing the same wallet token sum).
+    pub fn can_reserve(&self, reservation: &Reservation) -> Result<(), LedgerError> {
         if self.reservations.contains_key(&reservation.id) {
             return Err(LedgerError::Duplicate(reservation.id));
         }
-
-        let demand = Self::aggregate_demand(&reservation.sources);
-        for (account, &requested) in &demand {
+        for (account, &requested) in &Self::aggregate_demand(&reservation.sources) {
             let available = self.available(account);
             if available < requested {
                 return Err(LedgerError::Insufficient(Box::new(Shortfall {
@@ -102,15 +108,21 @@ impl Ledger {
                 })));
             }
         }
-        for (account, requested) in demand {
+        Ok(())
+    }
+
+    /// Place a reservation's holds and record it `Pending`, without re-checking admission — the
+    /// commit half of an already-passed `can_reserve`, and the primitive recovery replays to rebuild
+    /// holds from the durable record (a promise stands even if the live budget has since dropped).
+    /// The caller guarantees the id is not already held.
+    pub fn restore(&mut self, reservation: Reservation) {
+        for (account, requested) in Self::aggregate_demand(&reservation.sources) {
             let held = self.held.entry(account).or_default();
             held.pending = held.pending.saturating_add(requested);
         }
-
         let mut reservation = reservation;
         reservation.state = ReservationState::Pending;
         self.reservations.insert(reservation.id, reservation);
-        Ok(())
     }
 
     /// Settle a pending reservation with the amount actually pulled per source (`filled[i] ≤
@@ -205,6 +217,32 @@ impl Ledger {
     /// The reservation for `id`, in whatever state.
     pub fn reservation(&self, id: &ReservationId) -> Option<&Reservation> {
         self.reservations.get(id)
+    }
+
+    /// Every account the ledger knows mapped to its current available room — the lock-free snapshot
+    /// the service republishes for the quote path after each command.
+    pub fn available_snapshot(&self) -> BTreeMap<AccountKey, U256> {
+        self.budgets
+            .keys()
+            .chain(self.held.keys())
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|account| {
+                let available = self.available(&account);
+                (account, available)
+            })
+            .collect()
+    }
+
+    /// The pending reservations whose TTL has elapsed as of `now` (unix seconds) — the sweep expires
+    /// exactly these.
+    pub fn expired_as_of(&self, now: u64) -> Vec<ReservationId> {
+        self.reservations
+            .values()
+            .filter(|r| r.state == ReservationState::Pending && r.expires_at <= now)
+            .map(|r| r.id)
+            .collect()
     }
 
     /// Sum a source set's demand per account (sources on the same wallet token, or the same strategy
