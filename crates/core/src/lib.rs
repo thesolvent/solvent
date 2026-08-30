@@ -3,5 +3,6 @@
 pub mod deps;
 pub mod obs;
 pub mod primitives;
+pub mod registry;
 
 pub use primitives::SolventError;
