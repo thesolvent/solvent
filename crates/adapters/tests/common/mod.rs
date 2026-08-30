@@ -17,15 +17,16 @@ use alloy::{
     sol_types::SolValue,
 };
 use serde::Deserialize;
-use solvent_adapters::registry::AlloyChainSource;
+use solvent_adapters::registry::{AlloyChainSource, PgStore};
 use solvent_core::{
     deps::registry::ChainSource,
     primitives::{
         registry::{MakerStrategy, Snapshot, StrategyKey},
-        ChainId, MakerId, StrategyHash,
+        ChainConfig, ChainId, MakerId, StrategyHash,
     },
-    registry::price,
+    registry::{price, RegistrySync, SharedSnapshot},
 };
+use sqlx::PgPool;
 
 sol!(
     #[sol(rpc)]
@@ -509,4 +510,39 @@ pub fn direction(exact_in: bool) -> &'static str {
     } else {
         "exact-out"
     }
+}
+
+/// The live-DB URL, or `None` (printing a skip notice) when unset — the E2E
+/// tests are env-gated so the default `cargo test` stays hermetic.
+pub fn db_url_or_skip() -> Option<String> {
+    match std::env::var("TEST_DATABASE_URL") {
+        Ok(url) => Some(url),
+        Err(_) => {
+            eprintln!("TEST_DATABASE_URL unset — skipping live E2E");
+            None
+        }
+    }
+}
+
+/// Wire the real pipeline (`AlloyChainSource` → `RegistrySync` → `PgStore`) over
+/// a freshly-cleaned per-chain slice of the store.
+pub async fn pipeline(
+    h: &Harness,
+    db_url: &str,
+    chain: ChainId,
+) -> (RegistrySync, Arc<SharedSnapshot>, PgPool) {
+    let pool = PgPool::connect(db_url).await.expect("connect pg");
+    let store = PgStore::new(pool.clone());
+    store.migrate().await.expect("migrate");
+    for table in ["aqua_event", "registry_cursor"] {
+        sqlx::query(&format!("DELETE FROM {table} WHERE chain = $1"))
+            .bind(chain.0 as i64)
+            .execute(&pool)
+            .await
+            .expect("clean");
+    }
+    let config = ChainConfig::new(chain, 0, 25, 15);
+    let snapshot = Arc::new(SharedSnapshot::default());
+    let sync = RegistrySync::new(&config, h.chain_source(), Arc::new(store), snapshot.clone());
+    (sync, snapshot, pool)
 }

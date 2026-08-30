@@ -13,35 +13,12 @@ mod common;
 use std::sync::Arc;
 
 use alloy::primitives::{Address, U256};
-use common::{strategy_key, Harness, StrategySpec};
+use common::{pipeline, strategy_key, Harness, StrategySpec};
 use solvent_adapters::registry::PgStore;
 use solvent_core::{
     primitives::{registry::TokenPair, ChainConfig, ChainId},
     registry::{RegistrySync, SharedSnapshot},
 };
-use sqlx::PgPool;
-
-/// Wire the real pipeline over a fresh per-chain slice of the store.
-async fn pipeline(
-    h: &Harness,
-    db_url: &str,
-    chain: ChainId,
-) -> (RegistrySync, Arc<SharedSnapshot>, PgPool) {
-    let pool = PgPool::connect(db_url).await.expect("connect pg");
-    let store = PgStore::new(pool.clone());
-    store.migrate().await.expect("migrate");
-    for table in ["aqua_event", "registry_cursor"] {
-        sqlx::query(&format!("DELETE FROM {table} WHERE chain = $1"))
-            .bind(chain.0 as i64)
-            .execute(&pool)
-            .await
-            .expect("clean");
-    }
-    let config = ChainConfig::new(chain, 0, 25, 15);
-    let snapshot = Arc::new(SharedSnapshot::default());
-    let sync = RegistrySync::new(&config, h.chain_source(), Arc::new(store), snapshot.clone());
-    (sync, snapshot, pool)
-}
 
 fn priceable(h: &Harness) -> Vec<&StrategySpec> {
     h.fx.strategies
@@ -65,8 +42,7 @@ async fn assert_matches_chain(h: &Harness, snapshot: &SharedSnapshot) {
 
 #[tokio::test]
 async fn e2e_watcher_lifecycle() {
-    let Ok(db_url) = std::env::var("TEST_DATABASE_URL") else {
-        eprintln!("TEST_DATABASE_URL unset — skipping live E2E");
+    let Some(db_url) = common::db_url_or_skip() else {
         return;
     };
 
@@ -180,8 +156,7 @@ async fn e2e_watcher_lifecycle() {
 
 #[tokio::test]
 async fn e2e_watcher_app_filter() {
-    let Ok(db_url) = std::env::var("TEST_DATABASE_URL") else {
-        eprintln!("TEST_DATABASE_URL unset — skipping live E2E");
+    let Some(db_url) = common::db_url_or_skip() else {
         return;
     };
 
@@ -248,8 +223,7 @@ async fn e2e_watcher_app_filter() {
 
 #[tokio::test]
 async fn e2e_watcher_multi_maker() {
-    let Ok(db_url) = std::env::var("TEST_DATABASE_URL") else {
-        eprintln!("TEST_DATABASE_URL unset — skipping live E2E");
+    let Some(db_url) = common::db_url_or_skip() else {
         return;
     };
 
