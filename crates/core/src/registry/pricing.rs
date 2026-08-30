@@ -23,10 +23,9 @@ pub enum PriceError {
     Curve(#[from] CurveError),
 }
 
-/// Price a taker trading `amount` on `strategy` in the `token_in -> token_out`
-/// direction: `exact_in` returns the output, otherwise the required input. The
-/// right curve pool is built from the decoded curve + current virtual reserves,
-/// oriented by the token addresses.
+/// Price a taker trading `amount` in the `token_in -> token_out` direction (`exact_in` returns the
+/// output, else the required input). Prices whatever `strategy` it is handed — callers route only
+/// active ones.
 pub fn price(
     strategy: &MakerStrategy,
     token_in: Address,

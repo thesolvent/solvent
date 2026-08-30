@@ -1,9 +1,5 @@
-//! The SQLite registry store (sqlx), behind the storage-agnostic `Store` port.
-//! Runs in-process — no network hop. The event log is append-only, keyed by
-//! `(chain, block_number, block_hash, log_index)`; `insert` adds events
-//! idempotently and reports the rows it actually added, so the caller folds each
-//! event exactly once. `save_cursor` records scan progress separately, written
-//! last in a cycle.
+//! The SQLite registry store (sqlx) behind the `Store` port. Append-only event log keyed by
+//! `(chain, block, block_hash, log_index)`; `insert` is idempotent and returns only the new rows.
 
 use async_trait::async_trait;
 use solvent_core::{

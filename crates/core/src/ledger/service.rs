@@ -1,17 +1,6 @@
-//! The single-writer ledger service: the conductor that turns the pure engine into a durable,
-//! concurrency-safe, recoverable component.
-//!
-//! One `tokio::Mutex` makes it the sole writer, so concurrent commands serialize and the two-ceiling
-//! admission is race-free (the "Alice" property). Writes are **durable-first**: the in-memory
-//! authority never gets ahead of the store. On `reserve` the critical section checks admission,
-//! persists (the pivot), then commits the hold — so a crash anywhere leaves the durable record as
-//! the single source of truth, and `recover` rebuilds the in-memory holds from it. There is no
-//! rollback path to get wrong. After every command it republishes a lock-free `ArcSwap` snapshot of
-//! `available`, which the 500 ms quote path reads without ever touching the writer.
-//!
-//! The one `.await` held under the lock is a fast local-SQLite write; the writer is single by
-//! design, so that serialization is the intent, not a bottleneck. The async budget read happens
-//! *before* the lock so a chain round-trip never serializes the writer.
+//! The single-writer ledger service: durable-first (check → persist → commit under one
+//! `tokio::Mutex`) so the in-memory ledger never leads the store, publishing a lock-free `ArcSwap`
+//! of `available` for the quote path.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -51,9 +40,7 @@ impl LedgerService {
         }
     }
 
-    /// Admit a reservation for `ttl_secs`, holding maker capital at both ceilings. Durable-first:
-    /// check → persist → commit under the writer lock; a shortfall rejects before anything is
-    /// persisted, a durable failure rejects before the hold is committed.
+    /// Admit a reservation for `ttl_secs`, holding both ceilings; durable-first under the writer lock.
     pub async fn reserve(
         &self,
         id: ReservationId,
@@ -61,7 +48,7 @@ impl LedgerService {
         sources: Vec<ReservationSource>,
         ttl_secs: u64,
     ) -> Result<(), SolventError> {
-        // Read budgets before the lock so a chain round-trip never serializes the writer.
+        // Read budgets before the lock, off the critical section.
         let budgets = self.read_budgets(&accounts_of(&sources)).await?;
         let expires_at = self.clock.now_unix().saturating_add(ttl_secs);
         let reservation = Reservation::new(id, intent, sources, expires_at);
@@ -120,9 +107,8 @@ impl LedgerService {
         Ok(expired.len())
     }
 
-    /// Rebuild the in-memory holds after a restart by replaying the durably-open reservations. Each
-    /// is `restore`d unconditionally — the promise stands even if the live budget has since dropped
-    /// (that over-commitment is reconcile's to catch, not a reason to silently drop a hold).
+    /// Rebuild the in-memory holds from the durably-open reservations after a restart; `restore` is
+    /// unconditional, so a standing promise isn't re-litigated. Requires the registry synced first.
     pub async fn recover(&self) -> Result<(), SolventError> {
         let open = self.store.open_reservations().await?;
         let mut ledger = self.ledger.lock().await;
@@ -139,8 +125,7 @@ impl LedgerService {
         Ok(())
     }
 
-    /// Available room at `account`, read lock-free from the republished snapshot — the quote path's
-    /// entry point, which never touches the writer.
+    /// Available room at `account`, read lock-free — the quote path's entry point.
     pub fn available(&self, account: &AccountKey) -> U256 {
         self.available
             .load()

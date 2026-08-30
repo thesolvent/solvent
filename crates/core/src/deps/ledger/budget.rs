@@ -1,7 +1,5 @@
-//! The budget-source port: how much of an account is really settleable right now. The service asks
-//! per `AccountKey` and stays ignorant of where the number comes from — a wallet's budget is a chain
-//! read (`min(balanceOf, allowance→Aqua)`), a strategy virtual's is the registry snapshot. Read
-//! just-in-time at hard-reserve, the "firm quote" confirmation before we commit to a fill.
+//! The budget-source port: an account's settleable budget, asked per `AccountKey` (wallet = chain
+//! `min(balanceOf, allowance)`, strategy virtual = registry snapshot). A JIT firm confirm at reserve.
 
 use alloy_primitives::U256;
 use async_trait::async_trait;

@@ -1,8 +1,5 @@
-//! The ledger store port: durable, crash-safe persistence of the reservation lifecycle. The pure
-//! `Ledger` stays the in-memory authority; each command here mirrors the matching engine command as
-//! one atomic, idempotent unit of work, so a replay after a crash converges rather than
-//! double-counting. `open_reservations` returns the still-pending reservations a restart replays to
-//! rebuild the in-memory holds.
+//! The ledger store port: durable, idempotent persistence of the reservation lifecycle.
+//! `open_reservations` returns the pending rows a restart replays to rebuild holds.
 
 use alloy_primitives::U256;
 use async_trait::async_trait;
