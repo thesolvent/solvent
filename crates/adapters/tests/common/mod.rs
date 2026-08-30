@@ -378,6 +378,19 @@ impl Harness {
             .expect("dock mined");
     }
 
+    /// Set the maker's Aqua allowance for `token` to `amount`, overwriting the setup's `MAX` — used
+    /// to make the allowance (not the balance) the binding side of the wallet budget.
+    pub async fn approve_aqua(&self, token: Address, amount: U256) {
+        MockERC20::new(token, self.maker_provider.clone())
+            .approve(*self.aqua.address(), amount)
+            .send()
+            .await
+            .expect("approve")
+            .watch()
+            .await
+            .expect("approve mined");
+    }
+
     /// On-chain virtual balances `(t0, t1)` for a strategy.
     pub async fn on_chain_balances(&self, spec: &StrategySpec) -> (U256, U256) {
         let r = self
