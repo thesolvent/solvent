@@ -53,8 +53,6 @@ pub trait Pricing {
     fn quote_exact_out(&self, amount_out: U256) -> Result<U256, CurveError>;
 }
 
-// ---- Solidity integer-math primitives (bit-exact) --------------------------
-
 /// `1e18` — sqrt-price fixed-point basis (`XYCConcentrate.ONE`).
 #[inline]
 fn one18() -> U256 {
@@ -133,14 +131,12 @@ fn sqrt_ceil(x: U256) -> U256 {
     }
 }
 
-// ---- XYCSwap: constant product x*y=k ---------------------------------------
-
 /// `XYCSwap._xycSwapXD` on the given (already virtual, for Concentrate) reserves.
+/// Output floors and input ceils — the maker-favorable rounding.
 fn xyc_exact_in(balance_in: U256, balance_out: U256, amount_in: U256) -> Result<U256, CurveError> {
     if balance_in.is_zero() || balance_out.is_zero() {
         return Err(CurveError::EmptyReserves);
     }
-    // Floor: amountOut = amountIn * balanceOut / (balanceIn + amountIn).
     fdiv(cmul(amount_in, balance_out)?, cadd(balance_in, amount_in)?)
 }
 
@@ -152,7 +148,6 @@ fn xyc_exact_out(
     if balance_in.is_zero() || balance_out.is_zero() {
         return Err(CurveError::EmptyReserves);
     }
-    // Ceil: amountIn = ceilDiv(amountOut * balanceIn, balanceOut - amountOut).
     let numerator = cmul(amount_out, balance_in)?;
     let denominator = balance_out
         .checked_sub(amount_out)
@@ -190,8 +185,6 @@ impl Pricing for XycPool {
     }
 }
 
-// ---- XYCConcentrate: virtual-reserve amplification, then XYC ----------------
-
 /// `XYCConcentrateArgsBuilder._computeL` (scale `1e18`).
 fn concentrate_liquidity(
     balance_lt: U256,
@@ -200,21 +193,18 @@ fn concentrate_liquidity(
     sqrt_price_max: U256,
 ) -> Result<U256, CurveError> {
     let one = one18();
-    // alpha = ONE - mulDiv(sqrtMin, ONE, sqrtMax); zero only when sqrtMin >= sqrtMax.
     let ratio = mul_div(sqrt_price_min, one, sqrt_price_max)?;
+    // alpha is 0 only when sqrtMin >= sqrtMax, which would divide by zero below.
     let alpha = one.checked_sub(ratio).ok_or(CurveError::InvalidParams)?;
     if alpha.is_zero() {
         return Err(CurveError::InvalidParams);
     }
-    // beta = mulDiv(bLt, sqrtMin, ONE) + mulDiv(bGt, ONE, sqrtMax).
     let beta = cadd(
         mul_div(balance_lt, sqrt_price_min, one)?,
         mul_div(balance_gt, one, sqrt_price_max)?,
     )?;
-    // fourAC = mulDiv(4*alpha, bLt, ONE) * bGt.
     let four_alpha = cmul(U256::from(4u64), alpha)?;
     let four_ac = cmul(mul_div(four_alpha, balance_lt, one)?, balance_gt)?;
-    // disc = beta*beta + fourAC; L = mulDiv(beta + sqrt(disc), ONE, 2*alpha).
     let disc = cadd(cmul(beta, beta)?, four_ac)?;
     let numerator = cadd(beta, sqrt_floor(disc))?;
     mul_div(numerator, one, cmul(U256::from(2u64), alpha)?)
@@ -297,8 +287,6 @@ impl Pricing for ConcentratePool {
         xyc_exact_out(balance_in, balance_out, amount_out)
     }
 }
-
-// ---- PeggedSwap: √-linear invariant for pegged assets ----------------------
 
 /// Program-canonical pegged parameters (`PeggedSwapArgsBuilder.Args`): `x0`/`y0`
 /// are the lower/higher-address token normalization factors, `rate_lt`/`rate_gt`
@@ -447,7 +435,6 @@ mod tests {
         U256::from(n) * one18()
     }
 
-    // Two addresses with a known ordering for direction-sensitive curves.
     fn lo() -> Address {
         Address::from([0x11u8; 20])
     }
@@ -497,7 +484,6 @@ mod tests {
 
     #[test]
     fn xyc_matches_hand_computed() {
-        // Lab vector 01: 1000/1000 reserves, sell 100 -> 100*1000/1100 = 90.909...e18.
         let pool = XycPool::from_reserves(e18(1000), e18(1000));
         let out = pool.quote_exact_in(e18(100)).unwrap();
         assert_eq!(out, e18(100) * e18(1000) / (e18(1000) + e18(100)));
@@ -520,7 +506,6 @@ mod tests {
 
     #[test]
     fn concentrate_beats_full_range_in_band() {
-        // Lab vector 04: identical reserves, band [0.5, 2.0], sqrtP = sqrt(price * 1e18).
         let reserve = e18(1000);
         let amount = e18(100);
         let sqrt_min = sqrt_floor((one18() / U256::from(2u64)) * one18()); // price 0.5
@@ -546,7 +531,7 @@ mod tests {
 
     #[test]
     fn pegged_beats_full_range_near_peg() {
-        // Lab vector 05: 18/18 decimals so rates = 1, x0 = y0 = reserve, A = 100.
+        // 18/18 decimals -> rates = 1, x0 = y0 = reserve.
         let reserve = e18(1000);
         let amount = e18(100);
         let params = PeggedParams {
@@ -568,6 +553,7 @@ mod tests {
     }
 
     proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig { failure_persistence: None, ..proptest::prelude::ProptestConfig::default() })]
         // XYC structural invariants over the whole realistic range (fee-free).
         #[test]
         fn xyc_invariants(

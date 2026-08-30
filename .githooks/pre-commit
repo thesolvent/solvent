@@ -29,6 +29,7 @@ check() {
 check "dev-process breadcrumb (Task/Step/Phase N)" '//.*\b(task|step|phase)[[:space:]]+[0-9]'
 check "code-history narration" '//.*\b(used to|formerly|refactored|was renamed|was moved)\b'
 check "future-promise / roadmap reference" '//.*(grows in phase|arrives (later|in phase)|will (grow|arrive|land|be added))'
+check "design/plan doc reference (§ / design § / Lab vector)" '//.*(§|design[[:space:]]+§|\blab vector\b)'
 
 if [ -n "$violations" ]; then
   printf '%s\n' "✗ commit blocked — comments violate the standard:$violations"
