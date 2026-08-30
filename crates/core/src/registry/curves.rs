@@ -1,4 +1,4 @@
-//! Closed-form Rust ports of the three Aqua Tier-0 swap curves — `XYCSwap`,
+//! Closed-form Rust ports of the three Aqua swap curves — `XYCSwap`,
 //! `XYCConcentrate`, and `PeggedSwap` — bit-exact to the SwapVM v1.0.1 source
 //! (`@1inch/swap-vm/src/instructions/{XYCSwap,XYCConcentrate,PeggedSwap}.sol`).
 //!
@@ -14,6 +14,8 @@
 
 use alloy_primitives::{Address, U256, U512};
 use thiserror::Error;
+
+use crate::primitives::registry::PeggedParams;
 
 /// A revert produced by the on-chain curve, mirrored so the port can be
 /// differential-fuzzed for exact parity. Which variant surfaces is diagnostic
@@ -286,18 +288,6 @@ impl Pricing for ConcentratePool {
         let (balance_in, balance_out) = self.virtual_reserves()?;
         xyc_exact_out(balance_in, balance_out, amount_out)
     }
-}
-
-/// Program-canonical pegged parameters (`PeggedSwapArgsBuilder.Args`): `x0`/`y0`
-/// are the lower/higher-address token normalization factors, `rate_lt`/`rate_gt`
-/// scale each token to the common `1e18` base, `linear_width` is `A` at `1e27`.
-#[derive(Debug, Clone, Copy)]
-pub struct PeggedParams {
-    pub x0: U256,
-    pub y0: U256,
-    pub linear_width: U256,
-    pub rate_lt: U256,
-    pub rate_gt: U256,
 }
 
 /// `PeggedSwapMath.invariant(u, v, a)` = `√(u·ONE) + √(v·ONE) + a·(u+v)/ONE`.

@@ -17,7 +17,7 @@ use crate::primitives::{MakerId, StrategyHash};
 #[non_exhaustive]
 pub enum AquaEvent {
     /// A maker registered a strategy. `strategy` is the raw shipped bytes
-    /// (an ABI-encoded `Order`); the Tier-0 curve is decoded from it later.
+    /// (an ABI-encoded `Order`); the curve is decoded from it later.
     Shipped {
         maker: MakerId,
         app: Address,

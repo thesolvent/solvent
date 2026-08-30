@@ -84,7 +84,7 @@ impl Snapshot {
                 // no-op (on-chain `ship` reverts on a non-empty slot).
                 self.strategies
                     .entry(key)
-                    .or_insert_with(|| MakerStrategy::new(key, strategy));
+                    .or_insert_with(|| MakerStrategy::new(key, &strategy));
             }
             AquaEvent::Pushed {
                 maker,
@@ -313,7 +313,6 @@ mod tests {
             ],
         );
         let s = snap.strategy(&key(0)).unwrap();
-        assert_eq!(s.strategy, Bytes::from(vec![0u8]));
         assert_eq!(s.balance(&token(1)), U256::from(500u64));
     }
 
