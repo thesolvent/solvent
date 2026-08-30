@@ -7,7 +7,7 @@
 //! (taker → maker, `tokenIn`) plus a `Pulled` (maker → taker, `tokenOut`);
 //! `dock()` closes the strategy.
 
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 
 use crate::primitives::{MakerId, StrategyHash};
 
@@ -100,4 +100,40 @@ pub struct StrategyKey {
 pub struct EventCursor {
     pub block_number: u64,
     pub log_index: u64,
+}
+
+/// An event carrying the provenance of the log it was decoded from. The
+/// chain-source port yields these: the fold reads `cursor()` to order and
+/// dedupe, the sync/store layer reads `block_hash`/`removed` to spot reorgs.
+/// Provenance is `Option` because a pending (not-yet-mined) log has no position;
+/// the chain source only ever yields mined logs. Adapted from garden-rs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventExt<T> {
+    pub event: T,
+    /// The contract that emitted the log.
+    pub address: Address,
+    pub block_hash: Option<B256>,
+    pub block_number: Option<u64>,
+    pub transaction_hash: Option<B256>,
+    pub transaction_index: Option<u64>,
+    pub log_index: Option<u64>,
+    /// Geth compatibility: set when a reorg removed this log.
+    pub removed: bool,
+}
+
+impl<T> EventExt<T> {
+    /// Lift the decoded payload into another form, preserving provenance — used
+    /// to turn a chain-ABI event into its domain equivalent.
+    pub fn map_event<U>(self, f: impl FnOnce(T) -> U) -> EventExt<U> {
+        EventExt {
+            event: f(self.event),
+            address: self.address,
+            block_hash: self.block_hash,
+            block_number: self.block_number,
+            transaction_hash: self.transaction_hash,
+            transaction_index: self.transaction_index,
+            log_index: self.log_index,
+            removed: self.removed,
+        }
+    }
 }
