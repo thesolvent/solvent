@@ -16,7 +16,7 @@ use alloy_primitives::{Address, U256, U512};
 use thiserror::Error;
 
 use crate::primitives::pricing::{LimitedQuote, Ratio};
-use crate::primitives::registry::PeggedParams;
+use crate::primitives::registry::{Curve, PeggedParams};
 
 /// A revert produced by the on-chain curve, mirrored so the port can be
 /// differential-fuzzed for exact parity. Which variant surfaces is diagnostic
@@ -537,6 +537,76 @@ impl Pricing for PeggedPool {
         let x1 = ceil_div(cmul(u1, self.x0_init)?, one)?;
         let delta_in = x1.checked_sub(n.x0).ok_or(CurveError::AmountTooLarge)?;
         ceil_div(delta_in, self.rate_in)
+    }
+}
+
+/// Any priceable Aqua curve, oriented in→out. Static dispatch keeps the router's
+/// hot path allocation-free (`Copy`, no `Box<dyn Pricing>`) and `Send + Sync`.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub enum CurvePool {
+    Xyc(XycPool),
+    Concentrate(ConcentratePool),
+    Pegged(PeggedPool),
+}
+
+impl CurvePool {
+    /// Build the oriented pool for a `token_in -> token_out` swap from a decoded
+    /// curve and the maker's reserves. Shared by registry pricing and the router.
+    pub fn from_curve(
+        curve: &Curve,
+        token_in: Address,
+        token_out: Address,
+        balance_in: U256,
+        balance_out: U256,
+    ) -> Self {
+        match curve {
+            Curve::Xyc => CurvePool::Xyc(XycPool::from_reserves(balance_in, balance_out)),
+            Curve::Concentrate {
+                sqrt_price_min,
+                sqrt_price_max,
+            } => CurvePool::Concentrate(ConcentratePool::from_reserves_and_bounds(
+                token_in,
+                token_out,
+                balance_in,
+                balance_out,
+                *sqrt_price_min,
+                *sqrt_price_max,
+            )),
+            Curve::Pegged(params) => CurvePool::Pegged(PeggedPool::from_reserves_and_params(
+                token_in,
+                token_out,
+                balance_in,
+                balance_out,
+                *params,
+            )),
+        }
+    }
+}
+
+/// Forward a `Pricing` call to whichever curve the pool wraps — the variant list
+/// lives here once.
+macro_rules! dispatch {
+    ($self:ident, $method:ident $(, $arg:expr)*) => {
+        match $self {
+            CurvePool::Xyc(p) => p.$method($($arg),*),
+            CurvePool::Concentrate(p) => p.$method($($arg),*),
+            CurvePool::Pegged(p) => p.$method($($arg),*),
+        }
+    };
+}
+
+impl Pricing for CurvePool {
+    fn quote_exact_in(&self, amount_in: U256) -> Result<U256, CurveError> {
+        dispatch!(self, quote_exact_in, amount_in)
+    }
+
+    fn quote_exact_out(&self, amount_out: U256) -> Result<U256, CurveError> {
+        dispatch!(self, quote_exact_out, amount_out)
+    }
+
+    fn quote_with_limit(&self, amount_in: U256, limit: &Ratio) -> Result<LimitedQuote, CurveError> {
+        dispatch!(self, quote_with_limit, amount_in, limit)
     }
 }
 
