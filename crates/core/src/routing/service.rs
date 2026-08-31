@@ -1,13 +1,39 @@
 //! The router's public entry: turn an intent into a reservable `RoutePlan`, or decline.
 
-use alloy_primitives::U256;
+use alloy_primitives::{Address, U256};
 
+use crate::deps::routing::{GasPrice, PriceOracle};
 use crate::ledger::AvailableSnapshot;
+use crate::obs::warn;
 use crate::primitives::pricing::Ratio;
 use crate::primitives::registry::Snapshot;
+use crate::primitives::routing::gas::per_leg_cost as compute_leg_cost;
 use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 
 use super::{select, solve_sparse};
+
+/// Resolve the per-leg gas cost in `token_out` base units from the live cache — gas price
+/// and the native + output-token USD prices. `None` if any input is unavailable (the caller
+/// then routes without a gas threshold). Off the quote hot path; the ports read a cache.
+pub async fn resolve_leg_cost(
+    gas: &dyn GasPrice,
+    oracle: &dyn PriceOracle,
+    gas_units: u64,
+    native: Address,
+    token_out: Address,
+    token_decimals: u8,
+) -> Option<U256> {
+    let gas_wei = gas.gas_price_wei().await.ok()?;
+    let native_price = oracle.price(native).await.ok()?;
+    let token_price = oracle.price(token_out).await.ok()?;
+    Some(compute_leg_cost(
+        gas_units,
+        gas_wei,
+        native_price,
+        token_price,
+        token_decimals,
+    ))
+}
 
 /// Route `request`: rank candidates ([`select`]), solve the gas-sparse split
 /// ([`solve_sparse`]), and gate on the taker's bound — `min_out` for exact-in, `max_in` for
@@ -24,8 +50,22 @@ pub fn route(
     per_leg_cost: U256,
     warm: Option<&Ratio>,
 ) -> Option<RoutePlan> {
-    let candidates = select(snapshot, caps, request, config.max_candidates);
-    let solution = solve_sparse(&candidates, request, per_leg_cost, config.max_legs, warm)?;
+    let selection = select(snapshot, caps, request, config.max_candidates);
+    let solution = solve_sparse(
+        &selection.chosen,
+        request,
+        per_leg_cost,
+        config.max_legs,
+        warm,
+    )?;
+    // Optimality certificate: if a pool the funnel dropped has a higher spot marginal than the
+    // optimum's water level λ*, it should have been active — the funnel `k` was too small.
+    if selection
+        .best_omitted_spot
+        .is_some_and(|spot| spot > solution.lambda)
+    {
+        warn!(intent = %request.intent, "routing funnel too small: an omitted pool's spot exceeds the optimum's marginal price");
+    }
     let expected_profit = if request.exact_in {
         solution.net_out.checked_sub(bound)? // net-of-gas output must clear `min_out`
     } else {
@@ -127,5 +167,47 @@ mod tests {
             None
         )
         .is_none());
+    }
+
+    struct FakeGas(u128);
+    #[async_trait::async_trait]
+    impl GasPrice for FakeGas {
+        async fn gas_price_wei(&self) -> Result<u128, crate::deps::routing::GasPriceError> {
+            Ok(self.0)
+        }
+    }
+
+    struct FakeOracle(std::collections::HashMap<Address, crate::primitives::UsdPrice>);
+    #[async_trait::async_trait]
+    impl PriceOracle for FakeOracle {
+        async fn price(
+            &self,
+            token: Address,
+        ) -> Result<crate::primitives::UsdPrice, crate::deps::routing::PriceOracleError> {
+            self.0
+                .get(&token)
+                .copied()
+                .ok_or(crate::deps::routing::PriceOracleError::NotFound(token))
+        }
+    }
+
+    #[tokio::test]
+    async fn resolves_leg_cost_from_the_ports() {
+        use crate::primitives::UsdPrice;
+        use rust_decimal::Decimal;
+        let (native, token) = (tok(9), tok(2));
+        let gas = FakeGas(20_000_000_000);
+        let oracle = FakeOracle(std::collections::HashMap::from([
+            (native, UsdPrice(Decimal::from(3000u32))),
+            (token, UsdPrice(Decimal::from(1u32))),
+        ]));
+        // 150k × 20 gwei = 0.003 native; native $3000 ⇒ $9; token $1, 18 dp ⇒ 9e18.
+        let cost = resolve_leg_cost(&gas, &oracle, 150_000, native, token, 18)
+            .await
+            .unwrap();
+        assert_eq!(
+            cost,
+            U256::from(9u64) * U256::from(10u64).pow(U256::from(18u64))
+        );
     }
 }

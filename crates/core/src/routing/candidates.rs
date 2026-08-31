@@ -1,11 +1,11 @@
 //! Candidate selection: reduce an intent's pair to a bounded, deterministic set of
 //! priceable maker venues for the solver to optimize over.
 //!
-//! Like a production router (Uniswap's `get-candidate-pools`), this ranks by a cheap
-//! depth proxy and keeps a top-`k` before any exact quoting — here the proxy is
-//! `cap_out`, the maker's frozen deliverable. The pruning only bites when a pair has
-//! more than `k` makers; below that it is a no-op ordering. Caps are frozen by reading
-//! `caps` once; the ledger re-checks the firm figure at reservation time.
+//! Ranks every eligible venue by its **estimated net-of-fee output at the trade size** —
+//! the metric production routers select on, which self-selects the right curve type — and
+//! keeps the top-`k`. Because our quotes are closed-form, we rank directly rather than with
+//! a cheap TVL prefilter. Caps are frozen by reading the ledger snapshot once; the ledger
+//! re-checks the firm figure at reservation time.
 
 use std::cmp::Ordering;
 
@@ -95,6 +95,13 @@ impl Candidate {
             limited: net.limited,
         })
     }
+
+    /// The pool's net output-per-input at a tiny probe ≈ its spot marginal — the water level
+    /// at which it first becomes active. Sized to the trade so the probe isn't dust.
+    pub fn spot_marginal(&self, amount: U256) -> Option<Ratio> {
+        let probe = (amount / U256::from(1_000_000u64)).max(U256::from(1u64));
+        Ratio::new(self.net_quote_exact_in(probe).ok()?, probe)
+    }
 }
 
 /// The most promising venues for a request, deterministically ordered and capped at `k`.
@@ -108,7 +115,7 @@ pub fn select(
     caps: &AvailableSnapshot,
     request: &RouteRequest,
     k: usize,
-) -> Vec<Candidate> {
+) -> Selection {
     let pair = TokenPair::new(request.token_in, request.token_out);
     // What the taker cares about, quoted once per candidate: output for exact-in, required
     // input for exact-out. `None` = can't price this size.
@@ -125,12 +132,33 @@ pub fn select(
         .collect();
     let exact_in = request.exact_in;
     let better = |a: &Scored, b: &Scored| best_first(a, b, exact_in);
-    if scored.len() > k {
+    // Partition off the top-`k`; the discarded tail feeds the optimality certificate — the
+    // highest spot marginal an omitted pool could have offered.
+    let best_omitted_spot = if scored.len() > k {
         scored.select_nth_unstable_by(k, better);
+        let spot = scored[k..]
+            .iter()
+            .filter_map(|(_, c)| c.spot_marginal(request.amount))
+            .max();
         scored.truncate(k);
-    }
+        spot
+    } else {
+        None
+    };
     scored.sort_by(better);
-    scored.into_iter().map(|(_, c)| c).collect()
+    Selection {
+        chosen: scored.into_iter().map(|(_, c)| c).collect(),
+        best_omitted_spot,
+    }
+}
+
+/// The funnel's output: the top-`k` candidates, and the highest spot marginal among the
+/// pools that didn't make the cut (`None` if none were dropped) — the certificate input.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct Selection {
+    pub chosen: Vec<Candidate>,
+    pub best_omitted_spot: Option<Ratio>,
 }
 
 /// A candidate with its rank score (`None` = unpriceable at this size).
@@ -269,7 +297,7 @@ mod tests {
         let snap = Snapshot::from_strategies([xyc(m, h, a, b, 1000)]);
         // Payout token is b; wallet 100, strategy-virtual 60 ⇒ cap is the tighter 60.
         let c = caps(&[(wallet(m, b), 100), (virt(m, h, b), 60)]);
-        let out = select(&snap, &c, &request(a, b, 100), 64);
+        let out = select(&snap, &c, &request(a, b, 100), 64).chosen;
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].cap_out, U256::from(60u64));
         assert_eq!(out[0].token_out, b);
@@ -294,7 +322,7 @@ mod tests {
             (wallet(maker(3), b), 100),
             (virt(maker(3), hash(3), b), 100),
         ]);
-        assert!(select(&snap, &c, &request(a, b, 100), 64).is_empty());
+        assert!(select(&snap, &c, &request(a, b, 100), 64).chosen.is_empty());
     }
 
     #[test]
@@ -317,6 +345,7 @@ mod tests {
             (virt(maker(3), hash(9), b), big),
         ]);
         let order: Vec<_> = select(&snap, &c, &request(a, b, 100), 64)
+            .chosen
             .iter()
             .map(|c| c.key.strategy_hash)
             .collect();
@@ -336,10 +365,37 @@ mod tests {
             entries.push((virt(maker(n), hash(n), b), 1_000_000));
         }
         let c = caps(&entries);
-        let top2 = select(&snap, &c, &request(a, b, 100), 2);
+        let top2 = select(&snap, &c, &request(a, b, 100), 2).chosen;
         assert_eq!(top2.len(), 2);
         assert_eq!(top2[0].key.strategy_hash, hash(5)); // deepest
         assert_eq!(top2[1].key.strategy_hash, hash(4));
-        assert_eq!(select(&snap, &c, &request(a, b, 100), 64).len(), 5);
+        assert_eq!(select(&snap, &c, &request(a, b, 100), 64).chosen.len(), 5);
+    }
+
+    #[test]
+    fn reports_best_omitted_spot_only_when_truncating() {
+        let (a, b) = (tok(1), tok(2));
+        let snap = Snapshot::from_strategies(
+            (1u8..=3).map(|n| xyc(maker(n), hash(n), a, b, u64::from(n) * 1000)),
+        );
+        let big = 1_000_000u64;
+        let c = caps(
+            &(1u8..=3)
+                .flat_map(|n| {
+                    [
+                        (wallet(maker(n), b), big),
+                        (virt(maker(n), hash(n), b), big),
+                    ]
+                })
+                .collect::<Vec<_>>(),
+        );
+        // k below the eligible count ⇒ the certificate carries the best dropped pool's spot.
+        assert!(select(&snap, &c, &request(a, b, 100), 2)
+            .best_omitted_spot
+            .is_some());
+        // k at or above the count ⇒ nothing dropped, nothing to certify.
+        assert!(select(&snap, &c, &request(a, b, 100), 3)
+            .best_omitted_spot
+            .is_none());
     }
 }

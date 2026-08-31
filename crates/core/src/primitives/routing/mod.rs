@@ -8,6 +8,15 @@ use alloy_primitives::{Address, U256};
 
 use crate::primitives::{IntentId, MakerId, StrategyHash};
 
+/// Per-token metadata for the gas-cost conversion: the Binance spot symbol (which the price
+/// feed subscribes to) and the token's decimals (base-unit scaling). The composition root
+/// keys these by token address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenMeta {
+    pub symbol: String,
+    pub decimals: u8,
+}
+
 /// One intent's routing request — the pair, size, and direction to source. `exact_in`
 /// fixes the taker's input (sell `amount` of `token_in`); otherwise it fixes the output
 /// (deliver `amount` of `token_out`).
