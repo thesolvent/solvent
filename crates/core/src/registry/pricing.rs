@@ -5,7 +5,7 @@
 use alloy_primitives::{Address, U256};
 use thiserror::Error;
 
-use super::curves::{apply_flat_fee_in, apply_flat_fee_out, CurveError, CurvePool, Pricing};
+use super::curves::{gross_up_by_fees, shrink_by_fees, CurveError, CurvePool, Pricing};
 use crate::primitives::registry::{CurveSpec, MakerStrategy};
 
 /// Why a strategy could not be priced for a request.
@@ -37,18 +37,9 @@ pub fn price(
     let balance_out = strategy.balance(&token_out);
     let pool = CurvePool::from_curve(curve, token_in, token_out, balance_in, balance_out);
     let quoted = if exact_in {
-        // Flat fees shrink the input in program order, then the curve runs.
-        let net_in = fees_in_bps
-            .iter()
-            .try_fold(amount, |a, &bps| apply_flat_fee_in(a, bps))?;
-        pool.quote_exact_in(net_in)?
+        pool.quote_exact_in(shrink_by_fees(amount, fees_in_bps)?)?
     } else {
-        // The curve runs, then flat fees gross the input up in reverse order.
-        let curve_in = pool.quote_exact_out(amount)?;
-        fees_in_bps
-            .iter()
-            .rev()
-            .try_fold(curve_in, |a, &bps| apply_flat_fee_out(a, bps))?
+        gross_up_by_fees(pool.quote_exact_out(amount)?, fees_in_bps)?
     };
     Ok(quoted)
 }
@@ -58,7 +49,7 @@ mod tests {
     use super::*;
     use crate::primitives::registry::{Curve, PeggedParams, StrategyKey};
     use crate::primitives::{MakerId, StrategyHash};
-    use crate::registry::XycPool;
+    use crate::registry::{apply_flat_fee_in, apply_flat_fee_out, XycPool};
     use std::collections::BTreeMap;
 
     fn tok(n: u8) -> Address {
