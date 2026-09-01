@@ -77,10 +77,20 @@ fn fill_to_limit_numerical<P: Pricing + ?Sized>(
             limited: false,
         });
     }
-    let step = (amount_in / U256::from(1_000_000u64)).max(U256::from(1u64));
-    // Marginal at `a`, or zero when `a` is beyond the pool's representable range — a huge
-    // sentinel bound overflowing the fixed-point math reads as drained, so the bisection backs
-    // off instead of failing the whole fill.
+    // Clamp the bound to the largest input the pool still prices. An unbounded sentinel can lie
+    // beyond the representable/feasible range, and the finite-difference step scales to this
+    // bound — a huge one overshoots the feasible range and misreads every marginal as drained.
+    let bound = feasible_bound(pool, amount_in);
+    if bound.is_zero() {
+        return Ok(LimitedQuote {
+            amount_in: U256::ZERO,
+            amount_out: U256::ZERO,
+            limited: true,
+        });
+    }
+    let step = (bound / U256::from(1_000_000u64)).max(U256::from(1u64));
+    // Marginal at `a`, or zero when a probe lands beyond the representable range, so the bisection
+    // backs off instead of failing the whole fill.
     let marginal = |a: U256| -> Result<Ratio, CurveError> {
         let Ok(here) = pool.quote_exact_in(a) else {
             return Ok(Ratio::zero());
@@ -94,14 +104,14 @@ fn fill_to_limit_numerical<P: Pricing + ?Sized>(
     let clears = |a: U256| -> Result<bool, CurveError> {
         Ok(pool.quote_exact_in(a).is_ok() && marginal(a)?.ge(limit))
     };
-    if let Ok(out) = pool.quote_exact_in(amount_in) {
-        if marginal(amount_in)?.ge(limit) {
-            return Ok(LimitedQuote {
-                amount_in,
-                amount_out: out,
-                limited: false,
-            });
-        }
+    // The whole feasible bound still clears ⇒ fill it (capped by feasibility, not the limit).
+    if marginal(bound)?.ge(limit) {
+        let out = pool.quote_exact_in(bound)?;
+        return Ok(LimitedQuote {
+            amount_in: bound,
+            amount_out: out,
+            limited: bound < amount_in,
+        });
     }
     if marginal(U256::ZERO)?.lt(limit) {
         return Ok(LimitedQuote {
@@ -111,7 +121,7 @@ fn fill_to_limit_numerical<P: Pricing + ?Sized>(
         });
     }
     // Largest input that still prices and clears the limit; `lo` therefore always prices.
-    let (mut lo, mut hi) = (U256::ZERO, amount_in);
+    let (mut lo, mut hi) = (U256::ZERO, bound);
     while hi - lo > U256::from(1u64) {
         let mid = lo + (hi - lo) / U256::from(2u64);
         match clears(mid)? {
@@ -125,6 +135,24 @@ fn fill_to_limit_numerical<P: Pricing + ?Sized>(
         amount_out: out,
         limited: lo < amount_in,
     })
+}
+
+/// The largest input `≤ hi` the pool still prices. Feasibility is monotone — a small input
+/// prices, a huge or out-of-range one overflows — so a bisection finds the ceiling; `hi` itself
+/// when it already prices.
+fn feasible_bound<P: Pricing + ?Sized>(pool: &P, hi: U256) -> U256 {
+    if pool.quote_exact_in(hi).is_ok() {
+        return hi;
+    }
+    let (mut lo, mut hi) = (U256::ZERO, hi);
+    while hi - lo > U256::from(1u64) {
+        let mid = lo + (hi - lo) / U256::from(2u64);
+        match pool.quote_exact_in(mid).is_ok() {
+            true => lo = mid,
+            false => hi = mid,
+        }
+    }
+    lo
 }
 
 /// `1e18` — sqrt-price fixed-point basis (`XYCConcentrate.ONE`).
@@ -785,6 +813,16 @@ mod tests {
         let q = pool.quote_with_limit(sentinel, &Ratio::zero()).unwrap();
         assert!(q.amount_in < sentinel);
         assert!(q.amount_out > U256::ZERO);
+
+        // And with a positive floor below the pool's marginal it must still fill: the
+        // finite-difference step scaled to the sentinel overshot the feasible range, misreading
+        // the marginal as zero, so any positive floor silently dropped the pool from the split.
+        let bounded = pool.quote_with_limit(sentinel, &ratio(1, 2)).unwrap();
+        assert!(
+            bounded.amount_out > U256::ZERO,
+            "a positive floor below the marginal must still fill",
+        );
+        assert!(bounded.amount_in < sentinel);
     }
 
     #[test]
