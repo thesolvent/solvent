@@ -116,21 +116,12 @@ impl<'a> Fill<'a> {
         if out_room.is_zero() {
             return U256::ZERO;
         }
-        // Largest input whose *realized* (floored) output stays within the wallet room:
-        // `net_quote_exact_out` rounds the input up, so step back a unit when its round-trip
-        // output would overshoot the ceiling. Filling to it can only exceed the wallet by that
-        // round-trip, which this removes.
-        let ceiling = outs[i].saturating_add(out_room);
-        let cap = match c.net_quote_exact_out(ceiling) {
-            Ok(cap) => cap,
-            Err(_) => return U256::ZERO,
-        };
-        let cap = match c.net_quote_exact_in(cap) {
-            Ok(realized) if realized <= ceiling => cap,
-            Ok(_) => cap.saturating_sub(U256::from(1u64)),
-            Err(_) => return U256::ZERO,
-        };
-        cap.saturating_sub(ins[i]).min(box_room)
+        // The input to fill the maker's remaining wallet room without the round-trip
+        // overshooting it; no top-up on a price failure, so the group can't exceed the wallet.
+        match c.input_within_output(outs[i].saturating_add(out_room)) {
+            Some(cap) => cap.saturating_sub(ins[i]).min(box_room),
+            None => U256::ZERO,
+        }
     }
 }
 
@@ -288,14 +279,13 @@ fn input_bounds(candidates: &[Candidate], request: &RouteRequest) -> Vec<U256> {
         .iter()
         .map(|c| {
             if request.exact_in {
-                let cap = c
-                    .net_quote_exact_out(c.cap_out)
-                    .unwrap_or_else(|_| unbounded_input());
-                cap.min(request.amount)
+                c.input_within_output(c.cap_out)
+                    .unwrap_or_else(unbounded_input)
+                    .min(request.amount)
             } else {
                 let deliverable = c.cap_out.min(request.amount);
-                c.net_quote_exact_out(deliverable)
-                    .unwrap_or_else(|_| unbounded_input())
+                c.input_within_output(deliverable)
+                    .unwrap_or_else(unbounded_input)
             }
         })
         .collect()
@@ -849,6 +839,24 @@ mod tests {
             "maker 1 combined {} over-reserves its wallet {}",
             maker_out(&sol.legs, 1),
             wallet
+        );
+    }
+
+    #[test]
+    fn input_within_output_never_exceeds_the_cap() {
+        // A 3/1000 XYC pool: net_quote_exact_out(701) = 8, net_quote_exact_in(8) = 727 > 701 —
+        // filling a leg to the naive input would over-deliver past its cap and break reservation.
+        let cap = U256::from(701u64);
+        let c = cand(1, xyc(U256::from(3u64), U256::from(1000u64)), cap, &[]);
+        let naive = c.net_quote_exact_out(cap).unwrap();
+        assert!(
+            c.net_quote_exact_in(naive).unwrap() > cap,
+            "the naive round-trip overshoots the cap"
+        );
+        let bounded = c.input_within_output(cap).unwrap();
+        assert!(
+            c.net_quote_exact_in(bounded).unwrap() <= cap,
+            "input_within_output keeps the realized output within the cap"
         );
     }
 }
