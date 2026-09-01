@@ -12,6 +12,7 @@ use alloy_primitives::U256;
 
 use crate::primitives::pricing::{LimitedQuote, Ratio};
 use crate::primitives::routing::{RouteLeg, RouteRequest};
+use crate::primitives::MakerId;
 
 use super::candidates::Candidate;
 
@@ -29,16 +30,96 @@ pub struct Solution {
     pub lambda: Ratio,
 }
 
-/// Hard cap on bisection iterations; early-stop on the fill-gap tolerance usually converges
-/// far sooner, especially from a warm λ.
+/// Bisection iteration caps; the fill-gap tolerance early-stops far sooner from a warm λ.
 const MAX_ITERS: usize = 128;
-/// Cap on bracket-expansion steps when the warm λ is stale.
 const BRACKET_STEPS: usize = 128;
 
-/// The ε-optimal split of `request` across `candidates`, or `None` when the set cannot
-/// meet the request even filled to its caps. `warm` is the last λ **for this same pair**
-/// (λ is pair-specific); it tightens the bracket, so a good seed converges in a few
-/// iterations. The result is ε-identical with or without it (both stop within tolerance).
+/// A leg that could not price at a level — contributes nothing.
+const NO_FILL: LimitedQuote = LimitedQuote {
+    amount_in: U256::ZERO,
+    amount_out: U256::ZERO,
+    limited: true,
+};
+
+/// The frozen inputs of one solve: the candidates, their per-leg input `bounds`, and their
+/// wallet `floors`. Every fill is a pure function of a water level.
+struct Fill<'a> {
+    candidates: &'a [Candidate],
+    bounds: Vec<U256>,
+    floors: Vec<Ratio>,
+    exact_in: bool,
+}
+
+impl<'a> Fill<'a> {
+    fn new(candidates: &'a [Candidate], request: &RouteRequest) -> Self {
+        let bounds = input_bounds(candidates, request);
+        let floors = wallet_floors(candidates, &bounds);
+        Self {
+            candidates,
+            bounds,
+            floors,
+            exact_in: request.exact_in,
+        }
+    }
+
+    /// Leg `i`'s net fill at `level`, raised to its wallet floor; a price failure fills zero.
+    fn leg(&self, i: usize, level: &Ratio) -> LimitedQuote {
+        let level = if self.floors[i] > *level {
+            &self.floors[i]
+        } else {
+            level
+        };
+        self.candidates[i]
+            .net_quote_with_limit(self.bounds[i], level)
+            .unwrap_or(NO_FILL)
+    }
+
+    /// Total toward the target at `level` — input for exact-in, output for exact-out.
+    fn measure(&self, level: &Ratio) -> U256 {
+        (0..self.candidates.len()).fold(U256::ZERO, |sum, i| {
+            let leg = self.leg(i, level);
+            let toward = if self.exact_in {
+                leg.amount_in
+            } else {
+                leg.amount_out
+            };
+            sum.saturating_add(toward)
+        })
+    }
+
+    /// Input the exact-in top-up may add to leg `i`: its box room, capped by its maker's
+    /// remaining wallet room (zero on a price error — never the box — so no group overshoots).
+    fn topup_room(&self, ins: &[U256], outs: &[U256], i: usize) -> U256 {
+        let c = &self.candidates[i];
+        let box_room = self.bounds[i].saturating_sub(ins[i]);
+        if self.floors[i].is_zero() {
+            return box_room;
+        }
+        let used = group_output(self.candidates, outs, c.key.maker);
+        let out_room = c.wallet_cap.saturating_sub(used);
+        if out_room.is_zero() {
+            return U256::ZERO;
+        }
+        // Largest input whose *realized* (floored) output stays within the wallet room:
+        // `net_quote_exact_out` rounds the input up, so step back a unit when its round-trip
+        // output would overshoot the ceiling. Filling to it can only exceed the wallet by that
+        // round-trip, which this removes.
+        let ceiling = outs[i].saturating_add(out_room);
+        let cap = match c.net_quote_exact_out(ceiling) {
+            Ok(cap) => cap,
+            Err(_) => return U256::ZERO,
+        };
+        let cap = match c.net_quote_exact_in(cap) {
+            Ok(realized) if realized <= ceiling => cap,
+            Ok(_) => cap.saturating_sub(U256::from(1u64)),
+            Err(_) => return U256::ZERO,
+        };
+        cap.saturating_sub(ins[i]).min(box_room)
+    }
+}
+
+/// The ε-optimal split of `request` across `candidates`, or `None` when their wallet-capped
+/// capacity can't meet it. `warm` is the last λ for this pair; it only tightens the search.
 pub fn solve(
     candidates: &[Candidate],
     request: &RouteRequest,
@@ -47,54 +128,57 @@ pub fn solve(
     if candidates.is_empty() || request.amount.is_zero() {
         return None;
     }
-    let bounds = input_bounds(candidates, request);
+    let fill = Fill::new(candidates, request);
     let target = request.amount;
-    let exact_in = request.exact_in;
-    // Scalar fill total at a water level — allocation-free, so the bisection never touches
-    // the heap (only the final assembly builds the leg vector).
-    let measure = |lambda: &Ratio| measure_at(candidates, &bounds, lambda, exact_in);
-
-    // λ=0 fills every venue to its cap. If that can't reach the target, there is no route.
-    if measure(&Ratio::zero()) < target {
+    // λ=0 fills every venue to its cap; if that can't reach the target, there is no route.
+    if fill.measure(&Ratio::zero()) < target {
         return None;
     }
+    let level = bracket_level(|l| fill.measure(l), target, warm);
+    // exact-in assembles at the under-filling side then adds the remainder; exact-out at the
+    // over-filling side then trims the overshoot.
+    if fill.exact_in {
+        assemble_exact_in(&fill, &level.hi, target)
+    } else {
+        assemble_exact_out(&fill, &level.lo, target)
+    }
+}
 
-    // Bracket λ so `lo` over-fills (measure ≥ target) and `hi` under-fills. Seed tight around
-    // the warm λ and expand only if it is stale; otherwise start wide (`lo`=0 always holds).
-    let (mut lo, mut hi) = match warm.filter(|w| !w.is_zero()) {
-        Some(w) => (w.clone().halved(), w.clone() + w.clone()),
-        None => (Ratio::zero(), one()),
-    };
-    let mut m_lo = measure(&lo);
-    let mut m_hi = measure(&hi);
-    for _ in 0..BRACKET_STEPS {
-        if m_lo >= target {
-            break;
-        }
-        lo = lo.halved();
-        m_lo = measure(&lo);
-    }
-    if m_lo < target {
-        lo = Ratio::zero();
-        m_lo = measure(&lo);
-    }
+/// A tight bracket on the water level: `lo` still meets `target`, `hi` no longer does.
+struct LevelBracket {
+    lo: Ratio,
+    hi: Ratio,
+}
+
+/// Bisect a `fill(level)` non-increasing in the level to a tight bracket around `target`,
+/// assuming `fill(0) ≥ target` (the caller's feasibility check). `seed` (a prior level) only
+/// tightens the start; the result is ε-identical without it.
+fn bracket_level(
+    fill: impl Fn(&Ratio) -> U256,
+    target: U256,
+    seed: Option<&Ratio>,
+) -> LevelBracket {
+    let tol = (target / U256::from(1_000_000u64)).max(U256::from(1u64));
+    let mut lo = Ratio::zero();
+    let mut hi = seed
+        .filter(|s| !s.is_zero())
+        .map(double)
+        .unwrap_or_else(one);
+    let mut m_lo = fill(&lo);
+    let mut m_hi = fill(&hi);
     for _ in 0..BRACKET_STEPS {
         if m_hi < target {
             break;
         }
-        hi = hi.clone() + hi.clone();
-        m_hi = measure(&hi);
+        hi = double(&hi);
+        m_hi = fill(&hi);
     }
-
-    // Bisect until the fill straddles the target within tolerance (the integer touch-up in
-    // assembly closes the last gap), or a hard cap.
-    let tol = (target / U256::from(1_000_000u64)).max(U256::from(1u64));
     for _ in 0..MAX_ITERS {
         if m_lo.saturating_sub(m_hi) <= tol {
             break;
         }
-        let mid = (lo.clone() + hi.clone()).halved();
-        let m = measure(&mid);
+        let mid = midpoint(&lo, &hi);
+        let m = fill(&mid);
         if m >= target {
             lo = mid;
             m_lo = m;
@@ -103,14 +187,70 @@ pub fn solve(
             m_hi = m;
         }
     }
+    LevelBracket { lo, hi }
+}
 
-    // exact-in fills below target at `hi`, then adds the remainder; exact-out fills above
-    // target at `lo`, then trims the overshoot (the final `quote_exact_out` confirm).
-    if exact_in {
-        assemble_exact_in(candidates, &bounds, &hi, target)
-    } else {
-        assemble_exact_out(candidates, &bounds, &lo, target)
+/// Per-candidate wallet floor: the level at which a maker's legs' combined output hits its
+/// shared wallet, so filling at `max(λ, floor)` holds the maker within budget. λ-independent,
+/// hence precomputed; zero unless a maker's several strategies would over-fill it.
+fn wallet_floors(candidates: &[Candidate], bounds: &[U256]) -> Vec<Ratio> {
+    let mut floors = vec![Ratio::zero(); candidates.len()];
+    let mut makers: Vec<MakerId> = candidates.iter().map(|c| c.key.maker).collect();
+    makers.sort_unstable();
+    makers.dedup();
+    if makers.len() == candidates.len() {
+        return floors; // every maker distinct ⇒ no shared wallet binds
     }
+    for maker in makers {
+        let idxs: Vec<usize> = (0..candidates.len())
+            .filter(|&i| candidates[i].key.maker == maker)
+            .collect();
+        if idxs.len() < 2 {
+            continue; // a lone leg is already within its wallet via `cap_out`
+        }
+        // A maker's candidates share one `WalletBudget`; bind only if full fill would exceed it.
+        let wallet = candidates[idxs[0]].wallet_cap;
+        if group_output_at(candidates, bounds, &idxs, &Ratio::zero()) <= wallet {
+            continue;
+        }
+        let floor = group_floor_level(candidates, bounds, &idxs, wallet);
+        for &i in &idxs {
+            floors[i] = floor.clone();
+        }
+    }
+    floors
+}
+
+/// A maker group's combined net output at water level `level`.
+fn group_output_at(
+    candidates: &[Candidate],
+    bounds: &[U256],
+    idxs: &[usize],
+    level: &Ratio,
+) -> U256 {
+    idxs.iter().fold(U256::ZERO, |sum, &i| {
+        let out = candidates[i]
+            .net_quote_with_limit(bounds[i], level)
+            .map(|q| q.amount_out)
+            .unwrap_or(U256::ZERO);
+        sum.saturating_add(out)
+    })
+}
+
+/// The level at which a maker group's combined output falls to its `wallet` — where its legs
+/// fill when the wallet binds. The under-budget (`hi`) side keeps the group within it.
+fn group_floor_level(
+    candidates: &[Candidate],
+    bounds: &[U256],
+    idxs: &[usize],
+    wallet: U256,
+) -> Ratio {
+    bracket_level(
+        |level| group_output_at(candidates, bounds, idxs, level),
+        wallet,
+        None,
+    )
+    .hi
 }
 
 /// An "effectively unbounded" gross input for a venue whose cap the pool can never reach
@@ -144,100 +284,78 @@ fn input_bounds(candidates: &[Candidate], request: &RouteRequest) -> Vec<U256> {
         .collect()
 }
 
-/// Every candidate's capped net fill at water level `lambda`.
-fn fills_at(candidates: &[Candidate], bounds: &[U256], lambda: &Ratio) -> Vec<LimitedQuote> {
-    candidates
-        .iter()
-        .zip(bounds)
-        .map(|(c, &bound)| {
-            c.net_quote_with_limit(bound, lambda)
-                .unwrap_or(LimitedQuote {
-                    amount_in: U256::ZERO,
-                    amount_out: U256::ZERO,
-                    limited: true,
-                })
-        })
-        .collect()
-}
-
-/// Total fill toward the target at `lambda` — input for exact-in, output for exact-out —
-/// folded without allocating, so the bisection's inner loop never touches the heap.
-fn measure_at(candidates: &[Candidate], bounds: &[U256], lambda: &Ratio, exact_in: bool) -> U256 {
-    candidates
-        .iter()
-        .zip(bounds)
-        .fold(U256::ZERO, |sum, (c, &bound)| {
-            let fill = c
-                .net_quote_with_limit(bound, lambda)
-                .unwrap_or(LimitedQuote {
-                    amount_in: U256::ZERO,
-                    amount_out: U256::ZERO,
-                    limited: true,
-                });
-            sum.saturating_add(if exact_in {
-                fill.amount_in
-            } else {
-                fill.amount_out
-            })
-        })
-}
-
 fn one() -> Ratio {
     Ratio::from(U256::from(1u64))
 }
+fn double(r: &Ratio) -> Ratio {
+    r.clone() + r.clone()
+}
+fn midpoint(a: &Ratio, b: &Ratio) -> Ratio {
+    (a.clone() + b.clone()).halved()
+}
 
-/// Fill below `target` input at `lambda`, then place the remainder on the venue that buys
-/// the most extra output for it (bounded by its box), so total input is exactly `target`.
-fn assemble_exact_in(
-    candidates: &[Candidate],
-    bounds: &[U256],
-    lambda: &Ratio,
-    target: U256,
-) -> Option<Solution> {
-    let mut ins: Vec<U256> = fills_at(candidates, bounds, lambda)
+/// The saturating sum of a slice of amounts.
+fn sum(amounts: &[U256]) -> U256 {
+    amounts.iter().fold(U256::ZERO, |s, &a| s.saturating_add(a))
+}
+
+/// A maker's current combined output across the working `outs`.
+fn group_output(candidates: &[Candidate], outs: &[U256], maker: MakerId) -> U256 {
+    candidates
         .iter()
-        .map(|f| f.amount_in)
+        .zip(outs)
+        .filter(|(c, _)| c.key.maker == maker)
+        .fold(U256::ZERO, |sum, (_, &out)| sum.saturating_add(out))
+}
+
+/// Fill below `target` input at `level`, then place the remainder on the venue that buys the
+/// most extra output — bounded by its box cap and its maker's wallet — so total input is
+/// `target` and no maker's combined output exceeds its wallet.
+fn assemble_exact_in(fill: &Fill, level: &Ratio, target: U256) -> Option<Solution> {
+    let quotes: Vec<LimitedQuote> = (0..fill.candidates.len())
+        .map(|i| fill.leg(i, level))
         .collect();
-    let mut remainder =
-        target.saturating_sub(ins.iter().fold(U256::ZERO, |s, &a| s.saturating_add(a)));
+    let mut ins: Vec<U256> = quotes.iter().map(|q| q.amount_in).collect();
+    let mut outs: Vec<U256> = quotes.iter().map(|q| q.amount_out).collect();
+    let mut remainder = target.saturating_sub(sum(&ins));
     while !remainder.is_zero() {
-        let best = (0..candidates.len())
-            .filter(|&i| bounds[i] > ins[i])
+        let Some(i) = (0..fill.candidates.len())
+            .filter(|&i| !fill.topup_room(&ins, &outs, i).is_zero())
             .max_by_key(|&i| {
-                let add = remainder.min(bounds[i] - ins[i]);
-                let here = candidates[i]
+                let add = remainder.min(fill.topup_room(&ins, &outs, i));
+                let here = fill.candidates[i]
                     .net_quote_exact_in(ins[i])
                     .unwrap_or(U256::ZERO);
-                let ahead = candidates[i]
+                let ahead = fill.candidates[i]
                     .net_quote_exact_in(ins[i].saturating_add(add))
                     .unwrap_or(here);
                 ahead.saturating_sub(here)
-            });
-        let Some(i) = best else { break };
-        let add = remainder.min(bounds[i] - ins[i]);
+            })
+        else {
+            break;
+        };
+        let add = remainder.min(fill.topup_room(&ins, &outs, i));
+        if add.is_zero() {
+            break;
+        }
         ins[i] = ins[i].saturating_add(add);
+        outs[i] = fill.candidates[i]
+            .net_quote_exact_in(ins[i])
+            .unwrap_or(outs[i]);
         remainder -= add;
     }
-    build(candidates, &ins, Leg::ExactIn, lambda)
+    build(fill.candidates, &ins, Leg::ExactIn, level)
 }
 
-/// Fill above `target` output at `lambda`, then trim the overshoot off the largest legs
-/// so total output is exactly `target` (never under), recomputing input via exact-out.
-fn assemble_exact_out(
-    candidates: &[Candidate],
-    bounds: &[U256],
-    lambda: &Ratio,
-    target: U256,
-) -> Option<Solution> {
-    let mut outs: Vec<U256> = fills_at(candidates, bounds, lambda)
-        .iter()
-        .map(|f| f.amount_out)
+/// Fill above `target` output at `level`, then trim the overshoot off the largest legs so
+/// total output is exactly `target` (never under). Trimming only lowers output, so every
+/// maker stays within its wallet.
+fn assemble_exact_out(fill: &Fill, level: &Ratio, target: U256) -> Option<Solution> {
+    let mut outs: Vec<U256> = (0..fill.candidates.len())
+        .map(|i| fill.leg(i, level).amount_out)
         .collect();
-    let mut overshoot = outs
-        .iter()
-        .fold(U256::ZERO, |s, &o| s.saturating_add(o))
-        .saturating_sub(target);
-    let mut order: Vec<usize> = (0..candidates.len())
+    let mut overshoot = sum(&outs).saturating_sub(target);
+    let mut order: Vec<usize> = (0..fill.candidates.len())
         .filter(|&i| !outs[i].is_zero())
         .collect();
     order.sort_by(|&a, &b| outs[b].cmp(&outs[a]));
@@ -249,7 +367,7 @@ fn assemble_exact_out(
         outs[i] -= cut;
         overshoot -= cut;
     }
-    build(candidates, &outs, Leg::ExactOut, lambda)
+    build(fill.candidates, &outs, Leg::ExactOut, level)
 }
 
 /// Which side of the leg the working amounts hold — the other is recomputed exactly.
@@ -367,15 +485,28 @@ mod tests {
     }
 
     fn cand(hash: u8, pool: CurvePool, cap: U256, fees: &[u32]) -> Candidate {
+        // Distinct maker per candidate ⇒ its own wallet group (no shared cap).
+        cand_for_maker(hash, hash, pool, cap, cap, fees)
+    }
+
+    fn cand_for_maker(
+        maker_byte: u8,
+        hash: u8,
+        pool: CurvePool,
+        cap: U256,
+        wallet: U256,
+        fees: &[u32],
+    ) -> Candidate {
         Candidate {
             key: StrategyKey {
-                maker: MakerId(Address::from([hash; 20])),
+                maker: MakerId(Address::from([maker_byte; 20])),
                 app: Address::ZERO,
                 strategy_hash: StrategyHash(B256::from([hash; 32])),
             },
             token_in: tok(1),
             token_out: tok(2),
             cap_out: cap,
+            wallet_cap: wallet,
             pool,
             fees_in_bps: fees.to_vec(),
         }
@@ -580,5 +711,109 @@ mod tests {
         let one = solve_sparse(&cs, &req, e18(100_000), 8, None).unwrap();
         assert_eq!(one.legs.len(), 1);
         assert_eq!(one.net_out, one.amount_out.saturating_sub(e18(100_000)));
+    }
+
+    /// A maker's combined output across its legs.
+    fn maker_out(legs: &[RouteLeg], maker_byte: u8) -> U256 {
+        legs.iter()
+            .filter(|l| l.maker == MakerId(Address::from([maker_byte; 20])))
+            .fold(U256::ZERO, |s, l| s + l.amount_out)
+    }
+
+    #[test]
+    fn shared_wallet_cap_bounds_a_makers_combined_output() {
+        // Maker 1 runs two deep strategies drawing one small shared wallet; maker 2 runs one.
+        let wallet = e18(100);
+        let cs = [
+            cand_for_maker(1, 1, xyc(e18(2000), e18(2000)), e18(10_000), wallet, &[]),
+            cand_for_maker(1, 2, xyc(e18(2000), e18(2000)), e18(10_000), wallet, &[]),
+            cand_for_maker(
+                2,
+                3,
+                xyc(e18(2000), e18(2000)),
+                e18(10_000),
+                e18(10_000),
+                &[],
+            ),
+        ];
+        let target = e18(250);
+        let sol = solve(&cs, &request(target, false), None).unwrap();
+        assert_eq!(sol.amount_out, target);
+        let eps = target / U256::from(1_000_000u64);
+        assert!(
+            maker_out(&sol.legs, 1) <= wallet + eps,
+            "maker 1 combined {} exceeds its wallet {}",
+            maker_out(&sol.legs, 1),
+            wallet
+        );
+
+        // Lift the wallet: maker 1, uncapped, now takes more than the small wallet allowed —
+        // so it was the cap, not the curve, holding its combined output down.
+        let uncapped = [
+            cand_for_maker(
+                1,
+                1,
+                xyc(e18(2000), e18(2000)),
+                e18(10_000),
+                e18(10_000),
+                &[],
+            ),
+            cand_for_maker(
+                1,
+                2,
+                xyc(e18(2000), e18(2000)),
+                e18(10_000),
+                e18(10_000),
+                &[],
+            ),
+            cand_for_maker(
+                2,
+                3,
+                xyc(e18(2000), e18(2000)),
+                e18(10_000),
+                e18(10_000),
+                &[],
+            ),
+        ];
+        let free = solve(&uncapped, &request(target, false), None).unwrap();
+        assert!(maker_out(&free.legs, 1) > wallet);
+    }
+
+    #[test]
+    fn declines_when_all_liquidity_is_behind_one_over_capped_wallet() {
+        // One maker, two strategies, one wallet of 100; every candidate draws it.
+        let wallet = e18(100);
+        let cs = [
+            cand_for_maker(1, 1, xyc(e18(5000), e18(5000)), e18(10_000), wallet, &[]),
+            cand_for_maker(1, 2, xyc(e18(5000), e18(5000)), e18(10_000), wallet, &[]),
+        ];
+        // Exact-out beyond the wallet, and exact-in whose output would exceed it, are both
+        // unfillable through this set.
+        assert!(solve(&cs, &request(e18(150), false), None).is_none());
+        assert!(solve(&cs, &request(e18(5000), true), None).is_none());
+        // Within the wallet, it fills.
+        assert!(solve(&cs, &request(e18(80), false), None).is_some());
+    }
+
+    #[test]
+    fn exact_in_binding_group_never_over_reserves_the_wallet() {
+        // Maker 1's deep, best-priced strategies share a small wallet, so the optimum binds
+        // it near its wallet with the *highest* marginal — the remainder top-up prefers it,
+        // where a ceil/floor round-trip could push its combined output past the wallet. The
+        // shallower maker 2 absorbs the rest.
+        let wallet = e18(100);
+        let cs = [
+            cand_for_maker(1, 1, xyc(e18(2000), e18(2000)), e18(10_000), wallet, &[]),
+            cand_for_maker(1, 2, xyc(e18(2000), e18(2000)), e18(10_000), wallet, &[]),
+            cand_for_maker(2, 3, xyc(e18(500), e18(500)), e18(10_000), e18(10_000), &[]),
+        ];
+        let sol = solve(&cs, &request(e18(200), true), None).unwrap();
+        assert_eq!(sol.amount_in, e18(200), "spends the exact input");
+        assert!(
+            maker_out(&sol.legs, 1) <= wallet,
+            "maker 1 combined {} over-reserves its wallet {}",
+            maker_out(&sol.legs, 1),
+            wallet
+        );
     }
 }

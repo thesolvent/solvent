@@ -125,7 +125,8 @@ fn gen_pool(rng: &mut Rng, id: u32, s: &Scenario) -> Candidate {
         app: Address::ZERO,
         strategy_hash: StrategyHash(B256::from(hash)),
     };
-    Candidate::new(key, tok(1), tok(2), cap, pool, fees)
+    // Unbounded shared wallet: these studies isolate per-leg caps, not the group cap.
+    Candidate::new(key, tok(1), tok(2), cap, U256::MAX, pool, fees)
 }
 
 fn pools(rng: &mut Rng, s: &Scenario) -> Vec<Candidate> {
@@ -408,6 +409,7 @@ fn uniform_candidate(id: u32, depth: U256) -> Candidate {
         tok(1),
         tok(2),
         depth * U256::from(10u64),
+        U256::MAX,
         CurvePool::Xyc(XycPool::from_reserves(depth, depth)),
         vec![],
     )

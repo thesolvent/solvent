@@ -26,8 +26,12 @@ pub struct Candidate {
     pub key: StrategyKey,
     pub token_in: Address,
     pub token_out: Address,
-    /// Max deliverable output — the frozen `min(wallet budget, strategy virtual)`.
+    /// Max output this single leg can deliver — the frozen `min(wallet budget, strategy
+    /// virtual)`.
     pub cap_out: U256,
+    /// The maker's `token_out` wallet, shared across its strategies — the cap on their
+    /// combined output.
+    pub wallet_cap: U256,
     pub pool: CurvePool,
     pub fees_in_bps: Vec<u32>,
 }
@@ -36,13 +40,13 @@ pub struct Candidate {
 const BPS: u64 = 1_000_000_000;
 
 impl Candidate {
-    /// A frozen venue: the oriented `pool`, its flat `fees_in_bps`, and the deliverable
-    /// `cap_out`. Built internally by [`select`]; public so tests and tools can construct one.
+    /// A frozen venue; built internally by [`select`], public so tests and tools can build one.
     pub fn new(
         key: StrategyKey,
         token_in: Address,
         token_out: Address,
         cap_out: U256,
+        wallet_cap: U256,
         pool: CurvePool,
         fees_in_bps: Vec<u32>,
     ) -> Self {
@@ -51,6 +55,7 @@ impl Candidate {
             token_in,
             token_out,
             cap_out,
+            wallet_cap,
             pool,
             fees_in_bps,
         }
@@ -194,22 +199,29 @@ fn build_candidate(
     if balance_in.is_zero() || balance_out.is_zero() {
         return None;
     }
-    let cap_out = frozen_cap(strategy, caps, token_out);
-    if cap_out.is_zero() {
+    let cap = frozen_cap(strategy, caps, token_out);
+    if cap.deliverable.is_zero() {
         return None;
     }
     Some(Candidate {
         key: strategy.key,
         token_in,
         token_out,
-        cap_out,
+        cap_out: cap.deliverable,
+        wallet_cap: cap.wallet,
         pool: CurvePool::from_curve(curve, token_in, token_out, balance_in, balance_out),
         fees_in_bps: fees_in_bps.clone(),
     })
 }
 
-/// The two-ceiling cap for the maker's payout token: `min(wallet budget, strategy virtual)`.
-fn frozen_cap(strategy: &MakerStrategy, caps: &AvailableSnapshot, token_out: Address) -> U256 {
+/// A maker's two `token_out` output ceilings: the shared `wallet`, and this leg's
+/// `deliverable` = `min(wallet, strategy virtual)`.
+struct FrozenCap {
+    deliverable: U256,
+    wallet: U256,
+}
+
+fn frozen_cap(strategy: &MakerStrategy, caps: &AvailableSnapshot, token_out: Address) -> FrozenCap {
     let wallet = caps.available(&AccountKey::WalletBudget {
         maker: strategy.key.maker,
         token: token_out,
@@ -219,7 +231,10 @@ fn frozen_cap(strategy: &MakerStrategy, caps: &AvailableSnapshot, token_out: Add
         strategy_hash: strategy.key.strategy_hash,
         token: token_out,
     });
-    wallet.min(strategy_virtual)
+    FrozenCap {
+        deliverable: wallet.min(strategy_virtual),
+        wallet,
+    }
 }
 
 #[cfg(test)]
