@@ -7,8 +7,8 @@ pub mod service;
 pub mod sync;
 
 pub use curves::{
-    apply_flat_fee_in, apply_flat_fee_out, ConcentratePool, CurveError, PeggedPool, Pricing,
-    XycPool,
+    apply_flat_fee_in, apply_flat_fee_out, gross_up_by_fees, shrink_by_fees, ConcentratePool,
+    CurveError, CurvePool, PeggedPool, Pricing, XycPool,
 };
 pub use pricing::{price, PriceError};
 pub use service::SharedSnapshot;

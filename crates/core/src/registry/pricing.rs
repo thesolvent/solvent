@@ -5,11 +5,8 @@
 use alloy_primitives::{Address, U256};
 use thiserror::Error;
 
-use super::curves::{
-    apply_flat_fee_in, apply_flat_fee_out, ConcentratePool, CurveError, PeggedPool, Pricing,
-    XycPool,
-};
-use crate::primitives::registry::{Curve, CurveSpec, MakerStrategy};
+use super::curves::{gross_up_by_fees, shrink_by_fees, CurveError, CurvePool, Pricing};
+use crate::primitives::registry::{CurveSpec, MakerStrategy};
 
 /// Why a strategy could not be priced for a request.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -38,40 +35,11 @@ pub fn price(
     };
     let balance_in = strategy.balance(&token_in);
     let balance_out = strategy.balance(&token_out);
-    let pool: Box<dyn Pricing> = match curve {
-        Curve::Xyc => Box::new(XycPool::from_reserves(balance_in, balance_out)),
-        Curve::Concentrate {
-            sqrt_price_min,
-            sqrt_price_max,
-        } => Box::new(ConcentratePool::from_reserves_and_bounds(
-            token_in,
-            token_out,
-            balance_in,
-            balance_out,
-            *sqrt_price_min,
-            *sqrt_price_max,
-        )),
-        Curve::Pegged(params) => Box::new(PeggedPool::from_reserves_and_params(
-            token_in,
-            token_out,
-            balance_in,
-            balance_out,
-            *params,
-        )),
-    };
+    let pool = CurvePool::from_curve(curve, token_in, token_out, balance_in, balance_out);
     let quoted = if exact_in {
-        // Flat fees shrink the input in program order, then the curve runs.
-        let net_in = fees_in_bps
-            .iter()
-            .try_fold(amount, |a, &bps| apply_flat_fee_in(a, bps))?;
-        pool.quote_exact_in(net_in)?
+        pool.quote_exact_in(shrink_by_fees(amount, fees_in_bps)?)?
     } else {
-        // The curve runs, then flat fees gross the input up in reverse order.
-        let curve_in = pool.quote_exact_out(amount)?;
-        fees_in_bps
-            .iter()
-            .rev()
-            .try_fold(curve_in, |a, &bps| apply_flat_fee_out(a, bps))?
+        gross_up_by_fees(pool.quote_exact_out(amount)?, fees_in_bps)?
     };
     Ok(quoted)
 }
@@ -79,8 +47,9 @@ pub fn price(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::primitives::registry::{PeggedParams, StrategyKey};
+    use crate::primitives::registry::{Curve, PeggedParams, StrategyKey};
     use crate::primitives::{MakerId, StrategyHash};
+    use crate::registry::{apply_flat_fee_in, apply_flat_fee_out, XycPool};
     use std::collections::BTreeMap;
 
     fn tok(n: u8) -> Address {

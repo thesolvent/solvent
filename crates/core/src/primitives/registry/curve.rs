@@ -113,7 +113,9 @@ fn classify(program: &[u8]) -> CurveSpec {
     }
 }
 
-/// The curve shape from just the swap-defining opcodes.
+/// The curve shape from just the swap-defining opcodes. Params outside the contract's
+/// parse-time domain yield `None` (→ `Unsupported`): on-chain those revert at parse, so the
+/// port must never price a strategy the chain would reject.
 fn curve_of(curve_ixs: &[(u8, &[u8])]) -> Option<Curve> {
     match curve_ixs {
         [(op, _)] if *op == OP_XYC_SWAP => Some(Curve::Xyc),
@@ -122,22 +124,43 @@ fn curve_of(curve_ixs: &[(u8, &[u8])]) -> Option<Curve> {
                 && *op_swap == OP_XYC_SWAP
                 && args.len() == CONCENTRATE_ARGS_LEN =>
         {
-            Some(Curve::Concentrate {
-                sqrt_price_min: U256::from_be_slice(&args[0..32]),
-                sqrt_price_max: U256::from_be_slice(&args[32..64]),
-            })
+            let sqrt_price_min = U256::from_be_slice(&args[0..32]);
+            let sqrt_price_max = U256::from_be_slice(&args[32..64]);
+            // `build2D`: 0 < sqrtMin < sqrtMax.
+            (!sqrt_price_min.is_zero() && sqrt_price_min < sqrt_price_max).then_some(
+                Curve::Concentrate {
+                    sqrt_price_min,
+                    sqrt_price_max,
+                },
+            )
         }
         [(op, args)] if *op == OP_PEGGED_SWAP && args.len() == PEGGED_ARGS_LEN => {
-            Some(Curve::Pegged(PeggedParams {
+            let params = PeggedParams {
                 x0: U256::from_be_slice(&args[0..32]),
                 y0: U256::from_be_slice(&args[32..64]),
                 linear_width: U256::from_be_slice(&args[64..96]),
                 rate_lt: U256::from_be_slice(&args[96..128]),
                 rate_gt: U256::from_be_slice(&args[128..160]),
-            }))
+            };
+            is_pegged_in_domain(&params).then_some(Curve::Pegged(params))
         }
         _ => None,
     }
+}
+
+/// The contract's `PeggedSwapArgsBuilder.parse` domain: positive reserves and rates, and A
+/// within `MAX_LINEAR_WIDTH`. Out-of-domain params revert on-chain at parse.
+fn is_pegged_in_domain(p: &PeggedParams) -> bool {
+    !p.x0.is_zero()
+        && !p.y0.is_zero()
+        && !p.rate_lt.is_zero()
+        && !p.rate_gt.is_zero()
+        && p.linear_width <= max_linear_width()
+}
+
+/// `PeggedSwapMath.MAX_LINEAR_WIDTH` = `5000 * 1e27`: A's on-chain ceiling.
+fn max_linear_width() -> U256 {
+    U256::from(5000u64) * U256::from(10u64).pow(U256::from(27u64))
 }
 
 /// `flatFee` args: a 4-byte `uint32` bps (≤ `1e9`).
@@ -175,6 +198,15 @@ mod tests {
         v.extend(bps.to_be_bytes());
         v
     }
+    fn pegged_args(x0: u64, y0: u64, width: u128, rate_lt: u64, rate_gt: u64) -> Vec<u8> {
+        let mut v = vec![0u8; PEGGED_ARGS_LEN];
+        v[24..32].copy_from_slice(&x0.to_be_bytes());
+        v[56..64].copy_from_slice(&y0.to_be_bytes());
+        v[80..96].copy_from_slice(&width.to_be_bytes());
+        v[120..128].copy_from_slice(&rate_lt.to_be_bytes());
+        v[152..160].copy_from_slice(&rate_gt.to_be_bytes());
+        v
+    }
     fn priceable(curve: Curve, fees: &[u32]) -> CurveSpec {
         CurveSpec::Priceable {
             curve,
@@ -201,7 +233,7 @@ mod tests {
         );
 
         let mut peg = vec![OP_PEGGED_SWAP, 160];
-        peg.extend(vec![0u8; 160]);
+        peg.extend(pegged_args(1000, 1000, 100 * 10u128.pow(27), 1, 1));
         assert!(matches!(
             classify(&peg),
             CurveSpec::Priceable {
@@ -209,6 +241,28 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn rejects_out_of_domain_curve_params() {
+        // Pegged A above MAX_LINEAR_WIDTH (5000e27), and zero reserve/rate — all revert
+        // on-chain at parse, so the port declines to price them.
+        for bad in [
+            pegged_args(1000, 1000, 6000 * 10u128.pow(27), 1, 1), // A > MAX
+            pegged_args(0, 1000, 100 * 10u128.pow(27), 1, 1),     // x0 == 0
+            pegged_args(1000, 1000, 100 * 10u128.pow(27), 0, 1),  // rate == 0
+        ] {
+            let mut peg = vec![OP_PEGGED_SWAP, 160];
+            peg.extend(bad);
+            assert_eq!(classify(&peg), CurveSpec::Unsupported);
+        }
+        // Concentrate needs 0 < sqrtMin < sqrtMax.
+        for (min, max) in [(0u8, 9u8), (9, 9), (9, 3)] {
+            let mut conc = vec![OP_XYC_CONCENTRATE, 64];
+            conc.extend(conc_args(min, max));
+            conc.extend([OP_XYC_SWAP, 0]);
+            assert_eq!(classify(&conc), CurveSpec::Unsupported);
+        }
     }
 
     #[test]

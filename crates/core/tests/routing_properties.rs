@@ -1,0 +1,1552 @@
+//! Tier-0 routing invariants (the property suite): properties every `solve` result must satisfy,
+//! checked over a seeded random book generator — no reference solve, so each holds or reveals a
+//! bug. Failures print the seed for a reproducible repro.
+//!
+//! The always-on tests (`cargo test -p solvent-core --test routing_properties`) are fast: the
+//! sparsity check plus one pinned regression per fixed bug. The broad fuzz loops are `#[ignore]`d
+//! because the debug BigRational solver is ~100 ms/solve; run them in release:
+//! `cargo test -p solvent-core --test routing_properties --release -- --ignored`.
+
+use alloy_primitives::{Address, B256, U256};
+
+use solvent_core::primitives::pricing::Ratio;
+use solvent_core::primitives::registry::{PeggedParams, StrategyKey};
+use solvent_core::primitives::routing::RouteRequest;
+use solvent_core::primitives::{IntentId, MakerId, StrategyHash};
+use solvent_core::registry::{ConcentratePool, CurvePool, PeggedPool, XycPool};
+use solvent_core::routing::{solve, solve_sparse, Candidate, Split};
+
+/// Deterministic SplitMix64 — reproducible books without a dependency.
+struct Rng(u64);
+impl Rng {
+    fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+    fn range(&mut self, lo: u64, hi: u64) -> u64 {
+        lo + self.next_u64() % (hi - lo).max(1)
+    }
+    fn chance(&mut self, pct: u64) -> bool {
+        self.next_u64() % 100 < pct
+    }
+}
+
+fn e18(n: u64) -> U256 {
+    U256::from(n) * U256::from(10u64).pow(U256::from(18u64))
+}
+fn one27() -> U256 {
+    U256::from(10u64).pow(U256::from(27u64))
+}
+fn tok(n: u8) -> Address {
+    Address::from([n; 20])
+}
+fn umin(a: U256, b: U256) -> U256 {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+/// A random book of `n` candidates over `(tok(1), tok(2))`: varied curves, skews, fees, and caps,
+/// with several strategies folded onto a smaller set of makers so shared wallets actually bind.
+fn random_book(rng: &mut Rng, n: usize) -> Vec<Candidate> {
+    let n_makers = rng.range(1, n as u64 + 1) as usize;
+    // One shared wallet per maker (so a maker's strategies draw the same budget).
+    let maker_wallet: Vec<U256> = (0..n_makers)
+        .map(|_| e18(rng.range(100, 6000)) * U256::from(rng.range(2, 25)) / U256::from(10u64))
+        .collect();
+    (0..n)
+        .map(|i| {
+            let maker_idx = i % n_makers;
+            let depth = e18(rng.range(100, 5000));
+            let skew = rng.range(30, 300); // reserve_out = depth·skew/100
+            let reserve_in = depth;
+            let reserve_out = depth * U256::from(skew) / U256::from(100u64);
+            let pool = match rng.range(0, 3) {
+                0 => CurvePool::Xyc(XycPool::from_reserves(reserve_in, reserve_out)),
+                1 => {
+                    let sqrt_min = ((e18(1) / U256::from(4u64)) * e18(1)).root(2);
+                    let sqrt_max = (U256::from(4u64) * e18(1) * e18(1)).root(2);
+                    CurvePool::Concentrate(ConcentratePool::from_reserves_and_bounds(
+                        tok(1),
+                        tok(2),
+                        reserve_in,
+                        reserve_out,
+                        sqrt_min,
+                        sqrt_max,
+                    ))
+                }
+                _ => CurvePool::Pegged(PeggedPool::from_reserves_and_params(
+                    tok(1),
+                    tok(2),
+                    reserve_in,
+                    reserve_out,
+                    PeggedParams {
+                        x0: reserve_in,
+                        y0: reserve_out,
+                        linear_width: U256::from(100u64) * one27(),
+                        rate_lt: U256::from(1u64),
+                        rate_gt: U256::from(1u64),
+                    },
+                )),
+            };
+            let fees = match rng.range(0, 4) {
+                0 => vec![],
+                1 => vec![3_000_000u32],
+                2 => vec![1_000_000u32],
+                _ => vec![1_000_000u32, 2_000_000u32],
+            };
+            let wallet = maker_wallet[maker_idx];
+            let strategy_virtual = reserve_out * U256::from(rng.range(2, 30)) / U256::from(10u64);
+            let cap_out = umin(wallet, strategy_virtual);
+            let mut hash = [0u8; 32];
+            hash[24..].copy_from_slice(&(i as u64).to_be_bytes());
+            let key = StrategyKey {
+                maker: MakerId(Address::from([(maker_idx as u8) + 1; 20])),
+                app: Address::ZERO,
+                strategy_hash: StrategyHash(B256::from(hash)),
+            };
+            Candidate::new(key, tok(1), tok(2), cap_out, wallet, pool, fees)
+        })
+        .collect()
+}
+
+fn request(amount: U256, exact_in: bool) -> RouteRequest {
+    RouteRequest {
+        intent: IntentId(B256::ZERO),
+        token_in: tok(1),
+        token_out: tok(2),
+        amount,
+        exact_in,
+    }
+}
+
+fn sum_of(xs: impl Iterator<Item = U256>) -> U256 {
+    xs.fold(U256::ZERO, |s, x| s.saturating_add(x))
+}
+
+/// Every invariant a returned `Split` must satisfy. `where_` labels the failing case for a repro.
+fn assert_invariants(cs: &[Candidate], req: &RouteRequest, sol: &Split, where_: &str) {
+    // Totals equal the sum of legs.
+    let sum_in = sum_of(sol.legs.iter().map(|l| l.amount_in));
+    let sum_out = sum_of(sol.legs.iter().map(|l| l.amount_out));
+    assert_eq!(
+        sum_in, sol.amount_in,
+        "{where_}: Σ leg.amount_in != amount_in"
+    );
+    assert_eq!(
+        sum_out, sol.amount_out,
+        "{where_}: Σ leg.amount_out != amount_out"
+    );
+
+    // No dust leg; token orientation matches the request.
+    for l in &sol.legs {
+        assert!(
+            !l.amount_in.is_zero() && !l.amount_out.is_zero(),
+            "{where_}: a zero-amount (dust) leg survived",
+        );
+        assert_eq!(l.token_in, req.token_in, "{where_}: leg token_in mismatch");
+        assert_eq!(
+            l.token_out, req.token_out,
+            "{where_}: leg token_out mismatch"
+        );
+    }
+
+    // Conservation vs the taker's target. Symmetric contract: exact-in spends at most the
+    // target and within ε of it (a wallet-pinned book may strand a sub-ε sliver rather than
+    // over-reserve); exact-out delivers at least the target and within ε of it.
+    let eps = (req.amount / U256::from(1_000_000u64)).max(U256::from(1u64));
+    if req.exact_in {
+        assert!(
+            sol.amount_in <= req.amount,
+            "{where_}: exact-in over-spent the target ({} > {})",
+            sol.amount_in,
+            req.amount,
+        );
+        assert!(
+            sol.amount_in >= req.amount.saturating_sub(eps),
+            "{where_}: exact-in under-spent beyond ε ({} < {})",
+            sol.amount_in,
+            req.amount.saturating_sub(eps),
+        );
+    } else {
+        assert!(
+            sol.amount_out >= req.amount,
+            "{where_}: exact-out under-delivered ({} < {})",
+            sol.amount_out,
+            req.amount,
+        );
+        assert!(
+            sol.amount_out <= req.amount.saturating_add(eps),
+            "{where_}: exact-out over-delivered beyond ε",
+        );
+    }
+
+    // Per-leg output never exceeds its cap_out.
+    for l in &sol.legs {
+        let cap = cs
+            .iter()
+            .find(|c| c.key.strategy_hash == l.strategy_hash)
+            .map(|c| c.cap_out)
+            .expect("every leg maps to a candidate");
+        assert!(
+            l.amount_out <= cap,
+            "{where_}: leg output {} exceeds its cap_out {}",
+            l.amount_out,
+            cap,
+        );
+    }
+
+    // Each maker's combined output stays within its shared wallet.
+    let mut makers: Vec<MakerId> = cs.iter().map(|c| c.key.maker).collect();
+    makers.sort_unstable();
+    makers.dedup();
+    for maker in makers {
+        let out = sum_of(
+            sol.legs
+                .iter()
+                .filter(|l| l.maker == maker)
+                .map(|l| l.amount_out),
+        );
+        let wallet = cs
+            .iter()
+            .find(|c| c.key.maker == maker)
+            .map(|c| c.wallet_cap)
+            .unwrap_or(U256::MAX);
+        assert!(
+            out <= wallet,
+            "{where_}: maker's combined output {} exceeds its wallet {}",
+            out,
+            wallet,
+        );
+    }
+}
+
+/// One conservation trial: build the seeded book, solve, and assert every plan invariant.
+fn conservation_trial(seed: u64) {
+    let mut rng = Rng(0x5011_5011 ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(1, 12) as usize;
+    let cs = random_book(&mut rng, n);
+    let amount = e18(rng.range(10, 4000));
+    let exact_in = rng.chance(50);
+    let req = request(amount, exact_in);
+    let where_ = format!("seed={seed} n={n} amount={amount} exact_in={exact_in}");
+    if let Some(sol) = solve(&cs, &req, None) {
+        assert_invariants(&cs, &req, &sol, &where_);
+    }
+}
+
+/// One order-independence trial: solve the book and its reversal, assert identical totals.
+fn order_trial(seed: u64) {
+    let mut rng = Rng(0xA11CE ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(2, 12) as usize;
+    let cs = random_book(&mut rng, n);
+    let amount = e18(rng.range(10, 3000));
+    let exact_in = rng.chance(50);
+    let req = request(amount, exact_in);
+    let mut reversed = cs.clone();
+    reversed.reverse();
+    match (solve(&cs, &req, None), solve(&reversed, &req, None)) {
+        (Some(a), Some(b)) => assert_eq!(
+            (a.amount_in, a.amount_out),
+            (b.amount_in, b.amount_out),
+            "seed={seed}: totals changed under candidate reordering",
+        ),
+        (None, None) => {}
+        _ => panic!("seed={seed}: feasibility flipped under candidate reordering"),
+    }
+}
+
+/// Exact-in stays within tolerance on a wallet-pinned book — the shape that first stranded a
+/// sub-ε input sliver. Fast always-on guard against the under-spend regressing.
+#[test]
+fn exact_in_conservation_on_a_wallet_pinned_book() {
+    conservation_trial(755);
+}
+
+/// Totals are identical under candidate reordering on a book with a marginal tie — the shape
+/// that first exposed the order dependence. Fast always-on guard against it regressing.
+#[test]
+fn totals_are_order_independent_on_a_tie_book() {
+    order_trial(183);
+}
+
+/// Broad conservation fuzz. Heavy under the debug BigRational solver (~100 ms/solve); run it in
+/// release: `cargo test -p solvent-core --test routing_properties --release -- --ignored`.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn conservation_holds_over_random_books() {
+    for seed in 0..1500 {
+        conservation_trial(seed);
+    }
+}
+
+/// Broad order-independence fuzz. Heavy in debug; run it in release (see the conservation fuzz).
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn solve_is_order_independent_in_the_totals() {
+    for seed in 0..400 {
+        order_trial(seed);
+    }
+}
+
+#[test]
+fn sparsity_is_meaningful_below_the_gas_crossover() {
+    // Eight equal, well-priced pools and a trade that fragments the gas-free optimum. With a
+    // per-leg gas well below what each leg's output contributes, the sparsity pass must NOT
+    // collapse to a single leg — each leg still earns its gas. (The existing test only exercises
+    // the saturated branch where gas ≫ output.)
+    let cs: Vec<Candidate> = (0u8..8)
+        .map(|i| {
+            let mut hash = [0u8; 32];
+            hash[31] = i;
+            let key = StrategyKey {
+                maker: MakerId(Address::from([i + 1; 20])),
+                app: Address::ZERO,
+                strategy_hash: StrategyHash(B256::from(hash)),
+            };
+            Candidate::new(
+                key,
+                tok(1),
+                tok(2),
+                e18(10_000),
+                U256::MAX,
+                CurvePool::Xyc(XycPool::from_reserves(e18(2000), e18(2000))),
+                vec![],
+            )
+        })
+        .collect();
+    let req = request(e18(3000), true);
+    let free = solve(&cs, &req, None).unwrap();
+    assert!(free.legs.len() >= 4, "gas-free optimum should fragment");
+
+    // Gas ≈ 1% of a single leg's output — real but not overwhelming.
+    let per_leg = e18(4);
+    let sparse = solve_sparse(&cs, &req, per_leg, 8, None).unwrap();
+    assert!(
+        sparse.legs.len() > 1,
+        "sub-crossover gas should keep multiple paying legs, not collapse (got {})",
+        sparse.legs.len(),
+    );
+    assert_eq!(sparse.amount_in, e18(3000), "still spends the target");
+}
+
+/// A lower bound on the output a book can deliver, from per-candidate quotes and the shared
+/// wallet caps alone — independent of the water-fill. Each leg delivers at most its `cap_out`
+/// (when the curve can reach it) or its output at the large-input sentinel (its asymptote);
+/// each maker's legs together deliver at most its wallet. Unpriceable legs count as zero, so
+/// this never over-estimates — a target comfortably under it is genuinely fillable.
+fn deliverable_lower_bound(cs: &[Candidate]) -> U256 {
+    let sentinel = U256::from(1u8) << 112;
+    let leg_out = |c: &Candidate| match c.input_within_output(c.cap_out) {
+        Some(_) => c.cap_out,
+        None => c
+            .net_quote_exact_in(sentinel)
+            .unwrap_or(U256::ZERO)
+            .min(c.cap_out),
+    };
+    let mut makers: Vec<MakerId> = cs.iter().map(|c| c.key.maker).collect();
+    makers.sort_unstable();
+    makers.dedup();
+    makers.iter().fold(U256::ZERO, |total, &m| {
+        let group = cs
+            .iter()
+            .filter(|c| c.key.maker == m)
+            .fold(U256::ZERO, |s, c| s.saturating_add(leg_out(c)));
+        let wallet = cs
+            .iter()
+            .find(|c| c.key.maker == m)
+            .map(|c| c.wallet_cap)
+            .unwrap_or(U256::MAX);
+        total.saturating_add(group.min(wallet))
+    })
+}
+
+/// One feasibility trial: a book that can comfortably deliver a target must not decline it. The
+/// target is four-fifths of a conservative capacity bound — well within reach.
+fn feasibility_trial(seed: u64) {
+    let mut rng = Rng(0xFEA5_1B1E ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(1, 12) as usize;
+    let cs = random_book(&mut rng, n);
+    let target = deliverable_lower_bound(&cs) * U256::from(4u64) / U256::from(5u64);
+    if target.is_zero() {
+        return;
+    }
+    assert!(
+        solve(&cs, &request(target, false), None).is_some(),
+        "seed={seed}: declined an exact-out target {target} at 80% of a capacity lower bound",
+    );
+}
+
+/// A comfortably-fillable exact-out target near a leg's capacity is not declined — the book that
+/// first exposed the feasibility-gate under-count (`measure(0)` capped a wei below target). Fast
+/// always-on guard.
+#[test]
+fn exact_out_near_capacity_is_not_declined() {
+    feasibility_trial(13);
+}
+
+/// Feasibility oracle: catches a spurious `None` on a fillable book — a single leg erroring
+/// inside `build`, or the feasibility gate under-counting. This is the gap the conservation
+/// suite can't see, since it only checks the plans that come back `Some`.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn feasible_books_are_not_declined() {
+    for seed in 0u64..1500 {
+        feasibility_trial(seed);
+    }
+}
+
+/// A leg's finite-difference net marginal `d(output)/d(gross_input)` over `[fill, fill + probe]`.
+/// A ppm-scale `probe` tracks the tangent at `fill`; a coarser one gives the average marginal a
+/// would-be fill of that size would earn. `None` if the leg can't price the step.
+fn fd_marginal(c: &Candidate, fill: U256, probe: U256) -> Option<Ratio> {
+    let probe = probe.max(U256::from(1u64));
+    let here = c.net_quote_exact_in(fill).ok()?;
+    let ahead = c.net_quote_exact_in(fill.saturating_add(probe)).ok()?;
+    Ratio::new(ahead.saturating_sub(here), probe)
+}
+
+/// The KKT optimality residuals of a solved split, stated intrinsically (no dependence on the
+/// reported λ, which degenerates to zero on near-capacity trades). `residual_bps` is the spread
+/// of active interior legs' marginals — zero iff they share one marginal (the equimarginal
+/// condition); paired with conservation, that pins the correct water level. `violation_bps` is
+/// how far an unused leg's spot marginal rises above the cheapest interior leg — positive means
+/// it should have been filled. Box-capped and wallet-bound legs are excluded (complementary
+/// slackness on a cap, not the equimarginal condition).
+struct Certificate {
+    residual_bps: u64,
+    violation_bps: u64,
+}
+
+fn kkt_certificate(cs: &[Candidate], req: &RouteRequest, split: &Split) -> Certificate {
+    // An unused leg is probed over a chunk of the trade — whether a would-be fill of that size
+    // would still beat the water level (spot alone over-counts steep-decay legs whose optimal
+    // fill is nil). An active leg's marginal is probed locally, a small fraction of its own fill,
+    // so a steep leg with a small fill isn't read low by a trade-scaled step overshooting it.
+    let chunk = (req.amount / U256::from(16u64)).max(U256::from(1u64));
+    let group_tol = (req.amount / U256::from(1_000_000u64)).max(U256::from(1u64));
+    let group_out = |maker: MakerId| {
+        split
+            .legs
+            .iter()
+            .filter(|l| l.maker == maker)
+            .fold(U256::ZERO, |s, l| s.saturating_add(l.amount_out))
+    };
+    let mut interior: Vec<Ratio> = Vec::new();
+    let mut unused: Vec<Ratio> = Vec::new();
+    for c in cs {
+        let leg = split
+            .legs
+            .iter()
+            .find(|l| l.strategy_hash == c.key.strategy_hash);
+        let fill_in = leg.map_or(U256::ZERO, |l| l.amount_in);
+        let fill_out = leg.map_or(U256::ZERO, |l| l.amount_out);
+        // Cap-relative slack, so a leg the conservative bound parks a few ppm below its cap still
+        // reads as box-capped.
+        let cap_tol = (c.cap_out / U256::from(100_000u64)).max(U256::from(1u64));
+        // Wallet-bound group: pinned at the wallet, not at the equimarginal level.
+        if group_out(c.key.maker).saturating_add(group_tol) >= c.wallet_cap {
+            continue;
+        }
+        // Excluded from the equimarginal residual: a sub-ppm fill (activation-margin rounding), a
+        // box-capped leg (pinned by its own cap), or a pegged leg (its numerical fill lands the
+        // marginal on λ only to a finite-difference tolerance, not exactly). All three are still
+        // covered by the unused-leg violation check.
+        let is_pegged = matches!(c.pool, CurvePool::Pegged(_));
+        let excluded =
+            fill_in < group_tol || fill_out.saturating_add(cap_tol) >= c.cap_out || is_pegged;
+        match (fill_in.is_zero(), excluded) {
+            // Only a leg whose maker solve used *nothing* of is a candidate for "should have been
+            // filled" — an unused leg of a participating maker is its shared wallet spent on a
+            // better pool, not a miss.
+            (true, _) if group_out(c.key.maker).is_zero() => {
+                unused.extend(fd_marginal(c, U256::ZERO, chunk))
+            }
+            (true, _) => {}
+            (false, true) => {}
+            (false, false) => {
+                let local = (fill_in / U256::from(1000u64)).max(U256::from(1u64));
+                interior.extend(fd_marginal(c, fill_in, local));
+            }
+        }
+    }
+    let cheapest = interior.iter().min();
+    let residual_bps = match (cheapest, interior.iter().max()) {
+        (Some(lo), Some(hi)) => lo.rel_diff_bps(hi),
+        _ => 0,
+    };
+    let violation_bps = cheapest.map_or(0, |lo| {
+        unused
+            .iter()
+            .filter(|m| *m > lo)
+            .map(|m| m.rel_diff_bps(lo))
+            .max()
+            .unwrap_or(0)
+    });
+    Certificate {
+        residual_bps,
+        violation_bps,
+    }
+}
+
+/// One KKT trial on an interior exact-in solve, returning its certificate (`None` when the book
+/// yields no interior trade to check). An interior input is found by solving a comfortably
+/// sub-capacity exact-out trade and re-sourcing its input exact-in — exact-in has no overshoot
+/// trim, so its marginals sit cleanly at the water level.
+fn kkt_trial(seed: u64) -> Option<Certificate> {
+    let mut rng = Rng(0xC0FFEE ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(1, 12) as usize;
+    let cs = random_book(&mut rng, n);
+    let out_target = deliverable_lower_bound(&cs) / U256::from(3u64);
+    if out_target.is_zero() {
+        return None;
+    }
+    let in_target = solve(&cs, &request(out_target, false), None)?.amount_in;
+    if in_target.is_zero() {
+        return None;
+    }
+    let req = request(in_target, true);
+    let sol = solve(&cs, &req, None)?;
+    Some(kkt_certificate(&cs, &req, &sol))
+}
+
+/// A comfortably interior exact-in solve sits at the equimarginal optimum — the book that first
+/// exposed the pegged pool being dropped at a positive water level. Fast always-on guard.
+#[test]
+fn solve_is_kkt_optimal_on_a_pegged_book() {
+    if let Some(cert) = kkt_trial(386) {
+        assert!(
+            cert.residual_bps <= 25 && cert.violation_bps <= 25,
+            "seed=386: KKT residual={} violation={} (bps) — not at the equimarginal optimum",
+            cert.residual_bps,
+            cert.violation_bps,
+        );
+    }
+}
+
+/// Optimality oracle: every interior exact-in solve sits at the equimarginal (KKT) optimum —
+/// active legs share one marginal and no unused leg beats them. Catches a suboptimal split (wrong
+/// λ or wrong leg selection) that the validity and feasibility oracles can't see.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn solve_is_kkt_optimal() {
+    for seed in 0u64..1500 {
+        if let Some(cert) = kkt_trial(seed) {
+            assert!(
+                cert.residual_bps <= 25,
+                "seed={seed}: active legs off the equimarginal level by {} bps",
+                cert.residual_bps,
+            );
+            assert!(
+                cert.violation_bps <= 25,
+                "seed={seed}: an unused leg beats the split by {} bps",
+                cert.violation_bps,
+            );
+        }
+    }
+}
+
+/// Round-trip: sourcing `X` input exact-in yields `Y` output, and buying `Y` output exact-out
+/// should cost `~X` again. Returns `|X − X'|` in bps of `X` (`None` when the book has no interior
+/// trade). Catches asymmetry between the two assemble paths.
+fn roundtrip_bps(seed: u64) -> Option<u64> {
+    let mut rng = Rng(0x0022_11AA ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(1, 12) as usize;
+    let cs = random_book(&mut rng, n);
+    let out_target = deliverable_lower_bound(&cs) / U256::from(3u64);
+    if out_target.is_zero() {
+        return None;
+    }
+    let x = solve(&cs, &request(out_target, false), None)?.amount_in;
+    let y = solve(&cs, &request(x, true), None)?.amount_out;
+    if x.is_zero() || y.is_zero() {
+        return None;
+    }
+    let x2 = solve(&cs, &request(y, false), None)?.amount_in;
+    Some(Ratio::from(x2).rel_diff_bps(&Ratio::from(x)))
+}
+
+/// Round-trip consistency holds on a book: exact-in X → Y, then exact-out Y → X' returns to X
+/// within a bp. Fast always-on guard.
+#[test]
+fn roundtrip_is_consistent_on_a_book() {
+    if let Some(bps) = roundtrip_bps(7) {
+        assert!(bps <= 20, "round-trip off by {bps} bps");
+    }
+}
+
+/// Round-trip oracle: the two assemble paths agree — sourcing X input exact-in then buying that
+/// output exact-out returns to ~X. Catches asymmetry between the top-up and the trim.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn solve_round_trips_between_directions() {
+    for seed in 0u64..1500 {
+        if let Some(bps) = roundtrip_bps(seed) {
+            assert!(bps <= 20, "seed={seed}: round-trip off by {bps} bps");
+        }
+    }
+}
+
+/// Output-monotonicity breaks on a fixed book swept over increasing exact-in sizes: more input
+/// must never buy less output. Returns the count of breaks (0 = clean). (λ-monotonicity is not
+/// asserted — the water level is only resolved to the bisection tolerance, so it can tick the
+/// wrong way by a hair; a non-monotone `measure(λ)` would instead surface as a conservation or
+/// KKT failure, which it does not.)
+fn output_monotonicity_breaks(seed: u64) -> u32 {
+    let mut rng = Rng(0x30D0_30D0 ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(1, 12) as usize;
+    let cs = random_book(&mut rng, n);
+    let out_cap = deliverable_lower_bound(&cs);
+    if out_cap.is_zero() {
+        return 0;
+    }
+    let Some(x_cap) = solve(&cs, &request(out_cap / U256::from(2u64), false), None) else {
+        return 0;
+    };
+    let x_cap = x_cap.amount_in;
+    let mut breaks = 0;
+    let mut prev_out = U256::ZERO;
+    for k in 1u64..=8 {
+        let x = x_cap * U256::from(k) / U256::from(8u64);
+        let Some(sol) = solve(&cs, &request(x, true), None) else {
+            continue;
+        };
+        if sol.amount_out < prev_out {
+            breaks += 1;
+        }
+        prev_out = sol.amount_out;
+    }
+    breaks
+}
+
+/// Output rises with trade size on a book — more input never buys less output. Fast always-on
+/// guard.
+#[test]
+fn output_rises_with_trade_size_on_a_book() {
+    assert_eq!(
+        output_monotonicity_breaks(7),
+        0,
+        "output decreased as input grew"
+    );
+}
+
+/// Monotonicity oracle: solve output is non-decreasing in trade size across the random books — a
+/// dip would be an arbitrageable quote.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn solve_output_is_monotone_in_trade_size() {
+    // Fewer books than the other fuzzes: this one solves a full trade-size sweep per book.
+    for seed in 0u64..500 {
+        assert_eq!(
+            output_monotonicity_breaks(seed),
+            0,
+            "seed={seed}: output decreased as input grew",
+        );
+    }
+}
+
+/// The best gas-aware `net_output` any non-empty subset of a (small) book achieves at
+/// `per_leg_cost` — the true optimum `solve_sparse` is approximating.
+fn brute_sparse_optimum(cs: &[Candidate], req: &RouteRequest, per_leg_cost: U256) -> U256 {
+    let mut best = U256::ZERO;
+    for mask in 1u32..(1u32 << cs.len()) {
+        let subset: Vec<Candidate> = cs
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) != 0)
+            .map(|(_, c)| c.clone())
+            .collect();
+        if let Some(split) = solve(&subset, req, None) {
+            best = best.max(split.net_output(per_leg_cost));
+        }
+    }
+    best
+}
+
+/// `solve_sparse`'s regret against the true `2^K` gas-aware optimum, in bps of the optimum's net
+/// output. `gas_div` sets the per-leg gas as `avg_leg_output / gas_div` (so `gas_div=50` ≈ 2 %
+/// of a leg's output, a realistic swap cost). `None` when there's no multi-leg trade to prune.
+fn sparsity_regret_bps(seed: u64, gas_div: u64) -> Option<u64> {
+    let mut rng = Rng(0x5A17_5A17 ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(2, 7) as usize;
+    let cs = random_book(&mut rng, n);
+    let out_cap = deliverable_lower_bound(&cs);
+    if out_cap.is_zero() {
+        return None;
+    }
+    let x = solve(&cs, &request(out_cap / U256::from(3u64), false), None)?.amount_in;
+    if x.is_zero() {
+        return None;
+    }
+    let req = request(x, true);
+    let free = solve(&cs, &req, None)?;
+    if free.legs.len() < 2 {
+        return None;
+    }
+    let per_leg = free.amount_out / U256::from(gas_div * free.legs.len() as u64);
+    if per_leg.is_zero() {
+        return None;
+    }
+    let ours = solve_sparse(&cs, &req, per_leg, n, None)?.net_output(per_leg);
+    let best = brute_sparse_optimum(&cs, &req, per_leg);
+    if best.is_zero() {
+        return None;
+    }
+    Some(Ratio::from(ours).rel_diff_bps(&Ratio::from(best)))
+}
+
+/// `gas_div = 50` ⇒ per-leg gas ≈ 2 % of a leg's output, a realistic swap cost. At that regime
+/// the drop-by-smallest heuristic is near-optimal (observed regret ≤ 37 bps); regret grows only
+/// as gas approaches a large fraction of a leg's output (uneconomical trades), logged as L8.
+const REALISTIC_GAS_DIV: u64 = 50;
+
+/// `solve_sparse` stays near the true optimum on a book at realistic gas — the worst realistic-gas
+/// case in the sweep. Fast always-on guard.
+#[test]
+fn sparse_is_near_optimal_at_realistic_gas() {
+    if let Some(bps) = sparsity_regret_bps(59, REALISTIC_GAS_DIV) {
+        assert!(bps <= 100, "sparsity regret {bps} bps at realistic gas");
+    }
+}
+
+/// Sparsity-optimality oracle: at realistic gas, `solve_sparse`'s drop-the-smallest heuristic is
+/// within a small regret of the true `2^K` gas-aware optimum (enumerated over all subsets). K ≤ 6
+/// keeps the enumeration tractable.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn solve_sparse_is_near_optimal() {
+    for seed in 0u64..300 {
+        if let Some(bps) = sparsity_regret_bps(seed, REALISTIC_GAS_DIV) {
+            assert!(
+                bps <= 100,
+                "seed={seed}: sparsity regret {bps} bps vs the true optimum at realistic gas",
+            );
+        }
+    }
+}
+
+/// Funnel regret at `k`, decomposed. `capacity_bps` = output lost even when the funnel keeps the
+/// `k` pools the all-pools optimum relied on most — the intrinsic cost of a small funnel, in bps
+/// of the all-pools output. `ranking_bps` = the *extra* loss from ranking by output-at-size instead
+/// of that oracle support (pure ranking error), in bps of the oracle's output.
+struct FunnelRegret {
+    capacity_bps: u64,
+    /// `None` when the oracle's K-subset can't even fill the trade (K is capacity-limited, so
+    /// ranking is undefined); `Some(bps)` when it can, measuring out@size's extra loss.
+    ranking_bps: Option<u64>,
+}
+
+fn funnel_regret(seed: u64, k: usize) -> Option<FunnelRegret> {
+    let mut rng = Rng(0x00F0_DD1E ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(k as u64 + 1, 12) as usize;
+    let cs = random_book(&mut rng, n);
+    let out_cap = deliverable_lower_bound(&cs);
+    if out_cap.is_zero() {
+        return None;
+    }
+    let x = solve(&cs, &request(out_cap / U256::from(3u64), false), None)?.amount_in;
+    if x.is_zero() {
+        return None;
+    }
+    let req = request(x, true);
+    let all = solve(&cs, &req, None)?;
+    if all.amount_out.is_zero() {
+        return None;
+    }
+    let solve_out =
+        |subset: &[Candidate]| solve(subset, &req, None).map_or(U256::ZERO, |s| s.amount_out);
+    let top_k = |ranked: Vec<&Candidate>| -> U256 {
+        let subset: Vec<Candidate> = ranked.into_iter().take(k).cloned().collect();
+        solve_out(&subset)
+    };
+    // out@size ranking (what `select` uses): net output at the trade size, ties by strategy_hash.
+    let mut by_size: Vec<&Candidate> = cs.iter().collect();
+    by_size.sort_by(|a, b| {
+        let (sa, sb) = (
+            a.net_quote_exact_in(x).unwrap_or(U256::ZERO),
+            b.net_quote_exact_in(x).unwrap_or(U256::ZERO),
+        );
+        sb.cmp(&sa)
+            .then(a.key.strategy_hash.cmp(&b.key.strategy_hash))
+    });
+    let o_size = top_k(by_size);
+    // Oracle ranking: the pools the all-pools optimum put the most output into.
+    let mut by_fill: Vec<&Candidate> = cs.iter().collect();
+    let fill_of = |c: &Candidate| {
+        all.legs
+            .iter()
+            .find(|l| l.strategy_hash == c.key.strategy_hash)
+            .map_or(U256::ZERO, |l| l.amount_out)
+    };
+    by_fill.sort_by(|a, b| {
+        fill_of(b)
+            .cmp(&fill_of(a))
+            .then(a.key.strategy_hash.cmp(&b.key.strategy_hash))
+    });
+    let o_oracle = top_k(by_fill);
+    Some(FunnelRegret {
+        capacity_bps: Ratio::from(o_oracle).rel_diff_bps(&Ratio::from(all.amount_out)),
+        ranking_bps: match () {
+            _ if o_oracle.is_zero() => None,
+            _ if o_size >= o_oracle => Some(0),
+            _ => Some(Ratio::from(o_size).rel_diff_bps(&Ratio::from(o_oracle))),
+        },
+    })
+}
+
+/// Funnel decomposition study: at a forced-small K, how much of the top-K funnel's loss is the
+/// intrinsic capacity cost of keeping only K pools, versus out@size ranking picking a worse K than
+/// the all-pools optimum's support. Prints the distribution; the finding (out@size is capacity-
+/// blind) is L9. Not an assertion — it characterizes a known deficiency, not a pass/fail invariant.
+#[test]
+#[ignore = "study — run with --release --ignored --nocapture"]
+fn study_funnel_decomposition() {
+    for k in [2usize, 4] {
+        let (mut mcap, mut mrank, mut checked, mut cap_limited, mut rank_over50) =
+            (0u64, 0u64, 0u32, 0u32, 0u32);
+        let (mut wc, mut wr) = (String::new(), String::new());
+        for seed in 0u64..600 {
+            if let Some(fr) = funnel_regret(seed, k) {
+                checked += 1;
+                if fr.capacity_bps > mcap {
+                    mcap = fr.capacity_bps;
+                    wc = format!("seed={seed}");
+                }
+                match fr.ranking_bps {
+                    None => cap_limited += 1,
+                    Some(r) => {
+                        if r > 50 {
+                            rank_over50 += 1;
+                        }
+                        if r > mrank {
+                            mrank = r;
+                            wr = format!("seed={seed}");
+                        }
+                    }
+                }
+            }
+        }
+        println!("K={k} over {checked}: capacity_max {mcap} [{wc}] cap_limited {cap_limited}  ranking_max {mrank} [{wr}] ranking_over50 {rank_over50}");
+    }
+}
+
+/// A book of XYC pools with adversarial scale: reserves spanning 1e6..1e28 (decimal/scale
+/// mismatch) and skews up to ~1e12:1, to stress the fixed-point mul_div/sqrt and the bisection.
+fn extreme_book(rng: &mut Rng, n: usize) -> Vec<Candidate> {
+    (0..n)
+        .map(|i| {
+            let pow = |e: u64| U256::from(10u64).pow(U256::from(e));
+            let reserve_in = pow(rng.range(6, 28)) * U256::from(rng.range(1, 100));
+            let reserve_out = pow(rng.range(6, 28)) * U256::from(rng.range(1, 100));
+            let cap_out = reserve_out * U256::from(rng.range(2, 30)) / U256::from(10u64);
+            let mut hash = [0u8; 32];
+            hash[24..].copy_from_slice(&(i as u64).to_be_bytes());
+            let key = StrategyKey {
+                maker: MakerId(Address::from([(i as u8) + 1; 20])),
+                app: Address::ZERO,
+                strategy_hash: StrategyHash(B256::from(hash)),
+            };
+            let pool = CurvePool::Xyc(XycPool::from_reserves(reserve_in, reserve_out));
+            Candidate::new(key, tok(1), tok(2), cap_out, U256::MAX, pool, vec![])
+        })
+        .collect()
+}
+
+/// Robustness: at extreme reserve scales and skews, any plan `solve` returns is still valid —
+/// conserves the target, respects caps, no dust leg, no overflow-driven garbage. Exercises the
+/// numerical corners the e18-scale generator never reaches.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn conservation_holds_over_extreme_scale() {
+    let mut solved = 0u32;
+    for seed in 0u64..2000 {
+        let mut rng = Rng(0xE217_3E11 ^ seed.wrapping_mul(0x9E37_79B9));
+        let n = rng.range(1, 8) as usize;
+        let cs = extreme_book(&mut rng, n);
+        // Size the trade to the book's own capacity so it actually solves at whatever scale.
+        let cap = deliverable_lower_bound(&cs);
+        if cap.is_zero() {
+            continue;
+        }
+        let (req, where_) = if rng.chance(50) {
+            let out = cap / U256::from(3u64);
+            (
+                request(out, false),
+                format!("seed={seed} n={n} exact_out out={out}"),
+            )
+        } else {
+            let Some(x) = solve(&cs, &request(cap / U256::from(3u64), false), None) else {
+                continue;
+            };
+            (
+                request(x.amount_in, true),
+                format!("seed={seed} n={n} exact_in in={}", x.amount_in),
+            )
+        };
+        if let Some(sol) = solve(&cs, &req, None) {
+            solved += 1;
+            assert_invariants(&cs, &req, &sol, &where_);
+        }
+    }
+    assert!(
+        solved > 500,
+        "extreme-scale study barely exercised solve ({solved}/2000)"
+    );
+}
+
+/// A single uncapped candidate wrapping `pool`, for pricing characterization.
+fn priced(pool: CurvePool) -> Candidate {
+    maker(1, pool, U256::MAX, U256::MAX, vec![])
+}
+
+/// Price impact in bps: how far the realized rate (output/input) sits below the pool's spot
+/// marginal (rate at a tiny probe). impact = (spot − realized)/spot × 10000.
+fn impact_bps(c: &Candidate, x: U256) -> Option<u64> {
+    let probe = (x / U256::from(100_000u64)).max(U256::from(1u64));
+    let spot = Ratio::new(c.net_quote_exact_in(probe).ok()?, probe)?;
+    let realized = Ratio::new(c.net_quote_exact_in(x).ok()?, x)?;
+    Some(realized.rel_diff_bps(&spot))
+}
+
+/// sqrt-price in 1e18 fixed point for the price `num/den`.
+fn sqrtp(num: u64, den: u64) -> U256 {
+    (e18(num) * e18(1) / U256::from(den)).root(2)
+}
+
+#[test]
+#[ignore = "study — pricing impact across pool conditions"]
+fn study_price_impact() {
+    let depth = e18(1_000_000); // a deep 1,000,000 : 1,000,000 maker
+    let bp_of = |bp: u64| depth * U256::from(bp) / U256::from(10_000u64);
+
+    println!("== XYC balanced (depth 1,000,000): impact vs trade size ==");
+    let balanced = priced(xyc(depth, depth));
+    for bp in [1u64, 10, 50, 100, 500, 1000, 2500, 5000] {
+        println!(
+            "  trade {:>5} bp of depth: impact {:?} bps",
+            bp,
+            impact_bps(&balanced, bp_of(bp))
+        );
+    }
+
+    println!("== Concentration: same 1% trade, tighter band = deeper virtual liquidity ==");
+    let x = bp_of(100); // 1% of depth
+    println!(
+        "  full-range (XYC): impact {:?} bps",
+        impact_bps(&balanced, x)
+    );
+    for (name, lo, hi) in [
+        ("[0.50, 2.00]", sqrtp(1, 2), sqrtp(2, 1)),
+        ("[0.80, 1.25]", sqrtp(8, 10), sqrtp(125, 100)),
+        ("[0.95, 1.05]", sqrtp(95, 100), sqrtp(105, 100)),
+    ] {
+        println!(
+            "  band {name}: impact {:?} bps",
+            impact_bps(&priced(concentrated(depth, depth, lo, hi)), x)
+        );
+    }
+
+    println!("== Bias/skew: reserve_out : reserve_in, trade 1% of reserve_in ==");
+    for (ro, ri) in [(1u64, 1u64), (2, 1), (5, 1), (20, 1)] {
+        let pool = xyc(depth * U256::from(ri), depth * U256::from(ro));
+        let trade = depth * U256::from(ri) / U256::from(100u64);
+        println!(
+            "  {ro}:{ri} (spot rate ~{ro}): impact {:?} bps",
+            impact_bps(&priced(pool), trade)
+        );
+    }
+
+    println!("== Router aggregation: split a 5%-of-one-pool trade across N equal pools ==");
+    let trade = bp_of(500); // 5% of a single pool
+    for n in [1u64, 2, 4, 8] {
+        let cs: Vec<Candidate> = (0..n)
+            .map(|i| {
+                maker(
+                    (i as u8) + 1,
+                    xyc(depth, depth),
+                    U256::MAX,
+                    U256::MAX,
+                    vec![],
+                )
+            })
+            .collect();
+        if let Some(sol) = solve(&cs, &request(trade, true), None) {
+            let spot = Ratio::new(cs[0].net_quote_exact_in(e18(1)).unwrap(), e18(1)).unwrap();
+            let realized = Ratio::new(sol.amount_out, sol.amount_in).unwrap();
+            println!(
+                "  {n} pool(s), {} legs: impact {} bps",
+                sol.legs.len(),
+                realized.rel_diff_bps(&spot)
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Pricing matrix — how the solver prices across venue conditions. Numbers, not just latency:
+// a maker sizes liquidity from these tables. Run in release:
+//   cargo test -p solvent-core --test routing_properties --release study_pricing -- --ignored --nocapture --test-threads=1
+// ---------------------------------------------------------------------------------------------
+
+/// Whole-token float of a wei amount (6-dp precision), for readable tables — never for math.
+fn tokens(x: U256) -> f64 {
+    u128::try_from(x / U256::from(10u64).pow(U256::from(12u64))).unwrap_or(0) as f64 / 1e6
+}
+
+/// Realized rate: output per unit input, as a display float.
+fn rate(out: U256, inp: U256) -> f64 {
+    let i = tokens(inp);
+    if i == 0.0 {
+        0.0
+    } else {
+        tokens(out) / i
+    }
+}
+
+/// A flat SwapVM fee value from a bps figure (`Fee.BPS` denominator is 1e9).
+fn fee_bps(bps: u64) -> u32 {
+    (bps * 100_000) as u32
+}
+
+/// One uncapped-by-default candidate; `cap_out`/`wallet` bound it when a scenario needs a cap.
+fn maker(id: u8, pool: CurvePool, cap_out: U256, wallet: U256, fees: Vec<u32>) -> Candidate {
+    let mut hash = [0u8; 32];
+    hash[31] = id;
+    let key = StrategyKey {
+        maker: MakerId(Address::from([id; 20])),
+        app: Address::ZERO,
+        strategy_hash: StrategyHash(B256::from(hash)),
+    };
+    Candidate::new(key, tok(1), tok(2), cap_out, wallet, pool, fees)
+}
+
+fn xyc(reserve_in: U256, reserve_out: U256) -> CurvePool {
+    CurvePool::Xyc(XycPool::from_reserves(reserve_in, reserve_out))
+}
+
+fn concentrated(reserve_in: U256, reserve_out: U256, lo: U256, hi: U256) -> CurvePool {
+    CurvePool::Concentrate(ConcentratePool::from_reserves_and_bounds(
+        tok(1),
+        tok(2),
+        reserve_in,
+        reserve_out,
+        lo,
+        hi,
+    ))
+}
+
+fn pegged(reserve_in: U256, reserve_out: U256) -> CurvePool {
+    CurvePool::Pegged(PeggedPool::from_reserves_and_params(
+        tok(1),
+        tok(2),
+        reserve_in,
+        reserve_out,
+        PeggedParams {
+            x0: reserve_in,
+            y0: reserve_out,
+            linear_width: U256::from(100u64) * one27(),
+            rate_lt: U256::from(1u64),
+            rate_gt: U256::from(1u64),
+        },
+    ))
+}
+
+/// Scenario A — the baseline curve of a single deep balanced XYC maker: what a quote costs as the
+/// trade grows from a whisper (0.01% of depth) to half the pool.
+#[test]
+#[ignore = "study — pricing A: single XYC baseline"]
+fn study_pricing_a_single_xyc() {
+    let depth = e18(1_000_000);
+    let c = maker(1, xyc(depth, depth), U256::MAX, U256::MAX, vec![]);
+    let probe = e18(1);
+    let spot = rate(c.net_quote_exact_in(probe).unwrap(), probe);
+    println!("== A: single XYC, depth 1,000,000 : 1,000,000, fee 0 (spot {spot:.6}) ==");
+    println!(
+        "  {:>7} {:>15} {:>15} {:>10} {:>9}",
+        "trade", "amount_in", "amount_out", "exec", "impact"
+    );
+    for (label, bps) in [
+        ("0.01%", 1u64),
+        ("0.1%", 10),
+        ("0.5%", 50),
+        ("1%", 100),
+        ("2%", 200),
+        ("5%", 500),
+        ("10%", 1000),
+        ("25%", 2500),
+        ("50%", 5000),
+    ] {
+        let x = depth * U256::from(bps) / U256::from(10_000u64);
+        let out = c.net_quote_exact_in(x).unwrap();
+        println!(
+            "  {:>7} {:>15.2} {:>15.2} {:>10.6} {:>6} bp",
+            label,
+            tokens(x),
+            tokens(out),
+            rate(out, x),
+            impact_bps(&c, x).unwrap_or(0)
+        );
+    }
+}
+
+/// Scenario B — depth sensitivity: fix the trade at 10,000 and grow the maker's XYC depth. Answers
+/// "how much balance do I need to quote a given trade at a target impact?".
+#[test]
+#[ignore = "study — pricing B: depth sensitivity"]
+fn study_pricing_b_depth() {
+    let trade = e18(10_000);
+    println!("== B: trade 10,000 on a balanced XYC, varying depth ==");
+    println!("  {:>10} {:>14} {:>9}", "depth", "trade/depth", "impact");
+    let mut first_under_10: Option<u64> = None;
+    for d in [
+        100_000u64, 250_000, 500_000, 1_000_000, 2_500_000, 5_000_000, 10_000_000,
+    ] {
+        let depth = e18(d);
+        let c = maker(1, xyc(depth, depth), U256::MAX, U256::MAX, vec![]);
+        let imp = impact_bps(&c, trade).unwrap_or(u64::MAX);
+        let frac = 10_000.0 / d as f64 * 100.0;
+        println!("  {:>10} {:>12.3}% {:>6} bp", d, frac, imp);
+        if imp < 10 && first_under_10.is_none() {
+            first_under_10 = Some(d);
+        }
+    }
+    match first_under_10 {
+        Some(d) => println!("  -> <10 bps impact for a 10,000 trade needs XYC depth >= {d}"),
+        None => println!("  -> even 10,000,000 depth does not get under 10 bps"),
+    }
+}
+
+/// Scenario C — fee vs curve: at fixed depth and trade, separate the slippage the curve charges
+/// (nonlinearity) from the flat fee. A low-slippage/high-fee maker can lose to the reverse.
+#[test]
+#[ignore = "study — pricing C: fee vs curve impact"]
+fn study_pricing_c_fees() {
+    let depth = e18(1_000_000);
+    let trade = e18(10_000);
+    let probe = e18(1);
+    let free = maker(1, xyc(depth, depth), U256::MAX, U256::MAX, vec![]);
+    let true_spot = Ratio::new(free.net_quote_exact_in(probe).unwrap(), probe).unwrap();
+    let curve_impact = impact_bps(&free, trade).unwrap_or(0);
+    println!("== C: depth 1,000,000, trade 10,000 — curve impact is {curve_impact} bps, fee adds on top ==");
+    println!(
+        "  {:>7} {:>12} {:>10} {:>12} {:>11}",
+        "fee", "curve_imp", "fee_bps", "total_imp", "eff_exec"
+    );
+    for bps in [0u64, 5, 10, 30, 50, 100] {
+        let c = maker(
+            1,
+            xyc(depth, depth),
+            U256::MAX,
+            U256::MAX,
+            vec![fee_bps(bps)],
+        );
+        let out = c.net_quote_exact_in(trade).unwrap();
+        let total = Ratio::new(out, trade).unwrap().rel_diff_bps(&true_spot);
+        println!(
+            "  {:>4} bp {:>9} bp {:>7} bp {:>9} bp {:>11.6}",
+            bps,
+            curve_impact,
+            total.saturating_sub(curve_impact),
+            total,
+            rate(out, trade)
+        );
+    }
+}
+
+/// Scenario D — concentration: hold capital (1,000,000 each side) and trade (10,000) fixed, tighten
+/// the price band. A tighter band is deeper *virtual* liquidity until the trade exhausts it.
+#[test]
+#[ignore = "study — pricing D: concentration and exhaustion"]
+fn study_pricing_d_concentration() {
+    let depth = e18(1_000_000);
+    let trade = e18(10_000);
+    println!(
+        "== D: same 1,000,000 capital, trade 10,000 — tighter band = deeper effective liquidity =="
+    );
+    let full = maker(1, xyc(depth, depth), U256::MAX, U256::MAX, vec![]);
+    println!("  {:>12} {:>9}", "band", "impact");
+    println!(
+        "  {:>12} {:>6} bp",
+        "full-range",
+        impact_bps(&full, trade).unwrap_or(0)
+    );
+    let bands: [(&str, U256, U256); 4] = [
+        ("+-25%", sqrtp(75, 100), sqrtp(125, 100)),
+        ("+-10%", sqrtp(90, 100), sqrtp(110, 100)),
+        ("+-5%", sqrtp(95, 100), sqrtp(105, 100)),
+        ("+-2%", sqrtp(98, 100), sqrtp(102, 100)),
+    ];
+    for (name, lo, hi) in bands {
+        let c = maker(
+            1,
+            concentrated(depth, depth, lo, hi),
+            U256::MAX,
+            U256::MAX,
+            vec![],
+        );
+        println!(
+            "  {:>12} {:>6} bp",
+            name,
+            impact_bps(&c, trade).unwrap_or(0)
+        );
+    }
+
+    println!("  -- exhausting the +-2% band: grow the trade until the price leaves the band --");
+    let (lo, hi) = (sqrtp(98, 100), sqrtp(102, 100));
+    let band = maker(
+        1,
+        concentrated(depth, depth, lo, hi),
+        U256::MAX,
+        U256::MAX,
+        vec![],
+    );
+    let mut last_out = U256::ZERO;
+    for bps in [50u64, 100, 200, 300, 400, 500, 750, 1000, 1500] {
+        let x = depth * U256::from(bps) / U256::from(10_000u64);
+        match band.net_quote_exact_in(x) {
+            Ok(out) => {
+                let capped = out == last_out;
+                last_out = out;
+                println!(
+                    "  trade {:>5.2}% of capital: exec {:>10.6}, impact {:>6} bp{}",
+                    bps as f64 / 100.0,
+                    rate(out, x),
+                    impact_bps(&band, x).unwrap_or(0),
+                    if capped {
+                        "  <- band exhausted (output flat)"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            Err(_) => println!(
+                "  trade {:>5.2}% of capital: band exhausted (no fill)",
+                bps as f64 / 100.0
+            ),
+        }
+    }
+}
+
+/// Scenario E — aggregation, the core Solvent claim: split one trade across N identical XYC makers
+/// and watch impact fall. The N=1 column is the single-best-venue baseline.
+#[test]
+#[ignore = "study — pricing E: aggregation across N makers"]
+fn study_pricing_e_aggregation() {
+    let depth = e18(1_000_000);
+    let ns = [1u64, 2, 4, 8, 16];
+    println!(
+        "== E: N identical XYC makers (depth 1,000,000 each, fee 0) — impact (bps) by trade x N =="
+    );
+    print!("  {:>10}", "trade");
+    for n in ns {
+        print!("  {:>6}", format!("N={n}"));
+    }
+    println!();
+    for t in [10_000u64, 50_000, 100_000, 250_000, 500_000, 1_000_000] {
+        let trade = e18(t);
+        print!("  {t:>10}");
+        for n in ns {
+            let cs: Vec<Candidate> = (0..n)
+                .map(|i| {
+                    maker(
+                        (i as u8) + 1,
+                        xyc(depth, depth),
+                        U256::MAX,
+                        U256::MAX,
+                        vec![],
+                    )
+                })
+                .collect();
+            let spot = Ratio::new(cs[0].net_quote_exact_in(e18(1)).unwrap(), e18(1)).unwrap();
+            match solve(&cs, &request(trade, true), None) {
+                Some(sol) => {
+                    let realized = Ratio::new(sol.amount_out, sol.amount_in).unwrap();
+                    print!("  {:>4} bp", realized.rel_diff_bps(&spot));
+                }
+                None => print!("  {:>6}", "--"),
+            }
+        }
+        println!();
+    }
+}
+
+/// Scenario F — heterogeneous book: XYC + concentrated + pegged makers of different depths. Reports
+/// the best single venue against the Solvent split, the allocation, and the marginal-price
+/// equalization that explains the split.
+#[test]
+#[ignore = "study — pricing F: heterogeneous makers"]
+fn study_pricing_f_heterogeneous() {
+    let cs = vec![
+        maker(
+            1,
+            xyc(e18(1_000_000), e18(1_000_000)),
+            U256::MAX,
+            U256::MAX,
+            vec![],
+        ),
+        maker(
+            2,
+            concentrated(
+                e18(1_000_000),
+                e18(1_000_000),
+                sqrtp(90, 100),
+                sqrtp(110, 100),
+            ),
+            U256::MAX,
+            U256::MAX,
+            vec![],
+        ),
+        maker(
+            3,
+            pegged(e18(200_000), e18(200_000)),
+            U256::MAX,
+            U256::MAX,
+            vec![],
+        ),
+        maker(
+            4,
+            xyc(e18(2_000_000), e18(2_000_000)),
+            U256::MAX,
+            U256::MAX,
+            vec![],
+        ),
+        maker(
+            5,
+            concentrated(
+                e18(1_000_000),
+                e18(1_000_000),
+                sqrtp(95, 100),
+                sqrtp(105, 100),
+            ),
+            U256::MAX,
+            U256::MAX,
+            vec![],
+        ),
+    ];
+    let labels = [
+        "A XYC 1m",
+        "B conc+-10%",
+        "C pegged 200k",
+        "D XYC 2m",
+        "E conc+-5%",
+    ];
+    let trade = e18(500_000);
+    let spot = Ratio::new(cs[0].net_quote_exact_in(e18(1)).unwrap(), e18(1)).unwrap();
+    let best = cs
+        .iter()
+        .filter_map(|c| c.net_quote_exact_in(trade).ok())
+        .max()
+        .unwrap();
+    let sol = solve(&cs, &request(trade, true), None).unwrap();
+    println!("== F: 5 heterogeneous makers, trade 500,000 ==");
+    println!(
+        "  best single venue: exec {:>10.6}, impact {:>4} bp",
+        rate(best, trade),
+        Ratio::new(best, trade).unwrap().rel_diff_bps(&spot)
+    );
+    println!(
+        "  Solvent ({} legs): exec {:>10.6}, impact {:>4} bp  (improvement {} bp)",
+        sol.legs.len(),
+        rate(sol.amount_out, sol.amount_in),
+        Ratio::new(sol.amount_out, sol.amount_in)
+            .unwrap()
+            .rel_diff_bps(&spot),
+        Ratio::new(best, trade)
+            .unwrap()
+            .rel_diff_bps(&Ratio::new(sol.amount_out, sol.amount_in).unwrap())
+    );
+    println!("  allocation and post-fill marginal (the water level equalizes it):");
+    for leg in &sol.legs {
+        let idx = (leg.maker.0[0] as usize).saturating_sub(1);
+        let c = &cs[idx];
+        let marg = c
+            .spot_marginal(leg.amount_in)
+            .map(|m| rate_ratio(&m))
+            .unwrap_or(0.0);
+        println!(
+            "    {:>12}: {:>6.2}% of input ({:>12.2}), marginal ~{:.6}",
+            labels.get(idx).copied().unwrap_or("?"),
+            tokens(leg.amount_in) / tokens(sol.amount_in) * 100.0,
+            tokens(leg.amount_in),
+            marg
+        );
+    }
+}
+
+/// Scenario G — the shared-wallet cap: a maker with an excellent, deep curve but a small wallet is
+/// held to its wallet, and the rest spills to others. Shows the cost of the cap on quote quality.
+#[test]
+#[ignore = "study — pricing G: wallet caps"]
+fn study_pricing_g_wallet_caps() {
+    let trade = e18(500_000);
+    // A has the best (deepest) curve but its wallet caps it.
+    let a_pool = || xyc(e18(5_000_000), e18(5_000_000));
+    let others = || {
+        vec![
+            maker(
+                2,
+                xyc(e18(1_000_000), e18(1_000_000)),
+                e18(1_000_000),
+                e18(1_000_000),
+                vec![],
+            ),
+            maker(
+                3,
+                xyc(e18(1_000_000), e18(1_000_000)),
+                e18(1_000_000),
+                e18(1_000_000),
+                vec![],
+            ),
+        ]
+    };
+    let spot = Ratio::new(
+        maker(1, a_pool(), U256::MAX, U256::MAX, vec![])
+            .net_quote_exact_in(e18(1))
+            .unwrap(),
+        e18(1),
+    )
+    .unwrap();
+
+    for (label, a_cap) in [
+        ("uncapped A (wallet 5,000,000)", e18(5_000_000)),
+        ("capped A (wallet 50,000)", e18(50_000)),
+    ] {
+        let mut cs = vec![maker(1, a_pool(), a_cap, a_cap, vec![])];
+        cs.extend(others());
+        let sol = solve(&cs, &request(trade, true), None).unwrap();
+        let a_leg = sol
+            .legs
+            .iter()
+            .find(|l| l.maker.0[0] == 1)
+            .map(|l| tokens(l.amount_in))
+            .unwrap_or(0.0);
+        println!(
+            "  {:>30}: A takes {:>12.2}, exec {:.6}, impact {} bp",
+            label,
+            a_leg,
+            rate(sol.amount_out, sol.amount_in),
+            Ratio::new(sol.amount_out, sol.amount_in)
+                .unwrap()
+                .rel_diff_bps(&spot)
+        );
+    }
+    println!("== G: trade 500,000 — the wallet cap holds A to 50,000 and spills the rest (spot {:.4}) ==", rate_ratio(&spot));
+}
+
+/// Scenario H — skew vs quality: three XYC makers with the same input reserve but 1x/2x/5x output
+/// reserve. The absolute quote scales with the spot rate; the percentage impact does not.
+#[test]
+#[ignore = "study — pricing H: skew vs impact"]
+fn study_pricing_h_skew() {
+    let base = e18(1_000_000);
+    println!("== H: XYC makers, reserve_in 1,000,000, reserve_out 1x/2x/5x — spot differs, impact does not ==");
+    println!(
+        "  {:>10} {:>6} {:>13} {:>13} {:>9}",
+        "trade", "skew", "amount_out", "spot_rate", "impact"
+    );
+    for t in [10_000u64, 50_000, 100_000] {
+        let trade = e18(t);
+        for mult in [1u64, 2, 5] {
+            let c = maker(
+                1,
+                xyc(base, base * U256::from(mult)),
+                U256::MAX,
+                U256::MAX,
+                vec![],
+            );
+            let out = c.net_quote_exact_in(trade).unwrap();
+            println!(
+                "  {:>10} {:>4}x {:>13.2} {:>13.6} {:>6} bp",
+                t,
+                mult,
+                tokens(out),
+                mult as f64,
+                impact_bps(&c, trade).unwrap_or(0)
+            );
+        }
+    }
+}
+
+/// The headline dataset: price impact (bps) vs trade-as-fraction-of-liquidity, one row per fraction,
+/// one column per venue shape — single XYC / concentrated / pegged and Solvent over 2/4/8 XYC makers.
+/// This is the table behind the impact-vs-size chart.
+#[test]
+#[ignore = "study — pricing: impact curves for the headline chart"]
+fn study_pricing_impact_curves() {
+    let depth = e18(1_000_000);
+    let fracs = [10u64, 50, 100, 200, 500, 1000, 2000]; // bps of one pool's depth
+    println!("== Impact (bps) vs trade fraction of one pool's liquidity ==");
+    println!(
+        "  {:>8} {:>9} {:>9} {:>9} {:>10} {:>10} {:>10}",
+        "trade", "XYC", "conc+-10%", "pegged", "Solv x2", "Solv x4", "Solv x8"
+    );
+    let xyc_c = maker(1, xyc(depth, depth), U256::MAX, U256::MAX, vec![]);
+    let conc_c = maker(
+        1,
+        concentrated(depth, depth, sqrtp(90, 100), sqrtp(110, 100)),
+        U256::MAX,
+        U256::MAX,
+        vec![],
+    );
+    let peg_c = maker(1, pegged(depth, depth), U256::MAX, U256::MAX, vec![]);
+    let agg = |n: u64, trade: U256| -> String {
+        let cs: Vec<Candidate> = (0..n)
+            .map(|i| {
+                maker(
+                    (i as u8) + 1,
+                    xyc(depth, depth),
+                    U256::MAX,
+                    U256::MAX,
+                    vec![],
+                )
+            })
+            .collect();
+        let spot = Ratio::new(cs[0].net_quote_exact_in(e18(1)).unwrap(), e18(1)).unwrap();
+        match solve(&cs, &request(trade, true), None) {
+            Some(sol) => format!(
+                "{} bp",
+                Ratio::new(sol.amount_out, sol.amount_in)
+                    .unwrap()
+                    .rel_diff_bps(&spot)
+            ),
+            None => "--".to_string(),
+        }
+    };
+    let one = |c: &Candidate, x: U256| -> String {
+        c.net_quote_exact_in(x)
+            .ok()
+            .map(|_| format!("{} bp", impact_bps(c, x).unwrap_or(0)))
+            .unwrap_or_else(|| "--".to_string())
+    };
+    for bps in fracs {
+        let x = depth * U256::from(bps) / U256::from(10_000u64);
+        let label = format!("{:.2}%", bps as f64 / 100.0);
+        println!(
+            "  {:>8} {:>9} {:>9} {:>9} {:>10} {:>10} {:>10}",
+            label,
+            one(&xyc_c, x),
+            one(&conc_c, x),
+            one(&peg_c, x),
+            agg(2, x),
+            agg(4, x),
+            agg(8, x)
+        );
+    }
+}
+
+/// Display float for a rate ratio (output per input), for tables only.
+fn rate_ratio(r: &Ratio) -> f64 {
+    // rel_diff against 1.0 gives |r-1| in bps; recover a signed-enough float for display via probe.
+    let one = Ratio::new(e18(1), e18(1)).unwrap();
+    let bps = r.rel_diff_bps(&one) as f64 / 10_000.0;
+    if r >= &one {
+        1.0 + bps
+    } else {
+        1.0 - bps
+    }
+}

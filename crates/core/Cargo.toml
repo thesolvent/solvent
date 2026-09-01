@@ -7,6 +7,8 @@ publish.workspace = true
 [features]
 default = []
 tracing = ["dep:tracing"]
+# Count curve-quote requests per solve, for the latency benchmark's cost model. Off in production.
+quote-metrics = []
 
 [dependencies]
 alloy-primitives = { version = "1", features = ["serde"] }
@@ -14,6 +16,9 @@ alloy-sol-types = "1"
 arc-swap = "1"
 async-trait = "0.1"
 moka = { version = "0.12", features = ["sync"] }
+num-bigint = "0.4"
+num-rational = "0.4"
+num-traits = "0.2"
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
@@ -24,3 +29,8 @@ tracing = { version = "0.1", optional = true }
 proptest = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# Latency benchmark: `cargo bench -p solvent-core`. Plain Instant timing, no criterion.
+[[bench]]
+name = "routing"
+harness = false
