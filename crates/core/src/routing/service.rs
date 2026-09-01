@@ -60,8 +60,8 @@ pub fn route(
         config.max_legs,
         warm,
     )?;
-    // Optimality certificate: if a pool the funnel dropped has a higher spot marginal than the
-    // optimum's water level λ*, it should have been active — the funnel `k` was too small.
+    // Certificate diagnostic: a dropped pool whose (conservatively-estimated) spot marginal
+    // exceeds the optimum's water level λ* signals the funnel `k` was likely too small.
     if selection
         .best_omitted_spot
         .is_some_and(|spot| spot > split.lambda)
@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn routes_when_output_clears_the_min_and_declines_otherwise() {
         let (snap, caps, req) = fixture();
-        let cfg = RoutingConfig::new(64, 8, 150_000, None);
+        let cfg = RoutingConfig::new(64, 8, 150_000);
         // ~90 out for 100 in; a min-out below that yields a plan with the surplus as profit.
         let plan = route(
             &snap,
@@ -176,7 +176,7 @@ mod tests {
     fn exact_out_spread_charges_gas() {
         let (snap, caps, mut req) = fixture();
         req.exact_in = false; // deliver `amount` of token_out for at most `max_in`
-        let cfg = RoutingConfig::new(64, 8, 150_000, None);
+        let cfg = RoutingConfig::new(64, 8, 150_000);
         // ~102 in for 100 out; a generous max_in with no gas leaves surplus.
         let plan = route(
             &snap,

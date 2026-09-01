@@ -281,7 +281,8 @@ fn unbounded_input() -> U256 {
 /// the box cap (`net_quote_exact_out(cap_out)`), and the request itself — no venue takes
 /// more than the whole input (exact-in) or delivers more than the target (exact-out).
 /// Bounding to the request keeps the numerical fill's step scaled to the trade, not to an
-/// unreachable cap. An unreachable cap ⇒ the asymptote binds (`unbounded_input`).
+/// unreachable cap. Any un-priceable cap (an XYC asymptote, or arithmetic beyond the
+/// fixed-point range) ⇒ the sentinel bound, which the numerical fill backs off within.
 fn input_bounds(candidates: &[Candidate], request: &RouteRequest) -> Vec<U256> {
     candidates
         .iter()
@@ -404,6 +405,11 @@ fn build(candidates: &[Candidate], amounts: &[U256], side: Leg, lambda: &Ratio) 
             Leg::ExactIn => (amount, c.net_quote_exact_in(amount).ok()?),
             Leg::ExactOut => (c.net_quote_exact_out(amount).ok()?, amount),
         };
+        // A zero on either side is a dust fill the on-chain `quote()` reverts on — drop it
+        // rather than build a leg the chain would reject.
+        if leg_in.is_zero() || leg_out.is_zero() {
+            continue;
+        }
         legs.push(RouteLeg {
             maker: c.key.maker,
             strategy_hash: c.key.strategy_hash,
