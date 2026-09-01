@@ -41,6 +41,17 @@ impl Split {
         self.amount_in.saturating_add(self.gas(per_leg_cost))
     }
 
+    /// Whether this split is at least as good for the resolver as `other`, net of gas — more
+    /// `net_output` (exact-in) or less `gross_input` (exact-out). The sparsity pass keeps a
+    /// leg-drop when the smaller split is `no_worse_than` the current one.
+    pub fn no_worse_than(&self, other: &Split, per_leg_cost: U256, exact_in: bool) -> bool {
+        if exact_in {
+            self.net_output(per_leg_cost) >= other.net_output(per_leg_cost)
+        } else {
+            self.gross_input(per_leg_cost) <= other.gross_input(per_leg_cost)
+        }
+    }
+
     fn gas(&self, per_leg_cost: U256) -> U256 {
         per_leg_cost.saturating_mul(U256::from(self.legs.len()))
     }
@@ -57,16 +68,16 @@ const NO_FILL: LimitedQuote = LimitedQuote {
     limited: true,
 };
 
-/// The frozen inputs of one solve: the candidates, their per-leg input `bounds`, and their
-/// wallet `floors`. Every fill is a pure function of a water level.
-struct Fill<'a> {
+/// The frozen inputs of one solve: the candidate venues, their per-leg input `bounds`, and
+/// their wallet `floors`. Every fill is a pure function of a water level.
+struct Book<'a> {
     candidates: &'a [Candidate],
     bounds: Vec<U256>,
     floors: Vec<Ratio>,
     exact_in: bool,
 }
 
-impl<'a> Fill<'a> {
+impl<'a> Book<'a> {
     fn new(candidates: &'a [Candidate], request: &RouteRequest) -> Self {
         let bounds = input_bounds(candidates, request);
         let floors = wallet_floors(candidates, &bounds);
@@ -88,6 +99,14 @@ impl<'a> Fill<'a> {
         self.candidates[i]
             .net_quote_with_limit(self.bounds[i], level)
             .unwrap_or(NO_FILL)
+    }
+
+    /// Every leg's fill at `level`. Assembly (which runs once) uses this; the bisection uses
+    /// [`measure`](Self::measure) instead, to stay allocation-free.
+    fn fills(&self, level: &Ratio) -> Vec<LimitedQuote> {
+        (0..self.candidates.len())
+            .map(|i| self.leg(i, level))
+            .collect()
     }
 
     /// Total toward the target at `level` — input for exact-in, output for exact-out.
@@ -135,19 +154,19 @@ pub fn solve(
     if candidates.is_empty() || request.amount.is_zero() {
         return None;
     }
-    let fill = Fill::new(candidates, request);
+    let book = Book::new(candidates, request);
     let target = request.amount;
     // λ=0 fills every venue to its cap; if that can't reach the target, there is no route.
-    if fill.measure(&Ratio::zero()) < target {
+    if book.measure(&Ratio::zero()) < target {
         return None;
     }
-    let level = bracket_level(|l| fill.measure(l), target, warm);
+    let level = bracket_level(|l| book.measure(l), target, warm);
     // exact-in assembles at the under-filling side then adds the remainder; exact-out at the
     // over-filling side then trims the overshoot.
-    if fill.exact_in {
-        assemble_exact_in(&fill, &level.hi, target)
+    if book.exact_in {
+        assemble_exact_in(&book, &level.hi, target)
     } else {
-        assemble_exact_out(&fill, &level.lo, target)
+        assemble_exact_out(&book, &level.lo, target)
     }
 }
 
@@ -318,22 +337,25 @@ fn group_output(candidates: &[Candidate], outs: &[U256], maker: MakerId) -> U256
 /// Fill below `target` input at `level`, then place the remainder on the venue that buys the
 /// most extra output — bounded by its box cap and its maker's wallet — so total input is
 /// `target` and no maker's combined output exceeds its wallet.
-fn assemble_exact_in(fill: &Fill, level: &Ratio, target: U256) -> Option<Split> {
-    let quotes: Vec<LimitedQuote> = (0..fill.candidates.len())
-        .map(|i| fill.leg(i, level))
-        .collect();
-    let mut ins: Vec<U256> = quotes.iter().map(|q| q.amount_in).collect();
-    let mut outs: Vec<U256> = quotes.iter().map(|q| q.amount_out).collect();
+fn assemble_exact_in(book: &Book, level: &Ratio, target: U256) -> Option<Split> {
+    let fills = book.fills(level);
+    let mut ins: Vec<U256> = fills.iter().map(|q| q.amount_in).collect();
+    let mut outs: Vec<U256> = fills.iter().map(|q| q.amount_out).collect();
     let mut remainder = target.saturating_sub(sum(&ins));
     while !remainder.is_zero() {
-        let Some(i) = (0..fill.candidates.len())
-            .filter(|&i| !fill.topup_room(&ins, &outs, i).is_zero())
+        // Room per leg (box cap ∩ maker wallet), computed once for this pass.
+        let rooms: Vec<U256> = (0..book.candidates.len())
+            .map(|i| book.topup_room(&ins, &outs, i))
+            .collect();
+        // Pour the remainder into the leg that buys the most extra output for it.
+        let Some(i) = (0..book.candidates.len())
+            .filter(|&i| !rooms[i].is_zero())
             .max_by_key(|&i| {
-                let add = remainder.min(fill.topup_room(&ins, &outs, i));
-                let here = fill.candidates[i]
+                let add = remainder.min(rooms[i]);
+                let here = book.candidates[i]
                     .net_quote_exact_in(ins[i])
                     .unwrap_or(U256::ZERO);
-                let ahead = fill.candidates[i]
+                let ahead = book.candidates[i]
                     .net_quote_exact_in(ins[i].saturating_add(add))
                     .unwrap_or(here);
                 ahead.saturating_sub(here)
@@ -341,28 +363,26 @@ fn assemble_exact_in(fill: &Fill, level: &Ratio, target: U256) -> Option<Split> 
         else {
             break;
         };
-        let add = remainder.min(fill.topup_room(&ins, &outs, i));
+        let add = remainder.min(rooms[i]);
         if add.is_zero() {
             break;
         }
         ins[i] = ins[i].saturating_add(add);
-        outs[i] = fill.candidates[i]
+        outs[i] = book.candidates[i]
             .net_quote_exact_in(ins[i])
             .unwrap_or(outs[i]);
         remainder -= add;
     }
-    build(fill.candidates, &ins, Leg::ExactIn, level)
+    build(book.candidates, &ins, Leg::ExactIn, level)
 }
 
 /// Fill above `target` output at `level`, then trim the overshoot off the largest legs so
 /// total output is exactly `target` (never under). Trimming only lowers output, so every
 /// maker stays within its wallet.
-fn assemble_exact_out(fill: &Fill, level: &Ratio, target: U256) -> Option<Split> {
-    let mut outs: Vec<U256> = (0..fill.candidates.len())
-        .map(|i| fill.leg(i, level).amount_out)
-        .collect();
+fn assemble_exact_out(book: &Book, level: &Ratio, target: U256) -> Option<Split> {
+    let mut outs: Vec<U256> = book.fills(level).iter().map(|q| q.amount_out).collect();
     let mut overshoot = sum(&outs).saturating_sub(target);
-    let mut order: Vec<usize> = (0..fill.candidates.len())
+    let mut order: Vec<usize> = (0..book.candidates.len())
         .filter(|&i| !outs[i].is_zero())
         .collect();
     order.sort_by(|&a, &b| outs[b].cmp(&outs[a]));
@@ -374,7 +394,7 @@ fn assemble_exact_out(fill: &Fill, level: &Ratio, target: U256) -> Option<Split>
         outs[i] -= cut;
         overshoot -= cut;
     }
-    build(fill.candidates, &outs, Leg::ExactOut, level)
+    build(book.candidates, &outs, Leg::ExactOut, level)
 }
 
 /// Which side of the leg the working amounts hold — the other is recomputed exactly.
@@ -450,13 +470,7 @@ pub fn solve_sparse(
         // barely moves it). Keep the drop only if it improves the resolver's take, or we must
         // to meet `max_legs`; otherwise put the leg back and stop.
         match solve(&active, request, Some(&best.lambda)) {
-            Some(next)
-                if over_cap
-                    || (exact_in
-                        && next.net_output(per_leg_cost) >= best.net_output(per_leg_cost))
-                    || (!exact_in
-                        && next.gross_input(per_leg_cost) <= best.gross_input(per_leg_cost)) =>
-            {
+            Some(next) if over_cap || next.no_worse_than(&best, per_leg_cost, exact_in) => {
                 best = next;
             }
             _ => {
@@ -858,5 +872,35 @@ mod tests {
             c.net_quote_exact_in(bounded).unwrap() <= cap,
             "input_within_output keeps the realized output within the cap"
         );
+    }
+
+    fn split(legs: usize, amount_in: U256, amount_out: U256) -> Split {
+        let leg = RouteLeg {
+            maker: MakerId(Address::ZERO),
+            strategy_hash: StrategyHash(B256::ZERO),
+            token_in: tok(1),
+            token_out: tok(2),
+            amount_in: U256::ZERO,
+            amount_out: U256::ZERO,
+        };
+        Split {
+            legs: vec![leg; legs],
+            amount_in,
+            amount_out,
+            lambda: Ratio::zero(),
+        }
+    }
+
+    #[test]
+    fn no_worse_than_charges_gas_per_leg_both_directions() {
+        let cost = e18(1);
+        // Same totals, fewer legs ⇒ less gas ⇒ better for the resolver, both directions:
+        // exact-in nets more output, exact-out grosses less input.
+        let one = split(1, e18(100), e18(90));
+        let two = split(2, e18(100), e18(90));
+        assert!(one.no_worse_than(&two, cost, true)); // net_output 89 ≥ 88
+        assert!(!two.no_worse_than(&one, cost, true));
+        assert!(one.no_worse_than(&two, cost, false)); // gross_input 101 ≤ 102
+        assert!(!two.no_worse_than(&one, cost, false));
     }
 }
