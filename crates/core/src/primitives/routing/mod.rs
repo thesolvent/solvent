@@ -53,9 +53,9 @@ pub struct RoutePlan {
 
 /// Routing configuration. The gas **units** for one fill leg are a per-chain constant (one
 /// Aqua `swap` — transferFrom + pull/push + the SwapVM program; measure with `forge test
-/// --gas-report` on the filler). The per-leg *cost in output-token units* is derived live
-/// from `gas_units_per_leg × gas_price ÷ token price` (see `deps/routing`) and handed to the
-/// pure solver as a value.
+/// --gas-report` on the filler). The per-leg *cost in the spread token's units* is derived
+/// live from `gas_units_per_leg × gas_price ÷ token price` (see `deps/routing`) and handed to
+/// the pure solver as a value.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct RoutingConfig {

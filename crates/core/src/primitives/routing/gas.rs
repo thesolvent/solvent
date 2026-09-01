@@ -1,6 +1,7 @@
-//! Per-leg gas cost, expressed in output-token base units — the sparsity threshold the
-//! solver charges each leg. Pure: the adapter fetches `gas_price` (RPC) and the prices
-//! (oracle) and calls this. Prices are a fast estimate, never a settlement figure.
+//! Per-leg gas cost, expressed in the **spread token**'s base units — the token the resolver's
+//! profit is measured in (`token_out` for exact-in, `token_in` for exact-out) — as the sparsity
+//! threshold the solver charges each leg. Pure: the adapter fetches `gas_price` (RPC) and the
+//! prices (oracle) and calls this. Prices are a fast estimate, never a settlement figure.
 
 use alloy_primitives::U256;
 use rust_decimal::prelude::ToPrimitive;
@@ -8,8 +9,8 @@ use rust_decimal::Decimal;
 
 use crate::primitives::UsdPrice;
 
-/// `gas_units × gas_price` (native wei) valued in USD at `native_price`, converted to
-/// `token_out` at `token_price`, scaled by the token's decimals. Saturates to `U256::MAX`
+/// `gas_units × gas_price` (native wei) valued in USD at `native_price`, converted to the
+/// spread token at `token_price`, scaled by its decimals. Saturates to `U256::MAX`
 /// (⇒ never worth splitting) on a non-positive token price or an out-of-range result.
 pub fn per_leg_cost(
     gas_units: u64,
@@ -48,7 +49,7 @@ mod tests {
     }
 
     #[test]
-    fn converts_native_gas_into_output_token_units() {
+    fn converts_native_gas_into_spread_token_units() {
         // 150k gas × 20 gwei = 0.003 native; native $3000 ⇒ $9.
         // token $1, 18 decimals ⇒ 9e18 base units.
         let cost = per_leg_cost(150_000, 20_000_000_000, usd(3000), usd(1), 18);

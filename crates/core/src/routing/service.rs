@@ -12,35 +12,37 @@ use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 
 use super::{select, solve_sparse};
 
-/// Resolve the per-leg gas cost in `token_out` base units from the live cache — gas price
-/// and the native + output-token USD prices. `None` if any input is unavailable (the caller
-/// then routes without a gas threshold). Off the quote hot path; the ports read a cache.
+/// Resolve the per-leg gas cost in the **spread token**'s base units from the live cache — gas
+/// price and the native + spread-token USD prices. The spread token is `token_out` for exact-in
+/// and `token_in` for exact-out (the token the resolver's profit is measured in), so the caller
+/// passes whichever the direction needs. `None` if any input is unavailable (the caller then
+/// routes without a gas threshold). Off the quote hot path; the ports read a cache.
 pub async fn resolve_leg_cost(
     gas: &dyn GasPrice,
     oracle: &dyn PriceOracle,
     gas_units: u64,
     native: Address,
-    token_out: Address,
-    token_decimals: u8,
+    spread_token: Address,
+    spread_token_decimals: u8,
 ) -> Option<U256> {
     let gas_wei = gas.gas_price_wei().await.ok()?;
     let native_price = oracle.price(native).await.ok()?;
-    let token_price = oracle.price(token_out).await.ok()?;
+    let token_price = oracle.price(spread_token).await.ok()?;
     Some(compute_leg_cost(
         gas_units,
         gas_wei,
         native_price,
         token_price,
-        token_decimals,
+        spread_token_decimals,
     ))
 }
 
 /// Route `request`: rank candidates ([`select`]), solve the gas-sparse split
 /// ([`solve_sparse`]), and gate on the taker's bound — `min_out` for exact-in, `max_in` for
-/// exact-out. `per_leg_cost` is the resolved per-leg gas in `token_out` units; `warm` is the
-/// last λ for this pair. Returns `None` when there is no profitable, reservable route: the
-/// surplus is computed with a saturating-checked subtraction, so a bound the split can't beat
-/// declines the plan.
+/// exact-out. `per_leg_cost` is the resolved per-leg gas in the spread token (output for
+/// exact-in, input for exact-out); `warm` is the last λ for this pair. Returns `None` when
+/// there is no profitable, reservable route — the spread is a checked subtraction, so a bound
+/// the split can't beat declines the plan.
 pub fn route(
     snapshot: &Snapshot,
     caps: &AvailableSnapshot,
@@ -51,7 +53,7 @@ pub fn route(
     warm: Option<&Ratio>,
 ) -> Option<RoutePlan> {
     let selection = select(snapshot, caps, request, config.max_candidates);
-    let solution = solve_sparse(
+    let split = solve_sparse(
         &selection.chosen,
         request,
         per_leg_cost,
@@ -62,18 +64,19 @@ pub fn route(
     // optimum's water level λ*, it should have been active — the funnel `k` was too small.
     if selection
         .best_omitted_spot
-        .is_some_and(|spot| spot > solution.lambda)
+        .is_some_and(|spot| spot > split.lambda)
     {
         warn!(intent = %request.intent, "routing funnel too small: an omitted pool's spot exceeds the optimum's marginal price");
     }
+    // The resolver's spread over the taker's bound, both directions charging gas.
     let expected_profit = if request.exact_in {
-        solution.net_out.checked_sub(bound)? // net-of-gas output must clear `min_out`
+        split.net_output(per_leg_cost).checked_sub(bound)? // net output clears `min_out`
     } else {
-        bound.checked_sub(solution.amount_in)? // input must stay under `max_in`
+        bound.checked_sub(split.gross_input(per_leg_cost))? // input + gas stays under `max_in`
     };
     Some(RoutePlan {
         intent: request.intent,
-        legs: solution.legs,
+        legs: split.legs,
         expected_profit,
     })
 }
@@ -164,6 +167,36 @@ mod tests {
             U256::from(200u64),
             &cfg,
             U256::ZERO,
+            None
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn exact_out_spread_charges_gas() {
+        let (snap, caps, mut req) = fixture();
+        req.exact_in = false; // deliver `amount` of token_out for at most `max_in`
+        let cfg = RoutingConfig::new(64, 8, 150_000, None);
+        // ~102 in for 100 out; a generous max_in with no gas leaves surplus.
+        let plan = route(
+            &snap,
+            &caps,
+            &req,
+            U256::from(200u64),
+            &cfg,
+            U256::ZERO,
+            None,
+        )
+        .unwrap();
+        assert!(plan.expected_profit > U256::ZERO);
+        // The same max_in, but per-leg gas that swallows the surplus, declines the route.
+        assert!(route(
+            &snap,
+            &caps,
+            &req,
+            U256::from(200u64),
+            &cfg,
+            U256::from(150u64),
             None
         )
         .is_none());
