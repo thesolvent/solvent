@@ -77,6 +77,17 @@ path that read a strategy balance without this filter — now fixed to check `ac
 - **Disposition:** (1) enforce in the composition root when the app binary is wired; (2) reconcile
   (Task M) + the on-chain revert already cover the after-reserve drop.
 
+## L7 — Pegged legs under-fill slightly at the marginal-price optimum
+`fill_to_limit_numerical` (the partial fill for curves with no closed-form inverse, i.e. Pegged)
+finds the fill by bisecting a **finite-difference** marginal with a step of `feasible_bound / 1e6`.
+The secant lies below the true tangent on a concave curve, so the bisection stops where the *secant*
+reaches λ — a touch before the true marginal does — and the pegged leg under-fills. The KKT oracle
+measured this at up to ~18 % marginal deviation on a pegged leg vs the closed-form XYC/Concentrate legs
+(which land on λ exactly); the output loss is far smaller (the gap is integrated over a small fill
+delta). This is why the KKT residual check excludes pegged legs (they're still covered by the
+unused-leg violation check). → refine the fill with a Newton/secant step after the bisection, or a
+step local to the fill point, to land the marginal on λ tightly. Quality, not correctness.
+
 ---
 
 # Performance — refactor before production
