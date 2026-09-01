@@ -148,7 +148,10 @@ pub fn select(
     let mut scored: Vec<Scored> = snapshot
         .active_strategies_for_pair(pair)
         .filter_map(|s| build_candidate(s, caps, request.token_in, request.token_out))
-        .map(|c| (score(&c), c))
+        .map(|candidate| Scored {
+            score: score(&candidate),
+            candidate,
+        })
         .collect();
     let exact_in = request.exact_in;
     let better = |a: &Scored, b: &Scored| best_first(a, b, exact_in);
@@ -158,7 +161,7 @@ pub fn select(
         scored.select_nth_unstable_by(k, better);
         let spot = scored[k..]
             .iter()
-            .filter_map(|(_, c)| c.spot_marginal(request.amount))
+            .filter_map(|s| s.candidate.spot_marginal(request.amount))
             .max();
         scored.truncate(k);
         spot
@@ -167,7 +170,7 @@ pub fn select(
     };
     scored.sort_by(better);
     Selection {
-        chosen: scored.into_iter().map(|(_, c)| c).collect(),
+        chosen: scored.into_iter().map(|s| s.candidate).collect(),
         best_omitted_spot,
     }
 }
@@ -184,20 +187,28 @@ pub struct Selection {
 }
 
 /// A candidate with its rank score (`None` = unpriceable at this size).
-type Scored = (Option<U256>, Candidate);
+struct Scored {
+    score: Option<U256>,
+    candidate: Candidate,
+}
 
 /// Order candidates best-first: exact-in prefers more output, exact-out less input; a
 /// priceable candidate always beats an unpriceable one; `strategy_hash` breaks ties for a
 /// snapshot-order-independent result.
 fn best_first(a: &Scored, b: &Scored, exact_in: bool) -> Ordering {
-    let by_score = match (a.0, b.0) {
+    let by_score = match (a.score, b.score) {
         (Some(x), Some(y)) if exact_in => y.cmp(&x),
         (Some(x), Some(y)) => x.cmp(&y),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
     };
-    by_score.then_with(|| a.1.key.strategy_hash.cmp(&b.1.key.strategy_hash))
+    by_score.then_with(|| {
+        a.candidate
+            .key
+            .strategy_hash
+            .cmp(&b.candidate.key.strategy_hash)
+    })
 }
 
 /// Build one eligible candidate, or `None` when the strategy can't source this pair:

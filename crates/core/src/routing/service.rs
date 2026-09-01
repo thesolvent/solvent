@@ -69,10 +69,9 @@ pub fn route(
         warn!(intent = %request.intent, "routing funnel too small: an omitted pool's spot exceeds the optimum's marginal price");
     }
     // The resolver's spread over the taker's bound, both directions charging gas.
-    let expected_profit = if request.exact_in {
-        split.net_output(per_leg_cost).checked_sub(bound)? // net output clears `min_out`
-    } else {
-        bound.checked_sub(split.gross_input(per_leg_cost))? // input + gas stays under `max_in`
+    let expected_profit = match request.exact_in {
+        true => split.net_output(per_leg_cost).checked_sub(bound)?, // net output clears `min_out`
+        false => bound.checked_sub(split.gross_input(per_leg_cost))?, // input + gas stays under `max_in`
     };
     Some(RoutePlan {
         intent: request.intent,
