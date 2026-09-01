@@ -287,12 +287,12 @@ fn unbounded_input() -> U256 {
     U256::from(1u8) << 112
 }
 
-/// Per-candidate gross-input ceiling for the fill. Two constraints, whichever is tighter:
-/// the box cap (`net_quote_exact_out(cap_out)`), and the request itself — no venue takes
-/// more than the whole input (exact-in) or delivers more than the target (exact-out).
-/// Bounding to the request keeps the numerical fill's step scaled to the trade, not to an
-/// unreachable cap. Any un-priceable cap (an XYC asymptote, or arithmetic beyond the
-/// fixed-point range) ⇒ the sentinel bound, which the numerical fill backs off within.
+/// Per-candidate gross-input ceiling for the fill. For exact-in, the box cap's input, capped by
+/// the whole request. For exact-out, enough input to *reach* the binding output: the target when
+/// it sits below the cap — rounded up, so the feasibility measure can actually see the target and
+/// the assembly trims the overshoot back to it — else the cap, stepped back so no leg delivers
+/// past it. An un-priceable bound (an XYC asymptote, or arithmetic beyond the fixed-point range)
+/// ⇒ the sentinel, which the numerical fill backs off within.
 fn input_bounds(candidates: &[Candidate], request: &RouteRequest) -> Vec<U256> {
     candidates
         .iter()
@@ -301,9 +301,16 @@ fn input_bounds(candidates: &[Candidate], request: &RouteRequest) -> Vec<U256> {
                 c.input_within_output(c.cap_out)
                     .unwrap_or_else(unbounded_input)
                     .min(request.amount)
+            } else if request.amount < c.cap_out {
+                // The target binds below the cap: round the input up so the leg can reach the
+                // target — the feasibility measure must see it, and the assembly trims the
+                // overshoot back to exactly the target, which stays under the cap.
+                c.net_quote_exact_out(request.amount)
+                    .ok()
+                    .unwrap_or_else(unbounded_input)
             } else {
-                let deliverable = c.cap_out.min(request.amount);
-                c.input_within_output(deliverable)
+                // The cap binds: step back so the leg never delivers past its cap.
+                c.input_within_output(c.cap_out)
                     .unwrap_or_else(unbounded_input)
             }
         })
@@ -462,6 +469,10 @@ fn build(candidates: &[Candidate], amounts: &[U256], side: Leg, lambda: &Ratio) 
 /// `reducePaths`, Balancer `optimizeSwapAmounts`): it turns the gas-free optimum's many dust
 /// legs into a few that each earn their gas. `per_leg_cost` is the per-leg gas in the spread
 /// token (`token_out` for exact-in, `token_in` for exact-out).
+///
+/// `max_legs` is a best-effort target, not a hard cap: when no set within it can fill the trade,
+/// the last feasible split is returned even though it exceeds `max_legs` — a valid route beats
+/// declining a fillable trade.
 pub fn solve_sparse(
     candidates: &[Candidate],
     request: &RouteRequest,
@@ -831,6 +842,26 @@ mod tests {
         let collapsed = solve_sparse(&cs, &req, e18(100_000), 8, None).unwrap();
         assert_eq!(collapsed.legs.len(), 1, "high gas collapses exact-out");
         assert_eq!(collapsed.amount_out, e18(1000), "still delivers the target");
+    }
+
+    #[test]
+    fn sparsity_returns_a_valid_route_when_it_cannot_meet_max_legs() {
+        // max_legs is a best-effort target, not a hard cap: two shallow pools each capped below
+        // the target need both legs, so max_legs = 1 cannot hold the trade. Dropping to one leg
+        // makes `solve` return None, and `solve_sparse` restores the leg — returning a valid
+        // over-cap route rather than declining a fillable trade.
+        let cs = [
+            cand(1, xyc(e18(500), e18(500)), e18(400), &[]),
+            cand(2, xyc(e18(500), e18(500)), e18(400), &[]),
+        ];
+        let target = e18(600);
+        let sol = solve_sparse(&cs, &request(target, false), U256::ZERO, 1, None).unwrap();
+        assert_eq!(sol.amount_out, target, "still delivers the target");
+        assert_eq!(
+            sol.legs.len(),
+            2,
+            "keeps both legs — neither fills the target alone"
+        );
     }
 
     /// A maker's combined output across its legs.
