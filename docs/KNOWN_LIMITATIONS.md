@@ -142,3 +142,24 @@ throughput. → group-commit batching, or the command-actor / Disruptor model, w
 therefore makes N round-trips. → batch the whole reserve's confirm into a single multicall (design
 calls for "1 batched JIT confirm"). Also: the event-sourced zero-RPC budget cache replaces this on the
 quote path entirely (a later phase).
+
+---
+
+# Deferred routing test coverage
+
+The routing correctness + quality suite (Tiers 0–3, `docs/plans/backend/routing-experiments-plan.md`)
+was completed as a value-focused subset: Tier 0 invariants, Tier 1 oracles (KKT/round-trip/monotonicity),
+Tier 2 quality (sparsity #31, funnel #32), and one Tier-3 axis (extreme-scale robustness). The remaining
+20-axis-matrix studies were deferred as lower-yield — each either folds into an oracle already run, or
+re-confirms a known finding, or needs calibrated market data. Pick up if a specific concern arises:
+
+- **Adversarial book search** (CMA-ES / hill-climb maximising regret@K) — the solver adversary is covered
+  by the KKT optimality oracle, the funnel adversary by L9; would re-derive both.
+- **Realism replay** (calibrated depths/fees + log-normal sizes → bps given up per unit volume) — dominated
+  by #31's sparsity regret (≤37 bps) with the funnel inactive at K=64; needs real market data.
+- **Warm-start economics** (cold vs same/stale/adversarial λ — iteration counts), **tol/iter Pareto**
+  (regret vs p99 as `MAX_ITERS`/tol move), **two-stage funnel at large n** (spot prefilter n→256→K),
+  **temporal** (staleness/churn/depletion), **interaction discovery** (variance decomposition over an LHS
+  sample) — tuning/characterisation studies, valuable once there is production load to calibrate against.
+- **Quote-call → latency predictor** — the counter now exists (`--features quote-metrics`); building the
+  full per-curve unit-cost model is deferred until the `BigRational`→fixed-point decision is on the table.
