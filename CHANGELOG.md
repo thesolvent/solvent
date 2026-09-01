@@ -56,10 +56,22 @@ the project is pre-1.0 and evolving.
   - **Contract-fidelity hardening**: out-of-domain curve params rejected at decode; the pegged
     numerical fill degrades past the overflow sentinel; dust legs the chain reverts on are
     dropped; a leg's input is bounded to its output cap (no round-trip over-reservation).
-  - Deferred to T5: the 500 ms latency benchmark, and the 3-component (registry + ledger +
-    routing) live E2E over anvil + SQLite.
+  - **Validation (T5)**: an independent-oracle property suite (no reference solve — it would share
+    the code under test) — Tier-0 invariants (conservation, order-independence, feasibility),
+    Tier-1 optimality oracles (finite-difference KKT residual, round-trip, output-monotonicity),
+    Tier-2 quality studies (2^K sparsity regret, funnel decomposition), Tier-3 extreme-scale
+    robustness (1e6–1e28 reserves) — which surfaced and fixed four bugs a reference-solve test
+    structurally cannot catch: exact-in under-spend, order-dependence, pegged FD-precision fill,
+    and an unused-leg group-floor misflag.
+  - Criterion latency benchmark (500 ms p99 budget) + a feature-gated quote-call counter, and a
+    pricing matrix (scenarios A–H): baseline curve, depth sensitivity, fee-vs-curve separation,
+    concentration/effective-depth, N-maker aggregation, heterogeneous split, wallet caps, and
+    skew-vs-impact — the numbers behind the impact-vs-size characterization.
+  - 3-component live E2E over anvil + SQLite — registry sync → `route` → ledger `reserve` —
+    asserting every routed plan is reservable and the router declines beyond the ledger's caps.
+  - Limitations and deferred test coverage tracked in `docs/KNOWN_LIMITATIONS.md`.
 
-_Next: B3 T5 — routing benchmark + 3-component live E2E; then B4._
+_Next: B4._
 
 ## [0.1.0] — 2026-08-28
 
