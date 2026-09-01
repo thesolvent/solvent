@@ -607,6 +607,46 @@ mod tests {
             .fold(U256::ZERO, |s, x| s + x)
     }
 
+    /// A fine-grained greedy min-input reference for exact-out: buy each output chunk from the
+    /// leg that delivers it for the least extra input. The water-fill's optimum must spend no
+    /// more (within a chunk).
+    fn brute_force_in(candidates: &[Candidate], amount: U256, chunks: u64) -> U256 {
+        let caps: Vec<U256> = candidates.iter().map(|c| c.cap_out).collect();
+        let mut outs = vec![U256::ZERO; candidates.len()];
+        let chunk = (amount / U256::from(chunks)).max(U256::from(1u64));
+        let mut remaining = amount;
+        while !remaining.is_zero() {
+            let step = chunk.min(remaining);
+            let best = (0..candidates.len())
+                .filter(|&i| caps[i] > outs[i])
+                .min_by_key(|&i| {
+                    let add = step.min(caps[i] - outs[i]);
+                    let here = candidates[i]
+                        .net_quote_exact_out(outs[i])
+                        .unwrap_or(U256::ZERO);
+                    let ahead = candidates[i]
+                        .net_quote_exact_out(outs[i] + add)
+                        .unwrap_or(U256::MAX);
+                    ahead.saturating_sub(here)
+                });
+            let Some(i) = best else { break };
+            let add = step.min(caps[i] - outs[i]);
+            outs[i] += add;
+            remaining -= add;
+        }
+        candidates
+            .iter()
+            .zip(&outs)
+            .map(|(c, &o)| {
+                if o.is_zero() {
+                    U256::ZERO
+                } else {
+                    c.net_quote_exact_out(o).unwrap_or(U256::ZERO)
+                }
+            })
+            .fold(U256::ZERO, |s, x| s + x)
+    }
+
     #[test]
     fn exact_in_sum_equals_target_and_respects_caps() {
         let cs = [
@@ -662,6 +702,29 @@ mod tests {
             "a heterogeneous split, not a single venue"
         );
         assert_eq!(sol.amount_in, amount);
+    }
+
+    #[test]
+    fn exact_out_within_epsilon_of_brute_force_heterogeneous() {
+        // Same heterogeneous set, exact-out: the optimum spends no more input than the greedy
+        // min-input reference (within a chunk), and delivers the target exactly.
+        let cs = [
+            cand(1, xyc(e18(2000), e18(2000)), e18(10_000), &[3_000_000]), // 0.3%
+            cand(2, concentrate(e18(2000)), e18(10_000), &[]),
+            cand(3, pegged(e18(2000)), e18(10_000), &[1_000_000]), // 0.1%
+        ];
+        let amount = e18(500);
+        let sol = solve(&cs, &request(amount, false), None).unwrap();
+        let brute = brute_force_in(&cs, amount, 2000);
+        let eps = amount / U256::from(1000u64);
+        assert!(
+            sol.amount_in <= brute.saturating_add(eps),
+            "water-fill in {} vs brute in {}",
+            sol.amount_in,
+            brute
+        );
+        assert_eq!(sol.amount_out, amount, "delivers exactly the target");
+        assert!(sol.legs.len() >= 2, "a heterogeneous split");
     }
 
     #[test]
