@@ -333,3 +333,69 @@ fn sparsity_is_meaningful_below_the_gas_crossover() {
     );
     assert_eq!(sparse.amount_in, e18(3000), "still spends the target");
 }
+
+/// A lower bound on the output a book can deliver, from per-candidate quotes and the shared
+/// wallet caps alone — independent of the water-fill. Each leg delivers at most its `cap_out`
+/// (when the curve can reach it) or its output at the large-input sentinel (its asymptote);
+/// each maker's legs together deliver at most its wallet. Unpriceable legs count as zero, so
+/// this never over-estimates — a target comfortably under it is genuinely fillable.
+fn deliverable_lower_bound(cs: &[Candidate]) -> U256 {
+    let sentinel = U256::from(1u8) << 112;
+    let leg_out = |c: &Candidate| match c.input_within_output(c.cap_out) {
+        Some(_) => c.cap_out,
+        None => c
+            .net_quote_exact_in(sentinel)
+            .unwrap_or(U256::ZERO)
+            .min(c.cap_out),
+    };
+    let mut makers: Vec<MakerId> = cs.iter().map(|c| c.key.maker).collect();
+    makers.sort_unstable();
+    makers.dedup();
+    makers.iter().fold(U256::ZERO, |total, &m| {
+        let group = cs
+            .iter()
+            .filter(|c| c.key.maker == m)
+            .fold(U256::ZERO, |s, c| s.saturating_add(leg_out(c)));
+        let wallet = cs
+            .iter()
+            .find(|c| c.key.maker == m)
+            .map(|c| c.wallet_cap)
+            .unwrap_or(U256::MAX);
+        total.saturating_add(group.min(wallet))
+    })
+}
+
+/// One feasibility trial: a book that can comfortably deliver a target must not decline it. The
+/// target is four-fifths of a conservative capacity bound — well within reach.
+fn feasibility_trial(seed: u64) {
+    let mut rng = Rng(0xFEA5_1B1E ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(1, 12) as usize;
+    let cs = random_book(&mut rng, n);
+    let target = deliverable_lower_bound(&cs) * U256::from(4u64) / U256::from(5u64);
+    if target.is_zero() {
+        return;
+    }
+    assert!(
+        solve(&cs, &request(target, false), None).is_some(),
+        "seed={seed}: declined an exact-out target {target} at 80% of a capacity lower bound",
+    );
+}
+
+/// A comfortably-fillable exact-out target near a leg's capacity is not declined — the book that
+/// first exposed the feasibility-gate under-count (`measure(0)` capped a wei below target). Fast
+/// always-on guard.
+#[test]
+fn exact_out_near_capacity_is_not_declined() {
+    feasibility_trial(13);
+}
+
+/// Feasibility oracle: catches a spurious `None` on a fillable book — a single leg erroring
+/// inside `build`, or the feasibility gate under-counting. This is the gap the conservation
+/// suite can't see, since it only checks the plans that come back `Some`.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn feasible_books_are_not_declined() {
+    for seed in 0u64..1500 {
+        feasibility_trial(seed);
+    }
+}
