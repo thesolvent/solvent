@@ -898,3 +898,106 @@ fn conservation_holds_over_extreme_scale() {
         "extreme-scale study barely exercised solve ({solved}/2000)"
     );
 }
+
+/// A single uncapped candidate wrapping `pool`, for pricing characterization.
+fn priced(pool: CurvePool) -> Candidate {
+    let key = StrategyKey {
+        maker: MakerId(Address::from([1u8; 20])),
+        app: Address::ZERO,
+        strategy_hash: StrategyHash(B256::from([1u8; 32])),
+    };
+    Candidate::new(key, tok(1), tok(2), U256::MAX, U256::MAX, pool, vec![])
+}
+
+/// Price impact in bps: how far the realized rate (output/input) sits below the pool's spot
+/// marginal (rate at a tiny probe). impact = (spot − realized)/spot × 10000.
+fn impact_bps(c: &Candidate, x: U256) -> Option<u64> {
+    let probe = (x / U256::from(100_000u64)).max(U256::from(1u64));
+    let spot = Ratio::new(c.net_quote_exact_in(probe).ok()?, probe)?;
+    let realized = Ratio::new(c.net_quote_exact_in(x).ok()?, x)?;
+    Some(realized.rel_diff_bps(&spot))
+}
+
+/// sqrt-price in 1e18 fixed point for the price `num/den`.
+fn sqrtp(num: u64, den: u64) -> U256 {
+    (e18(num) * e18(1) / U256::from(den)).root(2)
+}
+
+#[test]
+#[ignore = "study — pricing impact across pool conditions"]
+fn study_price_impact() {
+    let depth = e18(1_000_000); // a deep 1,000,000 : 1,000,000 maker
+    let bp_of = |bp: u64| depth * U256::from(bp) / U256::from(10_000u64);
+
+    println!("== XYC balanced (depth 1,000,000): impact vs trade size ==");
+    let xyc = priced(CurvePool::Xyc(XycPool::from_reserves(depth, depth)));
+    for bp in [1u64, 10, 50, 100, 500, 1000, 2500, 5000] {
+        println!(
+            "  trade {:>5} bp of depth: impact {:?} bps",
+            bp,
+            impact_bps(&xyc, bp_of(bp))
+        );
+    }
+
+    println!("== Concentration: same 1% trade, tighter band = deeper virtual liquidity ==");
+    let x = bp_of(100); // 1% of depth
+    println!("  full-range (XYC): impact {:?} bps", impact_bps(&xyc, x));
+    for (name, lo, hi) in [
+        ("[0.50, 2.00]", sqrtp(1, 2), sqrtp(2, 1)),
+        ("[0.80, 1.25]", sqrtp(8, 10), sqrtp(125, 100)),
+        ("[0.95, 1.05]", sqrtp(95, 100), sqrtp(105, 100)),
+    ] {
+        let pool = CurvePool::Concentrate(ConcentratePool::from_reserves_and_bounds(
+            tok(1),
+            tok(2),
+            depth,
+            depth,
+            lo,
+            hi,
+        ));
+        println!(
+            "  band {name}: impact {:?} bps",
+            impact_bps(&priced(pool), x)
+        );
+    }
+
+    println!("== Bias/skew: reserve_out : reserve_in, trade 1% of reserve_in ==");
+    for (ro, ri) in [(1u64, 1u64), (2, 1), (5, 1), (20, 1)] {
+        let pool = CurvePool::Xyc(XycPool::from_reserves(
+            depth * U256::from(ri),
+            depth * U256::from(ro),
+        ));
+        let trade = depth * U256::from(ri) / U256::from(100u64);
+        println!(
+            "  {ro}:{ri} (spot rate ~{ro}): impact {:?} bps",
+            impact_bps(&priced(pool), trade)
+        );
+    }
+
+    println!("== Router aggregation: split a 5%-of-one-pool trade across N equal pools ==");
+    let trade = bp_of(500); // 5% of a single pool
+    for n in [1u64, 2, 4, 8] {
+        let cs: Vec<Candidate> = (0..n)
+            .map(|i| {
+                let mut h = [0u8; 32];
+                h[31] = i as u8;
+                let key = StrategyKey {
+                    maker: MakerId(Address::from([(i as u8) + 1; 20])),
+                    app: Address::ZERO,
+                    strategy_hash: StrategyHash(B256::from(h)),
+                };
+                let pool = CurvePool::Xyc(XycPool::from_reserves(depth, depth));
+                Candidate::new(key, tok(1), tok(2), U256::MAX, U256::MAX, pool, vec![])
+            })
+            .collect();
+        if let Some(sol) = solve(&cs, &request(trade, true), None) {
+            let spot = Ratio::new(cs[0].net_quote_exact_in(e18(1)).unwrap(), e18(1)).unwrap();
+            let realized = Ratio::new(sol.amount_out, sol.amount_in).unwrap();
+            println!(
+                "  {n} pool(s), {} legs: impact {} bps",
+                sol.legs.len(),
+                realized.rel_diff_bps(&spot)
+            );
+        }
+    }
+}
