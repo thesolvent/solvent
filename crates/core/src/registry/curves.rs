@@ -78,20 +78,30 @@ fn fill_to_limit_numerical<P: Pricing + ?Sized>(
         });
     }
     let step = (amount_in / U256::from(1_000_000u64)).max(U256::from(1u64));
+    // Marginal at `a`, or zero when `a` is beyond the pool's representable range — a huge
+    // sentinel bound overflowing the fixed-point math reads as drained, so the bisection backs
+    // off instead of failing the whole fill.
     let marginal = |a: U256| -> Result<Ratio, CurveError> {
-        let here = pool.quote_exact_in(a)?;
+        let Ok(here) = pool.quote_exact_in(a) else {
+            return Ok(Ratio::zero());
+        };
         match pool.quote_exact_in(a.saturating_add(step)) {
             Ok(ahead) => Ratio::new(ahead.saturating_sub(here), step).ok_or(CurveError::DivByZero),
             Err(_) => Ok(Ratio::zero()),
         }
     };
-    if marginal(amount_in)?.ge(limit) {
-        let out = pool.quote_exact_in(amount_in)?;
-        return Ok(LimitedQuote {
-            amount_in,
-            amount_out: out,
-            limited: false,
-        });
+    // An input that both prices and still clears the limit at its margin.
+    let clears = |a: U256| -> Result<bool, CurveError> {
+        Ok(pool.quote_exact_in(a).is_ok() && marginal(a)?.ge(limit))
+    };
+    if let Ok(out) = pool.quote_exact_in(amount_in) {
+        if marginal(amount_in)?.ge(limit) {
+            return Ok(LimitedQuote {
+                amount_in,
+                amount_out: out,
+                limited: false,
+            });
+        }
     }
     if marginal(U256::ZERO)?.lt(limit) {
         return Ok(LimitedQuote {
@@ -100,10 +110,11 @@ fn fill_to_limit_numerical<P: Pricing + ?Sized>(
             limited: true,
         });
     }
+    // Largest input that still prices and clears the limit; `lo` therefore always prices.
     let (mut lo, mut hi) = (U256::ZERO, amount_in);
     while hi - lo > U256::from(1u64) {
         let mid = lo + (hi - lo) / U256::from(2u64);
-        match marginal(mid)?.ge(limit) {
+        match clears(mid)? {
             true => lo = mid,
             false => hi = mid,
         }
@@ -750,6 +761,30 @@ mod tests {
 
     fn ratio(n: u64, d: u64) -> Ratio {
         Ratio::new(U256::from(n), U256::from(d)).unwrap()
+    }
+
+    #[test]
+    fn pegged_fill_degrades_past_the_overflow_sentinel() {
+        // A small normalization factor overflows the fixed-point math at the huge
+        // `unbounded_input` sentinel the solver passes for an unpriceable cap; the fill must
+        // back off to a representable amount instead of erroring (which would silently drop the
+        // pool from the split).
+        let params = PeggedParams {
+            x0: U256::from(1_000_000_000u64),
+            y0: U256::from(1_000_000_000u64),
+            linear_width: U256::from(100u64) * one27(),
+            rate_lt: U256::from(1u64),
+            rate_gt: U256::from(1u64),
+        };
+        let pool = PeggedPool::from_reserves_and_params(lo(), hi(), e18(1000), e18(1000), params);
+        let sentinel = U256::from(1u8) << 112;
+        // The raw quote overflows at the sentinel — the bug's precondition.
+        assert!(pool.quote_exact_in(sentinel).is_err());
+        // Filling with no floor (the λ=0 feasibility case) degrades to a bounded, priceable
+        // amount with real output, instead of erroring.
+        let q = pool.quote_with_limit(sentinel, &Ratio::zero()).unwrap();
+        assert!(q.amount_in < sentinel);
+        assert!(q.amount_out > U256::ZERO);
     }
 
     #[test]
