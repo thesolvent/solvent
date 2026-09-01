@@ -335,8 +335,9 @@ fn group_output(candidates: &[Candidate], outs: &[U256], maker: MakerId) -> U256
 }
 
 /// Fill below `target` input at `level`, then place the remainder on the venue that buys the
-/// most extra output — bounded by its box cap and its maker's wallet — so total input is
-/// `target` and no maker's combined output exceeds its wallet.
+/// most extra output — bounded by its box cap and its maker's wallet. Input reaches `target`
+/// within the bisection tolerance and never over-spends it; a wallet-pinned book may strand a
+/// sub-tolerance sliver rather than push a maker's combined output past its wallet.
 fn assemble_exact_in(book: &Book, level: &Ratio, target: U256) -> Option<Split> {
     let fills = book.fills(level);
     let mut ins: Vec<U256> = fills.iter().map(|q| q.amount_in).collect();
@@ -347,7 +348,8 @@ fn assemble_exact_in(book: &Book, level: &Ratio, target: U256) -> Option<Split> 
         let rooms: Vec<U256> = (0..book.candidates.len())
             .map(|i| book.topup_room(&ins, &outs, i))
             .collect();
-        // Pour the remainder into the leg that buys the most extra output for it.
+        // Pour the remainder into the leg that buys the most extra output for it; ties break
+        // by strategy_hash so the choice is independent of candidate order.
         let Some(i) = (0..book.candidates.len())
             .filter(|&i| !rooms[i].is_zero())
             .max_by_key(|&i| {
@@ -358,7 +360,10 @@ fn assemble_exact_in(book: &Book, level: &Ratio, target: U256) -> Option<Split> 
                 let ahead = book.candidates[i]
                     .net_quote_exact_in(ins[i].saturating_add(add))
                     .unwrap_or(here);
-                ahead.saturating_sub(here)
+                (
+                    ahead.saturating_sub(here),
+                    book.candidates[i].key.strategy_hash,
+                )
             })
         else {
             break;
@@ -385,7 +390,15 @@ fn assemble_exact_out(book: &Book, level: &Ratio, target: U256) -> Option<Split>
     let mut order: Vec<usize> = (0..book.candidates.len())
         .filter(|&i| !outs[i].is_zero())
         .collect();
-    order.sort_by(|&a, &b| outs[b].cmp(&outs[a]));
+    // Largest output first; ties break by strategy_hash so trimming is order-independent.
+    order.sort_by(|&a, &b| {
+        outs[b].cmp(&outs[a]).then_with(|| {
+            book.candidates[a]
+                .key
+                .strategy_hash
+                .cmp(&book.candidates[b].key.strategy_hash)
+        })
+    });
     for &i in &order {
         if overshoot.is_zero() {
             break;
@@ -461,7 +474,12 @@ pub fn solve_sparse(
     let mut best = solve(&active, request, warm)?;
     while best.legs.len() > 1 {
         let over_cap = best.legs.len() > max_legs;
-        let worst = best.legs.iter().min_by_key(|l| l.amount_out)?.strategy_hash;
+        // Smallest output is the drop candidate; ties break by strategy_hash for a stable choice.
+        let worst = best
+            .legs
+            .iter()
+            .min_by_key(|l| (l.amount_out, l.strategy_hash))?
+            .strategy_hash;
         let Some(pos) = active.iter().position(|c| c.key.strategy_hash == worst) else {
             break;
         };
