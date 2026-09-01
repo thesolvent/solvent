@@ -834,3 +834,67 @@ fn study_funnel_decomposition() {
         println!("K={k} over {checked}: capacity_max {mcap} [{wc}] cap_limited {cap_limited}  ranking_max {mrank} [{wr}] ranking_over50 {rank_over50}");
     }
 }
+
+/// A book of XYC pools with adversarial scale: reserves spanning 1e6..1e28 (decimal/scale
+/// mismatch) and skews up to ~1e12:1, to stress the fixed-point mul_div/sqrt and the bisection.
+fn extreme_book(rng: &mut Rng, n: usize) -> Vec<Candidate> {
+    (0..n)
+        .map(|i| {
+            let pow = |e: u64| U256::from(10u64).pow(U256::from(e));
+            let reserve_in = pow(rng.range(6, 28)) * U256::from(rng.range(1, 100));
+            let reserve_out = pow(rng.range(6, 28)) * U256::from(rng.range(1, 100));
+            let cap_out = reserve_out * U256::from(rng.range(2, 30)) / U256::from(10u64);
+            let mut hash = [0u8; 32];
+            hash[24..].copy_from_slice(&(i as u64).to_be_bytes());
+            let key = StrategyKey {
+                maker: MakerId(Address::from([(i as u8) + 1; 20])),
+                app: Address::ZERO,
+                strategy_hash: StrategyHash(B256::from(hash)),
+            };
+            let pool = CurvePool::Xyc(XycPool::from_reserves(reserve_in, reserve_out));
+            Candidate::new(key, tok(1), tok(2), cap_out, U256::MAX, pool, vec![])
+        })
+        .collect()
+}
+
+/// Robustness: at extreme reserve scales and skews, any plan `solve` returns is still valid —
+/// conserves the target, respects caps, no dust leg, no overflow-driven garbage. Exercises the
+/// numerical corners the e18-scale generator never reaches.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn conservation_holds_over_extreme_scale() {
+    let mut solved = 0u32;
+    for seed in 0u64..2000 {
+        let mut rng = Rng(0xE217_3E11 ^ seed.wrapping_mul(0x9E37_79B9));
+        let n = rng.range(1, 8) as usize;
+        let cs = extreme_book(&mut rng, n);
+        // Size the trade to the book's own capacity so it actually solves at whatever scale.
+        let cap = deliverable_lower_bound(&cs);
+        if cap.is_zero() {
+            continue;
+        }
+        let (req, where_) = if rng.chance(50) {
+            let out = cap / U256::from(3u64);
+            (
+                request(out, false),
+                format!("seed={seed} n={n} exact_out out={out}"),
+            )
+        } else {
+            let Some(x) = solve(&cs, &request(cap / U256::from(3u64), false), None) else {
+                continue;
+            };
+            (
+                request(x.amount_in, true),
+                format!("seed={seed} n={n} exact_in in={}", x.amount_in),
+            )
+        };
+        if let Some(sol) = solve(&cs, &req, None) {
+            solved += 1;
+            assert_invariants(&cs, &req, &sol, &where_);
+        }
+    }
+    assert!(
+        solved > 500,
+        "extreme-scale study barely exercised solve ({solved}/2000)"
+    );
+}
