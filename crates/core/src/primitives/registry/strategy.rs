@@ -17,10 +17,9 @@ pub struct TokenPair {
 impl TokenPair {
     /// Order the two tokens by address (the on-chain `Lt`/`Gt` convention).
     pub fn new(a: Address, b: Address) -> Self {
-        if a <= b {
-            Self { lo: a, hi: b }
-        } else {
-            Self { lo: b, hi: a }
+        Self {
+            lo: a.min(b),
+            hi: a.max(b),
         }
     }
 }
