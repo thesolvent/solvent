@@ -4,7 +4,7 @@
 
 use thiserror::Error;
 
-use crate::deps::execution::{ExecutionError, SimError};
+use crate::deps::execution::{ExecutionError, SettlementError, SimError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
 use crate::deps::registry::{ChainSourceError, StoreError};
 use crate::primitives::ledger::LedgerError;
@@ -40,4 +40,7 @@ pub enum SolventError {
     /// The simulation engine failed to evaluate a fill.
     #[error("simulation: {0}")]
     Sim(#[from] SimError),
+    /// Reading a confirmed fill's on-chain settlement failed.
+    #[error("settlement: {0}")]
+    Settlement(#[from] SettlementError),
 }

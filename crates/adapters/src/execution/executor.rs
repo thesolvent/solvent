@@ -50,9 +50,12 @@ fn fill_to_intent(fill: &FillTx) -> TxIntent {
 /// `Confirmed` posts, and the two "our fill did not land" terminals (`Replaced`/`Dropped`) void.
 /// Everything else keeps the fill in flight — the engine absorbs sub-confirmation reorgs by falling
 /// back to earlier states, so no non-terminal state is final and an unknown future one is not either.
-fn to_exec_status(status: TxStatus) -> ExecStatus {
+fn to_exec_status(status: TxStatus, mined_tx: B256) -> ExecStatus {
     match status {
-        TxStatus::Confirmed { block } => ExecStatus::Confirmed { block },
+        TxStatus::Confirmed { block } => ExecStatus::Confirmed {
+            block,
+            tx: mined_tx,
+        },
         TxStatus::Failed { reason } => ExecStatus::Failed { reason },
         TxStatus::Replaced | TxStatus::Dropped => ExecStatus::Dropped,
         _ => ExecStatus::Pending,
@@ -91,13 +94,18 @@ impl Execution for WalletkitExecutor {
     async fn status(&self, handle: ExecHandle) -> Result<Option<ExecStatus>, ExecutionError> {
         let id = self.handles.lock().get(&handle.0).copied();
         match id {
+            // Read the full handle, not just the status: the mined hash lives in `broadcasts`
+            // (its last entry survives an RBF bump), and the settlement reader keys off it.
             Some(id) => {
-                let status = self
+                let tracked = self
                     .wallet
-                    .status(id)
+                    .handle(id)
                     .await
                     .map_err(|e| ExecutionError::Engine(e.to_string()))?;
-                Ok(status.map(to_exec_status))
+                Ok(tracked.map(|h| {
+                    let mined = h.broadcasts.last().copied().unwrap_or_default();
+                    to_exec_status(h.status, mined)
+                }))
             }
             None => Ok(None),
         }
@@ -130,20 +138,24 @@ mod tests {
 
     #[test]
     fn status_projection_decides_post_vs_void() {
+        let tx = B256::from([9; 32]);
         assert_eq!(
-            to_exec_status(TxStatus::Confirmed { block: 7 }),
-            ExecStatus::Confirmed { block: 7 }
+            to_exec_status(TxStatus::Confirmed { block: 7 }, tx),
+            ExecStatus::Confirmed { block: 7, tx }
         );
         assert_eq!(
-            to_exec_status(TxStatus::Failed {
-                reason: "revert".into()
-            }),
+            to_exec_status(
+                TxStatus::Failed {
+                    reason: "revert".into()
+                },
+                tx
+            ),
             ExecStatus::Failed {
                 reason: "revert".into()
             }
         );
-        assert_eq!(to_exec_status(TxStatus::Dropped), ExecStatus::Dropped);
-        assert_eq!(to_exec_status(TxStatus::Replaced), ExecStatus::Dropped);
+        assert_eq!(to_exec_status(TxStatus::Dropped, tx), ExecStatus::Dropped);
+        assert_eq!(to_exec_status(TxStatus::Replaced, tx), ExecStatus::Dropped);
         for in_flight in [
             TxStatus::Pending,
             TxStatus::Sent,
@@ -153,7 +165,7 @@ mod tests {
             },
             TxStatus::Replacing { since_block: 1 },
         ] {
-            assert_eq!(to_exec_status(in_flight), ExecStatus::Pending);
+            assert_eq!(to_exec_status(in_flight, tx), ExecStatus::Pending);
         }
     }
 

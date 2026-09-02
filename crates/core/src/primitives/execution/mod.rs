@@ -3,4 +3,4 @@
 
 pub mod fill;
 
-pub use fill::{ExecHandle, ExecStatus, FillTx, SimVerdict};
+pub use fill::{ExecHandle, ExecStatus, FillOutcome, FillTx, PendingFill, SimVerdict};
