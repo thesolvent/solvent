@@ -141,12 +141,11 @@ impl<T> EventExt<T> {
 
     /// The fold/dedup position, present once the log is mined.
     pub fn cursor(&self) -> Option<EventCursor> {
-        match (self.block_number, self.log_index) {
-            (Some(block_number), Some(log_index)) => Some(EventCursor {
+        self.block_number
+            .zip(self.log_index)
+            .map(|(block_number, log_index)| EventCursor {
                 block_number,
                 log_index,
-            }),
-            _ => None,
-        }
+            })
     }
 }

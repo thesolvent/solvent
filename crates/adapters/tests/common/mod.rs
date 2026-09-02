@@ -133,6 +133,7 @@ pub struct Harness {
     _anvil: AnvilInstance,
     pub maker: Address,
     pub taker: Address,
+    pub taker_signer: PrivateKeySigner,
     pub maker_provider: DynProvider,
     pub taker_provider: DynProvider,
     pub aqua: Aqua::AquaInstance<DynProvider>,
@@ -162,7 +163,7 @@ impl Harness {
             .connect_http(anvil.endpoint_url())
             .erased();
         let taker_provider = ProviderBuilder::new()
-            .wallet(EthereumWallet::from(taker_signer))
+            .wallet(EthereumWallet::from(taker_signer.clone()))
             .connect_http(anvil.endpoint_url())
             .erased();
 
@@ -219,6 +220,7 @@ impl Harness {
             _anvil: anvil,
             maker,
             taker,
+            taker_signer,
             maker_provider,
             taker_provider,
             aqua,
