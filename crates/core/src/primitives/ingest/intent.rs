@@ -60,20 +60,20 @@ pub struct Exclusivity {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Intent {
-    /// Order hash — dedup key, correlation id, and the routing/reservation id.
+    /// The order hash.
     pub id: IntentId,
     pub protocol: ProtocolId,
     pub input: IntentInput,
     pub outputs: Vec<IntentOutput>,
-    /// Unix seconds after which the order is dead.
     pub deadline: u64,
     pub exclusivity: Option<Exclusivity>,
-    /// The reactor/settler to call when filling.
     pub settler: Address,
     pub origin_chain: ChainId,
-    /// The encoded signed order — opaque here, decoded by the protocol's fill builder.
+    /// Opaque encoded order, decoded only by the protocol's fill builder.
     pub raw: Bytes,
-    /// Arrival time; routing prices each curve at this instant.
+    /// The swapper's signature over `raw`, carried separately for the fill builder.
+    pub signature: Bytes,
+    /// Arrival time; routing prices the curves at this instant.
     pub observed_at: u64,
 }
 
@@ -89,6 +89,7 @@ impl Intent {
         settler: Address,
         origin_chain: ChainId,
         raw: Bytes,
+        signature: Bytes,
         observed_at: u64,
     ) -> Intent {
         Intent {
@@ -101,6 +102,7 @@ impl Intent {
             settler,
             origin_chain,
             raw,
+            signature,
             observed_at,
         }
     }

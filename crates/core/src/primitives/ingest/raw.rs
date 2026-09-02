@@ -11,21 +11,29 @@ use crate::primitives::ChainId;
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RawOrder {
-    /// Which protocol's encoding `payload` is — selects the normalizer and fill builder.
+    /// Selects the normalizer for `payload`.
     pub protocol: ProtocolId,
     pub chain: ChainId,
-    /// The encoded signed order, opaque until the protocol's normalizer decodes it.
+    /// Opaque encoded order, until the protocol's normalizer decodes it.
     pub payload: Bytes,
-    /// Arrival time, stamped by the feed; becomes `Intent::observed_at`.
+    /// The swapper's signature, carried separately as the feed delivers it.
+    pub signature: Bytes,
     pub observed_at: u64,
 }
 
 impl RawOrder {
-    pub fn new(protocol: ProtocolId, chain: ChainId, payload: Bytes, observed_at: u64) -> RawOrder {
+    pub fn new(
+        protocol: ProtocolId,
+        chain: ChainId,
+        payload: Bytes,
+        signature: Bytes,
+        observed_at: u64,
+    ) -> RawOrder {
         RawOrder {
             protocol,
             chain,
             payload,
+            signature,
             observed_at,
         }
     }

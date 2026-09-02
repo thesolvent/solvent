@@ -19,7 +19,14 @@ fn e18(n: u64) -> U256 {
 #[test]
 fn normalizes_a_real_v2_order_and_matches_the_contract_hash() {
     let payload = Bytes::from_str(PAYLOAD.trim()).expect("fixture hex");
-    let raw = RawOrder::new(ProtocolId::UniswapXV2, ChainId(1), payload.clone(), 1234);
+    let sig = Bytes::from(vec![0xABu8; 65]);
+    let raw = RawOrder::new(
+        ProtocolId::UniswapXV2,
+        ChainId(1),
+        payload.clone(),
+        sig.clone(),
+        1234,
+    );
 
     let intent = UniswapXV2Normalizer
         .normalize(&raw)
@@ -82,6 +89,7 @@ fn normalizes_a_real_v2_order_and_matches_the_contract_hash() {
     );
     assert_eq!(intent.origin_chain, ChainId(1));
     assert_eq!(intent.raw, payload);
+    assert_eq!(intent.signature, sig);
     assert_eq!(intent.observed_at, 1234);
 }
 
@@ -91,6 +99,7 @@ fn rejects_a_malformed_payload() {
         ProtocolId::UniswapXV2,
         ChainId(1),
         Bytes::from_static(&[1, 2, 3]),
+        Bytes::new(),
         0,
     );
     assert!(matches!(
