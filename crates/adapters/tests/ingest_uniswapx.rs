@@ -78,10 +78,10 @@ fn normalizes_a_real_v2_order_and_matches_the_contract_hash() {
     assert_eq!(intent.deadline, 2000);
     assert_eq!(
         intent.exclusivity,
-        Some(Exclusivity {
-            filler: address!("5555555555555555555555555555555555555555"),
-            ends_at: 1000,
-        })
+        Some(Exclusivity::new(
+            address!("5555555555555555555555555555555555555555"),
+            1000,
+        ))
     );
     assert_eq!(
         intent.settler,

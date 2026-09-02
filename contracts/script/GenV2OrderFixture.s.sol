@@ -39,7 +39,7 @@ contract GenV2OrderFixture is Script {
             exclusiveFiller: address(0x5555555555555555555555555555555555555555),
             exclusivityOverrideBps: 0,
             inputAmount: 0,
-            outputAmounts: new uint256[](0)
+            outputAmounts: new uint256[](1)
         });
 
         V2DutchOrder memory order = V2DutchOrder({

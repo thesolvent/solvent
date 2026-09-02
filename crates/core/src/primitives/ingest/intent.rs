@@ -51,9 +51,16 @@ impl IntentOutput {
 /// An exclusive-fill window: until `ends_at`, only `filler` may fill. `filler` is matched against
 /// the reactor's `msg.sender`, so it is the resolver's filler *contract*, not the operator EOA.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Exclusivity {
     pub filler: Address,
     pub ends_at: u64,
+}
+
+impl Exclusivity {
+    pub fn new(filler: Address, ends_at: u64) -> Exclusivity {
+        Exclusivity { filler, ends_at }
+    }
 }
 
 /// A normalized, protocol-agnostic order.

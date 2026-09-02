@@ -175,3 +175,12 @@ re-confirms a known finding, or needs calibrated market data. Pick up if a speci
   API (or a faithful mock) when built.
 - **RFQ `QuoteServer` (Mode 2)** — deferred until the Ledger soft-hold exists and there is a real
   deployment to contend on; a local rig can't demonstrate real RFQ competition.
+- **Cosigner override-bounds pre-filter** — the normalizer rejects a cosigner `outputAmounts` whose
+  length mismatches the outputs (an always-reverting order), but does not yet reject out-of-bounds
+  override *values* (`inputAmount > baseInput.startAmount`, `outputAmounts[i] < baseOutput.startAmount`),
+  which the reactor also reverts. Our own builder never emits these; a pre-filter earns its place once
+  the `hosted` feed ingests third-party orders.
+- **Multi-output / exact-output (input-decaying) coverage** — `OrderSpec`/`SelfHostedFeed` only build
+  single-output, static-input orders, so the tests don't exercise multi-output or the ceil/input-decay
+  path end-to-end. The curve math is proven direction-agnostic in `curve.rs`; add order shapes when a
+  protocol/order needs them.

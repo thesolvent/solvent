@@ -71,7 +71,30 @@ the project is pre-1.0 and evolving.
     asserting every routed plan is reservable and the router declines beyond the ledger's caps.
   - Limitations and deferred test coverage tracked in `docs/KNOWN_LIMITATIONS.md`.
 
-_Next: B4._
+- **B4 — ingest**: the inbound edge that turns an off-chain UniswapX order into a clean, validated,
+  deduped canonical `Intent` and fills it on-chain through the resolver's executor.
+  - **Canonical `Intent`** — protocol-agnostic (opaque `raw` + `ProtocolId`, typed common fields);
+    `AmountCurve` (static / linear Dutch decay) priced by `amount_at`, rounding by slope direction to
+    match on-chain decay bit-for-bit; models both exact-in and exact-out orders. `#[non_exhaustive]`
+    throughout so new protocols/fields don't break callers.
+  - **UniswapX V2 normalizer** — decodes the real `V2DutchOrder` and reproduces `V2DutchOrderLib.hash`
+    (the `orderHash`) from the contract's flattened EIP-712 type strings + alloy `abi_encode`
+    (differentially tested against the contract); maps cosigner overrides + exclusivity, rejecting
+    orders whose cosigner-override arity the reactor would revert on.
+  - **Ingest pipeline** — `OrderFeed`/`Normalizer` ports; fan-in → normalize → admit (chain, deadline,
+    amounts) → `moka` TTL dedup → bounded `mpsc` (backpressure). Off-chain cosignature/fillability left
+    to the reactor.
+  - **Order builder + dual signature** — mints signed+cosigned V2 orders our reactor accepts: swapper
+    Permit2 EIP-712 witness + cosigner raw digest (never `sign_message`); digests differentially
+    tested against the contract. `self_hosted` feed streams them (the `hosted` poll feed and `replay`
+    are deferred — see `docs/KNOWN_LIMITATIONS.md`).
+  - **Fill builder** — `RoutePlan` → `UniswapXAquaFiller.fill(...)` calldata (`Bytes`); the registry
+    retains each strategy's shipped program to source from.
+  - **Full-loop live E2E** over anvil — a self-hosted order → normalize → route → reserve → **on-chain
+    fill** through the deployed reactor + filler + etched Permit2, sourcing the output from a shipped
+    Aqua maker; both signatures verify on-chain.
+
+_Next: B5 — execution._
 
 ## [0.1.0] — 2026-08-28
 

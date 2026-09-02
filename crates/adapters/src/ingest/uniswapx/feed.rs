@@ -99,10 +99,7 @@ mod tests {
         );
         assert_eq!(
             intent.exclusivity,
-            Some(Exclusivity {
-                filler: spec.exclusive_filler,
-                ends_at: spec.decay_start,
-            })
+            Some(Exclusivity::new(spec.exclusive_filler, spec.decay_start))
         );
         assert_eq!(intent.signature, orders[0].signature);
         assert_eq!(intent.observed_at, 1234);
