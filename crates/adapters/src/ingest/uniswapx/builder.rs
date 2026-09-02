@@ -91,7 +91,9 @@ impl SignedOrderBuilder {
                 exclusiveFiller: spec.exclusive_filler,
                 exclusivityOverrideBps: U256::ZERO,
                 inputAmount: U256::ZERO,
-                outputAmounts: vec![],
+                // One entry per output (the reactor requires the lengths match); 0 = defer to the
+                // base decay, no cosigner override.
+                outputAmounts: vec![U256::ZERO],
             },
             cosignature: Bytes::new(),
         };
