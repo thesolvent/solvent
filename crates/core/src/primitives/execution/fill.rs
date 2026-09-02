@@ -57,3 +57,12 @@ pub enum ExecStatus {
 /// [`status`](crate::deps::execution::Execution::status).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ExecHandle(pub B256);
+
+/// The verdict of simulating a fill before it spends a nonce. `Reject` carries the reason so the
+/// service can log why a fill was dropped. Fail-closed: only a confirmed success is [`Ok`](SimVerdict::Ok).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SimVerdict {
+    Ok,
+    Reject { reason: String },
+}

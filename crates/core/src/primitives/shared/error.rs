@@ -4,7 +4,7 @@
 
 use thiserror::Error;
 
-use crate::deps::execution::ExecutionError;
+use crate::deps::execution::{ExecutionError, SimError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
 use crate::deps::registry::{ChainSourceError, StoreError};
 use crate::primitives::ledger::LedgerError;
@@ -37,4 +37,7 @@ pub enum SolventError {
     /// The tx engine failed to submit or track a fill.
     #[error("execution: {0}")]
     Execution(#[from] ExecutionError),
+    /// The simulation engine failed to evaluate a fill.
+    #[error("simulation: {0}")]
+    Sim(#[from] SimError),
 }
