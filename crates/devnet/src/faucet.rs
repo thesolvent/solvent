@@ -133,18 +133,24 @@ async fn faucet(
             .ok_or_else(|| AppError::BadRequest(format!("unknown token: {symbol}")))?;
         let amount =
             U256::from(state.drip_units) * U256::from(10u64).pow(U256::from(token.decimals));
-        let tx = IDevToken::new(token.address, state.provider.clone())
+        let receipt = IDevToken::new(token.address, state.provider.clone())
             .mint(who, amount)
             .send()
             .await
             .map_err(AppError::chain)?
-            .watch()
+            .get_receipt()
             .await
             .map_err(AppError::chain)?;
+        if !receipt.status() {
+            return Err(AppError::Chain(format!(
+                "mint {symbol} reverted (tx {:#x})",
+                receipt.transaction_hash
+            )));
+        }
         minted.push(Minted {
             symbol,
             amount: amount.to_string(),
-            tx: format!("{tx:#x}"),
+            tx: format!("{:#x}", receipt.transaction_hash),
         });
     }
 
@@ -157,15 +163,18 @@ async fn faucet(
         let request = TransactionRequest::default()
             .with_to(who)
             .with_value(state.gas_target_wei - balance);
-        let tx = state
+        let receipt = state
             .provider
             .send_transaction(request)
             .await
             .map_err(AppError::chain)?
-            .watch()
+            .get_receipt()
             .await
             .map_err(AppError::chain)?;
-        Some(format!("{tx:#x}"))
+        if !receipt.status() {
+            return Err(AppError::Chain("gas top-up reverted".to_string()));
+        }
+        Some(format!("{:#x}", receipt.transaction_hash))
     } else {
         None
     };
