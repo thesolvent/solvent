@@ -1,0 +1,4 @@
+# Private git dependencies (walletkit) authenticate through the machine's git
+# credential helper; libgit2's built-in auth can't reach the private repo.
+[net]
+git-fetch-with-cli = true
