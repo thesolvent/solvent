@@ -104,8 +104,27 @@ the project is pre-1.0 and evolving.
   - **Full-loop live E2E** over anvil — a self-hosted order → normalize → route → reserve → **on-chain
     fill** through the deployed reactor + filler + etched Permit2, sourcing the output from a shipped
     Aqua maker; both signatures verify on-chain.
+- **B5 — execution**: closes the intent lifecycle — a reserved `RoutePlan` becomes an included fill,
+  and the outcome is coupled back to the ledger. A thin wrapper over `walletkit`: it owns fill
+  semantics, walletkit owns the tx lifecycle (sign / private-submit / track / bump / reorg / nonce).
+  - **`Execution` + `SimGate` ports** — solvent-native `FillTx`/`ExecStatus`/`SimVerdict` so core never
+    depends on walletkit; the `WalletkitExecutor` adapter wraps one `Wallet`, implementing both:
+    submits on a construction-fixed route (private relay in prod, public on a local chain), simulates
+    via `dry_run`, and projects walletkit's eight tx states onto the terminal signal the ledger needs.
+  - **Fill-aware sim gate** — eth-calls the exact fill before a nonce is spent; the filler's on-chain
+    guards (under-delivery / profit threshold / stale caps) surface as reverts, so a clean simulation
+    proves all of them at once. Fail-closed. (A revm fork-sim can slot in behind the same port later.)
+  - **`SettlementReader` port + Aqua adapter** — reads the *actual* per-source amounts a confirmed fill
+    pulled from its own receipt's Aqua `Pulled` events (shared `IAqua` decode with the registry), so
+    the ledger posts what truly happened and returns any unfilled remainder — never the reserved hold.
+  - **`ExecutionService`** — `fill` (sim → submit, voiding the reservation on a reject before any
+    nonce) and `reconcile` (tick → post the actual amount on confirm, void on failure); idempotent by
+    intent, one-shot terminal transitions guarded by the ledger FSM, with an `on_reorg` compensation
+    hook. Confirmation is finality-anchored (walletkit).
+  - **Full-loop live E2E** over anvil through the **production execution path** — order → … → reserve
+    → sim → submit → confirm → post the actual pulled amount; plus a stale-order sim-reject → void.
 
-_Next: B5 — execution._
+_Next: B6 — reconcile._
 
 ## [0.1.0] — 2026-08-28
 
