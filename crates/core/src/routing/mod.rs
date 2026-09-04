@@ -5,6 +5,6 @@ pub mod candidates;
 pub mod service;
 pub mod waterfill;
 
-pub use candidates::{select, Candidate};
-pub use service::route;
+pub use candidates::{select, Candidate, Selection};
+pub use service::{resolve_leg_cost, route};
 pub use waterfill::{solve, solve_sparse, Solution};
