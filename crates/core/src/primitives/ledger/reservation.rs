@@ -2,6 +2,7 @@
 //! intent, and where that promise sits in the two-phase lifecycle.
 
 use alloy_primitives::{Address, U256};
+use serde::{Deserialize, Serialize};
 
 use crate::primitives::{IntentId, MakerId, ReservationId, StrategyHash};
 
@@ -10,7 +11,7 @@ use super::account::AccountKey;
 /// One maker-capital source a reservation draws on: `amount` of `token` pulled from a specific
 /// strategy — settled by exactly one Aqua `pull`. Each source holds capacity at both ceilings, the
 /// shared wallet and the strategy virtual.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReservationSource {
     pub maker: MakerId,
     pub strategy_hash: StrategyHash,
