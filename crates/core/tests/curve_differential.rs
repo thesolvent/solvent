@@ -8,9 +8,8 @@
 
 use alloy_primitives::{Address, U256};
 use serde::Deserialize;
-use solvent_core::registry::{
-    ConcentratePool, CurveError, PeggedParams, PeggedPool, Pricing, XycPool,
-};
+use solvent_core::primitives::registry::PeggedParams;
+use solvent_core::registry::{ConcentratePool, CurveError, PeggedPool, Pricing, XycPool};
 
 #[derive(Deserialize)]
 struct Corpus {

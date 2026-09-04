@@ -2,8 +2,9 @@
 
 use std::collections::BTreeMap;
 
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, U256};
 
+use super::curve::{decode_strategy, CurveSpec};
 use super::event::StrategyKey;
 
 /// An unordered token pair, canonicalized so `(A,B)` and `(B,A)` are one key.
@@ -25,15 +26,14 @@ impl TokenPair {
 }
 
 /// One maker strategy's live state, folded from the Aqua event stream. Balances
-/// are the maker's virtual allowances Aqua tracks; the Tier-0 curve is decoded
-/// from `strategy` later. Docked strategies are kept as inactive
-/// tombstones so replay is deterministic and re-ship stays a no-op.
+/// are the maker's virtual allowances Aqua tracks; `curve` is decoded once from
+/// the shipped program. Docked strategies are kept as inactive tombstones so
+/// replay is deterministic and re-ship stays a no-op.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MakerStrategy {
     pub key: StrategyKey,
-    /// Raw shipped bytes (an ABI-encoded `Order`); source for curve decoding.
-    pub strategy: Bytes,
+    pub curve: CurveSpec,
     /// token -> virtual balance.
     pub balances: BTreeMap<Address, U256>,
     /// False once `Docked`.
@@ -41,10 +41,11 @@ pub struct MakerStrategy {
 }
 
 impl MakerStrategy {
-    pub fn new(key: StrategyKey, strategy: Bytes) -> Self {
+    /// Register a strategy, decoding its curve from the shipped bytes.
+    pub fn new(key: StrategyKey, strategy: &[u8]) -> Self {
         Self {
             key,
-            strategy,
+            curve: decode_strategy(strategy),
             balances: BTreeMap::new(),
             active: true,
         }
