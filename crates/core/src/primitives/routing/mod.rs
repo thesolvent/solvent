@@ -61,26 +61,18 @@ pub struct RoutePlan {
 pub struct RoutingConfig {
     /// Funnel bound — the most candidates the solver ever optimizes over.
     pub max_candidates: usize,
-    /// Split cap — the most legs a route may use (over-fragmentation guard).
+    /// Split cap — the most legs a route may use (over-fragmentation guard); `0` behaves as `1`.
     pub max_legs: usize,
     /// Gas a single fill leg costs on this chain, in gas units.
     pub gas_units_per_leg: u64,
-    /// Optional per-pool price-impact cap (bps of the venue's spot); `None` = no cap.
-    pub max_price_impact_bps: Option<u32>,
 }
 
 impl RoutingConfig {
-    pub fn new(
-        max_candidates: usize,
-        max_legs: usize,
-        gas_units_per_leg: u64,
-        max_price_impact_bps: Option<u32>,
-    ) -> Self {
+    pub fn new(max_candidates: usize, max_legs: usize, gas_units_per_leg: u64) -> Self {
         Self {
             max_candidates,
             max_legs,
             gas_units_per_leg,
-            max_price_impact_bps,
         }
     }
 }

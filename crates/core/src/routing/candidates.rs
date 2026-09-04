@@ -101,8 +101,10 @@ impl Candidate {
         })
     }
 
-    /// The pool's net output-per-input at a tiny probe ≈ its spot marginal — the water level
-    /// at which it first becomes active. Sized to the trade so the probe isn't dust.
+    /// A conservative estimate of the pool's spot marginal (net output-per-input as the trade
+    /// → 0): the secant slope over a tiny probe. For a concave curve the secant lies below the
+    /// true tangent, so this under-estimates — the certificate built on it may miss a case,
+    /// never false-alarm. A diagnostic, not a proof.
     pub fn spot_marginal(&self, amount: U256) -> Option<Ratio> {
         let probe = (amount / U256::from(1_000_000u64)).max(U256::from(1u64));
         Ratio::new(self.net_quote_exact_in(probe).ok()?, probe)
@@ -137,8 +139,8 @@ pub fn select(
         .collect();
     let exact_in = request.exact_in;
     let better = |a: &Scored, b: &Scored| best_first(a, b, exact_in);
-    // Partition off the top-`k`; the discarded tail feeds the optimality certificate — the
-    // highest spot marginal an omitted pool could have offered.
+    // Partition off the top-`k`; the discarded tail feeds the certificate diagnostic — the
+    // highest (conservatively-estimated) spot marginal an omitted pool could have offered.
     let best_omitted_spot = if scored.len() > k {
         scored.select_nth_unstable_by(k, better);
         let spot = scored[k..]
@@ -157,8 +159,10 @@ pub fn select(
     }
 }
 
-/// The funnel's output: the top-`k` candidates, and the highest spot marginal among the
-/// pools that didn't make the cut (`None` if none were dropped) — the certificate input.
+/// The funnel's output: the top-`k` candidates, and the highest spot marginal among the pools
+/// that didn't make the cut (`None` if none were dropped). Feeds a **heuristic** certificate:
+/// out@size ranking isn't a proven superset of the optimal support, so this flags a probably-
+/// too-small `k` — a diagnostic, not a guarantee.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Selection {
