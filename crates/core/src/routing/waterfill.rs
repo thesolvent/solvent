@@ -16,18 +16,34 @@ use crate::primitives::MakerId;
 
 use super::candidates::Candidate;
 
-/// The solver's split: the legs to fill and the totals achieved, plus the marginal price
-/// the search settled on — a warm-start seed for the next solve on this pair.
+/// The marginal-price-optimal split of a trade across maker legs: the legs to fill, the totals
+/// achieved, and the water level λ the search settled on (a warm-start seed for the next solve
+/// on this pair). Gas is applied by the accessors, not stored.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct Solution {
+pub struct Split {
     pub legs: Vec<RouteLeg>,
     pub amount_in: U256,
     pub amount_out: U256,
-    /// Output net of per-leg gas (`amount_out − legs × per_leg_cost`); equals `amount_out`
-    /// until [`solve_sparse`] charges gas.
-    pub net_out: U256,
     pub lambda: Ratio,
+}
+
+impl Split {
+    /// Output the resolver nets after gas — exact-in's take (`amount_out − legs·gas`).
+    /// `per_leg_cost` is the per-leg gas in the spread token (`token_out`).
+    pub fn net_output(&self, per_leg_cost: U256) -> U256 {
+        self.amount_out.saturating_sub(self.gas(per_leg_cost))
+    }
+
+    /// Input the resolver grosses out with gas — exact-out's cost (`amount_in + legs·gas`).
+    /// `per_leg_cost` is the per-leg gas in the spread token (`token_in`).
+    pub fn gross_input(&self, per_leg_cost: U256) -> U256 {
+        self.amount_in.saturating_add(self.gas(per_leg_cost))
+    }
+
+    fn gas(&self, per_leg_cost: U256) -> U256 {
+        per_leg_cost.saturating_mul(U256::from(self.legs.len()))
+    }
 }
 
 /// Bisection iteration caps; the fill-gap tolerance early-stops far sooner from a warm λ.
@@ -124,7 +140,7 @@ pub fn solve(
     candidates: &[Candidate],
     request: &RouteRequest,
     warm: Option<&Ratio>,
-) -> Option<Solution> {
+) -> Option<Split> {
     if candidates.is_empty() || request.amount.is_zero() {
         return None;
     }
@@ -311,7 +327,7 @@ fn group_output(candidates: &[Candidate], outs: &[U256], maker: MakerId) -> U256
 /// Fill below `target` input at `level`, then place the remainder on the venue that buys the
 /// most extra output — bounded by its box cap and its maker's wallet — so total input is
 /// `target` and no maker's combined output exceeds its wallet.
-fn assemble_exact_in(fill: &Fill, level: &Ratio, target: U256) -> Option<Solution> {
+fn assemble_exact_in(fill: &Fill, level: &Ratio, target: U256) -> Option<Split> {
     let quotes: Vec<LimitedQuote> = (0..fill.candidates.len())
         .map(|i| fill.leg(i, level))
         .collect();
@@ -350,7 +366,7 @@ fn assemble_exact_in(fill: &Fill, level: &Ratio, target: U256) -> Option<Solutio
 /// Fill above `target` output at `level`, then trim the overshoot off the largest legs so
 /// total output is exactly `target` (never under). Trimming only lowers output, so every
 /// maker stays within its wallet.
-fn assemble_exact_out(fill: &Fill, level: &Ratio, target: U256) -> Option<Solution> {
+fn assemble_exact_out(fill: &Fill, level: &Ratio, target: U256) -> Option<Split> {
     let mut outs: Vec<U256> = (0..fill.candidates.len())
         .map(|i| fill.leg(i, level).amount_out)
         .collect();
@@ -377,12 +393,7 @@ enum Leg {
 }
 
 /// Turn per-candidate working amounts into legs, pricing the other side exactly.
-fn build(
-    candidates: &[Candidate],
-    amounts: &[U256],
-    side: Leg,
-    lambda: &Ratio,
-) -> Option<Solution> {
+fn build(candidates: &[Candidate], amounts: &[U256], side: Leg, lambda: &Ratio) -> Option<Split> {
     let mut legs = Vec::new();
     let (mut amount_in, mut amount_out) = (U256::ZERO, U256::ZERO);
     for (c, &amount) in candidates.iter().zip(amounts) {
@@ -407,31 +418,32 @@ fn build(
     if legs.is_empty() {
         return None;
     }
-    Some(Solution {
+    Some(Split {
         legs,
         amount_in,
         amount_out,
-        net_out: amount_out,
         lambda: lambda.clone(),
     })
 }
 
-/// The water-fill split, then a **gas-aware sparsity pass**: repeatedly drop the smallest
-/// leg and re-solve while that either raises net-of-gas output (`amount_out − legs ×
-/// per_leg_cost`) or the split still exceeds `max_legs`. This is the backward-elimination
-/// every production router uses (0x `reducePaths`, Balancer `optimizeSwapAmounts`) — it
-/// turns the gas-free optimum's many dust legs into a few that each earn their gas.
+/// The water-fill split, then a **gas-aware sparsity pass**: repeatedly drop the smallest leg
+/// and re-solve while that improves the resolver's take — more [`net_output`](Split::net_output)
+/// for exact-in, less [`gross_input`](Split::gross_input) for exact-out — or the split still
+/// exceeds `max_legs`. This is the backward-elimination every production router uses (0x
+/// `reducePaths`, Balancer `optimizeSwapAmounts`): it turns the gas-free optimum's many dust
+/// legs into a few that each earn their gas. `per_leg_cost` is the per-leg gas in the spread
+/// token (`token_out` for exact-in, `token_in` for exact-out).
 pub fn solve_sparse(
     candidates: &[Candidate],
     request: &RouteRequest,
     per_leg_cost: U256,
     max_legs: usize,
     warm: Option<&Ratio>,
-) -> Option<Solution> {
+) -> Option<Split> {
+    let exact_in = request.exact_in;
     let mut active: Vec<Candidate> = candidates.to_vec();
     let mut best = solve(&active, request, warm)?;
     while best.legs.len() > 1 {
-        let net_now = net_of_gas(&best, per_leg_cost);
         let over_cap = best.legs.len() > max_legs;
         let worst = best.legs.iter().min_by_key(|l| l.amount_out)?.strategy_hash;
         let Some(pos) = active.iter().position(|c| c.key.strategy_hash == worst) else {
@@ -439,11 +451,15 @@ pub fn solve_sparse(
         };
         let removed = active.swap_remove(pos);
         // Re-solve the smaller set, warm-started from this pair's current λ (dropping one leg
-        // barely moves it). Keep the drop only if it raises net-of-gas output, or we must to
-        // meet `max_legs`; otherwise put the leg back and stop.
+        // barely moves it). Keep the drop only if it improves the resolver's take, or we must
+        // to meet `max_legs`; otherwise put the leg back and stop.
         match solve(&active, request, Some(&best.lambda)) {
             Some(next)
-                if over_cap || (request.exact_in && net_of_gas(&next, per_leg_cost) >= net_now) =>
+                if over_cap
+                    || (exact_in
+                        && next.net_output(per_leg_cost) >= best.net_output(per_leg_cost))
+                    || (!exact_in
+                        && next.gross_input(per_leg_cost) <= best.gross_input(per_leg_cost)) =>
             {
                 best = next;
             }
@@ -453,14 +469,7 @@ pub fn solve_sparse(
             }
         }
     }
-    best.net_out = net_of_gas(&best, per_leg_cost);
     Some(best)
-}
-
-/// Output net of a fixed gas charge per leg.
-fn net_of_gas(sol: &Solution, per_leg_cost: U256) -> U256 {
-    sol.amount_out
-        .saturating_sub(per_leg_cost.saturating_mul(U256::from(sol.legs.len())))
 }
 
 #[cfg(test)]
@@ -710,7 +719,27 @@ mod tests {
         // Gas so high no second leg earns it ⇒ collapses to a single leg.
         let one = solve_sparse(&cs, &req, e18(100_000), 8, None).unwrap();
         assert_eq!(one.legs.len(), 1);
-        assert_eq!(one.net_out, one.amount_out.saturating_sub(e18(100_000)));
+        assert_eq!(
+            one.net_output(e18(100_000)),
+            one.amount_out.saturating_sub(e18(100_000))
+        );
+    }
+
+    #[test]
+    fn sparsify_charges_gas_on_exact_out() {
+        // Eight equal pools, an exact-out target one pool can meet ⇒ the gas-free optimum
+        // fragments, and high per-leg gas (in input units) collapses it — exact-out now prices
+        // gas via `gross_input`, where it was previously blind.
+        let cs: Vec<Candidate> = (1u8..=8)
+            .map(|n| cand(n, xyc(e18(2000), e18(2000)), e18(10_000), &[]))
+            .collect();
+        let req = request(e18(1000), false);
+        let free = solve(&cs, &req, None).unwrap();
+        assert!(free.legs.len() >= 2, "gas-free exact-out fragments");
+
+        let collapsed = solve_sparse(&cs, &req, e18(100_000), 8, None).unwrap();
+        assert_eq!(collapsed.legs.len(), 1, "high gas collapses exact-out");
+        assert_eq!(collapsed.amount_out, e18(1000), "still delivers the target");
     }
 
     /// A maker's combined output across its legs.

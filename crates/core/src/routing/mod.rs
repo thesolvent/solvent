@@ -7,4 +7,4 @@ pub mod waterfill;
 
 pub use candidates::{select, Candidate, Selection};
 pub use service::{resolve_leg_cost, route};
-pub use waterfill::{solve, solve_sparse, Solution};
+pub use waterfill::{solve, solve_sparse, Split};
