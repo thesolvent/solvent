@@ -21,6 +21,10 @@ test:
 test-fork:
     cd contracts && forge test --fork-url mainnet
 
+# Export the filler ABI for the (future) backend to consume — a stable artifact, not out/.
+abi:
+    cd contracts && forge inspect src/UniswapXAquaFiller.sol:UniswapXAquaFiller abi --json > abi/UniswapXAquaFiller.json
+
 fmt:
     cd contracts && forge fmt
 

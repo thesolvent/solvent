@@ -6,7 +6,18 @@ the project is pre-1.0 and evolving.
 
 ## [Unreleased]
 
-_Next: implement `UniswapXAquaFiller.sol` + its hermetic/fork test matrix._
+### Added
+- **`UniswapXAquaFiller`** — the P1 on-chain filler: a zero-inventory UniswapX taker that sources order
+  outputs from makers' Aqua positions via the SwapVM router, executing an off-chain routing plan
+  (`SourceSwap[]`). Supports multi-maker sourcing, multi-token outputs, and batched orders. Three safety
+  layers (per-leg `amountInMaximum`, reactor approvals derived from the resolved orders, and a
+  balance-snapshot profitability guard), plus `Ownable2Step` + a transient reentrancy guard.
+- **Test suite** — 20 hermetic tests (happy paths, boundaries, every guard, admin, and a source-split
+  fuzz) against source-deployed UniswapX + Aqua/SwapVM, plus an opt-in mainnet-fork test against the
+  real V2 reactor + Permit2.
+- **ABI export** — `abi/UniswapXAquaFiller.json` (via `just abi`) for the future backend.
+
+_Next: the Rust backend phase._
 
 ## [0.1.0] — 2026-08-28
 
