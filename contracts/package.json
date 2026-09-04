@@ -1,0 +1,15 @@
+{
+  "name": "@solvent/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "On-chain filler (UniswapXAquaFiller) + tests for Solvent, a zero-inventory intent resolver on 1inch Aqua",
+  "license": "MIT",
+  "comment": "1inch Aqua/SwapVM ship as npm packages (their foundry.toml uses libs=[node_modules]); pins mirror swap-vm@v1.0.1 exactly. Uniswap (UniswapX/permit2) ship as git submodules and are fetched by `forge install` (see justfile `setup`).",
+  "dependencies": {
+    "@1inch/swap-vm": "github:1inch/swap-vm#v1.0.1",
+    "@1inch/aqua": "github:1inch/aqua#0.1.0",
+    "@1inch/solidity-utils": "6.9.7",
+    "@openzeppelin/contracts": "5.4.0",
+    "forge-std": "github:foundry-rs/forge-std#v1.11.0"
+  }
+}
