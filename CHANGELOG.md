@@ -36,7 +36,30 @@ the project is pre-1.0 and evolving.
   - Known limitations tracked in `docs/KNOWN_LIMITATIONS.md` (late-`Shipped` drift, reorg, and the
     performance items — snapshot clone, batched confirm — deferred to reconcile/reorg/optimization).
 
-_Next: B3 — routing (water-fill solver over maker curves)._
+- **B3 — routing**: a capped water-fill solver that sources an intent across maker curves at the
+  marginal-price optimum, gated on the taker's bound.
+  - **Solver**: single-pair specialization of `CFMMRouter.jl`'s dual — bisect the water level λ
+    where every active venue quotes the same net-of-fee marginal (Angeris' equimarginal
+    principle); exact-in and exact-out, ε-validated against a brute-force reference both ways.
+  - **Funnel + certificate**: rank candidates by estimated net-of-fee output at the trade size
+    (what production routers select on), top-`k` via quickselect, with a conservative heuristic
+    certificate that flags a too-small `k`.
+  - **Gas-aware sparsity**: backward-elimination trading legs against a per-leg gas cost in the
+    **spread token** (output for exact-in, input for exact-out) — `Split::net_output` /
+    `gross_input`; `route()` gates profit symmetrically.
+  - **Shared maker-wallet cap**: a maker's strategies share one wallet, so the solver caps their
+    combined output with a per-maker KKT group-floor (`max(λ, λ*_g)`) — the plan stays
+    simultaneously reservable (independently audited).
+  - **Live gas model**: pure `per_leg_cost` (gas → native → USD → spread token) behind
+    `GasPrice`/`PriceOracle` ports; adapters — lock-free `MarketCache`, periodic `GasPoller`, and
+    a WebSocket `BinanceFeed` (bookTicker mid) — feed it off the quote hot path.
+  - **Contract-fidelity hardening**: out-of-domain curve params rejected at decode; the pegged
+    numerical fill degrades past the overflow sentinel; dust legs the chain reverts on are
+    dropped; a leg's input is bounded to its output cap (no round-trip over-reservation).
+  - Deferred to T5: the 500 ms latency benchmark, and the 3-component (registry + ledger +
+    routing) live E2E over anvil + SQLite.
+
+_Next: B3 T5 — routing benchmark + 3-component live E2E; then B4._
 
 ## [0.1.0] — 2026-08-28
 
