@@ -15,6 +15,7 @@
 use alloy_primitives::{Address, U256, U512};
 use thiserror::Error;
 
+use crate::primitives::pricing::{LimitedQuote, Ratio};
 use crate::primitives::registry::PeggedParams;
 
 /// A revert produced by the on-chain curve, mirrored so the port can be
@@ -53,6 +54,66 @@ pub trait Pricing {
     fn quote_exact_in(&self, amount_in: U256) -> Result<U256, CurveError>;
     /// Input required for a taker buying `amount_out` of `tokenOut` (`!isExactIn`).
     fn quote_exact_out(&self, amount_out: U256) -> Result<U256, CurveError>;
+    /// Fill input up to `amount_in`, stopping once the marginal output-per-input
+    /// drops to `limit` — the water-fill step. `limited` marks a price-bound stop.
+    /// Default bisects the input via `quote_exact_in`; closed-form curves override.
+    fn quote_with_limit(&self, amount_in: U256, limit: &Ratio) -> Result<LimitedQuote, CurveError> {
+        fill_to_limit_numerical(self, amount_in, limit)
+    }
+}
+
+/// Bisect the input for the largest fill whose marginal output-per-input stays at or
+/// above `limit`, using an approximate finite-difference marginal; a drained pool prices
+/// at zero. For curves with no closed-form inverse (Pegged).
+fn fill_to_limit_numerical<P: Pricing + ?Sized>(
+    pool: &P,
+    amount_in: U256,
+    limit: &Ratio,
+) -> Result<LimitedQuote, CurveError> {
+    if amount_in.is_zero() {
+        return Ok(LimitedQuote {
+            amount_in: U256::ZERO,
+            amount_out: U256::ZERO,
+            limited: false,
+        });
+    }
+    let step = (amount_in / U256::from(1_000_000u64)).max(U256::from(1u64));
+    let marginal = |a: U256| -> Result<Ratio, CurveError> {
+        let here = pool.quote_exact_in(a)?;
+        match pool.quote_exact_in(a.saturating_add(step)) {
+            Ok(ahead) => Ratio::new(ahead.saturating_sub(here), step).ok_or(CurveError::DivByZero),
+            Err(_) => Ok(Ratio::zero()),
+        }
+    };
+    if marginal(amount_in)?.ge(limit) {
+        let out = pool.quote_exact_in(amount_in)?;
+        return Ok(LimitedQuote {
+            amount_in,
+            amount_out: out,
+            limited: false,
+        });
+    }
+    if marginal(U256::ZERO)?.lt(limit) {
+        return Ok(LimitedQuote {
+            amount_in: U256::ZERO,
+            amount_out: U256::ZERO,
+            limited: true,
+        });
+    }
+    let (mut lo, mut hi) = (U256::ZERO, amount_in);
+    while hi - lo > U256::from(1u64) {
+        let mid = lo + (hi - lo) / U256::from(2u64);
+        match marginal(mid)?.ge(limit) {
+            true => lo = mid,
+            false => hi = mid,
+        }
+    }
+    let out = pool.quote_exact_in(lo)?;
+    Ok(LimitedQuote {
+        amount_in: lo,
+        amount_out: out,
+        limited: lo < amount_in,
+    })
 }
 
 /// `1e18` — sqrt-price fixed-point basis (`XYCConcentrate.ONE`).
@@ -126,10 +187,9 @@ fn sqrt_floor(x: U256) -> U256 {
 #[inline]
 fn sqrt_ceil(x: U256) -> U256 {
     let r = x.root(2);
-    if r * r < x {
-        r + U256::from(1u64)
-    } else {
-        r
+    match r * r < x {
+        true => r + U256::from(1u64),
+        false => r,
     }
 }
 
@@ -159,33 +219,6 @@ pub fn apply_flat_fee_out(amount: U256, fee_bps: u32) -> Result<U256, CurveError
     )
 }
 
-/// `XYCSwap._xycSwapXD` on the given (already virtual, for Concentrate) reserves.
-/// Output floors and input ceils — the maker-favorable rounding.
-fn xyc_exact_in(balance_in: U256, balance_out: U256, amount_in: U256) -> Result<U256, CurveError> {
-    if balance_in.is_zero() || balance_out.is_zero() {
-        return Err(CurveError::EmptyReserves);
-    }
-    fdiv(cmul(amount_in, balance_out)?, cadd(balance_in, amount_in)?)
-}
-
-fn xyc_exact_out(
-    balance_in: U256,
-    balance_out: U256,
-    amount_out: U256,
-) -> Result<U256, CurveError> {
-    if balance_in.is_zero() || balance_out.is_zero() {
-        return Err(CurveError::EmptyReserves);
-    }
-    let numerator = cmul(amount_out, balance_in)?;
-    let denominator = balance_out
-        .checked_sub(amount_out)
-        .ok_or(CurveError::AmountTooLarge)?;
-    if denominator.is_zero() {
-        return Err(CurveError::AmountTooLarge);
-    }
-    ceil_div(numerator, denominator)
-}
-
 /// Full-range constant-product pool (`AquaXYCAmmStrategy`).
 #[derive(Debug, Clone, Copy)]
 pub struct XycPool {
@@ -203,13 +236,69 @@ impl XycPool {
     }
 }
 
+impl XycPool {
+    fn is_empty(&self) -> bool {
+        self.balance_in.is_zero() || self.balance_out.is_zero()
+    }
+}
+
 impl Pricing for XycPool {
+    /// `XYCSwap._xycSwapXD` — output floors, the maker-favorable rounding.
     fn quote_exact_in(&self, amount_in: U256) -> Result<U256, CurveError> {
-        xyc_exact_in(self.balance_in, self.balance_out, amount_in)
+        if self.is_empty() {
+            return Err(CurveError::EmptyReserves);
+        }
+        fdiv(
+            cmul(amount_in, self.balance_out)?,
+            cadd(self.balance_in, amount_in)?,
+        )
     }
 
+    /// The ceil inverse of `quote_exact_in` — input ceils, never under-charging.
     fn quote_exact_out(&self, amount_out: U256) -> Result<U256, CurveError> {
-        xyc_exact_out(self.balance_in, self.balance_out, amount_out)
+        if self.is_empty() {
+            return Err(CurveError::EmptyReserves);
+        }
+        let denominator = self
+            .balance_out
+            .checked_sub(amount_out)
+            .filter(|d| !d.is_zero())
+            .ok_or(CurveError::AmountTooLarge)?;
+        ceil_div(cmul(amount_out, self.balance_in)?, denominator)
+    }
+
+    /// Closed form: `marginal(a) = k/(bal_in + a)²`, so the fill boundary is
+    /// `a* = ⌊√(k/limit)⌋ − bal_in`. A zero limit is "no floor" (fill all).
+    fn quote_with_limit(&self, amount_in: U256, limit: &Ratio) -> Result<LimitedQuote, CurveError> {
+        if self.is_empty() {
+            return Err(CurveError::EmptyReserves);
+        }
+        if limit.is_zero() {
+            return Ok(LimitedQuote {
+                amount_in,
+                amount_out: self.quote_exact_in(amount_in)?,
+                limited: false,
+            });
+        }
+        let spot = Ratio::new(self.balance_out, self.balance_in).ok_or(CurveError::DivByZero)?;
+        if spot.le(limit) {
+            return Ok(LimitedQuote {
+                amount_in: U256::ZERO,
+                amount_out: U256::ZERO,
+                limited: !amount_in.is_zero(),
+            });
+        }
+        let k = Ratio::from(self.balance_in) * Ratio::from(self.balance_out);
+        let boundary = (k * limit.clone().invert().ok_or(CurveError::DivByZero)?)
+            .floor_sqrt()
+            .ok_or(CurveError::Overflow)?;
+        // spot > limit ⇒ boundary ≥ balance_in; a rounding tie floors the fill to zero.
+        let amount = amount_in.min(boundary.saturating_sub(self.balance_in));
+        Ok(LimitedQuote {
+            amount_in: amount,
+            amount_out: self.quote_exact_in(amount)?,
+            limited: amount < amount_in,
+        })
     }
 }
 
@@ -272,13 +361,14 @@ impl ConcentratePool {
         }
     }
 
-    /// The virtual `(balanceIn, balanceOut)` the XYC leg actually swaps against.
-    fn virtual_reserves(&self) -> Result<(U256, U256), CurveError> {
+    /// The virtual XYC pool the concentrated leg actually swaps against — the real
+    /// reserves grown by `_xycConcentrateGrowLiquidity2D`. Concentrate *is* XYC on
+    /// these reserves, so pricing delegates to it.
+    fn virtual_pool(&self) -> Result<XycPool, CurveError> {
         let one = one18();
-        let (balance_lt, balance_gt) = if self.in_is_lt {
-            (self.balance_in, self.balance_out)
-        } else {
-            (self.balance_out, self.balance_in)
+        let (balance_lt, balance_gt) = match self.in_is_lt {
+            true => (self.balance_in, self.balance_out),
+            false => (self.balance_out, self.balance_in),
         };
         let liquidity = concentrate_liquidity(
             balance_lt,
@@ -286,33 +376,34 @@ impl ConcentratePool {
             self.sqrt_price_min,
             self.sqrt_price_max,
         )?;
-        if self.in_is_lt {
-            let add_in = ceil_div(cmul(liquidity, one)?, self.sqrt_price_max)?;
-            let add_out = mul_div(liquidity, self.sqrt_price_min, one)?;
-            Ok((
-                cadd(self.balance_in, add_in)?,
-                cadd(self.balance_out, add_out)?,
-            ))
-        } else {
-            let add_in = ceil_div(cmul(liquidity, self.sqrt_price_min)?, one)?;
-            let add_out = mul_div(liquidity, one, self.sqrt_price_max)?;
-            Ok((
-                cadd(self.balance_in, add_in)?,
-                cadd(self.balance_out, add_out)?,
-            ))
-        }
+        let (add_in, add_out) = match self.in_is_lt {
+            true => (
+                ceil_div(cmul(liquidity, one)?, self.sqrt_price_max)?,
+                mul_div(liquidity, self.sqrt_price_min, one)?,
+            ),
+            false => (
+                ceil_div(cmul(liquidity, self.sqrt_price_min)?, one)?,
+                mul_div(liquidity, one, self.sqrt_price_max)?,
+            ),
+        };
+        Ok(XycPool::from_reserves(
+            cadd(self.balance_in, add_in)?,
+            cadd(self.balance_out, add_out)?,
+        ))
     }
 }
 
 impl Pricing for ConcentratePool {
     fn quote_exact_in(&self, amount_in: U256) -> Result<U256, CurveError> {
-        let (balance_in, balance_out) = self.virtual_reserves()?;
-        xyc_exact_in(balance_in, balance_out, amount_in)
+        self.virtual_pool()?.quote_exact_in(amount_in)
     }
 
     fn quote_exact_out(&self, amount_out: U256) -> Result<U256, CurveError> {
-        let (balance_in, balance_out) = self.virtual_reserves()?;
-        xyc_exact_out(balance_in, balance_out, amount_out)
+        self.virtual_pool()?.quote_exact_out(amount_out)
+    }
+
+    fn quote_with_limit(&self, amount_in: U256, limit: &Ratio) -> Result<LimitedQuote, CurveError> {
+        self.virtual_pool()?.quote_with_limit(amount_in, limit)
     }
 }
 
@@ -366,6 +457,13 @@ fn pegged_solve(u: U256, a: U256, invariant_c: U256) -> Result<U256, CurveError>
     fdiv(cmul(w, w)?, one)
 }
 
+/// A pegged pool's current reserves in normalized units, plus the invariant they pin.
+struct Normalized {
+    x0: U256,
+    y0: U256,
+    invariant: U256,
+}
+
 /// Pegged / stableswap pool (`AquaPeggedAmmStrategy`), oriented to `(in, out)`.
 #[derive(Debug, Clone, Copy)]
 pub struct PeggedPool {
@@ -388,10 +486,9 @@ impl PeggedPool {
         balance_out: U256,
         params: PeggedParams,
     ) -> Self {
-        let (rate_in, rate_out, x0_init, y0_init) = if token_in < token_out {
-            (params.rate_lt, params.rate_gt, params.x0, params.y0)
-        } else {
-            (params.rate_gt, params.rate_lt, params.y0, params.x0)
+        let (rate_in, rate_out, x0_init, y0_init) = match token_in < token_out {
+            true => (params.rate_lt, params.rate_gt, params.x0, params.y0),
+            false => (params.rate_gt, params.rate_lt, params.y0, params.x0),
         };
         Self {
             balance_in,
@@ -405,7 +502,7 @@ impl PeggedPool {
     }
 
     /// Normalized current reserves + the target invariant they pin.
-    fn normalized(&self) -> Result<(U256, U256, U256), CurveError> {
+    fn normalized(&self) -> Result<Normalized, CurveError> {
         if self.balance_in.is_zero() && self.balance_out.is_zero() {
             return Err(CurveError::EmptyReserves);
         }
@@ -413,32 +510,32 @@ impl PeggedPool {
         let y0 = cmul(self.balance_out, self.rate_out)?;
         let invariant =
             pegged_invariant_from_reserves(x0, y0, self.x0_init, self.y0_init, self.linear_width)?;
-        Ok((x0, y0, invariant))
+        Ok(Normalized { x0, y0, invariant })
     }
 }
 
 impl Pricing for PeggedPool {
     fn quote_exact_in(&self, amount_in: U256) -> Result<U256, CurveError> {
         let one = one27();
-        let (x0, y0, invariant) = self.normalized()?;
-        let x1 = cadd(x0, cmul(amount_in, self.rate_in)?)?;
+        let n = self.normalized()?;
+        let x1 = cadd(n.x0, cmul(amount_in, self.rate_in)?)?;
         let u1 = fdiv(cmul(x1, one)?, self.x0_init)?;
-        let v1 = pegged_solve(u1, self.linear_width, invariant)?;
+        let v1 = pegged_solve(u1, self.linear_width, n.invariant)?;
         let y1 = ceil_div(cmul(v1, self.y0_init)?, one)?;
-        let delta_out = y0.checked_sub(y1).ok_or(CurveError::AmountTooLarge)?;
+        let delta_out = n.y0.checked_sub(y1).ok_or(CurveError::AmountTooLarge)?;
         fdiv(delta_out, self.rate_out)
     }
 
     fn quote_exact_out(&self, amount_out: U256) -> Result<U256, CurveError> {
         let one = one27();
-        let (x0, y0, invariant) = self.normalized()?;
-        let y1 = y0
-            .checked_sub(cmul(amount_out, self.rate_out)?)
-            .ok_or(CurveError::AmountTooLarge)?;
+        let n = self.normalized()?;
+        let y1 =
+            n.y0.checked_sub(cmul(amount_out, self.rate_out)?)
+                .ok_or(CurveError::AmountTooLarge)?;
         let v1 = fdiv(cmul(y1, one)?, self.y0_init)?;
-        let u1 = pegged_solve(v1, self.linear_width, invariant)?;
+        let u1 = pegged_solve(v1, self.linear_width, n.invariant)?;
         let x1 = ceil_div(cmul(u1, self.x0_init)?, one)?;
-        let delta_in = x1.checked_sub(x0).ok_or(CurveError::AmountTooLarge)?;
+        let delta_in = x1.checked_sub(n.x0).ok_or(CurveError::AmountTooLarge)?;
         ceil_div(delta_in, self.rate_in)
     }
 }
@@ -566,6 +663,98 @@ mod tests {
         // Stays within ~1% of 1:1 in the flat region, and never over-pays out.
         assert!(peg_out > amount - amount / U256::from(100u64));
         assert!(peg_out <= amount);
+    }
+
+    fn ratio(n: u64, d: u64) -> Ratio {
+        Ratio::new(U256::from(n), U256::from(d)).unwrap()
+    }
+
+    #[test]
+    fn xyc_quote_with_limit_fills_to_the_price_bound() {
+        let pool = XycPool::from_reserves(U256::from(1000u64), U256::from(1000u64));
+        // Spot output-per-input is 1; fill until the marginal drops to 1/2:
+        // k/(1000+a)² = 1/2 → 1000+a = √(2·10⁶) = 1414 → a = 414.
+        let q = pool
+            .quote_with_limit(U256::from(2000u64), &ratio(1, 2))
+            .unwrap();
+        assert_eq!(q.amount_in, U256::from(414u64));
+        assert_eq!(
+            q.amount_out,
+            pool.quote_exact_in(U256::from(414u64)).unwrap()
+        );
+        assert!(q.limited, "the price bound, not the input, ended the fill");
+
+        // A floor at or above spot takes nothing.
+        let none = pool
+            .quote_with_limit(U256::from(2000u64), &ratio(1, 1))
+            .unwrap();
+        assert_eq!(none.amount_in, U256::ZERO);
+        assert!(none.limited);
+
+        // A floor the fill never reaches consumes all the input.
+        let all = pool
+            .quote_with_limit(U256::from(100u64), &ratio(1, 1000))
+            .unwrap();
+        assert_eq!(all.amount_in, U256::from(100u64));
+        assert_eq!(
+            all.amount_out,
+            pool.quote_exact_in(U256::from(100u64)).unwrap()
+        );
+        assert!(!all.limited);
+    }
+
+    #[test]
+    fn concentrate_quote_with_limit_respects_the_price_bound() {
+        let reserve = e18(1000);
+        let sqrt_min = sqrt_floor((one18() / U256::from(2u64)) * one18()); // price 0.5
+        let sqrt_max = sqrt_floor((U256::from(2u64) * one18()) * one18()); // price 2.0
+        let pool = ConcentratePool::from_reserves_and_bounds(
+            lo(),
+            hi(),
+            reserve,
+            reserve,
+            sqrt_min,
+            sqrt_max,
+        );
+        // Symmetric reserves and band ⇒ spot output-per-input is 1; a floor at spot takes nothing.
+        let none = pool.quote_with_limit(e18(100_000), &ratio(1, 1)).unwrap();
+        assert_eq!(none.amount_in, U256::ZERO);
+        assert!(none.limited);
+        // Below spot, a large request fills partially to the bound; a tighter floor fills strictly less.
+        let mid = pool.quote_with_limit(e18(100_000), &ratio(1, 2)).unwrap();
+        let tight = pool.quote_with_limit(e18(100_000), &ratio(3, 4)).unwrap();
+        assert!(mid.limited && tight.limited);
+        assert!(tight.amount_in < mid.amount_in);
+        assert_eq!(mid.amount_out, pool.quote_exact_in(mid.amount_in).unwrap());
+        // A zero floor is "no floor": the whole request is consumed, unlimited.
+        let all = pool.quote_with_limit(e18(100), &Ratio::zero()).unwrap();
+        assert_eq!(all.amount_in, e18(100));
+        assert!(!all.limited);
+    }
+
+    #[test]
+    fn pegged_quote_with_limit_is_consistent_and_monotone() {
+        let reserve = e18(1000);
+        let params = PeggedParams {
+            x0: reserve,
+            y0: reserve,
+            linear_width: U256::from(100u64) * one27(),
+            rate_lt: U256::from(1u64),
+            rate_gt: U256::from(1u64),
+        };
+        let pool = PeggedPool::from_reserves_and_params(lo(), hi(), reserve, reserve, params);
+        // A higher price floor fills no more, and the numerical fill's output is the pool's own quote.
+        let tight = pool.quote_with_limit(e18(500), &ratio(999, 1000)).unwrap();
+        let loose = pool.quote_with_limit(e18(500), &ratio(990, 1000)).unwrap();
+        assert!(tight.amount_in <= loose.amount_in);
+        assert_eq!(
+            tight.amount_out,
+            pool.quote_exact_in(tight.amount_in).unwrap()
+        );
+        assert_eq!(
+            loose.amount_out,
+            pool.quote_exact_in(loose.amount_in).unwrap()
+        );
     }
 
     proptest::proptest! {
