@@ -1,10 +1,10 @@
 //! Typed identifiers. Each wraps a fixed-bytes value in its own type, so passing the wrong id to
-//! the wrong function is a compile error, not a runtime mix-up. DB column: `bytea`.
+//! the wrong function is a compile error, not a runtime mix-up. DB column: `BLOB`.
 
 use alloy_primitives::{Address, B256};
 
 /// Define a newtype id over a parsable inner type (`B256`, `Address`, `u64`), with
-/// `Display`/`FromStr` and a transparent `serde` (persisted inside JSONB event payloads).
+/// `Display`/`FromStr` and a transparent `serde` (persisted inside JSON event payloads).
 macro_rules! define_id {
     ($(#[$doc:meta])* $name:ident($inner:ty)) => {
         $(#[$doc])*

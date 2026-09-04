@@ -15,15 +15,28 @@ the project is pre-1.0 and evolving.
     differentially validated against on-chain `quote()` (360-vector corpus).
   - Aqua event model + curve-agnostic `apply()` fold; strategy/`Order` decoder via `sol!`;
     lock-free `ArcSwap` snapshot with a dual `StrategyKey`/`TokenPair` index; closed-form `price()`.
-  - `ChainSource` port + alloy `eth_getLogs` adapter (vendored garden indexer); Postgres event
-    store (`sqlx`) with a per-chain cursor; `RegistrySync` — moka-deduped, DB-authoritative,
-    cursor-last — with restart recovery.
-  - Live E2E against anvil-deployed Aqua/SwapVM + Postgres: full pricing matrix plus the watcher
-    lifecycle (ship/push/swap/dock, duplicate re-scans, recovery, app-filter, multi-maker).
+  - `ChainSource` port + alloy `eth_getLogs` adapter (vendored garden indexer); in-process SQLite
+    event store (`sqlx`) behind a storage-agnostic `Store` port, with a per-chain cursor;
+    `RegistrySync` — moka-deduped, DB-authoritative, cursor-last — with restart recovery.
+  - Live E2E against anvil-deployed Aqua/SwapVM + a temp-file SQLite: full pricing matrix plus the
+    watcher lifecycle (ship/push/swap/dock, duplicate re-scans, recovery, app-filter, multi-maker).
   - Deferred to later tasks: reorg handling, periodic multicall reconciliation, protocol/dynamic
     fees, control-flow jumps, Decay, Extruction.
+- **B2 — ledger ★**: an off-chain reservation + double-entry engine that makes an over-committable
+  maker balance safe to promise across concurrent intents (the novel core).
+  - Pure engine: two-ceiling atomic admission (shared wallet + strategy virtual), two-phase
+    reserve / post (partial) / void / expire / void_reorg, conservation invariant (property-tested).
+  - Single-writer `LedgerService` — durable-first (check → persist → commit) so the in-memory ledger
+    never leads the store; lock-free `ArcSwap` of `available` for the quote path; TTL sweep; recovery.
+  - `LedgerStore` (SQLite, idempotent, state-guarded transitions) + `BudgetSource` (chain
+    `min(balanceOf, allowance)` in one Multicall3 + registry snapshot) + `Clock` ports.
+  - Live E2E against anvil + SQLite: live-budget two-ceiling admission, shared-wallet & same-strategy
+    races, firm-confirm on a budget drop, docked/unknown → zero budget, concurrent never-over-promise,
+    mixed-state & idempotent recovery, partial/void/TTL lifecycle, multi-maker isolation.
+  - Known limitations tracked in `docs/KNOWN_LIMITATIONS.md` (late-`Shipped` drift, reorg, and the
+    performance items — snapshot clone, batched confirm — deferred to reconcile/reorg/optimization).
 
-_Next: implement `UniswapXAquaFiller.sol` + its hermetic/fork test matrix._
+_Next: B3 — routing (water-fill solver over maker curves)._
 
 ## [0.1.0] — 2026-08-28
 

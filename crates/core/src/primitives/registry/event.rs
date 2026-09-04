@@ -13,7 +13,7 @@ use crate::primitives::{MakerId, StrategyHash};
 
 /// A decoded Aqua event. `app` is the SwapVM router the strategy runs on; there
 /// is no typed id for it (one router per deployment in the MVP). `serde` is the
-/// on-disk form: the event log persists each as a JSONB payload.
+/// on-disk form: the event log persists each as a JSON payload.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum AquaEvent {

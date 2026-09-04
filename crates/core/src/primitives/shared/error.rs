@@ -4,7 +4,9 @@
 
 use thiserror::Error;
 
+use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
 use crate::deps::registry::{ChainSourceError, StoreError};
+use crate::primitives::ledger::LedgerError;
 
 /// The error every fallible Solvent API returns.
 #[derive(Debug, Error)]
@@ -22,4 +24,13 @@ pub enum SolventError {
     /// The registry store failed.
     #[error("store: {0}")]
     Store(#[from] StoreError),
+    /// The ledger rejected a command (over-commitment, wrong state, bad fill).
+    #[error("ledger: {0}")]
+    Ledger(#[from] LedgerError),
+    /// The ledger store failed.
+    #[error("ledger store: {0}")]
+    LedgerStore(#[from] LedgerStoreError),
+    /// Reading a settleable budget failed.
+    #[error("budget source: {0}")]
+    BudgetSource(#[from] BudgetSourceError),
 }
