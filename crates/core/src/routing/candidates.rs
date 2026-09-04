@@ -83,6 +83,19 @@ impl Candidate {
         gross_up_by_fees(self.pool.quote_exact_out(amount_out)?, &self.fees_in_bps)
     }
 
+    /// The largest gross input whose fee-inclusive output does not exceed `max_out`. Unlike
+    /// [`net_quote_exact_out`](Self::net_quote_exact_out), which rounds the input up to deliver
+    /// *at least* `max_out`, this steps back a unit when that round-trip overshoots — so a leg
+    /// filled to it never exceeds its cap. `None` if the pool can't price `max_out`.
+    pub fn input_within_output(&self, max_out: U256) -> Option<U256> {
+        let input = self.net_quote_exact_out(max_out).ok()?;
+        match self.net_quote_exact_in(input) {
+            Ok(out) if out <= max_out => Some(input),
+            Ok(_) => Some(input.saturating_sub(U256::from(1u64))),
+            Err(_) => None,
+        }
+    }
+
     /// Fee-inclusive fill up to a gross marginal `limit`: rescale the bound to net space
     /// (net marginal = gross/γ, so use λ/γ), fill the fee-free pool, then gross the
     /// consumed input back up. The split decision; leg amounts are set exactly later.
