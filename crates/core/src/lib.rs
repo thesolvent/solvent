@@ -5,5 +5,6 @@ pub mod ledger;
 pub mod obs;
 pub mod primitives;
 pub mod registry;
+pub mod routing;
 
 pub use primitives::SolventError;

@@ -17,6 +17,13 @@ use crate::primitives::{IntentId, ReservationId, SolventError};
 #[derive(Debug, Default)]
 pub struct AvailableSnapshot(pub BTreeMap<AccountKey, U256>);
 
+impl AvailableSnapshot {
+    /// Available room at `account`, or zero for an account with no reservations.
+    pub fn available(&self, account: &AccountKey) -> U256 {
+        self.0.get(account).copied().unwrap_or(U256::ZERO)
+    }
+}
+
 pub struct LedgerService {
     ledger: Mutex<Ledger>,
     store: Arc<dyn LedgerStore>,
@@ -127,12 +134,7 @@ impl LedgerService {
 
     /// Available room at `account`, read lock-free — the quote path's entry point.
     pub fn available(&self, account: &AccountKey) -> U256 {
-        self.available
-            .load()
-            .0
-            .get(account)
-            .copied()
-            .unwrap_or(U256::ZERO)
+        self.available.load().available(account)
     }
 
     async fn read_budgets(
