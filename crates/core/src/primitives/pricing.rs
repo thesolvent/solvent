@@ -54,6 +54,12 @@ impl Ratio {
         let root = (self.0.numer() * self.0.denom()).sqrt() / self.0.denom();
         from_bigint(&root)
     }
+
+    /// Half of this ratio — the water-fill's bisection step.
+    #[must_use]
+    pub fn halved(self) -> Ratio {
+        Ratio(self.0 / BigInt::from(2))
+    }
 }
 
 impl core::ops::Mul for Ratio {
@@ -69,6 +75,16 @@ impl From<U256> for Ratio {
     /// A whole number as a rational over 1.
     fn from(n: U256) -> Ratio {
         Ratio(BigRational::from(to_bigint(n)))
+    }
+}
+
+impl core::ops::Add for Ratio {
+    type Output = Ratio;
+
+    /// Add two ratios (reduced). Infallible with arbitrary precision — the water-fill's
+    /// bisection midpoint.
+    fn add(self, rhs: Ratio) -> Ratio {
+        Ratio(self.0 + rhs.0)
     }
 }
 

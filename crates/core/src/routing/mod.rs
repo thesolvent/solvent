@@ -2,5 +2,9 @@
 //! across maker curves at the marginal-price optimum (the solver).
 
 pub mod candidates;
+pub mod service;
+pub mod waterfill;
 
 pub use candidates::{select, Candidate};
+pub use service::route;
+pub use waterfill::{solve, solve_sparse, Solution};

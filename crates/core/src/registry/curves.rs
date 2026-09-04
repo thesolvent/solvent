@@ -219,6 +219,19 @@ pub fn apply_flat_fee_out(amount: U256, fee_bps: u32) -> Result<U256, CurveError
     )
 }
 
+/// Shrink a gross input by a strategy's stacked flat fees, in program order (exact-in).
+pub fn shrink_by_fees(amount: U256, fees: &[u32]) -> Result<U256, CurveError> {
+    fees.iter()
+        .try_fold(amount, |a, &bps| apply_flat_fee_in(a, bps))
+}
+
+/// Gross a curve input up to cover a strategy's stacked flat fees, in reverse (exact-out).
+pub fn gross_up_by_fees(amount: U256, fees: &[u32]) -> Result<U256, CurveError> {
+    fees.iter()
+        .rev()
+        .try_fold(amount, |a, &bps| apply_flat_fee_out(a, bps))
+}
+
 /// Full-range constant-product pool (`AquaXYCAmmStrategy`).
 #[derive(Debug, Clone, Copy)]
 pub struct XycPool {

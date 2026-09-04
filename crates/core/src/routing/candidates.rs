@@ -7,12 +7,16 @@
 //! more than `k` makers; below that it is a no-op ordering. Caps are frozen by reading
 //! `caps` once; the ledger re-checks the firm figure at reservation time.
 
+use std::cmp::Ordering;
+
 use alloy_primitives::{Address, U256};
 
 use crate::ledger::AvailableSnapshot;
 use crate::primitives::ledger::AccountKey;
+use crate::primitives::pricing::{LimitedQuote, Ratio};
 use crate::primitives::registry::{CurveSpec, MakerStrategy, Snapshot, StrategyKey, TokenPair};
-use crate::registry::CurvePool;
+use crate::primitives::routing::RouteRequest;
+use crate::registry::{gross_up_by_fees, shrink_by_fees, CurveError, CurvePool, Pricing};
 
 /// A frozen, priceable maker venue for one `token_in -> token_out` direction. Carries
 /// the oriented curve and its flat fees so the solver can price it net-of-fee.
@@ -28,28 +32,122 @@ pub struct Candidate {
     pub fees_in_bps: Vec<u32>,
 }
 
-/// The most promising venues for `token_in -> token_out`, deterministically ordered and
-/// capped at `k`. Ranks by deliverable depth (`cap_out`) — the analogue of a liquidity
-/// sort — then by `strategy_hash` for a stable order independent of snapshot iteration.
+/// Aqua flat-fee denominator (`Fee.BPS`, 1e9 = 100%).
+const BPS: u64 = 1_000_000_000;
+
+impl Candidate {
+    /// A frozen venue: the oriented `pool`, its flat `fees_in_bps`, and the deliverable
+    /// `cap_out`. Built internally by [`select`]; public so tests and tools can construct one.
+    pub fn new(
+        key: StrategyKey,
+        token_in: Address,
+        token_out: Address,
+        cap_out: U256,
+        pool: CurvePool,
+        fees_in_bps: Vec<u32>,
+    ) -> Self {
+        Self {
+            key,
+            token_in,
+            token_out,
+            cap_out,
+            pool,
+            fees_in_bps,
+        }
+    }
+
+    /// γ = Π(1 − fⱼ/BPS): the fraction of gross input the fee-free curve actually sees.
+    fn gamma(&self) -> Result<Ratio, CurveError> {
+        self.fees_in_bps
+            .iter()
+            .try_fold(Ratio::from(U256::from(1u64)), |g, &f| {
+                let factor = Ratio::new(U256::from(BPS - u64::from(f)), U256::from(BPS))
+                    .ok_or(CurveError::DivByZero)?;
+                Ok(g * factor)
+            })
+    }
+
+    /// Fee-inclusive output for a gross input: flat fees shrink the input, then the curve.
+    pub fn net_quote_exact_in(&self, gross_in: U256) -> Result<U256, CurveError> {
+        self.pool
+            .quote_exact_in(shrink_by_fees(gross_in, &self.fees_in_bps)?)
+    }
+
+    /// Fee-inclusive gross input for an output: the curve, then fees gross the input up.
+    pub fn net_quote_exact_out(&self, amount_out: U256) -> Result<U256, CurveError> {
+        gross_up_by_fees(self.pool.quote_exact_out(amount_out)?, &self.fees_in_bps)
+    }
+
+    /// Fee-inclusive fill up to a gross marginal `limit`: rescale the bound to net space
+    /// (net marginal = gross/γ, so use λ/γ), fill the fee-free pool, then gross the
+    /// consumed input back up. The split decision; leg amounts are set exactly later.
+    pub fn net_quote_with_limit(
+        &self,
+        gross_bound: U256,
+        limit: &Ratio,
+    ) -> Result<LimitedQuote, CurveError> {
+        let net_limit = limit.clone() * self.gamma()?.invert().ok_or(CurveError::DivByZero)?;
+        let net_bound = shrink_by_fees(gross_bound, &self.fees_in_bps)?;
+        let net = self.pool.quote_with_limit(net_bound, &net_limit)?;
+        Ok(LimitedQuote {
+            amount_in: gross_up_by_fees(net.amount_in, &self.fees_in_bps)?.min(gross_bound),
+            amount_out: net.amount_out,
+            limited: net.limited,
+        })
+    }
+}
+
+/// The most promising venues for a request, deterministically ordered and capped at `k`.
+/// Ranks by **estimated net-of-fee output at the trade size** (exact-out: the input to
+/// deliver it) — the metric every production router selects on, and the one that makes the
+/// solver's optimum captured by a small `k`. Since our quotes are closed-form we rank every
+/// candidate directly (no cheap TVL prefilter), which is strictly more accurate. Top-`k` via
+/// quickselect (`O(n)`); `strategy_hash` breaks ties for a snapshot-order-independent set.
 pub fn select(
     snapshot: &Snapshot,
     caps: &AvailableSnapshot,
-    token_in: Address,
-    token_out: Address,
+    request: &RouteRequest,
     k: usize,
 ) -> Vec<Candidate> {
-    let pair = TokenPair::new(token_in, token_out);
-    let mut out: Vec<Candidate> = snapshot
+    let pair = TokenPair::new(request.token_in, request.token_out);
+    // What the taker cares about, quoted once per candidate: output for exact-in, required
+    // input for exact-out. `None` = can't price this size.
+    let score = |c: &Candidate| -> Option<U256> {
+        match request.exact_in {
+            true => c.net_quote_exact_in(request.amount).ok(),
+            false => c.net_quote_exact_out(request.amount.min(c.cap_out)).ok(),
+        }
+    };
+    let mut scored: Vec<Scored> = snapshot
         .active_strategies_for_pair(pair)
-        .filter_map(|strategy| build_candidate(strategy, caps, token_in, token_out))
+        .filter_map(|s| build_candidate(s, caps, request.token_in, request.token_out))
+        .map(|c| (score(&c), c))
         .collect();
-    out.sort_by(|a, b| {
-        b.cap_out
-            .cmp(&a.cap_out)
-            .then_with(|| a.key.strategy_hash.cmp(&b.key.strategy_hash))
-    });
-    out.truncate(k);
-    out
+    let exact_in = request.exact_in;
+    let better = |a: &Scored, b: &Scored| best_first(a, b, exact_in);
+    if scored.len() > k {
+        scored.select_nth_unstable_by(k, better);
+        scored.truncate(k);
+    }
+    scored.sort_by(better);
+    scored.into_iter().map(|(_, c)| c).collect()
+}
+
+/// A candidate with its rank score (`None` = unpriceable at this size).
+type Scored = (Option<U256>, Candidate);
+
+/// Order candidates best-first: exact-in prefers more output, exact-out less input; a
+/// priceable candidate always beats an unpriceable one; `strategy_hash` breaks ties for a
+/// snapshot-order-independent result.
+fn best_first(a: &Scored, b: &Scored, exact_in: bool) -> Ordering {
+    let by_score = match (a.0, b.0) {
+        (Some(x), Some(y)) if exact_in => y.cmp(&x),
+        (Some(x), Some(y)) => x.cmp(&y),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    };
+    by_score.then_with(|| a.1.key.strategy_hash.cmp(&b.1.key.strategy_hash))
 }
 
 /// Build one eligible candidate, or `None` when the strategy can't source this pair:
@@ -100,9 +198,19 @@ fn frozen_cap(strategy: &MakerStrategy, caps: &AvailableSnapshot, token_out: Add
 mod tests {
     use super::*;
     use crate::primitives::registry::Curve;
-    use crate::primitives::{MakerId, StrategyHash};
+    use crate::primitives::{IntentId, MakerId, StrategyHash};
     use alloy_primitives::B256;
     use std::collections::BTreeMap;
+
+    fn request(in_tok: Address, out_tok: Address, amount: u64) -> RouteRequest {
+        RouteRequest {
+            intent: IntentId(B256::ZERO),
+            token_in: in_tok,
+            token_out: out_tok,
+            amount: U256::from(amount),
+            exact_in: true,
+        }
+    }
 
     fn tok(n: u8) -> Address {
         Address::from([n; 20])
@@ -161,7 +269,7 @@ mod tests {
         let snap = Snapshot::from_strategies([xyc(m, h, a, b, 1000)]);
         // Payout token is b; wallet 100, strategy-virtual 60 ⇒ cap is the tighter 60.
         let c = caps(&[(wallet(m, b), 100), (virt(m, h, b), 60)]);
-        let out = select(&snap, &c, a, b, 64);
+        let out = select(&snap, &c, &request(a, b, 100), 64);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].cap_out, U256::from(60u64));
         assert_eq!(out[0].token_out, b);
@@ -186,48 +294,52 @@ mod tests {
             (wallet(maker(3), b), 100),
             (virt(maker(3), hash(3), b), 100),
         ]);
-        assert!(select(&snap, &c, a, b, 64).is_empty());
+        assert!(select(&snap, &c, &request(a, b, 100), 64).is_empty());
     }
 
     #[test]
-    fn ranks_by_cap_then_hash() {
+    fn ranks_by_estimated_output_then_hash() {
         let (a, b) = (tok(1), tok(2));
-        // maker order (1,2,3) deliberately disagrees with cap order (30,90,90).
+        // Deeper pools quote more output for the same trade ⇒ rank higher; equal-depth
+        // pools tie and break on strategy_hash asc. maker order disagrees with depth.
         let snap = Snapshot::from_strategies([
-            xyc(maker(1), hash(10), a, b, 1000),
-            xyc(maker(2), hash(5), a, b, 1000),
-            xyc(maker(3), hash(9), a, b, 1000),
+            xyc(maker(1), hash(10), a, b, 1000), // shallow
+            xyc(maker(2), hash(5), a, b, 5000),  // deep
+            xyc(maker(3), hash(9), a, b, 5000),  // deep, ties with maker(2)
         ]);
+        let big = 1_000_000u64;
         let c = caps(&[
-            (wallet(maker(1), b), 30),
-            (virt(maker(1), hash(10), b), 30),
-            (wallet(maker(2), b), 90),
-            (virt(maker(2), hash(5), b), 90),
-            (wallet(maker(3), b), 90),
-            (virt(maker(3), hash(9), b), 90),
+            (wallet(maker(1), b), big),
+            (virt(maker(1), hash(10), b), big),
+            (wallet(maker(2), b), big),
+            (virt(maker(2), hash(5), b), big),
+            (wallet(maker(3), b), big),
+            (virt(maker(3), hash(9), b), big),
         ]);
-        let order: Vec<_> = select(&snap, &c, a, b, 64)
+        let order: Vec<_> = select(&snap, &c, &request(a, b, 100), 64)
             .iter()
             .map(|c| c.key.strategy_hash)
             .collect();
-        // cap desc puts the two 90s first; the tie breaks on strategy_hash asc.
         assert_eq!(order, vec![hash(5), hash(9), hash(10)]);
     }
 
     #[test]
     fn truncates_to_k_and_returns_all_below_k() {
         let (a, b) = (tok(1), tok(2));
-        let snap = Snapshot::from_strategies((1u8..=5).map(|n| xyc(maker(n), hash(n), a, b, 1000)));
+        // depth n·1000 ⇒ deeper ranks higher.
+        let snap = Snapshot::from_strategies(
+            (1u8..=5).map(|n| xyc(maker(n), hash(n), a, b, u64::from(n) * 1000)),
+        );
         let mut entries = Vec::new();
         for n in 1u8..=5 {
-            entries.push((wallet(maker(n), b), u64::from(n) * 10));
-            entries.push((virt(maker(n), hash(n), b), u64::from(n) * 10));
+            entries.push((wallet(maker(n), b), 1_000_000));
+            entries.push((virt(maker(n), hash(n), b), 1_000_000));
         }
         let c = caps(&entries);
-        let top2 = select(&snap, &c, a, b, 2);
+        let top2 = select(&snap, &c, &request(a, b, 100), 2);
         assert_eq!(top2.len(), 2);
-        assert_eq!(top2[0].cap_out, U256::from(50u64));
-        assert_eq!(top2[1].cap_out, U256::from(40u64));
-        assert_eq!(select(&snap, &c, a, b, 64).len(), 5);
+        assert_eq!(top2[0].key.strategy_hash, hash(5)); // deepest
+        assert_eq!(top2[1].key.strategy_hash, hash(4));
+        assert_eq!(select(&snap, &c, &request(a, b, 100), 64).len(), 5);
     }
 }
