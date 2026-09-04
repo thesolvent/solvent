@@ -30,4 +30,22 @@ fmt-check:
 # The gate a contracts phase must pass before it closes.
 gate: fmt-check build test
 
-# --- backend (Rust) — recipes are wired when the backend phase begins ---
+# --- backend (Rust) ---
+be-fmt:
+    cargo fmt
+
+be-fmt-check:
+    cargo fmt --check
+
+be-clippy:
+    cargo clippy --all-targets -- -D warnings
+    cargo clippy --all-targets --no-default-features -- -D warnings
+    cargo clippy --all-targets --all-features -- -D warnings
+
+be-test:
+    cargo test
+    cargo test --no-default-features
+    cargo test --all-features
+
+# The gate a backend phase must pass before it closes.
+be-gate: be-fmt-check be-clippy be-test
