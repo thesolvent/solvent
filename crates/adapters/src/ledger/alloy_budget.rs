@@ -1,7 +1,5 @@
-//! The chain-reading [`BudgetSource`]. It answers per `AccountKey`: a wallet's settleable budget is
-//! the ERC-20 reality — `min(balanceOf(maker), allowance(maker → Aqua))`, read just-in-time as the
-//! "firm quote" confirmation — and a strategy virtual's is its balance in the registry snapshot. The
-//! service asks; this adapter owns the chain-vs-registry split.
+//! The chain-reading [`BudgetSource`]: a wallet's budget is `min(balanceOf, allowance→Aqua)` via one
+//! Multicall3; a strategy virtual's is the registry snapshot.
 
 use std::sync::Arc;
 
@@ -54,8 +52,7 @@ impl<P: Provider + Clone + 'static> BudgetSource for AlloyBudgetSource<P> {
     async fn budget(&self, account: &AccountKey) -> Result<U256, BudgetSourceError> {
         match account {
             AccountKey::WalletBudget { maker, token } => {
-                // One atomic, same-block read via Multicall3 — a firm "last look" wants
-                // balanceOf and allowance to agree on one block, not straddle two.
+                // One atomic same-block read (Multicall3): balanceOf and allowance from one block.
                 let erc20 = IERC20::new(*token, self.provider.clone());
                 let (balance, allowance) = self
                     .provider
@@ -77,8 +74,7 @@ impl<P: Provider + Clone + 'static> BudgetSource for AlloyBudgetSource<P> {
                     app: self.app,
                     strategy_hash: *strategy_hash,
                 };
-                // A docked strategy is a tombstone that keeps its old balance but can no longer be
-                // pulled — treat it as zero budget, or we would promise capital that reverts on-chain.
+                // A docked strategy keeps its tombstone balance but can't be pulled — zero budget.
                 Ok(self
                     .registry
                     .load()

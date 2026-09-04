@@ -1,14 +1,7 @@
-//! The pure double-entry reservation engine: an in-memory, zero-I/O state machine that makes an
-//! over-committable maker Aqua balance safe to *promise* across concurrent intents. It is the
-//! ledger analogue of the registry's `Snapshot` fold — deterministic and rebuildable from its
-//! command stream. Durability, the live budget feed, and the reorg/TTL drivers sit in outer layers.
-//!
-//! Every source is held at two ceilings, because a pull reverts on-chain unless it satisfies both:
-//! the maker's shared wallet allowance (`WalletBudget`) and the individual strategy's virtual
-//! balance (`StrategyVirtual`). A `reserve` is admitted only if every touched account has room;
-//! `post` consumes the reserved hold at settlement (a partial fill restores the remainder);
-//! `void`/`expire` release it. `budget` is fed from outside, so the engine owns `pending`/`consumed`,
-//! derives `available`, and the compartments always reconcile to the budget.
+//! The pure double-entry reservation engine: a zero-I/O state machine making an over-committable
+//! maker balance safe to promise across concurrent intents. Each source is held at both ceilings
+//! (shared wallet + strategy virtual); budget is fed in, so it owns `pending`/`consumed` and derives
+//! `available`.
 
 use std::collections::{BTreeMap, BTreeSet};
 

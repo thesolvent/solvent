@@ -1,7 +1,5 @@
-//! The SQLite ledger store (sqlx), behind the storage-agnostic `LedgerStore` port. In-process, no
-//! network hop. Each command is a single statement — atomic on its own in SQLite — that mirrors a
-//! pure-engine command. `reserve` inserts idempotently on the reservation id; the transitions only
-//! fire from the expected prior state, so a crash-replay converges instead of double-counting.
+//! The SQLite ledger store (sqlx) behind the `LedgerStore` port. Each command is one statement;
+//! `reserve` is idempotent on the id and transitions fire only from the expected prior state.
 
 use alloy::primitives::{B256, U256};
 use async_trait::async_trait;
