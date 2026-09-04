@@ -1,5 +1,5 @@
 //! Registry — a live, event-sourced picture of maker Aqua liquidity that prices
-//! the three Aqua Tier-0 strategy types closed-form (design §7).
+//! the three Aqua Tier-0 strategy types closed-form.
 
 pub mod curves;
 

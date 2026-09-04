@@ -72,8 +72,11 @@ phase 3–5 tasks, each task **one complete component**.
 ## Code style — house rules (only what differs from defaults)
 
 - **Comments say why, not what** — short, minimal; most lines need none. No comment-per-change,
-  no dev-process breadcrumbs (task/step numbers, "grows in Phase N", "was/refactored"). Spec
-  anchors (`EIP-2`, `§7.9`) are fine; roadmap references are noise. Doc summaries 1–2 sentences.
+  no dev-process breadcrumbs (task/step numbers, "grows in Phase N", "was/refactored"). **No
+  references to the design doc, plan, phases, or task numbers** (`§7.10`, `design §…`, `Phase N`,
+  `Bx`, `Lab vector`) — a comment explains the code, not where it came from; put spec cross-refs in
+  the docs, not the source. Roadmap/future references are noise. Naming the upstream being ported
+  (e.g. `XYCSwap._xycSwapXD`) is fine (it *is* the why). Doc summaries 1–2 sentences.
 - **Naming:** accessors drop `get_` (bare noun), writes are domain verbs, predicates are
   `is_`/`supports_`. Fix outliers to match.
 - **YAGNI** (see Core rules) — a deliberate *public API surface* (a re-export, a spec-mandated

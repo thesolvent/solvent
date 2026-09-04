@@ -1,6 +1,7 @@
 //! Value primitives, organized per domain: `shared` is the cross-cutting foundation; domain-specific
 //! modules (`registry`, `ledger`, …) sit alongside it.
 
+pub mod registry;
 pub mod shared;
 
 pub use shared::{
