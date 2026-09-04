@@ -11,39 +11,23 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{strategy_key, Harness, StrategySpec, CHAIN};
+use common::{pipeline, strategy_key, Harness, StrategySpec, CHAIN};
 use solvent_adapters::registry::PgStore;
 use solvent_core::{
     primitives::{registry::Snapshot, ChainConfig},
     registry::{price, PriceError, RegistrySync, SharedSnapshot},
 };
-use sqlx::PgPool;
 
 #[tokio::test]
 async fn e2e_registry_full_pipeline() {
-    let Ok(db_url) = std::env::var("TEST_DATABASE_URL") else {
-        eprintln!("TEST_DATABASE_URL unset — skipping live E2E");
+    let Some(db_url) = common::db_url_or_skip() else {
         return;
     };
 
     let h = Harness::setup().await;
     h.ship_all().await;
+    let (sync, snapshot, pool) = pipeline(&h, &db_url, CHAIN).await;
     let to_block = h.latest_block().await;
-
-    // Real pipeline over a fresh per-chain slice of the store.
-    let pool = PgPool::connect(&db_url).await.expect("connect pg");
-    let store = PgStore::new(pool.clone());
-    store.migrate().await.expect("migrate");
-    for table in ["aqua_event", "registry_cursor"] {
-        sqlx::query(&format!("DELETE FROM {table} WHERE chain = $1"))
-            .bind(CHAIN.0 as i64)
-            .execute(&pool)
-            .await
-            .expect("clean");
-    }
-    let config = ChainConfig::new(CHAIN, 0, 25, 15);
-    let snapshot = Arc::new(SharedSnapshot::default());
-    let sync = RegistrySync::new(&config, h.chain_source(), Arc::new(store), snapshot.clone());
     sync.sync_once(to_block).await.expect("sync");
 
     // E1 — cold-start backfill: every strategy folded with on-chain balances.
@@ -84,6 +68,7 @@ async fn e2e_registry_full_pipeline() {
 
     // E2 — restart recovery rebuilds an identical snapshot from the store.
     {
+        let config = ChainConfig::new(CHAIN, 0, 25, 15);
         let store = PgStore::new(pool.clone());
         let recovered = Arc::new(SharedSnapshot::default());
         let restart = RegistrySync::new(
