@@ -99,15 +99,13 @@ impl Snapshot {
                     strategy_hash,
                 };
                 // A `Pushed` to a tombstoned strategy is impossible on-chain
-                // (`push` to a docked slot reverts); ignore it if it appears.
-                if let Some(s) = self.strategies.get_mut(&key) {
-                    if s.active {
-                        let before = s.pair();
-                        let balance = s.balances.entry(token).or_insert(U256::ZERO);
-                        *balance = balance.saturating_add(amount);
-                        let after = s.pair();
-                        Self::reindex(&mut self.by_pair, key, before, after);
-                    }
+                // (`push` to a docked slot reverts); the `filter` ignores it.
+                if let Some(s) = self.strategies.get_mut(&key).filter(|s| s.active) {
+                    let before = s.pair();
+                    let balance = s.balances.entry(token).or_insert(U256::ZERO);
+                    *balance = balance.saturating_add(amount);
+                    let after = s.pair();
+                    Self::reindex(&mut self.by_pair, key, before, after);
                 }
             }
             AquaEvent::Pulled {
@@ -122,11 +120,9 @@ impl Snapshot {
                     app,
                     strategy_hash,
                 };
-                if let Some(s) = self.strategies.get_mut(&key) {
-                    if s.active {
-                        if let Some(balance) = s.balances.get_mut(&token) {
-                            *balance = balance.saturating_sub(amount);
-                        }
+                if let Some(s) = self.strategies.get_mut(&key).filter(|s| s.active) {
+                    if let Some(balance) = s.balances.get_mut(&token) {
+                        *balance = balance.saturating_sub(amount);
                     }
                 }
             }

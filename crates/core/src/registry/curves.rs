@@ -133,6 +133,32 @@ fn sqrt_ceil(x: U256) -> U256 {
     }
 }
 
+/// SwapVM fee denominator (`Fee.BPS`, 1e9 = 100%).
+#[inline]
+fn bps_denominator() -> U256 {
+    U256::from(1_000_000_000u64)
+}
+
+/// `Fee._flatFeeAmountInXD` exact-in: the maker's cut off the input before the
+/// curve — `amount − ceilDiv(amount·bps, BPS)`.
+pub fn apply_flat_fee_in(amount: U256, fee_bps: u32) -> Result<U256, CurveError> {
+    let cut = ceil_div(cmul(amount, U256::from(fee_bps))?, bps_denominator())?;
+    amount.checked_sub(cut).ok_or(CurveError::AmountTooLarge)
+}
+
+/// `Fee._flatFeeAmountInXD` exact-out: the input grossed up to cover the fee —
+/// `amount + ceilDiv(amount·bps, BPS − bps)`.
+pub fn apply_flat_fee_out(amount: U256, fee_bps: u32) -> Result<U256, CurveError> {
+    let denominator = bps_denominator()
+        .checked_sub(U256::from(fee_bps))
+        .filter(|d| !d.is_zero())
+        .ok_or(CurveError::InvalidParams)?;
+    cadd(
+        amount,
+        ceil_div(cmul(amount, U256::from(fee_bps))?, denominator)?,
+    )
+}
+
 /// `XYCSwap._xycSwapXD` on the given (already virtual, for Concentrate) reserves.
 /// Output floors and input ceils — the maker-favorable rounding.
 fn xyc_exact_in(balance_in: U256, balance_out: U256, amount_in: U256) -> Result<U256, CurveError> {

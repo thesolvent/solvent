@@ -5,8 +5,11 @@
 use alloy_primitives::{Address, U256};
 use thiserror::Error;
 
-use super::curves::{ConcentratePool, CurveError, PeggedPool, Pricing, XycPool};
-use crate::primitives::registry::{CurveSpec, MakerStrategy};
+use super::curves::{
+    apply_flat_fee_in, apply_flat_fee_out, ConcentratePool, CurveError, PeggedPool, Pricing,
+    XycPool,
+};
+use crate::primitives::registry::{Curve, CurveSpec, MakerStrategy};
 
 /// Why a strategy could not be priced for a request.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -31,21 +34,17 @@ pub fn price(
     amount: U256,
     exact_in: bool,
 ) -> Result<U256, PriceError> {
+    let CurveSpec::Priceable { curve, fees_in_bps } = &strategy.curve else {
+        return Err(PriceError::Unsupported);
+    };
     let balance_in = strategy.balance(&token_in);
     let balance_out = strategy.balance(&token_out);
-    let quote = |pool: &dyn Pricing| {
-        if exact_in {
-            pool.quote_exact_in(amount)
-        } else {
-            pool.quote_exact_out(amount)
-        }
-    };
-    let amount = match &strategy.curve {
-        CurveSpec::Xyc => quote(&XycPool::from_reserves(balance_in, balance_out)),
-        CurveSpec::Concentrate {
+    let pool: Box<dyn Pricing> = match curve {
+        Curve::Xyc => Box::new(XycPool::from_reserves(balance_in, balance_out)),
+        Curve::Concentrate {
             sqrt_price_min,
             sqrt_price_max,
-        } => quote(&ConcentratePool::from_reserves_and_bounds(
+        } => Box::new(ConcentratePool::from_reserves_and_bounds(
             token_in,
             token_out,
             balance_in,
@@ -53,16 +52,29 @@ pub fn price(
             *sqrt_price_min,
             *sqrt_price_max,
         )),
-        CurveSpec::Pegged(params) => quote(&PeggedPool::from_reserves_and_params(
+        Curve::Pegged(params) => Box::new(PeggedPool::from_reserves_and_params(
             token_in,
             token_out,
             balance_in,
             balance_out,
             *params,
         )),
-        CurveSpec::Unsupported => return Err(PriceError::Unsupported),
     };
-    Ok(amount?)
+    let quoted = if exact_in {
+        // Flat fees shrink the input in program order, then the curve runs.
+        let net_in = fees_in_bps
+            .iter()
+            .try_fold(amount, |a, &bps| apply_flat_fee_in(a, bps))?;
+        pool.quote_exact_in(net_in)?
+    } else {
+        // The curve runs, then flat fees gross the input up in reverse order.
+        let curve_in = pool.quote_exact_out(amount)?;
+        fees_in_bps
+            .iter()
+            .rev()
+            .try_fold(curve_in, |a, &bps| apply_flat_fee_out(a, bps))?
+    };
+    Ok(quoted)
 }
 
 #[cfg(test)]
@@ -101,11 +113,17 @@ mod tests {
     fn e18(n: u128) -> U256 {
         U256::from(n) * U256::from(1_000_000_000_000_000_000u128)
     }
+    fn spec(curve: Curve, fees_in_bps: &[u32]) -> CurveSpec {
+        CurveSpec::Priceable {
+            curve,
+            fees_in_bps: fees_in_bps.to_vec(),
+        }
+    }
 
     #[test]
     fn xyc_price_matches_the_pool() {
         let s = strategy(
-            CurveSpec::Xyc,
+            spec(Curve::Xyc, &[]),
             tok(1),
             U256::from(1000u64),
             tok(2),
@@ -127,7 +145,7 @@ mod tests {
             rate_gt: U256::from(1u64),
         };
         let s = strategy(
-            CurveSpec::Pegged(params),
+            spec(Curve::Pegged(params), &[]),
             tok(1),
             e18(1000),
             tok(2),
@@ -139,6 +157,34 @@ mod tests {
             .quote_exact_in(e18(100))
             .unwrap();
         assert!(peg > xyc);
+    }
+
+    #[test]
+    fn flat_fee_reduces_output_and_grosses_input() {
+        let fee = 3_000_000u32; // 0.3% at 1e9 BPS
+        let s = strategy(
+            spec(Curve::Xyc, &[fee]),
+            tok(1),
+            e18(1000),
+            tok(2),
+            e18(1000),
+        );
+        let pool = XycPool::from_reserves(e18(1000), e18(1000));
+
+        // exact-in: the fee shrinks the curve's input.
+        let got_in = price(&s, tok(1), tok(2), e18(100), true).unwrap();
+        assert_eq!(
+            got_in,
+            pool.quote_exact_in(apply_flat_fee_in(e18(100), fee).unwrap())
+                .unwrap()
+        );
+        assert!(got_in < pool.quote_exact_in(e18(100)).unwrap());
+
+        // exact-out: the fee grosses the curve's input up.
+        let got_out = price(&s, tok(1), tok(2), e18(90), false).unwrap();
+        let curve_in = pool.quote_exact_out(e18(90)).unwrap();
+        assert_eq!(got_out, apply_flat_fee_out(curve_in, fee).unwrap());
+        assert!(got_out > curve_in);
     }
 
     #[test]
@@ -156,7 +202,7 @@ mod tests {
         );
 
         let s = strategy(
-            CurveSpec::Xyc,
+            spec(Curve::Xyc, &[]),
             tok(1),
             U256::from(1000u64),
             tok(2),

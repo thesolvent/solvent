@@ -5,6 +5,9 @@ pub mod curves;
 pub mod pricing;
 pub mod service;
 
-pub use curves::{ConcentratePool, CurveError, PeggedPool, Pricing, XycPool};
+pub use curves::{
+    apply_flat_fee_in, apply_flat_fee_out, ConcentratePool, CurveError, PeggedPool, Pricing,
+    XycPool,
+};
 pub use pricing::{price, PriceError};
 pub use service::SharedSnapshot;
