@@ -6,7 +6,12 @@ publish.workspace = true
 
 [dependencies]
 solvent-core = { path = "../core" }
-alloy = { version = "1", features = ["providers", "rpc-types-eth", "sol-types"] }
+alloy = { version = "1", features = [
+    "contract",
+    "providers",
+    "rpc-types-eth",
+    "sol-types",
+] }
 async-trait = "0.1"
 futures = "0.3"
 sqlx = { version = "0.8", features = [

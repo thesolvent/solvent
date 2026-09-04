@@ -114,8 +114,12 @@ impl Ledger {
     /// Place a reservation's holds and record it `Pending`, without re-checking admission — the
     /// commit half of an already-passed `can_reserve`, and the primitive recovery replays to rebuild
     /// holds from the durable record (a promise stands even if the live budget has since dropped).
-    /// The caller guarantees the id is not already held.
+    /// Idempotent on the id: a reservation already held is left untouched, so replaying recovery
+    /// never double-counts.
     pub fn restore(&mut self, reservation: Reservation) {
+        if self.reservations.contains_key(&reservation.id) {
+            return;
+        }
         for (account, requested) in Self::aggregate_demand(&reservation.sources) {
             let held = self.held.entry(account).or_default();
             held.pending = held.pending.saturating_add(requested);
