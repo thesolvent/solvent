@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use alloy_primitives::U256;
 
-use super::event::{AquaEvent, EventCursor, StrategyKey};
+use super::event::{AquaEvent, StrategyKey};
 use super::strategy::{MakerStrategy, TokenPair};
 
 /// The event-sourced picture of all maker liquidity.
@@ -20,22 +20,12 @@ use super::strategy::{MakerStrategy, TokenPair};
 pub struct Snapshot {
     strategies: BTreeMap<StrategyKey, MakerStrategy>,
     by_pair: BTreeMap<TokenPair, BTreeSet<StrategyKey>>,
-    /// High-water mark: the position of the last event folded in. Guarantees
-    /// exactly-once + strict ordering, so the reorg-overlap re-scan can safely
-    /// re-feed already-seen events.
-    applied_through: Option<EventCursor>,
 }
 
 impl Snapshot {
     /// The strategy for `key`, active or tombstoned.
     pub fn strategy(&self, key: &StrategyKey) -> Option<&MakerStrategy> {
         self.strategies.get(key)
-    }
-
-    /// The last event position folded in, or `None` for an empty snapshot. The
-    /// sync loop aligns its durable cursor with this.
-    pub fn applied_through(&self) -> Option<EventCursor> {
-        self.applied_through
     }
 
     /// Total strategies tracked (including tombstones).
@@ -59,15 +49,11 @@ impl Snapshot {
             .filter_map(move |key| self.strategies.get(key).filter(|s| s.active))
     }
 
-    /// Fold one event at its chain position `cursor`. Exactly-once + ordered: a
-    /// `cursor` at or below the high-water mark is ignored (reorg-overlap re-feed
-    /// or out-of-order), as are events for a strategy never seen `Shipped`. Reorg
-    /// rewrites are handled a layer up, by rebuilding from the canonical log.
-    pub fn apply(&mut self, cursor: EventCursor, event: AquaEvent) {
-        if self.applied_through.is_some_and(|hw| cursor <= hw) {
-            return;
-        }
-        self.applied_through = Some(cursor);
+    /// Fold one event into the snapshot — a pure step: `Shipped` registers,
+    /// `Pushed`/`Pulled` move balances, `Docked` tombstones; events for a strategy
+    /// never seen `Shipped` are ignored. Dedup and chain-ordering are the caller's
+    /// job (the sync loop applies each event exactly once, in order).
+    pub fn apply(&mut self, event: AquaEvent) {
         match event {
             AquaEvent::Shipped {
                 maker,
@@ -231,17 +217,9 @@ mod tests {
         }
     }
 
-    fn cur(block: u64, log: u64) -> EventCursor {
-        EventCursor {
-            block_number: block,
-            log_index: log,
-        }
-    }
-
-    // Apply a sequence at strictly increasing cursors (one block each).
     fn apply_seq(snap: &mut Snapshot, events: impl IntoIterator<Item = AquaEvent>) {
-        for (i, ev) in events.into_iter().enumerate() {
-            snap.apply(cur(i as u64, 0), ev);
+        for ev in events {
+            snap.apply(ev);
         }
     }
 
@@ -319,68 +297,42 @@ mod tests {
         assert!(snap.is_empty());
     }
 
-    #[test]
-    fn duplicate_and_out_of_order_events_are_ignored() {
-        let mut snap = Snapshot::default();
-        snap.apply(cur(1, 0), shipped(0));
-        snap.apply(cur(1, 1), pushed(0, 1, 1000));
-        snap.apply(cur(1, 2), pushed(0, 2, 1000));
-        // Replay at the same cursor (reorg-overlap re-scan) -> no double-count.
-        snap.apply(cur(1, 2), pushed(0, 2, 1000));
-        // An older, out-of-order event -> ignored.
-        snap.apply(cur(0, 5), pushed(0, 1, 5000));
-        let s = snap.strategy(&key(0)).unwrap();
-        assert_eq!(s.balance(&token(1)), U256::from(1000u64));
-        assert_eq!(s.balance(&token(2)), U256::from(1000u64));
-        assert_eq!(snap.applied_through(), Some(cur(1, 2)));
-    }
-
     proptest::proptest! {
         #![proptest_config(proptest::prelude::ProptestConfig { failure_persistence: None, ..proptest::prelude::ProptestConfig::default() })]
-        // For ANY ordered stream: re-feeding every event changes nothing
-        // (exactly-once), and the dual index stays consistent with the map.
+        // For ANY event stream, the dual index stays consistent with the map:
+        // every indexed key is an active strategy on that pair, and vice versa.
         #[test]
-        fn fold_is_idempotent_and_index_consistent(
+        fn fold_keeps_dual_index_consistent(
             ops in proptest::collection::vec(
                 (0u8..4, 0u8..3, 0u8..3, 0u64..1_000_000),
                 0..300,
             ),
         ) {
-            let events: Vec<AquaEvent> = ops
-                .into_iter()
-                .map(|(op, s, t, amt)| match op {
+            let mut snap = Snapshot::default();
+            for (op, s, t, amt) in ops {
+                snap.apply(match op {
                     0 => shipped(s),
                     1 => pushed(s, t, amt),
                     2 => pulled(s, t, amt),
                     _ => docked(s),
-                })
-                .collect();
-
-            let mut once = Snapshot::default();
-            let mut twice = Snapshot::default();
-            for (i, ev) in events.iter().enumerate() {
-                let c = cur(i as u64, 0);
-                once.apply(c, ev.clone());
-                twice.apply(c, ev.clone());
-                twice.apply(c, ev.clone()); // immediate replay must be a no-op
+                });
             }
-            proptest::prop_assert!(once == twice);
 
             // Forward: every indexed key is present, active, and matches its bucket.
-            for (pair, set) in &once.by_pair {
+            for (pair, set) in &snap.by_pair {
                 proptest::prop_assert!(!set.is_empty());
                 for k in set {
-                    let strat = once.strategies.get(k).expect("indexed key must exist");
+                    let strat = snap.strategies.get(k).expect("indexed key must exist");
                     proptest::prop_assert!(strat.active);
                     proptest::prop_assert_eq!(strat.pair(), Some(*pair));
                 }
             }
             // Reverse: every active two-token strategy is indexed under its pair.
-            for (k, strat) in &once.strategies {
+            for (k, strat) in &snap.strategies {
                 if strat.active {
                     if let Some(pair) = strat.pair() {
                         proptest::prop_assert!(
-                            once.by_pair.get(&pair).is_some_and(|set| set.contains(k))
+                            snap.by_pair.get(&pair).is_some_and(|set| set.contains(k))
                         );
                     }
                 }

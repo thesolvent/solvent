@@ -4,6 +4,7 @@
 pub mod curves;
 pub mod pricing;
 pub mod service;
+pub mod sync;
 
 pub use curves::{
     apply_flat_fee_in, apply_flat_fee_out, ConcentratePool, CurveError, PeggedPool, Pricing,
@@ -11,3 +12,4 @@ pub use curves::{
 };
 pub use pricing::{price, PriceError};
 pub use service::SharedSnapshot;
+pub use sync::RegistrySync;

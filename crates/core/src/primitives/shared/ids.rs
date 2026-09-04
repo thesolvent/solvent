@@ -3,11 +3,16 @@
 
 use alloy_primitives::{Address, B256};
 
-/// Define a newtype id over a hex-parsable inner type (`B256`, `Address`), with `Display`/`FromStr`.
+/// Define a newtype id over a parsable inner type (`B256`, `Address`, `u64`), with
+/// `Display`/`FromStr` and a transparent `serde` (persisted inside JSONB event payloads).
 macro_rules! define_id {
     ($(#[$doc:meta])* $name:ident($inner:ty)) => {
         $(#[$doc])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord,
+            ::serde::Serialize, ::serde::Deserialize,
+        )]
+        #[serde(transparent)]
         pub struct $name(pub $inner);
 
         impl ::core::fmt::Display for $name {
@@ -51,6 +56,10 @@ define_id!(
 define_id!(
     /// On-chain fill identifier.
     FillId(B256)
+);
+define_id!(
+    /// EVM chain identifier (e.g. `1` for Ethereum mainnet).
+    ChainId(u64)
 );
 
 #[cfg(test)]
