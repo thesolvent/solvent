@@ -15,11 +15,11 @@ the project is pre-1.0 and evolving.
     differentially validated against on-chain `quote()` (360-vector corpus).
   - Aqua event model + curve-agnostic `apply()` fold; strategy/`Order` decoder via `sol!`;
     lock-free `ArcSwap` snapshot with a dual `StrategyKey`/`TokenPair` index; closed-form `price()`.
-  - `ChainSource` port + alloy `eth_getLogs` adapter (vendored garden indexer); Postgres event
-    store (`sqlx`) with a per-chain cursor; `RegistrySync` — moka-deduped, DB-authoritative,
-    cursor-last — with restart recovery.
-  - Live E2E against anvil-deployed Aqua/SwapVM + Postgres: full pricing matrix plus the watcher
-    lifecycle (ship/push/swap/dock, duplicate re-scans, recovery, app-filter, multi-maker).
+  - `ChainSource` port + alloy `eth_getLogs` adapter (vendored garden indexer); in-process SQLite
+    event store (`sqlx`) behind a storage-agnostic `Store` port, with a per-chain cursor;
+    `RegistrySync` — moka-deduped, DB-authoritative, cursor-last — with restart recovery.
+  - Live E2E against anvil-deployed Aqua/SwapVM + a temp-file SQLite: full pricing matrix plus the
+    watcher lifecycle (ship/push/swap/dock, duplicate re-scans, recovery, app-filter, multi-maker).
   - Deferred to later tasks: reorg handling, periodic multicall reconciliation, protocol/dynamic
     fees, control-flow jumps, Decay, Extruction.
 

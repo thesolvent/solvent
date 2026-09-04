@@ -1,7 +1,7 @@
-//! Registry adapters: the alloy-backed [`ChainSource`] and the Postgres [`Store`].
+//! Registry adapters: the alloy-backed [`ChainSource`] and the SQLite [`Store`].
 
 mod alloy_source;
-mod pg_store;
+mod sqlite_store;
 
 pub use alloy_source::AlloyChainSource;
-pub use pg_store::PgStore;
+pub use sqlite_store::SqliteStore;

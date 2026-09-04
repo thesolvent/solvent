@@ -17,7 +17,7 @@ use alloy::{
     sol_types::SolValue,
 };
 use serde::Deserialize;
-use solvent_adapters::registry::{AlloyChainSource, PgStore};
+use solvent_adapters::registry::{AlloyChainSource, SqliteStore};
 use solvent_core::{
     deps::registry::ChainSource,
     primitives::{
@@ -26,7 +26,8 @@ use solvent_core::{
     },
     registry::{price, RegistrySync, SharedSnapshot},
 };
-use sqlx::PgPool;
+use sqlx::SqlitePool;
+use tempfile::TempDir;
 
 sol!(
     #[sol(rpc)]
@@ -512,37 +513,36 @@ pub fn direction(exact_in: bool) -> &'static str {
     }
 }
 
-/// The live-DB URL, or `None` (printing a skip notice) when unset — the E2E
-/// tests are env-gated so the default `cargo test` stays hermetic.
-pub fn db_url_or_skip() -> Option<String> {
-    match std::env::var("TEST_DATABASE_URL") {
-        Ok(url) => Some(url),
+/// True (printing a skip notice) when `anvil` cannot be spawned — the live E2E
+/// tests need a chain, so the default `cargo test` skips them when foundry is not
+/// on `PATH`. The SQLite store is always available, so nothing else gates them.
+pub fn skip_without_anvil() -> bool {
+    match Anvil::new().try_spawn() {
+        Ok(_) => false,
         Err(_) => {
-            eprintln!("TEST_DATABASE_URL unset — skipping live E2E");
-            None
+            eprintln!("anvil not spawnable (foundry on PATH?) — skipping live E2E");
+            true
         }
     }
 }
 
-/// Wire the real pipeline (`AlloyChainSource` → `RegistrySync` → `PgStore`) over
-/// a freshly-cleaned per-chain slice of the store.
+/// Wire the real pipeline (`AlloyChainSource` → `RegistrySync` → `SqliteStore`)
+/// over a fresh temp-file SQLite database. The returned `TempDir` owns that file
+/// and must outlive the pool, so the caller keeps it for the test's duration.
 pub async fn pipeline(
     h: &Harness,
-    db_url: &str,
     chain: ChainId,
-) -> (RegistrySync, Arc<SharedSnapshot>, PgPool) {
-    let pool = PgPool::connect(db_url).await.expect("connect pg");
-    let store = PgStore::new(pool.clone());
+) -> (RegistrySync, Arc<SharedSnapshot>, SqlitePool, TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("registry.db").display()
+    );
+    let pool = SqlitePool::connect(&url).await.expect("open sqlite");
+    let store = SqliteStore::new(pool.clone());
     store.migrate().await.expect("migrate");
-    for table in ["aqua_event", "registry_cursor"] {
-        sqlx::query(&format!("DELETE FROM {table} WHERE chain = $1"))
-            .bind(chain.0 as i64)
-            .execute(&pool)
-            .await
-            .expect("clean");
-    }
     let config = ChainConfig::new(chain, 0, 25, 15);
     let snapshot = Arc::new(SharedSnapshot::default());
     let sync = RegistrySync::new(&config, h.chain_source(), Arc::new(store), snapshot.clone());
-    (sync, snapshot, pool)
+    (sync, snapshot, pool, dir)
 }
