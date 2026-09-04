@@ -22,5 +22,7 @@ tokio = { version = "1", features = ["time"] }
 tracing = "0.1"
 
 [dev-dependencies]
+# E2E only: node-bindings (anvil), contract deploy + local signer come via `full`.
+alloy = { version = "1", features = ["full", "node-bindings"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
