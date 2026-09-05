@@ -98,6 +98,17 @@ impl LedgerService {
         Ok(())
     }
 
+    /// The sources of `id` as durably held, or `None` if unknown — the authoritative per-source
+    /// amounts read back from the ledger, so a settlement is matched against what was actually held
+    /// rather than what a caller re-supplies.
+    pub async fn reservation_sources(&self, id: ReservationId) -> Option<Vec<ReservationSource>> {
+        self.ledger
+            .lock()
+            .await
+            .reservation(&id)
+            .map(|r| r.sources.clone())
+    }
+
     /// Expire every pending reservation past its TTL as of now, restoring their holds. Returns how
     /// many were swept.
     pub async fn sweep_expired(&self) -> Result<usize, SolventError> {

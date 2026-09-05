@@ -3,7 +3,7 @@
 
 use alloy_primitives::{Address, Bytes, B256};
 
-use crate::primitives::IntentId;
+use crate::primitives::{IntentId, ReservationId};
 
 /// The transaction that settles one reserved plan on-chain: a call to a protocol's filler contract
 /// carrying the calldata its `FillBuilder` produced. Protocol-agnostic — the adapter turns it into
@@ -47,8 +47,15 @@ impl FillTx {
 #[non_exhaustive]
 pub enum ExecStatus {
     Pending,
-    Confirmed { block: u64 },
-    Failed { reason: String },
+    /// Reached the configured confirmation depth. `tx` is the *mined* hash (the latest broadcast,
+    /// so it survives an RBF bump) — the settlement reader keys off it.
+    Confirmed {
+        block: u64,
+        tx: B256,
+    },
+    Failed {
+        reason: String,
+    },
     Dropped,
 }
 
@@ -65,4 +72,31 @@ pub struct ExecHandle(pub B256);
 pub enum SimVerdict {
     Ok,
     Reject { reason: String },
+}
+
+/// A reserved plan handed to the execution service to fill: the transaction to send and the
+/// reservation whose holds it settles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PendingFill {
+    pub fill_tx: FillTx,
+    pub reservation: ReservationId,
+}
+
+impl PendingFill {
+    pub fn new(fill_tx: FillTx, reservation: ReservationId) -> Self {
+        Self {
+            fill_tx,
+            reservation,
+        }
+    }
+}
+
+/// The result of asking the service to fill a plan: submitted and now tracked, or dropped by the
+/// simulation gate (the reservation is voided in that case, having never spent a nonce).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FillOutcome {
+    Submitted { handle: ExecHandle },
+    Rejected { reason: String },
 }
