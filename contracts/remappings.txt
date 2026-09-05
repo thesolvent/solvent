@@ -4,4 +4,8 @@
 @openzeppelin/contracts/=node_modules/@openzeppelin/contracts/
 forge-std/=node_modules/forge-std/src/
 uniswapx/=lib/UniswapX/src/
+uniswapx-test/=lib/UniswapX/test/
 permit2/=lib/UniswapX/lib/permit2/
+solmate/=lib/UniswapX/lib/solmate/
+openzeppelin-contracts/=lib/UniswapX/lib/openzeppelin-contracts/contracts/
+forge-gas-snapshot/=lib/UniswapX/lib/forge-gas-snapshot/src/
