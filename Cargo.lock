@@ -5248,6 +5248,7 @@ dependencies = [
  "axum",
  "config",
  "serde",
+ "serde_json",
  "solvent-adapters",
  "solvent-core",
  "sqlx",

@@ -12,3 +12,6 @@ default_fee_bps = 5
 block_explorer_url = "http://localhost:5100"
 networks = ["Ethereum"]
 faucet = true
+
+# Token metadata (Uniswap Token List JSON). Addresses must match the devnet deploy.
+token_list = "tokens.devnet.json"
