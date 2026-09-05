@@ -3,3 +3,16 @@ name = "solvent"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+
+[dependencies]
+solvent-core = { path = "../core", features = ["tracing"] }
+solvent-adapters = { path = "../adapters" }
+alloy = { version = "1", features = ["providers", "reqwest-rustls-tls", "rpc-types-eth"] }
+axum = "0.8"
+config = { version = "0.15", default-features = false, features = ["toml"] }
+serde = { version = "1", features = ["derive"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
