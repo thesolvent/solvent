@@ -55,9 +55,46 @@ contract GenV2OrderFixture is Script {
             cosignature: ""
         });
 
+        bytes32 orderHash = order.hash();
+
         console2.log("PAYLOAD");
         console2.logBytes(abi.encode(order));
         console2.log("ORDERHASH");
-        console2.logBytes32(order.hash());
+        console2.logBytes32(orderHash);
+
+        // Cosigner preimage: keccak(orderHash || abi.encode(cosignerData)), signed raw.
+        console2.log("COSIGN_DIGEST");
+        console2.logBytes32(keccak256(abi.encodePacked(orderHash, abi.encode(order.cosignerData))));
+
+        // Swapper Permit2 EIP-712 witness digest, against canonical Permit2 on chainId 1.
+        address permit2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+        bytes32 domainSep = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,uint256 chainId,address verifyingContract)"),
+                keccak256("Permit2"),
+                uint256(1),
+                permit2
+            )
+        );
+        bytes32 witnessTypeHash = keccak256(
+            abi.encodePacked(
+                "PermitWitnessTransferFrom(TokenPermissions permitted,address spender,uint256 nonce,uint256 deadline,",
+                V2DutchOrderLib.PERMIT2_ORDER_TYPE
+            )
+        );
+        bytes32 tpHash = keccak256(
+            abi.encode(
+                keccak256("TokenPermissions(address token,uint256 amount)"),
+                address(order.baseInput.token),
+                order.baseInput.endAmount
+            )
+        );
+        bytes32 structHash = keccak256(
+            abi.encode(
+                witnessTypeHash, tpHash, address(order.info.reactor), order.info.nonce, order.info.deadline, orderHash
+            )
+        );
+        console2.log("WITNESS_DIGEST");
+        console2.logBytes32(keccak256(abi.encodePacked(hex"1901", domainSep, structHash)));
     }
 }

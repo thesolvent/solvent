@@ -1,11 +1,7 @@
-//! Decodes a UniswapX V2 Dutch order into the canonical `Intent`. The `orderHash` (our `IntentId`)
-//! reproduces `V2DutchOrderLib.hash` from alloy's `abi_encode` plus the contract's own EIP-712 type
-//! strings — a custom struct hash that flattens `baseInput` into three fields, which alloy's derived
-//! hashing can't produce. The resolved amounts map straight onto `AmountCurve::dutch`, whose rounding
-//! mirrors `DutchDecayLib` bit-for-bit.
+//! Decodes a UniswapX V2 Dutch order into the canonical `Intent`. Resolved amounts map onto
+//! `AmountCurve::dutch`, whose rounding mirrors `DutchDecayLib` bit-for-bit.
 
-use alloy::primitives::{keccak256, Address, B256, U256};
-use alloy::sol;
+use alloy::primitives::{Address, U256};
 use alloy::sol_types::SolValue;
 
 use solvent_core::deps::ingest::{NormalizeError, Normalizer};
@@ -14,49 +10,7 @@ use solvent_core::primitives::ingest::{
 };
 use solvent_core::primitives::IntentId;
 
-sol! {
-    struct OrderInfo {
-        address reactor;
-        address swapper;
-        uint256 nonce;
-        uint256 deadline;
-        address additionalValidationContract;
-        bytes additionalValidationData;
-    }
-    struct DutchInput {
-        address token;
-        uint256 startAmount;
-        uint256 endAmount;
-    }
-    struct DutchOutput {
-        address token;
-        uint256 startAmount;
-        uint256 endAmount;
-        address recipient;
-    }
-    struct CosignerData {
-        uint256 decayStartTime;
-        uint256 decayEndTime;
-        address exclusiveFiller;
-        uint256 exclusivityOverrideBps;
-        uint256 inputAmount;
-        uint256[] outputAmounts;
-    }
-    struct V2DutchOrder {
-        OrderInfo info;
-        address cosigner;
-        DutchInput baseInput;
-        DutchOutput[] baseOutputs;
-        CosignerData cosignerData;
-        bytes cosignature;
-    }
-}
-
-// EIP-712 type strings, verbatim from the UniswapX libs (their exact bytes drive `orderHash`).
-const ORDER_INFO_TYPE: &[u8] = b"OrderInfo(address reactor,address swapper,uint256 nonce,uint256 deadline,address additionalValidationContract,bytes additionalValidationData)";
-const DUTCH_OUTPUT_TYPE: &[u8] =
-    b"DutchOutput(address token,uint256 startAmount,uint256 endAmount,address recipient)";
-const V2_DUTCH_ORDER_TYPE: &[u8] = b"V2DutchOrder(OrderInfo info,address cosigner,address baseInputToken,uint256 baseInputStartAmount,uint256 baseInputEndAmount,DutchOutput[] baseOutputs)";
+use super::codec::{order_hash, V2DutchOrder};
 
 pub struct UniswapXV2Normalizer;
 
@@ -110,6 +64,7 @@ impl Normalizer for UniswapXV2Normalizer {
             order.info.reactor,
             raw.chain,
             raw.payload.clone(),
+            raw.signature.clone(),
             raw.observed_at,
         ))
     }
@@ -120,53 +75,4 @@ fn overridden(override_amount: U256, base: U256) -> U256 {
     Some(override_amount)
         .filter(|a| !a.is_zero())
         .unwrap_or(base)
-}
-
-/// `V2DutchOrderLib.hash(order)` — `keccak256(abi.encode(ORDER_TYPE_HASH, info.hash(), cosigner,
-/// baseInput.token, baseInput.startAmount, baseInput.endAmount, baseOutputs.hash()))`, over the
-/// pre-cosigner-override base amounts (the hash the swapper signed). The `abi.encode` is alloy's; we
-/// supply only the flattened type string, which alloy's derived hashing can't reproduce.
-fn order_hash(order: &V2DutchOrder) -> B256 {
-    let order_type_hash =
-        keccak256([V2_DUTCH_ORDER_TYPE, DUTCH_OUTPUT_TYPE, ORDER_INFO_TYPE].concat());
-    keccak256(
-        (
-            order_type_hash,
-            info_hash(&order.info),
-            order.cosigner,
-            order.baseInput.token,
-            order.baseInput.startAmount,
-            order.baseInput.endAmount,
-            outputs_hash(&order.baseOutputs),
-        )
-            .abi_encode(),
-    )
-}
-
-/// `OrderInfoLib.hash` — the `bytes` field is hashed, per EIP-712.
-fn info_hash(info: &OrderInfo) -> B256 {
-    keccak256(
-        (
-            keccak256(ORDER_INFO_TYPE),
-            info.reactor,
-            info.swapper,
-            info.nonce,
-            info.deadline,
-            info.additionalValidationContract,
-            keccak256(&info.additionalValidationData),
-        )
-            .abi_encode(),
-    )
-}
-
-/// `DutchOrderLib.hash(DutchOutput[])` — keccak of the packed per-output struct hashes.
-fn outputs_hash(outputs: &[DutchOutput]) -> B256 {
-    let type_hash = keccak256(DUTCH_OUTPUT_TYPE);
-    let packed: Vec<u8> = outputs
-        .iter()
-        .flat_map(|o| {
-            keccak256((type_hash, o.token, o.startAmount, o.endAmount, o.recipient).abi_encode()).0
-        })
-        .collect();
-    keccak256(packed)
 }

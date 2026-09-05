@@ -143,6 +143,7 @@ mod tests {
             addr(4),
             chain,
             Bytes::new(),
+            Bytes::new(),
             0,
         )
     }
@@ -152,6 +153,7 @@ mod tests {
             ProtocolId::UniswapXV2,
             ChainId(1),
             Bytes::from(vec![tag]),
+            Bytes::new(),
             0,
         )
     }

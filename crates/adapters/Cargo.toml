@@ -10,6 +10,8 @@ alloy = { version = "1", features = [
     "contract",
     "providers",
     "rpc-types-eth",
+    "signer-local",
+    "signers",
     "sol-types",
 ] }
 async-trait = "0.1"

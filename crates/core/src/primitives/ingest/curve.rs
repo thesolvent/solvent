@@ -42,8 +42,8 @@ impl AmountCurve {
     pub fn dutch(start: U256, end: U256, start_time: u64, end_time: u64) -> AmountCurve {
         let rounding = match start.cmp(&end) {
             Ordering::Equal => return AmountCurve::Static(start),
-            Ordering::Less => Rounding::Up, // rising amount ceils
-            Ordering::Greater => Rounding::Down, // falling amount floors
+            Ordering::Less => Rounding::Up,
+            Ordering::Greater => Rounding::Down,
         };
         AmountCurve::Linear {
             start,
