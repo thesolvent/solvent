@@ -94,6 +94,11 @@ impl Snapshot {
         self.strategies.len()
     }
 
+    /// Every active strategy — the budget cache enumerates these to refresh each maker's caps.
+    pub fn active_strategies(&self) -> impl Iterator<Item = &MakerStrategy> {
+        self.strategies.values().filter(|s| s.active)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.strategies.is_empty()
     }

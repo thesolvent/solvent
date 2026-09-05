@@ -42,7 +42,7 @@ pub struct TokenAmounts {
 
 /// Format `raw` base units as a human decimal string, trailing zeros trimmed (`"1.5"`, `"4"`). Wraps
 /// alloy's `format_units`; a nonsensical `decimals` (> 77) falls back to the raw integer string.
-fn format_units(raw: U256, decimals: u8) -> String {
+pub(crate) fn format_units(raw: U256, decimals: u8) -> String {
     match alloy_primitives::utils::format_units(raw, decimals) {
         Ok(s) if s.contains('.') => s.trim_end_matches('0').trim_end_matches('.').to_string(),
         Ok(s) => s,

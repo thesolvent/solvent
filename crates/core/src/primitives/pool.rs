@@ -1,7 +1,7 @@
 //! Pool value types — the aggregation of active strategies over one pair, served directly.
 
 use alloy_primitives::Address;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::amount::TokenAmounts;
 use super::asset::Token;
@@ -54,4 +54,34 @@ pub struct PoolDetail {
     #[serde(flatten)]
     pub pool: Pool,
     pub makers: Vec<PoolMaker>,
+}
+
+/// The trade direction a depth curve is plotted for; the pair's curves are asymmetric, so buying the
+/// base and selling it hit different inventory and price differently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    Buy,
+    Sell,
+}
+
+/// The pool's combined executable liquidity as a curve: for each sampled trade size, the output, its
+/// blended price, and how far that price sits below the tip. Reconstructs an order book the pool
+/// doesn't have by stacking every active maker's curve (the router's split, plotted across sizes).
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct PoolDepth {
+    pub axis_title: String,
+    pub best_price: String,
+    pub points: Vec<DepthPoint>,
+}
+
+/// One point on the depth curve, anchored to a price-impact bucket. Amounts are base-unit strings;
+/// `impact_pct` is how far `effective_price` sits below `best_price`, in percent.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct DepthPoint {
+    pub trade_size: String,
+    pub output: String,
+    pub effective_price: String,
+    pub impact_pct: f64,
+    pub makers_used: u64,
 }

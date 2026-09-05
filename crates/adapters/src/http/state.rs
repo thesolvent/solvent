@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use solvent_core::asset::AssetManager;
-use solvent_core::pool::PoolService;
+use solvent_core::pool::{DepthService, PoolService};
 
 use crate::chain::ChainHead;
 
@@ -35,4 +35,5 @@ pub struct AppState {
     pub head: ChainHead,
     pub assets: Arc<AssetManager>,
     pub pools: Arc<PoolService>,
+    pub depth: Arc<DepthService>,
 }
