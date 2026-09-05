@@ -2,5 +2,5 @@
 
 mod service;
 
-pub use crate::primitives::asset::{Asset, TokenList, TokenMeta};
+pub use crate::primitives::asset::{Asset, Token, TokenList, TokenMeta};
 pub use service::AssetManager;

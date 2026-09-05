@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use alloy_primitives::Address;
 
-use crate::primitives::asset::{Asset, TokenList, TokenMeta};
+use crate::primitives::asset::{Asset, Token, TokenList, TokenMeta};
 use crate::primitives::registry::{ActiveAsset, TokenPair};
 use crate::registry::SharedSnapshot;
 
@@ -57,9 +57,37 @@ impl AssetManager {
         }
     }
 
-    /// A human pair label from catalog symbols, falling back to a short address for unlisted tokens.
-    fn pair_label(&self, pair: &TokenPair) -> String {
-        format!("{}/{}", self.symbol(&pair.lo), self.symbol(&pair.hi))
+    /// A human pair label as `base/quote` (quote = the stablecoin side when one token is a stable),
+    /// falling back to a short address for tokens not in the catalog.
+    pub fn pair_label(&self, pair: &TokenPair) -> String {
+        let (base, quote) = self.base_quote(pair);
+        format!("{}/{}", self.symbol(&base), self.symbol(&quote))
+    }
+
+    /// Order a pair as `(base, quote)`: the stablecoin is the quote when exactly one side is a
+    /// stable, else canonical address order.
+    pub fn base_quote(&self, pair: &TokenPair) -> (Address, Address) {
+        match (self.is_stable(&pair.lo), self.is_stable(&pair.hi)) {
+            (true, false) => (pair.hi, pair.lo),
+            _ => (pair.lo, pair.hi),
+        }
+    }
+
+    /// A token's identity + display essentials, if it is in the catalog.
+    pub fn token(&self, address: &Address) -> Option<Token> {
+        self.catalog.get(address).map(|meta| Token {
+            address: meta.address,
+            chain_id: meta.chain_id,
+            symbol: meta.symbol.clone(),
+            decimals: meta.decimals,
+        })
+    }
+
+    /// Whether `address` is tagged as a stablecoin in the catalog.
+    pub fn is_stable(&self, address: &Address) -> bool {
+        self.catalog
+            .get(address)
+            .is_some_and(|meta| meta.tags.iter().any(|tag| tag == "stables"))
     }
 
     fn symbol(&self, address: &Address) -> String {

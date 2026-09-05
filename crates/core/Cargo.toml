@@ -16,6 +16,7 @@ alloy-sol-types = "1"
 arc-swap = "1"
 async-trait = "0.1"
 futures = "0.3"
+itertools = "0.13"
 moka = { version = "0.12", features = ["sync"] }
 num-bigint = "0.4"
 num-rational = "0.4"

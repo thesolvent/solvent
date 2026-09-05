@@ -5293,6 +5293,7 @@ dependencies = [
  "arc-swap",
  "async-trait",
  "futures",
+ "itertools 0.13.0",
  "moka",
  "num-bigint",
  "num-rational",
