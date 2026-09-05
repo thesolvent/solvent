@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 
+use alloy::primitives::Address;
 use serde::Deserialize;
 use solvent_adapters::http::state::{AppConfig, Features};
 use solvent_core::asset::TokenList;
@@ -17,6 +18,10 @@ pub struct Config {
     #[serde(default)]
     pub database_url: Option<String>,
     pub chain_id: u64,
+    /// The Aqua contract (allowance spender) and the SwapVM router (`app`, which keys strategies in
+    /// the registry). The depth reader needs both to read each maker's pullable wallet on chain.
+    pub aqua_address: Address,
+    pub app_address: Address,
     #[serde(default = "default_fee_bps")]
     pub default_fee_bps: u32,
     #[serde(default = "default_explorer")]

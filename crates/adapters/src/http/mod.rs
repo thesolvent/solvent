@@ -35,6 +35,7 @@ pub fn router(state: AppState) -> Router {
         .route("/assets", get(handlers::assets::assets))
         .route("/pools", get(handlers::pools::pools))
         .route("/pools/detail", get(handlers::pools::pool_detail))
+        .route("/pools/depth", get(handlers::pools::pool_depth))
         .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
 
@@ -63,16 +64,30 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    use alloy::primitives::Address;
+    use alloy::primitives::{Address, U256};
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use solvent_core::asset::{AssetManager, TokenList, TokenMeta};
-    use solvent_core::pool::PoolService;
+    use solvent_core::deps::ledger::{BudgetSource, BudgetSourceError};
+    use solvent_core::ledger::BudgetCache;
+    use solvent_core::pool::{DepthService, PoolService};
+    use solvent_core::primitives::ledger::AccountKey;
     use solvent_core::registry::SharedSnapshot;
     use tower::ServiceExt;
 
     use crate::chain::ChainHead;
     use crate::http::state::{AppConfig, Features};
+
+    /// A budget source that funds nothing — enough for the router to wire depth over an empty
+    /// registry (the depth tests here exercise routing, not caps).
+    struct ZeroBudget;
+
+    #[async_trait::async_trait]
+    impl BudgetSource for ZeroBudget {
+        async fn budget(&self, _: &AccountKey) -> Result<U256, BudgetSourceError> {
+            Ok(U256::ZERO)
+        }
+    }
 
     fn test_state() -> AppState {
         let list = TokenList {
@@ -90,6 +105,14 @@ mod tests {
         let registry = Arc::new(SharedSnapshot::default());
         let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
         let pools = Arc::new(PoolService::new(Arc::clone(&registry), Arc::clone(&assets)));
+        let depth = Arc::new(DepthService::new(
+            Arc::clone(&registry),
+            Arc::new(BudgetCache::new(
+                Arc::new(ZeroBudget),
+                Arc::clone(&registry),
+            )),
+            Arc::clone(&assets),
+        ));
         AppState {
             config: Arc::new(AppConfig {
                 chain_id: 31337,
@@ -105,6 +128,7 @@ mod tests {
             head: ChainHead::stub(0),
             assets,
             pools,
+            depth,
         }
     }
 
@@ -177,6 +201,19 @@ mod tests {
     #[tokio::test]
     async fn pool_detail_malformed_address_is_400() {
         let (status, _) = get("/v1/pools/detail?base=nope&quote=nope").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn pool_depth_unknown_pair_is_404() {
+        let (a, b) = (Address::from([1; 20]), Address::from([2; 20]));
+        let (status, _) = get(&format!("/v1/pools/depth?base={a}&quote={b}")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn pool_depth_malformed_address_is_400() {
+        let (status, _) = get("/v1/pools/depth?base=nope&quote=nope&side=sell").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 }
