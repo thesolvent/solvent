@@ -163,3 +163,15 @@ re-confirms a known finding, or needs calibrated market data. Pick up if a speci
   sample) — tuning/characterisation studies, valuable once there is production load to calibrate against.
 - **Quote-call → latency predictor** — the counter now exists (`--features quote-metrics`); building the
   full per-curve unit-cost model is deferred until the `BigRational`→fixed-point decision is on the table.
+
+# Deferred ingest work (B4)
+
+- **`replay` order feed** — deferred to **B7 (backtest)**, its only real consumer. Building it in B4
+  would only support a self-referential "replay ≡ self_hosted" test and would fix a serde archive
+  format before the backtest defines what it needs. The design's "self_hosted ≡ replay identical
+  stream" done-when moves to B7.
+- **`hosted` poll feed** (Uniswap Orders API, 6 rps, 429 backoff, re-poll backfill) — deferred to the
+  mainnet target; v1 depends on no hosted service. Needs its own E2E/contract test against the live
+  API (or a faithful mock) when built.
+- **RFQ `QuoteServer` (Mode 2)** — deferred until the Ledger soft-hold exists and there is a real
+  deployment to contend on; a local rig can't demonstrate real RFQ competition.
