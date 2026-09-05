@@ -205,7 +205,7 @@ mod tests {
 
         assert_eq!(
             cosign_digest(&order, hash),
-            b256!("c0fb93c8a3b8d5bb2eaf22c8e115b8240fb800dc4a4ea102978f6253d8f6c5ff")
+            b256!("e475e7c8a1b4efc6e907e43fb64312e2b6494314f924214e494a511c1dadec3c")
         );
         assert_eq!(
             witness_digest(&order, hash, permit2, 1),

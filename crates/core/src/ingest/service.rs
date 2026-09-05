@@ -70,7 +70,7 @@ impl IngestPipeline {
                 return None;
             }
         };
-        if !self.admit(&intent) {
+        if !self.is_admissible(&intent) {
             return None;
         }
         if self.dedup.get(&intent.id).is_some() {
@@ -83,7 +83,7 @@ impl IngestPipeline {
 
     /// The protocol-agnostic edge checks: on a supported chain, still live, asking for real amounts.
     /// On-chain concerns (cosignature, exact fillability) are enforced later by the reactor.
-    fn admit(&self, intent: &Intent) -> bool {
+    fn is_admissible(&self, intent: &Intent) -> bool {
         let now = self.clock.now_unix();
         if !self.supported_chains.contains(&intent.origin_chain) {
             debug!("ingest drop {}: unsupported chain", intent.id);
