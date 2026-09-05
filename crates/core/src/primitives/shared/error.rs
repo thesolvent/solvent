@@ -1,0 +1,46 @@
+//! The one public error type. Each port defines its own `{Trait}Error` that maps in via `From`;
+//! a variant is added only when a consumer needs it — and no classification (`kind()`) until a
+//! caller actually branches on it.
+
+use thiserror::Error;
+
+use crate::deps::execution::{ExecutionError, SettlementError, SimError};
+use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
+use crate::deps::registry::{ChainSourceError, StoreError};
+use crate::primitives::ledger::LedgerError;
+
+/// The error every fallible Solvent API returns.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum SolventError {
+    /// A typed identifier could not be parsed from its input.
+    #[error("invalid {id_type} id: {reason}")]
+    InvalidId {
+        id_type: &'static str,
+        reason: String,
+    },
+    /// Reading Aqua events from the chain failed.
+    #[error("chain source: {0}")]
+    ChainSource(#[from] ChainSourceError),
+    /// The registry store failed.
+    #[error("store: {0}")]
+    Store(#[from] StoreError),
+    /// The ledger rejected a command (over-commitment, wrong state, bad fill).
+    #[error("ledger: {0}")]
+    Ledger(#[from] LedgerError),
+    /// The ledger store failed.
+    #[error("ledger store: {0}")]
+    LedgerStore(#[from] LedgerStoreError),
+    /// Reading a settleable budget failed.
+    #[error("budget source: {0}")]
+    BudgetSource(#[from] BudgetSourceError),
+    /// The tx engine failed to submit or track a fill.
+    #[error("execution: {0}")]
+    Execution(#[from] ExecutionError),
+    /// The simulation engine failed to evaluate a fill.
+    #[error("simulation: {0}")]
+    Sim(#[from] SimError),
+    /// Reading a confirmed fill's on-chain settlement failed.
+    #[error("settlement: {0}")]
+    Settlement(#[from] SettlementError),
+}
