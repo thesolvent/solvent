@@ -901,12 +901,7 @@ fn conservation_holds_over_extreme_scale() {
 
 /// A single uncapped candidate wrapping `pool`, for pricing characterization.
 fn priced(pool: CurvePool) -> Candidate {
-    let key = StrategyKey {
-        maker: MakerId(Address::from([1u8; 20])),
-        app: Address::ZERO,
-        strategy_hash: StrategyHash(B256::from([1u8; 32])),
-    };
-    Candidate::new(key, tok(1), tok(2), U256::MAX, U256::MAX, pool, vec![])
+    maker(1, pool, U256::MAX, U256::MAX, vec![])
 }
 
 /// Price impact in bps: how far the realized rate (output/input) sits below the pool's spot
@@ -930,43 +925,35 @@ fn study_price_impact() {
     let bp_of = |bp: u64| depth * U256::from(bp) / U256::from(10_000u64);
 
     println!("== XYC balanced (depth 1,000,000): impact vs trade size ==");
-    let xyc = priced(CurvePool::Xyc(XycPool::from_reserves(depth, depth)));
+    let balanced = priced(xyc(depth, depth));
     for bp in [1u64, 10, 50, 100, 500, 1000, 2500, 5000] {
         println!(
             "  trade {:>5} bp of depth: impact {:?} bps",
             bp,
-            impact_bps(&xyc, bp_of(bp))
+            impact_bps(&balanced, bp_of(bp))
         );
     }
 
     println!("== Concentration: same 1% trade, tighter band = deeper virtual liquidity ==");
     let x = bp_of(100); // 1% of depth
-    println!("  full-range (XYC): impact {:?} bps", impact_bps(&xyc, x));
+    println!(
+        "  full-range (XYC): impact {:?} bps",
+        impact_bps(&balanced, x)
+    );
     for (name, lo, hi) in [
         ("[0.50, 2.00]", sqrtp(1, 2), sqrtp(2, 1)),
         ("[0.80, 1.25]", sqrtp(8, 10), sqrtp(125, 100)),
         ("[0.95, 1.05]", sqrtp(95, 100), sqrtp(105, 100)),
     ] {
-        let pool = CurvePool::Concentrate(ConcentratePool::from_reserves_and_bounds(
-            tok(1),
-            tok(2),
-            depth,
-            depth,
-            lo,
-            hi,
-        ));
         println!(
             "  band {name}: impact {:?} bps",
-            impact_bps(&priced(pool), x)
+            impact_bps(&priced(concentrated(depth, depth, lo, hi)), x)
         );
     }
 
     println!("== Bias/skew: reserve_out : reserve_in, trade 1% of reserve_in ==");
     for (ro, ri) in [(1u64, 1u64), (2, 1), (5, 1), (20, 1)] {
-        let pool = CurvePool::Xyc(XycPool::from_reserves(
-            depth * U256::from(ri),
-            depth * U256::from(ro),
-        ));
+        let pool = xyc(depth * U256::from(ri), depth * U256::from(ro));
         let trade = depth * U256::from(ri) / U256::from(100u64);
         println!(
             "  {ro}:{ri} (spot rate ~{ro}): impact {:?} bps",
@@ -979,15 +966,13 @@ fn study_price_impact() {
     for n in [1u64, 2, 4, 8] {
         let cs: Vec<Candidate> = (0..n)
             .map(|i| {
-                let mut h = [0u8; 32];
-                h[31] = i as u8;
-                let key = StrategyKey {
-                    maker: MakerId(Address::from([(i as u8) + 1; 20])),
-                    app: Address::ZERO,
-                    strategy_hash: StrategyHash(B256::from(h)),
-                };
-                let pool = CurvePool::Xyc(XycPool::from_reserves(depth, depth));
-                Candidate::new(key, tok(1), tok(2), U256::MAX, U256::MAX, pool, vec![])
+                maker(
+                    (i as u8) + 1,
+                    xyc(depth, depth),
+                    U256::MAX,
+                    U256::MAX,
+                    vec![],
+                )
             })
             .collect();
         if let Some(sol) = solve(&cs, &request(trade, true), None) {
@@ -999,5 +984,569 @@ fn study_price_impact() {
                 realized.rel_diff_bps(&spot)
             );
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Pricing matrix — how the solver prices across venue conditions. Numbers, not just latency:
+// a maker sizes liquidity from these tables. Run in release:
+//   cargo test -p solvent-core --test routing_properties --release study_pricing -- --ignored --nocapture --test-threads=1
+// ---------------------------------------------------------------------------------------------
+
+/// Whole-token float of a wei amount (6-dp precision), for readable tables — never for math.
+fn tokens(x: U256) -> f64 {
+    u128::try_from(x / U256::from(10u64).pow(U256::from(12u64))).unwrap_or(0) as f64 / 1e6
+}
+
+/// Realized rate: output per unit input, as a display float.
+fn rate(out: U256, inp: U256) -> f64 {
+    let i = tokens(inp);
+    if i == 0.0 {
+        0.0
+    } else {
+        tokens(out) / i
+    }
+}
+
+/// A flat SwapVM fee value from a bps figure (`Fee.BPS` denominator is 1e9).
+fn fee_bps(bps: u64) -> u32 {
+    (bps * 100_000) as u32
+}
+
+/// One uncapped-by-default candidate; `cap_out`/`wallet` bound it when a scenario needs a cap.
+fn maker(id: u8, pool: CurvePool, cap_out: U256, wallet: U256, fees: Vec<u32>) -> Candidate {
+    let mut hash = [0u8; 32];
+    hash[31] = id;
+    let key = StrategyKey {
+        maker: MakerId(Address::from([id; 20])),
+        app: Address::ZERO,
+        strategy_hash: StrategyHash(B256::from(hash)),
+    };
+    Candidate::new(key, tok(1), tok(2), cap_out, wallet, pool, fees)
+}
+
+fn xyc(reserve_in: U256, reserve_out: U256) -> CurvePool {
+    CurvePool::Xyc(XycPool::from_reserves(reserve_in, reserve_out))
+}
+
+fn concentrated(reserve_in: U256, reserve_out: U256, lo: U256, hi: U256) -> CurvePool {
+    CurvePool::Concentrate(ConcentratePool::from_reserves_and_bounds(
+        tok(1),
+        tok(2),
+        reserve_in,
+        reserve_out,
+        lo,
+        hi,
+    ))
+}
+
+fn pegged(reserve_in: U256, reserve_out: U256) -> CurvePool {
+    CurvePool::Pegged(PeggedPool::from_reserves_and_params(
+        tok(1),
+        tok(2),
+        reserve_in,
+        reserve_out,
+        PeggedParams {
+            x0: reserve_in,
+            y0: reserve_out,
+            linear_width: U256::from(100u64) * one27(),
+            rate_lt: U256::from(1u64),
+            rate_gt: U256::from(1u64),
+        },
+    ))
+}
+
+/// Scenario A — the baseline curve of a single deep balanced XYC maker: what a quote costs as the
+/// trade grows from a whisper (0.01% of depth) to half the pool.
+#[test]
+#[ignore = "study — pricing A: single XYC baseline"]
+fn study_pricing_a_single_xyc() {
+    let depth = e18(1_000_000);
+    let c = maker(1, xyc(depth, depth), U256::MAX, U256::MAX, vec![]);
+    let probe = e18(1);
+    let spot = rate(c.net_quote_exact_in(probe).unwrap(), probe);
+    println!("== A: single XYC, depth 1,000,000 : 1,000,000, fee 0 (spot {spot:.6}) ==");
+    println!(
+        "  {:>7} {:>15} {:>15} {:>10} {:>9}",
+        "trade", "amount_in", "amount_out", "exec", "impact"
+    );
+    for (label, bps) in [
+        ("0.01%", 1u64),
+        ("0.1%", 10),
+        ("0.5%", 50),
+        ("1%", 100),
+        ("2%", 200),
+        ("5%", 500),
+        ("10%", 1000),
+        ("25%", 2500),
+        ("50%", 5000),
+    ] {
+        let x = depth * U256::from(bps) / U256::from(10_000u64);
+        let out = c.net_quote_exact_in(x).unwrap();
+        println!(
+            "  {:>7} {:>15.2} {:>15.2} {:>10.6} {:>6} bp",
+            label,
+            tokens(x),
+            tokens(out),
+            rate(out, x),
+            impact_bps(&c, x).unwrap_or(0)
+        );
+    }
+}
+
+/// Scenario B — depth sensitivity: fix the trade at 10,000 and grow the maker's XYC depth. Answers
+/// "how much balance do I need to quote a given trade at a target impact?".
+#[test]
+#[ignore = "study — pricing B: depth sensitivity"]
+fn study_pricing_b_depth() {
+    let trade = e18(10_000);
+    println!("== B: trade 10,000 on a balanced XYC, varying depth ==");
+    println!("  {:>10} {:>14} {:>9}", "depth", "trade/depth", "impact");
+    let mut first_under_10: Option<u64> = None;
+    for d in [
+        100_000u64, 250_000, 500_000, 1_000_000, 2_500_000, 5_000_000, 10_000_000,
+    ] {
+        let depth = e18(d);
+        let c = maker(1, xyc(depth, depth), U256::MAX, U256::MAX, vec![]);
+        let imp = impact_bps(&c, trade).unwrap_or(u64::MAX);
+        let frac = 10_000.0 / d as f64 * 100.0;
+        println!("  {:>10} {:>12.3}% {:>6} bp", d, frac, imp);
+        if imp < 10 && first_under_10.is_none() {
+            first_under_10 = Some(d);
+        }
+    }
+    match first_under_10 {
+        Some(d) => println!("  -> <10 bps impact for a 10,000 trade needs XYC depth >= {d}"),
+        None => println!("  -> even 10,000,000 depth does not get under 10 bps"),
+    }
+}
+
+/// Scenario C — fee vs curve: at fixed depth and trade, separate the slippage the curve charges
+/// (nonlinearity) from the flat fee. A low-slippage/high-fee maker can lose to the reverse.
+#[test]
+#[ignore = "study — pricing C: fee vs curve impact"]
+fn study_pricing_c_fees() {
+    let depth = e18(1_000_000);
+    let trade = e18(10_000);
+    let probe = e18(1);
+    let free = maker(1, xyc(depth, depth), U256::MAX, U256::MAX, vec![]);
+    let true_spot = Ratio::new(free.net_quote_exact_in(probe).unwrap(), probe).unwrap();
+    let curve_impact = impact_bps(&free, trade).unwrap_or(0);
+    println!("== C: depth 1,000,000, trade 10,000 — curve impact is {curve_impact} bps, fee adds on top ==");
+    println!(
+        "  {:>7} {:>12} {:>10} {:>12} {:>11}",
+        "fee", "curve_imp", "fee_bps", "total_imp", "eff_exec"
+    );
+    for bps in [0u64, 5, 10, 30, 50, 100] {
+        let c = maker(
+            1,
+            xyc(depth, depth),
+            U256::MAX,
+            U256::MAX,
+            vec![fee_bps(bps)],
+        );
+        let out = c.net_quote_exact_in(trade).unwrap();
+        let total = Ratio::new(out, trade).unwrap().rel_diff_bps(&true_spot);
+        println!(
+            "  {:>4} bp {:>9} bp {:>7} bp {:>9} bp {:>11.6}",
+            bps,
+            curve_impact,
+            total.saturating_sub(curve_impact),
+            total,
+            rate(out, trade)
+        );
+    }
+}
+
+/// Scenario D — concentration: hold capital (1,000,000 each side) and trade (10,000) fixed, tighten
+/// the price band. A tighter band is deeper *virtual* liquidity until the trade exhausts it.
+#[test]
+#[ignore = "study — pricing D: concentration and exhaustion"]
+fn study_pricing_d_concentration() {
+    let depth = e18(1_000_000);
+    let trade = e18(10_000);
+    println!(
+        "== D: same 1,000,000 capital, trade 10,000 — tighter band = deeper effective liquidity =="
+    );
+    let full = maker(1, xyc(depth, depth), U256::MAX, U256::MAX, vec![]);
+    println!("  {:>12} {:>9}", "band", "impact");
+    println!(
+        "  {:>12} {:>6} bp",
+        "full-range",
+        impact_bps(&full, trade).unwrap_or(0)
+    );
+    let bands: [(&str, U256, U256); 4] = [
+        ("+-25%", sqrtp(75, 100), sqrtp(125, 100)),
+        ("+-10%", sqrtp(90, 100), sqrtp(110, 100)),
+        ("+-5%", sqrtp(95, 100), sqrtp(105, 100)),
+        ("+-2%", sqrtp(98, 100), sqrtp(102, 100)),
+    ];
+    for (name, lo, hi) in bands {
+        let c = maker(
+            1,
+            concentrated(depth, depth, lo, hi),
+            U256::MAX,
+            U256::MAX,
+            vec![],
+        );
+        println!(
+            "  {:>12} {:>6} bp",
+            name,
+            impact_bps(&c, trade).unwrap_or(0)
+        );
+    }
+
+    println!("  -- exhausting the +-2% band: grow the trade until the price leaves the band --");
+    let (lo, hi) = (sqrtp(98, 100), sqrtp(102, 100));
+    let band = maker(
+        1,
+        concentrated(depth, depth, lo, hi),
+        U256::MAX,
+        U256::MAX,
+        vec![],
+    );
+    let mut last_out = U256::ZERO;
+    for bps in [50u64, 100, 200, 300, 400, 500, 750, 1000, 1500] {
+        let x = depth * U256::from(bps) / U256::from(10_000u64);
+        match band.net_quote_exact_in(x) {
+            Ok(out) => {
+                let capped = out == last_out;
+                last_out = out;
+                println!(
+                    "  trade {:>5.2}% of capital: exec {:>10.6}, impact {:>6} bp{}",
+                    bps as f64 / 100.0,
+                    rate(out, x),
+                    impact_bps(&band, x).unwrap_or(0),
+                    if capped {
+                        "  <- band exhausted (output flat)"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            Err(_) => println!(
+                "  trade {:>5.2}% of capital: band exhausted (no fill)",
+                bps as f64 / 100.0
+            ),
+        }
+    }
+}
+
+/// Scenario E — aggregation, the core Solvent claim: split one trade across N identical XYC makers
+/// and watch impact fall. The N=1 column is the single-best-venue baseline.
+#[test]
+#[ignore = "study — pricing E: aggregation across N makers"]
+fn study_pricing_e_aggregation() {
+    let depth = e18(1_000_000);
+    let ns = [1u64, 2, 4, 8, 16];
+    println!(
+        "== E: N identical XYC makers (depth 1,000,000 each, fee 0) — impact (bps) by trade x N =="
+    );
+    print!("  {:>10}", "trade");
+    for n in ns {
+        print!("  {:>6}", format!("N={n}"));
+    }
+    println!();
+    for t in [10_000u64, 50_000, 100_000, 250_000, 500_000, 1_000_000] {
+        let trade = e18(t);
+        print!("  {t:>10}");
+        for n in ns {
+            let cs: Vec<Candidate> = (0..n)
+                .map(|i| {
+                    maker(
+                        (i as u8) + 1,
+                        xyc(depth, depth),
+                        U256::MAX,
+                        U256::MAX,
+                        vec![],
+                    )
+                })
+                .collect();
+            let spot = Ratio::new(cs[0].net_quote_exact_in(e18(1)).unwrap(), e18(1)).unwrap();
+            match solve(&cs, &request(trade, true), None) {
+                Some(sol) => {
+                    let realized = Ratio::new(sol.amount_out, sol.amount_in).unwrap();
+                    print!("  {:>4} bp", realized.rel_diff_bps(&spot));
+                }
+                None => print!("  {:>6}", "--"),
+            }
+        }
+        println!();
+    }
+}
+
+/// Scenario F — heterogeneous book: XYC + concentrated + pegged makers of different depths. Reports
+/// the best single venue against the Solvent split, the allocation, and the marginal-price
+/// equalization that explains the split.
+#[test]
+#[ignore = "study — pricing F: heterogeneous makers"]
+fn study_pricing_f_heterogeneous() {
+    let cs = vec![
+        maker(
+            1,
+            xyc(e18(1_000_000), e18(1_000_000)),
+            U256::MAX,
+            U256::MAX,
+            vec![],
+        ),
+        maker(
+            2,
+            concentrated(
+                e18(1_000_000),
+                e18(1_000_000),
+                sqrtp(90, 100),
+                sqrtp(110, 100),
+            ),
+            U256::MAX,
+            U256::MAX,
+            vec![],
+        ),
+        maker(
+            3,
+            pegged(e18(200_000), e18(200_000)),
+            U256::MAX,
+            U256::MAX,
+            vec![],
+        ),
+        maker(
+            4,
+            xyc(e18(2_000_000), e18(2_000_000)),
+            U256::MAX,
+            U256::MAX,
+            vec![],
+        ),
+        maker(
+            5,
+            concentrated(
+                e18(1_000_000),
+                e18(1_000_000),
+                sqrtp(95, 100),
+                sqrtp(105, 100),
+            ),
+            U256::MAX,
+            U256::MAX,
+            vec![],
+        ),
+    ];
+    let labels = [
+        "A XYC 1m",
+        "B conc+-10%",
+        "C pegged 200k",
+        "D XYC 2m",
+        "E conc+-5%",
+    ];
+    let trade = e18(500_000);
+    let spot = Ratio::new(cs[0].net_quote_exact_in(e18(1)).unwrap(), e18(1)).unwrap();
+    let best = cs
+        .iter()
+        .filter_map(|c| c.net_quote_exact_in(trade).ok())
+        .max()
+        .unwrap();
+    let sol = solve(&cs, &request(trade, true), None).unwrap();
+    println!("== F: 5 heterogeneous makers, trade 500,000 ==");
+    println!(
+        "  best single venue: exec {:>10.6}, impact {:>4} bp",
+        rate(best, trade),
+        Ratio::new(best, trade).unwrap().rel_diff_bps(&spot)
+    );
+    println!(
+        "  Solvent ({} legs): exec {:>10.6}, impact {:>4} bp  (improvement {} bp)",
+        sol.legs.len(),
+        rate(sol.amount_out, sol.amount_in),
+        Ratio::new(sol.amount_out, sol.amount_in)
+            .unwrap()
+            .rel_diff_bps(&spot),
+        Ratio::new(best, trade)
+            .unwrap()
+            .rel_diff_bps(&Ratio::new(sol.amount_out, sol.amount_in).unwrap())
+    );
+    println!("  allocation and post-fill marginal (the water level equalizes it):");
+    for leg in &sol.legs {
+        let idx = (leg.maker.0[0] as usize).saturating_sub(1);
+        let c = &cs[idx];
+        let marg = c
+            .spot_marginal(leg.amount_in)
+            .map(|m| rate_ratio(&m))
+            .unwrap_or(0.0);
+        println!(
+            "    {:>12}: {:>6.2}% of input ({:>12.2}), marginal ~{:.6}",
+            labels.get(idx).copied().unwrap_or("?"),
+            tokens(leg.amount_in) / tokens(sol.amount_in) * 100.0,
+            tokens(leg.amount_in),
+            marg
+        );
+    }
+}
+
+/// Scenario G — the shared-wallet cap: a maker with an excellent, deep curve but a small wallet is
+/// held to its wallet, and the rest spills to others. Shows the cost of the cap on quote quality.
+#[test]
+#[ignore = "study — pricing G: wallet caps"]
+fn study_pricing_g_wallet_caps() {
+    let trade = e18(500_000);
+    // A has the best (deepest) curve but its wallet caps it.
+    let a_pool = || xyc(e18(5_000_000), e18(5_000_000));
+    let others = || {
+        vec![
+            maker(
+                2,
+                xyc(e18(1_000_000), e18(1_000_000)),
+                e18(1_000_000),
+                e18(1_000_000),
+                vec![],
+            ),
+            maker(
+                3,
+                xyc(e18(1_000_000), e18(1_000_000)),
+                e18(1_000_000),
+                e18(1_000_000),
+                vec![],
+            ),
+        ]
+    };
+    let spot = Ratio::new(
+        maker(1, a_pool(), U256::MAX, U256::MAX, vec![])
+            .net_quote_exact_in(e18(1))
+            .unwrap(),
+        e18(1),
+    )
+    .unwrap();
+
+    for (label, a_cap) in [
+        ("uncapped A (wallet 5,000,000)", e18(5_000_000)),
+        ("capped A (wallet 50,000)", e18(50_000)),
+    ] {
+        let mut cs = vec![maker(1, a_pool(), a_cap, a_cap, vec![])];
+        cs.extend(others());
+        let sol = solve(&cs, &request(trade, true), None).unwrap();
+        let a_leg = sol
+            .legs
+            .iter()
+            .find(|l| l.maker.0[0] == 1)
+            .map(|l| tokens(l.amount_in))
+            .unwrap_or(0.0);
+        println!(
+            "  {:>30}: A takes {:>12.2}, exec {:.6}, impact {} bp",
+            label,
+            a_leg,
+            rate(sol.amount_out, sol.amount_in),
+            Ratio::new(sol.amount_out, sol.amount_in)
+                .unwrap()
+                .rel_diff_bps(&spot)
+        );
+    }
+    println!("== G: trade 500,000 — the wallet cap holds A to 50,000 and spills the rest (spot {:.4}) ==", rate_ratio(&spot));
+}
+
+/// Scenario H — skew vs quality: three XYC makers with the same input reserve but 1x/2x/5x output
+/// reserve. The absolute quote scales with the spot rate; the percentage impact does not.
+#[test]
+#[ignore = "study — pricing H: skew vs impact"]
+fn study_pricing_h_skew() {
+    let base = e18(1_000_000);
+    println!("== H: XYC makers, reserve_in 1,000,000, reserve_out 1x/2x/5x — spot differs, impact does not ==");
+    println!(
+        "  {:>10} {:>6} {:>13} {:>13} {:>9}",
+        "trade", "skew", "amount_out", "spot_rate", "impact"
+    );
+    for t in [10_000u64, 50_000, 100_000] {
+        let trade = e18(t);
+        for mult in [1u64, 2, 5] {
+            let c = maker(
+                1,
+                xyc(base, base * U256::from(mult)),
+                U256::MAX,
+                U256::MAX,
+                vec![],
+            );
+            let out = c.net_quote_exact_in(trade).unwrap();
+            println!(
+                "  {:>10} {:>4}x {:>13.2} {:>13.6} {:>6} bp",
+                t,
+                mult,
+                tokens(out),
+                mult as f64,
+                impact_bps(&c, trade).unwrap_or(0)
+            );
+        }
+    }
+}
+
+/// The headline dataset: price impact (bps) vs trade-as-fraction-of-liquidity, one row per fraction,
+/// one column per venue shape — single XYC / concentrated / pegged and Solvent over 2/4/8 XYC makers.
+/// This is the table behind the impact-vs-size chart.
+#[test]
+#[ignore = "study — pricing: impact curves for the headline chart"]
+fn study_pricing_impact_curves() {
+    let depth = e18(1_000_000);
+    let fracs = [10u64, 50, 100, 200, 500, 1000, 2000]; // bps of one pool's depth
+    println!("== Impact (bps) vs trade fraction of one pool's liquidity ==");
+    println!(
+        "  {:>8} {:>9} {:>9} {:>9} {:>10} {:>10} {:>10}",
+        "trade", "XYC", "conc+-10%", "pegged", "Solv x2", "Solv x4", "Solv x8"
+    );
+    let xyc_c = maker(1, xyc(depth, depth), U256::MAX, U256::MAX, vec![]);
+    let conc_c = maker(
+        1,
+        concentrated(depth, depth, sqrtp(90, 100), sqrtp(110, 100)),
+        U256::MAX,
+        U256::MAX,
+        vec![],
+    );
+    let peg_c = maker(1, pegged(depth, depth), U256::MAX, U256::MAX, vec![]);
+    let agg = |n: u64, trade: U256| -> String {
+        let cs: Vec<Candidate> = (0..n)
+            .map(|i| {
+                maker(
+                    (i as u8) + 1,
+                    xyc(depth, depth),
+                    U256::MAX,
+                    U256::MAX,
+                    vec![],
+                )
+            })
+            .collect();
+        let spot = Ratio::new(cs[0].net_quote_exact_in(e18(1)).unwrap(), e18(1)).unwrap();
+        match solve(&cs, &request(trade, true), None) {
+            Some(sol) => format!(
+                "{} bp",
+                Ratio::new(sol.amount_out, sol.amount_in)
+                    .unwrap()
+                    .rel_diff_bps(&spot)
+            ),
+            None => "--".to_string(),
+        }
+    };
+    let one = |c: &Candidate, x: U256| -> String {
+        c.net_quote_exact_in(x)
+            .ok()
+            .map(|_| format!("{} bp", impact_bps(c, x).unwrap_or(0)))
+            .unwrap_or_else(|| "--".to_string())
+    };
+    for bps in fracs {
+        let x = depth * U256::from(bps) / U256::from(10_000u64);
+        let label = format!("{:.2}%", bps as f64 / 100.0);
+        println!(
+            "  {:>8} {:>9} {:>9} {:>9} {:>10} {:>10} {:>10}",
+            label,
+            one(&xyc_c, x),
+            one(&conc_c, x),
+            one(&peg_c, x),
+            agg(2, x),
+            agg(4, x),
+            agg(8, x)
+        );
+    }
+}
+
+/// Display float for a rate ratio (output per input), for tables only.
+fn rate_ratio(r: &Ratio) -> f64 {
+    // rel_diff against 1.0 gives |r-1| in bps; recover a signed-enough float for display via probe.
+    let one = Ratio::new(e18(1), e18(1)).unwrap();
+    let bps = r.rel_diff_bps(&one) as f64 / 10_000.0;
+    if r >= &one {
+        1.0 + bps
+    } else {
+        1.0 - bps
     }
 }
