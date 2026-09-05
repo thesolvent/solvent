@@ -10,6 +10,26 @@
     "@openzeppelin/contracts" "5.4.0"
     forge-std "github:foundry-rs/forge-std#v1.11.0"
 
+"@1inch/solidity-utils@6.9.14":
+  version "6.9.14"
+  resolved "https://registry.yarnpkg.com/@1inch/solidity-utils/-/solidity-utils-6.9.14.tgz#953ec6fd3eedcb709148528b4644aa2354b8ce22"
+  integrity sha512-FC5cVCIXxg5DfV/l9b0B4wgU0nz+ZzDi4F33bgDu0BMqcdYrb9vO54XOO9iNRNs+I1lQ+RTZzKI8BBbDh8koLg==
+  dependencies:
+    "@metamask/eth-sig-util" "8.0.0"
+    "@nomicfoundation/hardhat-ethers" "3.0.8"
+    "@nomicfoundation/hardhat-network-helpers" "1.0.12"
+    "@nomicfoundation/hardhat-verify" "2.0.14"
+    "@openzeppelin/contracts" "5.1.0"
+    "@uniswap/permit2-sdk" "1.3.0"
+    chai "4.5.0"
+    dotenv "16.4.5"
+    ethereumjs-util "7.1.5"
+    ethers "6.13.4"
+    hardhat "2.23.0"
+    hardhat-deploy "0.14.0"
+    mocha-chai-jest-snapshot "1.1.6"
+    node-fetch "2.7.0"
+
 "@1inch/solidity-utils@6.9.5":
   version "6.9.5"
   resolved "https://registry.yarnpkg.com/@1inch/solidity-utils/-/solidity-utils-6.9.5.tgz#922b45f3f721042a97449adb5d46656169d5c765"
