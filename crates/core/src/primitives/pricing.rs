@@ -9,7 +9,7 @@
 use alloy_primitives::U256;
 use num_bigint::{BigInt, Sign};
 use num_rational::BigRational;
-use num_traits::Zero;
+use num_traits::{Signed, ToPrimitive, Zero};
 
 /// A reduced, non-negative exact rational. Construction reduces; arithmetic never
 /// overflows; structural equality is value equality.
@@ -59,6 +59,19 @@ impl Ratio {
     #[must_use]
     pub fn halved(self) -> Ratio {
         Ratio(self.0 / BigInt::from(2))
+    }
+
+    /// The relative difference from `other` in basis points, floored:
+    /// `|self − other| / other × 10000`. `u64::MAX` when `other` is zero (undefined) or the
+    /// result exceeds `u64`. The KKT certificate's marginal-versus-λ residual.
+    #[must_use]
+    pub fn rel_diff_bps(&self, other: &Ratio) -> u64 {
+        if other.0.is_zero() {
+            return u64::MAX;
+        }
+        let diff = (self.0.clone() - other.0.clone()).abs();
+        let bps = diff / other.0.clone() * BigRational::from_integer(BigInt::from(10_000u32));
+        bps.to_integer().to_u64().unwrap_or(u64::MAX)
     }
 }
 

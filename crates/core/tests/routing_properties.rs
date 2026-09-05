@@ -9,6 +9,7 @@
 
 use alloy_primitives::{Address, B256, U256};
 
+use solvent_core::primitives::pricing::Ratio;
 use solvent_core::primitives::registry::{PeggedParams, StrategyKey};
 use solvent_core::primitives::routing::RouteRequest;
 use solvent_core::primitives::{IntentId, MakerId, StrategyHash};
@@ -397,5 +398,155 @@ fn exact_out_near_capacity_is_not_declined() {
 fn feasible_books_are_not_declined() {
     for seed in 0u64..1500 {
         feasibility_trial(seed);
+    }
+}
+
+/// A leg's finite-difference net marginal `d(output)/d(gross_input)` over `[fill, fill + probe]`.
+/// A ppm-scale `probe` tracks the tangent at `fill`; a coarser one gives the average marginal a
+/// would-be fill of that size would earn. `None` if the leg can't price the step.
+fn fd_marginal(c: &Candidate, fill: U256, probe: U256) -> Option<Ratio> {
+    let probe = probe.max(U256::from(1u64));
+    let here = c.net_quote_exact_in(fill).ok()?;
+    let ahead = c.net_quote_exact_in(fill.saturating_add(probe)).ok()?;
+    Ratio::new(ahead.saturating_sub(here), probe)
+}
+
+/// The KKT optimality residuals of a solved split, stated intrinsically (no dependence on the
+/// reported λ, which degenerates to zero on near-capacity trades). `residual_bps` is the spread
+/// of active interior legs' marginals — zero iff they share one marginal (the equimarginal
+/// condition); paired with conservation, that pins the correct water level. `violation_bps` is
+/// how far an unused leg's spot marginal rises above the cheapest interior leg — positive means
+/// it should have been filled. Box-capped and wallet-bound legs are excluded (complementary
+/// slackness on a cap, not the equimarginal condition).
+struct Certificate {
+    residual_bps: u64,
+    violation_bps: u64,
+}
+
+fn kkt_certificate(cs: &[Candidate], req: &RouteRequest, split: &Split) -> Certificate {
+    // An unused leg is probed over a chunk of the trade — whether a would-be fill of that size
+    // would still beat the water level (spot alone over-counts steep-decay legs whose optimal
+    // fill is nil). An active leg's marginal is probed locally, a small fraction of its own fill,
+    // so a steep leg with a small fill isn't read low by a trade-scaled step overshooting it.
+    let chunk = (req.amount / U256::from(16u64)).max(U256::from(1u64));
+    let group_tol = (req.amount / U256::from(1_000_000u64)).max(U256::from(1u64));
+    let group_out = |maker: MakerId| {
+        split
+            .legs
+            .iter()
+            .filter(|l| l.maker == maker)
+            .fold(U256::ZERO, |s, l| s.saturating_add(l.amount_out))
+    };
+    let mut interior: Vec<Ratio> = Vec::new();
+    let mut unused: Vec<Ratio> = Vec::new();
+    for c in cs {
+        let leg = split
+            .legs
+            .iter()
+            .find(|l| l.strategy_hash == c.key.strategy_hash);
+        let fill_in = leg.map_or(U256::ZERO, |l| l.amount_in);
+        let fill_out = leg.map_or(U256::ZERO, |l| l.amount_out);
+        // Cap-relative slack, so a leg the conservative bound parks a few ppm below its cap still
+        // reads as box-capped.
+        let cap_tol = (c.cap_out / U256::from(100_000u64)).max(U256::from(1u64));
+        // Wallet-bound group: pinned at the wallet, not at the equimarginal level.
+        if group_out(c.key.maker).saturating_add(group_tol) >= c.wallet_cap {
+            continue;
+        }
+        // Excluded from the equimarginal residual: a sub-ppm fill (activation-margin rounding), a
+        // box-capped leg (pinned by its own cap), or a pegged leg (its numerical fill lands the
+        // marginal on λ only to a finite-difference tolerance, not exactly). All three are still
+        // covered by the unused-leg violation check.
+        let is_pegged = matches!(c.pool, CurvePool::Pegged(_));
+        let excluded =
+            fill_in < group_tol || fill_out.saturating_add(cap_tol) >= c.cap_out || is_pegged;
+        match (fill_in.is_zero(), excluded) {
+            // Only a leg whose maker solve used *nothing* of is a candidate for "should have been
+            // filled" — an unused leg of a participating maker is its shared wallet spent on a
+            // better pool, not a miss.
+            (true, _) if group_out(c.key.maker).is_zero() => {
+                unused.extend(fd_marginal(c, U256::ZERO, chunk))
+            }
+            (true, _) => {}
+            (false, true) => {}
+            (false, false) => {
+                let local = (fill_in / U256::from(1000u64)).max(U256::from(1u64));
+                interior.extend(fd_marginal(c, fill_in, local));
+            }
+        }
+    }
+    let cheapest = interior.iter().min();
+    let residual_bps = match (cheapest, interior.iter().max()) {
+        (Some(lo), Some(hi)) => lo.rel_diff_bps(hi),
+        _ => 0,
+    };
+    let violation_bps = cheapest.map_or(0, |lo| {
+        unused
+            .iter()
+            .filter(|m| *m > lo)
+            .map(|m| m.rel_diff_bps(lo))
+            .max()
+            .unwrap_or(0)
+    });
+    Certificate {
+        residual_bps,
+        violation_bps,
+    }
+}
+
+/// One KKT trial on an interior exact-in solve, returning its certificate (`None` when the book
+/// yields no interior trade to check). An interior input is found by solving a comfortably
+/// sub-capacity exact-out trade and re-sourcing its input exact-in — exact-in has no overshoot
+/// trim, so its marginals sit cleanly at the water level.
+fn kkt_trial(seed: u64) -> Option<Certificate> {
+    let mut rng = Rng(0xC0FFEE ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(1, 12) as usize;
+    let cs = random_book(&mut rng, n);
+    let out_target = deliverable_lower_bound(&cs) / U256::from(3u64);
+    if out_target.is_zero() {
+        return None;
+    }
+    let in_target = solve(&cs, &request(out_target, false), None)?.amount_in;
+    if in_target.is_zero() {
+        return None;
+    }
+    let req = request(in_target, true);
+    let sol = solve(&cs, &req, None)?;
+    Some(kkt_certificate(&cs, &req, &sol))
+}
+
+/// A comfortably interior exact-in solve sits at the equimarginal optimum — the book that first
+/// exposed the pegged pool being dropped at a positive water level. Fast always-on guard.
+#[test]
+fn solve_is_kkt_optimal_on_a_pegged_book() {
+    if let Some(cert) = kkt_trial(386) {
+        assert!(
+            cert.residual_bps <= 100 && cert.violation_bps <= 100,
+            "seed=386: KKT residual={} violation={} (bps) — not at the equimarginal optimum",
+            cert.residual_bps,
+            cert.violation_bps,
+        );
+    }
+}
+
+/// Optimality oracle: every interior exact-in solve sits at the equimarginal (KKT) optimum —
+/// active legs share one marginal and no unused leg beats them. Catches a suboptimal split (wrong
+/// λ or wrong leg selection) that the validity and feasibility oracles can't see.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn solve_is_kkt_optimal() {
+    for seed in 0u64..1500 {
+        if let Some(cert) = kkt_trial(seed) {
+            assert!(
+                cert.residual_bps <= 100,
+                "seed={seed}: active legs off the equimarginal level by {} bps",
+                cert.residual_bps,
+            );
+            assert!(
+                cert.violation_bps <= 100,
+                "seed={seed}: an unused leg beats the split by {} bps",
+                cert.violation_bps,
+            );
+        }
     }
 }
