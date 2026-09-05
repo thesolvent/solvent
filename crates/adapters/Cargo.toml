@@ -16,6 +16,7 @@ alloy = { version = "1", features = [
 ] }
 async-trait = "0.1"
 axum = "0.8"
+base64 = "0.22"
 futures = "0.3"
 sqlx = { version = "0.8", features = [
     "runtime-tokio",

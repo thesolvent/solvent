@@ -3,6 +3,7 @@
 //! Handlers stay thin — they translate HTTP to/from the domain and return [`primitives::ApiResult`];
 //! business logic lives in core services. Business routes mount under `/v1` as milestones land.
 
+pub mod dto;
 pub mod error;
 pub mod primitives;
 
