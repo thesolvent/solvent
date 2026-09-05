@@ -1,6 +1,5 @@
 //! Shared wire types for list endpoints: the `List<T>` payload, the `Page` query extractor, and an
-//! opaque cursor codec. Payload value types (`Amount`, `Token`) join this module at their first
-//! consumer in M1.
+//! opaque cursor codec. Payload value types (`Amount`, `Token`, …) live in `solvent_core`, not here.
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;

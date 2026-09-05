@@ -2,5 +2,5 @@
 
 mod service;
 
-pub use crate::primitives::pool::{Pool, PoolType};
+pub use crate::primitives::pool::{Pool, PoolDetail, PoolMaker, PoolType};
 pub use service::PoolService;

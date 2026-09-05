@@ -34,6 +34,7 @@ pub fn router(state: AppState) -> Router {
         .route("/stats", get(handlers::stats::stats))
         .route("/assets", get(handlers::assets::assets))
         .route("/pools", get(handlers::pools::pools))
+        .route("/pools/detail", get(handlers::pools::pool_detail))
         .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
 
@@ -164,5 +165,18 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["status"], "Ok");
         assert!(json["result"]["items"].is_array());
+    }
+
+    #[tokio::test]
+    async fn pool_detail_unknown_pair_is_404() {
+        let (a, b) = (Address::from([1; 20]), Address::from([2; 20]));
+        let (status, _) = get(&format!("/v1/pools/detail?base={a}&quote={b}")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn pool_detail_malformed_address_is_400() {
+        let (status, _) = get("/v1/pools/detail?base=nope&quote=nope").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 }

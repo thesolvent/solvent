@@ -70,7 +70,7 @@ pub struct PoolStats {
 
 /// A strategy's total flat fee in real bps. SwapVM `bps` are at `1e9` = 100%, so one real bp
 /// (`0.01%`) is `1e5` SwapVM units.
-fn fee_in_bps(fees_in_bps: &[u32]) -> u32 {
+pub fn fee_in_bps(fees_in_bps: &[u32]) -> u32 {
     let swapvm: u64 = fees_in_bps.iter().map(|f| *f as u64).sum();
     (swapvm / 100_000) as u32
 }

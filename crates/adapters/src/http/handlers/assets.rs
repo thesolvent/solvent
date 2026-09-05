@@ -12,7 +12,6 @@ use crate::http::state::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct AssetsQuery {
-    #[serde(default)]
     supported: Option<bool>,
 }
 
