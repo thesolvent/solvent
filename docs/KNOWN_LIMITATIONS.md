@@ -77,6 +77,38 @@ path that read a strategy balance without this filter — now fixed to check `ac
 - **Disposition:** (1) enforce in the composition root when the app binary is wired; (2) reconcile
   (Task M) + the on-chain revert already cover the after-reserve drop.
 
+## L7 — Pegged legs under-fill slightly at the marginal-price optimum
+`fill_to_limit_numerical` (the partial fill for curves with no closed-form inverse, i.e. Pegged)
+finds the fill by bisecting a **finite-difference** marginal with a step of `feasible_bound / 1e6`.
+The secant lies below the true tangent on a concave curve, so the bisection stops where the *secant*
+reaches λ — a touch before the true marginal does — and the pegged leg under-fills. The KKT oracle
+measured this at up to ~18 % marginal deviation on a pegged leg vs the closed-form XYC/Concentrate legs
+(which land on λ exactly); the output loss is far smaller (the gap is integrated over a small fill
+delta). This is why the KKT residual check excludes pegged legs (they're still covered by the
+unused-leg violation check). → refine the fill with a Newton/secant step after the bisection, or a
+step local to the fill point, to land the marginal on λ tightly. Quality, not correctness.
+
+## L8 — Sparsity heuristic is near-optimal only while gas is a small fraction of leg output
+`solve_sparse` prunes legs by dropping the smallest-output one while that improves the resolver's
+net take — a greedy hill-climb, not the true `2^K` gas-aware optimum. The subset-optimality study
+measured its regret against the exhaustive optimum across gas levels: **≤37 bps at realistic gas
+(~2 % of a leg's output), but ~5 % at gas = 10 % of output and up to 37 % at gas = 50 %**. So on
+gas-heavy trades — small trades where per-leg gas rivals a leg's output, which are barely economical
+anyway — the heuristic can leave a few percent on the table. → if such trades ever matter, swap
+drop-by-smallest for drop-by-marginal-contribution or forward-selection (both closer to the `2^K`
+optimum). Quality, not correctness; the split is always valid and reservable.
+
+## L9 — The out@size funnel ranking ignores capacity
+`select` keeps the top-K candidates ranked by estimated net output at the trade size
+(`net_quote_exact_in(amount)`). That favours good-price pools and is **blind to input capacity**, so
+when a pair has more than K pools the top-K can lack the combined capacity to absorb the trade — a
+high-capacity, moderately-priced pool the optimum leans on gets ranked just out of the funnel. The
+funnel-decomposition study confirmed it at forced-small K (e.g. seed 22: the top-4-by-out@size hold
+1702 of a 2464 input, so they can't fill a trade the optimum's support-4 fills easily). **Not a
+current issue** — the shipped K=64 is far above any pair's pool count today, so the funnel never
+drops — but as registries grow past ~64 pools/pair it will. → add a capacity signal to the ranking,
+or a capacity floor that keeps adding pools until the top-K can absorb the trade. Quality, at scale.
+
 ---
 
 # Performance — refactor before production
@@ -110,3 +142,24 @@ throughput. → group-commit batching, or the command-actor / Disruptor model, w
 therefore makes N round-trips. → batch the whole reserve's confirm into a single multicall (design
 calls for "1 batched JIT confirm"). Also: the event-sourced zero-RPC budget cache replaces this on the
 quote path entirely (a later phase).
+
+---
+
+# Deferred routing test coverage
+
+The routing correctness + quality suite (Tiers 0–3, `docs/plans/backend/routing-experiments-plan.md`)
+was completed as a value-focused subset: Tier 0 invariants, Tier 1 oracles (KKT/round-trip/monotonicity),
+Tier 2 quality (sparsity #31, funnel #32), and one Tier-3 axis (extreme-scale robustness). The remaining
+20-axis-matrix studies were deferred as lower-yield — each either folds into an oracle already run, or
+re-confirms a known finding, or needs calibrated market data. Pick up if a specific concern arises:
+
+- **Adversarial book search** (CMA-ES / hill-climb maximising regret@K) — the solver adversary is covered
+  by the KKT optimality oracle, the funnel adversary by L9; would re-derive both.
+- **Realism replay** (calibrated depths/fees + log-normal sizes → bps given up per unit volume) — dominated
+  by #31's sparsity regret (≤37 bps) with the funnel inactive at K=64; needs real market data.
+- **Warm-start economics** (cold vs same/stale/adversarial λ — iteration counts), **tol/iter Pareto**
+  (regret vs p99 as `MAX_ITERS`/tol move), **two-stage funnel at large n** (spot prefilter n→256→K),
+  **temporal** (staleness/churn/depletion), **interaction discovery** (variance decomposition over an LHS
+  sample) — tuning/characterisation studies, valuable once there is production load to calibrate against.
+- **Quote-call → latency predictor** — the counter now exists (`--features quote-metrics`); building the
+  full per-curve unit-cost model is deferred until the `BigRational`→fixed-point decision is on the table.

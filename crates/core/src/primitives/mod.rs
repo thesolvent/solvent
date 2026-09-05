@@ -2,7 +2,9 @@
 //! modules (`registry`, `ledger`, …) sit alongside it.
 
 pub mod ledger;
+pub mod pricing;
 pub mod registry;
+pub mod routing;
 pub mod shared;
 
 pub use shared::{

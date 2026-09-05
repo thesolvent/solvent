@@ -153,6 +153,26 @@ impl Snapshot {
 }
 
 #[cfg(test)]
+impl Snapshot {
+    /// Build directly from strategies, bypassing the event fold — for tests in other
+    /// slices (e.g. routing) that need a populated snapshot without shipping programs.
+    pub(crate) fn from_strategies(strategies: impl IntoIterator<Item = MakerStrategy>) -> Self {
+        let mut snapshot = Snapshot::default();
+        for strategy in strategies {
+            if let Some(pair) = strategy.pair() {
+                snapshot
+                    .by_pair
+                    .entry(pair)
+                    .or_default()
+                    .insert(strategy.key);
+            }
+            snapshot.strategies.insert(strategy.key, strategy);
+        }
+        snapshot
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::primitives::{MakerId, StrategyHash};

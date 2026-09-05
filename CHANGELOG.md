@@ -36,7 +36,42 @@ the project is pre-1.0 and evolving.
   - Known limitations tracked in `docs/KNOWN_LIMITATIONS.md` (late-`Shipped` drift, reorg, and the
     performance items — snapshot clone, batched confirm — deferred to reconcile/reorg/optimization).
 
-_Next: B3 — routing (water-fill solver over maker curves)._
+- **B3 — routing**: a capped water-fill solver that sources an intent across maker curves at the
+  marginal-price optimum, gated on the taker's bound.
+  - **Solver**: single-pair specialization of `CFMMRouter.jl`'s dual — bisect the water level λ
+    where every active venue quotes the same net-of-fee marginal (Angeris' equimarginal
+    principle); exact-in and exact-out, ε-validated against a brute-force reference both ways.
+  - **Funnel + certificate**: rank candidates by estimated net-of-fee output at the trade size
+    (what production routers select on), top-`k` via quickselect, with a conservative heuristic
+    certificate that flags a too-small `k`.
+  - **Gas-aware sparsity**: backward-elimination trading legs against a per-leg gas cost in the
+    **spread token** (output for exact-in, input for exact-out) — `Split::net_output` /
+    `gross_input`; `route()` gates profit symmetrically.
+  - **Shared maker-wallet cap**: a maker's strategies share one wallet, so the solver caps their
+    combined output with a per-maker KKT group-floor (`max(λ, λ*_g)`) — the plan stays
+    simultaneously reservable (independently audited).
+  - **Live gas model**: pure `per_leg_cost` (gas → native → USD → spread token) behind
+    `GasPrice`/`PriceOracle` ports; adapters — lock-free `MarketCache`, periodic `GasPoller`, and
+    a WebSocket `BinanceFeed` (bookTicker mid) — feed it off the quote hot path.
+  - **Contract-fidelity hardening**: out-of-domain curve params rejected at decode; the pegged
+    numerical fill degrades past the overflow sentinel; dust legs the chain reverts on are
+    dropped; a leg's input is bounded to its output cap (no round-trip over-reservation).
+  - **Validation (T5)**: an independent-oracle property suite (no reference solve — it would share
+    the code under test) — Tier-0 invariants (conservation, order-independence, feasibility),
+    Tier-1 optimality oracles (finite-difference KKT residual, round-trip, output-monotonicity),
+    Tier-2 quality studies (2^K sparsity regret, funnel decomposition), Tier-3 extreme-scale
+    robustness (1e6–1e28 reserves) — which surfaced and fixed four bugs a reference-solve test
+    structurally cannot catch: exact-in under-spend, order-dependence, pegged FD-precision fill,
+    and an unused-leg group-floor misflag.
+  - Criterion latency benchmark (500 ms p99 budget) + a feature-gated quote-call counter, and a
+    pricing matrix (scenarios A–H): baseline curve, depth sensitivity, fee-vs-curve separation,
+    concentration/effective-depth, N-maker aggregation, heterogeneous split, wallet caps, and
+    skew-vs-impact — the numbers behind the impact-vs-size characterization.
+  - 3-component live E2E over anvil + SQLite — registry sync → `route` → ledger `reserve` —
+    asserting every routed plan is reservable and the router declines beyond the ledger's caps.
+  - Limitations and deferred test coverage tracked in `docs/KNOWN_LIMITATIONS.md`.
+
+_Next: B4._
 
 ## [0.1.0] — 2026-08-28
 
