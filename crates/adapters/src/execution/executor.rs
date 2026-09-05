@@ -8,11 +8,11 @@ use alloy::primitives::{B256, U256};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use walletkit::core::deps::SubmissionOpts;
-use walletkit::core::wallet::{HandleId, TxIntent, TxStatus};
+use walletkit::core::wallet::{HandleId, SimOutcome, TxIntent, TxStatus};
 use walletkit::Wallet;
 
-use solvent_core::deps::execution::{Execution, ExecutionError};
-use solvent_core::primitives::execution::{ExecHandle, ExecStatus, FillTx};
+use solvent_core::deps::execution::{Execution, ExecutionError, SimError, SimGate};
+use solvent_core::primitives::execution::{ExecHandle, ExecStatus, FillTx, SimVerdict};
 
 /// Submits and tracks fills through one walletkit [`Wallet`]. `submission` fixes the broadcast
 /// route for every fill: a private relay (Flashbots/Protect) in production, or the public mempool
@@ -34,6 +34,18 @@ impl WalletkitExecutor {
     }
 }
 
+/// Build the fill's raw call — a zero-value call to the filler contract from its owner. Shared by
+/// submission and simulation so both send byte-identical calldata to the same target.
+fn fill_to_intent(fill: &FillTx) -> TxIntent {
+    TxIntent::call(
+        fill.chain_id,
+        fill.filler_owner,
+        fill.filler,
+        U256::ZERO,
+        fill.calldata.clone(),
+    )
+}
+
 /// Project the engine's lifecycle onto the reservation signal. Terminal states drive the ledger:
 /// `Confirmed` posts, and the two "our fill did not land" terminals (`Replaced`/`Dropped`) void.
 /// Everything else keeps the fill in flight — the engine absorbs sub-confirmation reorgs by falling
@@ -47,16 +59,25 @@ fn to_exec_status(status: TxStatus) -> ExecStatus {
     }
 }
 
+/// Turn a simulation outcome into a submit/drop verdict. Fail-closed: only a confirmed `Success`
+/// passes; a revert (the P1 filler's own guards — under-delivery, stale caps, profit threshold —
+/// surface here) and any outcome the engine can't classify both reject before a nonce is spent.
+fn to_verdict(outcome: SimOutcome) -> SimVerdict {
+    match outcome {
+        SimOutcome::Success => SimVerdict::Ok,
+        SimOutcome::Revert(reason) => SimVerdict::Reject {
+            reason: format!("{reason:?}"),
+        },
+        _ => SimVerdict::Reject {
+            reason: "unrecognized simulation outcome".into(),
+        },
+    }
+}
+
 #[async_trait]
 impl Execution for WalletkitExecutor {
     async fn submit(&self, fill: &FillTx) -> Result<ExecHandle, ExecutionError> {
-        let intent = TxIntent::call(
-            fill.chain_id,
-            fill.filler_owner,
-            fill.filler,
-            U256::ZERO,
-            fill.calldata.clone(),
-        );
+        let intent = fill_to_intent(fill);
         let handle = self
             .wallet
             .send_with(&intent, self.submission.clone())
@@ -87,6 +108,19 @@ impl Execution for WalletkitExecutor {
             .tick()
             .await
             .map_err(|e| ExecutionError::Engine(e.to_string()))
+    }
+}
+
+#[async_trait]
+impl SimGate for WalletkitExecutor {
+    async fn simulate(&self, fill: &FillTx) -> Result<SimVerdict, SimError> {
+        let intent = fill_to_intent(fill);
+        let preview = self
+            .wallet
+            .dry_run(&intent)
+            .await
+            .map_err(|e| SimError::Engine(e.to_string()))?;
+        Ok(to_verdict(preview.outcome))
     }
 }
 
@@ -121,5 +155,19 @@ mod tests {
         ] {
             assert_eq!(to_exec_status(in_flight), ExecStatus::Pending);
         }
+    }
+
+    #[test]
+    fn sim_gate_passes_only_a_confirmed_success() {
+        use walletkit::core::wallet::RevertReason;
+
+        assert_eq!(to_verdict(SimOutcome::Success), SimVerdict::Ok);
+        // A revert (the filler's on-chain guards fire here) drops the fill, keeping the reason.
+        assert!(matches!(
+            to_verdict(SimOutcome::Revert(RevertReason::Error(
+                "insufficient output".into()
+            ))),
+            SimVerdict::Reject { .. }
+        ));
     }
 }
