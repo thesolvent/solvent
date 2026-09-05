@@ -7,7 +7,6 @@ use std::sync::Arc;
 use alloy::{
     primitives::{Address, U256},
     providers::Provider,
-    sol,
 };
 use async_trait::async_trait;
 use solvent_core::{
@@ -16,13 +15,7 @@ use solvent_core::{
     registry::SharedSnapshot,
 };
 
-sol! {
-    #[sol(rpc)]
-    interface IERC20 {
-        function balanceOf(address account) external view returns (uint256);
-        function allowance(address owner, address spender) external view returns (uint256);
-    }
-}
+use crate::erc20::{read_balance_allowances, IERC20};
 
 /// A wallet account reduced to the two addresses its reads need: the maker (balance owner) and the
 /// token contract.
@@ -62,29 +55,23 @@ impl<P: Provider + Clone + 'static> AlloyBudgetSource<P> {
             .unwrap_or(U256::ZERO)
     }
 
-    /// The pullable `min(balanceOf, allowance→Aqua)` for every wallet, in two Multicall3 aggregates
-    /// (all `balanceOf` in one, all `allowance` in the other — they are distinct call types). Two
-    /// round-trips for the whole book, not two per maker. Empty in, empty out — no call made.
+    /// The pullable `min(balanceOf, allowance→Aqua)` for every wallet, batched into two Multicall3
+    /// aggregates — two round-trips for the whole book, not two per maker.
     async fn wallet_pullables(
         &self,
         wallets: &[Wallet],
     ) -> Result<BTreeMap<AccountKey, U256>, BudgetSourceError> {
-        if wallets.is_empty() {
-            return Ok(BTreeMap::new());
-        }
-        let mut balances = self.provider.multicall().dynamic::<IERC20::balanceOfCall>();
-        let mut allowances = self.provider.multicall().dynamic::<IERC20::allowanceCall>();
-        for (_, maker, token) in wallets {
-            let erc20 = IERC20::new(*token, self.provider.clone());
-            balances = balances.add_dynamic(erc20.balanceOf(maker.0));
-            allowances = allowances.add_dynamic(erc20.allowance(maker.0, self.aqua));
-        }
-        let balances = balances.aggregate().await.map_err(chain)?;
-        let allowances = allowances.aggregate().await.map_err(chain)?;
+        let accounts: Vec<(Address, Address)> = wallets
+            .iter()
+            .map(|(_, maker, token)| (maker.0, *token))
+            .collect();
+        let reads = read_balance_allowances(&self.provider, self.aqua, &accounts)
+            .await
+            .map_err(chain)?;
         Ok(wallets
             .iter()
-            .enumerate()
-            .map(|(i, (account, _, _))| (*account, balances[i].min(allowances[i])))
+            .zip(reads)
+            .map(|((account, _, _), read)| (*account, read.balance.min(read.allowance)))
             .collect())
     }
 }

@@ -36,6 +36,10 @@ pub fn router(state: AppState) -> Router {
         .route("/pools", get(handlers::pools::pools))
         .route("/pools/detail", get(handlers::pools::pool_detail))
         .route("/pools/depth", get(handlers::pools::pool_depth))
+        .route(
+            "/wallets/{addr}/balances",
+            get(handlers::balances::balances),
+        )
         .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
 
@@ -64,13 +68,18 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
+    use std::collections::BTreeMap;
+
     use alloy::primitives::{Address, U256};
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use solvent_core::asset::{AssetManager, TokenList, TokenMeta};
+    use solvent_core::balances::BalancesService;
+    use solvent_core::deps::balances::{BalancesOracle, BalancesOracleError};
     use solvent_core::deps::ledger::{BudgetSource, BudgetSourceError};
     use solvent_core::ledger::BudgetCache;
     use solvent_core::pool::{DepthService, PoolService};
+    use solvent_core::primitives::balances::Holdings;
     use solvent_core::primitives::ledger::AccountKey;
     use solvent_core::registry::SharedSnapshot;
     use tower::ServiceExt;
@@ -86,6 +95,21 @@ mod tests {
     impl BudgetSource for ZeroBudget {
         async fn budget(&self, _: &AccountKey) -> Result<U256, BudgetSourceError> {
             Ok(U256::ZERO)
+        }
+    }
+
+    /// A balances oracle that reports nothing — the wallet endpoint then lists every catalog token
+    /// at zero, which is what the balances tests here assert.
+    struct ZeroOracle;
+
+    #[async_trait::async_trait]
+    impl BalancesOracle for ZeroOracle {
+        async fn holdings(
+            &self,
+            _: Address,
+            _: &[Address],
+        ) -> Result<BTreeMap<Address, Holdings>, BalancesOracleError> {
+            Ok(BTreeMap::new())
         }
     }
 
@@ -113,6 +137,10 @@ mod tests {
             )),
             Arc::clone(&assets),
         ));
+        let balances = Arc::new(BalancesService::new(
+            Arc::new(ZeroOracle),
+            Arc::clone(&assets),
+        ));
         AppState {
             config: Arc::new(AppConfig {
                 chain_id: 31337,
@@ -129,6 +157,7 @@ mod tests {
             assets,
             pools,
             depth,
+            balances,
         }
     }
 
@@ -214,6 +243,22 @@ mod tests {
     #[tokio::test]
     async fn pool_depth_malformed_address_is_400() {
         let (status, _) = get("/v1/pools/depth?base=nope&quote=nope&side=sell").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn wallet_balances_list_the_whole_catalog() {
+        let addr = Address::from([7; 20]);
+        let (status, json) = get(&format!("/v1/wallets/{addr}/balances")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["status"], "Ok");
+        assert_eq!(json["result"]["items"][0]["token"]["symbol"], "WETH");
+        assert_eq!(json["result"]["items"][0]["balance"]["display"], "0");
+    }
+
+    #[tokio::test]
+    async fn wallet_balances_malformed_addr_is_400() {
+        let (status, _) = get("/v1/wallets/nope/balances").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 }
