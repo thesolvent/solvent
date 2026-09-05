@@ -1,6 +1,7 @@
 //! Solvent core — value primitives, ports, and domain logic. Zero I/O; cannot depend on adapters.
 
 pub mod asset;
+pub mod balances;
 pub mod deps;
 pub mod execution;
 pub mod ingest;
