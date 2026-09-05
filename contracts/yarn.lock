@@ -50,9 +50,10 @@
     mocha-chai-jest-snapshot "1.1.6"
     node-fetch "2.7.0"
 
-"@1inch/swap-vm@github:1inch/swap-vm#v1.0.1":
+"@1inch/swap-vm@github:1inch/swap-vm#v1.0.2":
   version "0.0.6"
-  resolved "https://codeload.github.com/1inch/swap-vm/tar.gz/b6e4f97139e89437772881208bbc8538b0567748"
+  uid "32c687c2b73101fc26549e48fa1ff8a4d73afbac"
+  resolved "https://codeload.github.com/1inch/swap-vm/tar.gz/32c687c2b73101fc26549e48fa1ff8a4d73afbac"
   dependencies:
     "@1inch/aqua" "github:1inch/aqua#0.1.0"
     "@1inch/solidity-utils" "6.9.7"
