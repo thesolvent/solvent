@@ -29,8 +29,9 @@ pub struct TokenList {
 
 /// The complete picture of one asset: identity + static metadata + market + protocol status. Every
 /// asset query returns this, and the API serializes it verbatim.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct Asset {
+    #[schema(value_type = String)]
     pub address: Address,
     pub chain_id: u64,
     pub symbol: String,

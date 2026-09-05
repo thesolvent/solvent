@@ -34,6 +34,7 @@ tokio-tungstenite = { version = "0.24", features = ["connect", "rustls-tls-webpk
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["trace", "request-id", "timeout", "cors"] }
 tracing = "0.1"
+utoipa = "5"
 walletkit = { package = "walletkit-rs", git = "https://github.com/21r21a33333/walletkit.git", rev = "3e75a5d2385da13d6ab813104f1e2473860e32cb", default-features = false }
 
 [dev-dependencies]

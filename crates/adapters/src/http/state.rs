@@ -9,7 +9,7 @@ use solvent_core::asset::AssetManager;
 use crate::chain::ChainHead;
 
 /// Feature flags the FE reads at bootstrap. `earn` / `send_buy` are always off in the MVP.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct Features {
     pub faucet: bool,
     pub earn: bool,
@@ -17,7 +17,7 @@ pub struct Features {
 }
 
 /// Runtime config the FE reads instead of hardcoding — also the `/config` response body.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct AppConfig {
     pub chain_id: u64,
     pub features: Features,
