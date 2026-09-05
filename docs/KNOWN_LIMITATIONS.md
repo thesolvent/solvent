@@ -88,6 +88,27 @@ delta). This is why the KKT residual check excludes pegged legs (they're still c
 unused-leg violation check). → refine the fill with a Newton/secant step after the bisection, or a
 step local to the fill point, to land the marginal on λ tightly. Quality, not correctness.
 
+## L8 — Sparsity heuristic is near-optimal only while gas is a small fraction of leg output
+`solve_sparse` prunes legs by dropping the smallest-output one while that improves the resolver's
+net take — a greedy hill-climb, not the true `2^K` gas-aware optimum. The subset-optimality study
+measured its regret against the exhaustive optimum across gas levels: **≤37 bps at realistic gas
+(~2 % of a leg's output), but ~5 % at gas = 10 % of output and up to 37 % at gas = 50 %**. So on
+gas-heavy trades — small trades where per-leg gas rivals a leg's output, which are barely economical
+anyway — the heuristic can leave a few percent on the table. → if such trades ever matter, swap
+drop-by-smallest for drop-by-marginal-contribution or forward-selection (both closer to the `2^K`
+optimum). Quality, not correctness; the split is always valid and reservable.
+
+## L9 — The out@size funnel ranking ignores capacity
+`select` keeps the top-K candidates ranked by estimated net output at the trade size
+(`net_quote_exact_in(amount)`). That favours good-price pools and is **blind to input capacity**, so
+when a pair has more than K pools the top-K can lack the combined capacity to absorb the trade — a
+high-capacity, moderately-priced pool the optimum leans on gets ranked just out of the funnel. The
+funnel-decomposition study confirmed it at forced-small K (e.g. seed 22: the top-4-by-out@size hold
+1702 of a 2464 input, so they can't fill a trade the optimum's support-4 fills easily). **Not a
+current issue** — the shipped K=64 is far above any pair's pool count today, so the funnel never
+drops — but as registries grow past ~64 pools/pair it will. → add a capacity signal to the ranking,
+or a capacity floor that keeps adding pools until the top-K can absorb the trade. Quality, at scale.
+
 ---
 
 # Performance — refactor before production

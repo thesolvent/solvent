@@ -649,3 +649,188 @@ fn solve_output_is_monotone_in_trade_size() {
         );
     }
 }
+
+/// The best gas-aware `net_output` any non-empty subset of a (small) book achieves at
+/// `per_leg_cost` — the true optimum `solve_sparse` is approximating.
+fn brute_sparse_optimum(cs: &[Candidate], req: &RouteRequest, per_leg_cost: U256) -> U256 {
+    let mut best = U256::ZERO;
+    for mask in 1u32..(1u32 << cs.len()) {
+        let subset: Vec<Candidate> = cs
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) != 0)
+            .map(|(_, c)| c.clone())
+            .collect();
+        if let Some(split) = solve(&subset, req, None) {
+            best = best.max(split.net_output(per_leg_cost));
+        }
+    }
+    best
+}
+
+/// `solve_sparse`'s regret against the true `2^K` gas-aware optimum, in bps of the optimum's net
+/// output. `gas_div` sets the per-leg gas as `avg_leg_output / gas_div` (so `gas_div=50` ≈ 2 %
+/// of a leg's output, a realistic swap cost). `None` when there's no multi-leg trade to prune.
+fn sparsity_regret_bps(seed: u64, gas_div: u64) -> Option<u64> {
+    let mut rng = Rng(0x5A17_5A17 ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(2, 7) as usize;
+    let cs = random_book(&mut rng, n);
+    let out_cap = deliverable_lower_bound(&cs);
+    if out_cap.is_zero() {
+        return None;
+    }
+    let x = solve(&cs, &request(out_cap / U256::from(3u64), false), None)?.amount_in;
+    if x.is_zero() {
+        return None;
+    }
+    let req = request(x, true);
+    let free = solve(&cs, &req, None)?;
+    if free.legs.len() < 2 {
+        return None;
+    }
+    let per_leg = free.amount_out / U256::from(gas_div * free.legs.len() as u64);
+    if per_leg.is_zero() {
+        return None;
+    }
+    let ours = solve_sparse(&cs, &req, per_leg, n, None)?.net_output(per_leg);
+    let best = brute_sparse_optimum(&cs, &req, per_leg);
+    if best.is_zero() {
+        return None;
+    }
+    Some(Ratio::from(ours).rel_diff_bps(&Ratio::from(best)))
+}
+
+/// `gas_div = 50` ⇒ per-leg gas ≈ 2 % of a leg's output, a realistic swap cost. At that regime
+/// the drop-by-smallest heuristic is near-optimal (observed regret ≤ 37 bps); regret grows only
+/// as gas approaches a large fraction of a leg's output (uneconomical trades), logged as L8.
+const REALISTIC_GAS_DIV: u64 = 50;
+
+/// `solve_sparse` stays near the true optimum on a book at realistic gas — the worst realistic-gas
+/// case in the sweep. Fast always-on guard.
+#[test]
+fn sparse_is_near_optimal_at_realistic_gas() {
+    if let Some(bps) = sparsity_regret_bps(59, REALISTIC_GAS_DIV) {
+        assert!(bps <= 100, "sparsity regret {bps} bps at realistic gas");
+    }
+}
+
+/// Sparsity-optimality oracle: at realistic gas, `solve_sparse`'s drop-the-smallest heuristic is
+/// within a small regret of the true `2^K` gas-aware optimum (enumerated over all subsets). K ≤ 6
+/// keeps the enumeration tractable.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn solve_sparse_is_near_optimal() {
+    for seed in 0u64..300 {
+        if let Some(bps) = sparsity_regret_bps(seed, REALISTIC_GAS_DIV) {
+            assert!(
+                bps <= 100,
+                "seed={seed}: sparsity regret {bps} bps vs the true optimum at realistic gas",
+            );
+        }
+    }
+}
+
+/// Funnel regret at `k`, decomposed. `capacity_bps` = output lost even when the funnel keeps the
+/// `k` pools the all-pools optimum relied on most — the intrinsic cost of a small funnel, in bps
+/// of the all-pools output. `ranking_bps` = the *extra* loss from ranking by output-at-size instead
+/// of that oracle support (pure ranking error), in bps of the oracle's output.
+struct FunnelRegret {
+    capacity_bps: u64,
+    /// `None` when the oracle's K-subset can't even fill the trade (K is capacity-limited, so
+    /// ranking is undefined); `Some(bps)` when it can, measuring out@size's extra loss.
+    ranking_bps: Option<u64>,
+}
+
+fn funnel_regret(seed: u64, k: usize) -> Option<FunnelRegret> {
+    let mut rng = Rng(0x00F0_DD1E ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(k as u64 + 1, 12) as usize;
+    let cs = random_book(&mut rng, n);
+    let out_cap = deliverable_lower_bound(&cs);
+    if out_cap.is_zero() {
+        return None;
+    }
+    let x = solve(&cs, &request(out_cap / U256::from(3u64), false), None)?.amount_in;
+    if x.is_zero() {
+        return None;
+    }
+    let req = request(x, true);
+    let all = solve(&cs, &req, None)?;
+    if all.amount_out.is_zero() {
+        return None;
+    }
+    let solve_out =
+        |subset: &[Candidate]| solve(subset, &req, None).map_or(U256::ZERO, |s| s.amount_out);
+    let top_k = |ranked: Vec<&Candidate>| -> U256 {
+        let subset: Vec<Candidate> = ranked.into_iter().take(k).cloned().collect();
+        solve_out(&subset)
+    };
+    // out@size ranking (what `select` uses): net output at the trade size, ties by strategy_hash.
+    let mut by_size: Vec<&Candidate> = cs.iter().collect();
+    by_size.sort_by(|a, b| {
+        let (sa, sb) = (
+            a.net_quote_exact_in(x).unwrap_or(U256::ZERO),
+            b.net_quote_exact_in(x).unwrap_or(U256::ZERO),
+        );
+        sb.cmp(&sa)
+            .then(a.key.strategy_hash.cmp(&b.key.strategy_hash))
+    });
+    let o_size = top_k(by_size);
+    // Oracle ranking: the pools the all-pools optimum put the most output into.
+    let mut by_fill: Vec<&Candidate> = cs.iter().collect();
+    let fill_of = |c: &Candidate| {
+        all.legs
+            .iter()
+            .find(|l| l.strategy_hash == c.key.strategy_hash)
+            .map_or(U256::ZERO, |l| l.amount_out)
+    };
+    by_fill.sort_by(|a, b| {
+        fill_of(b)
+            .cmp(&fill_of(a))
+            .then(a.key.strategy_hash.cmp(&b.key.strategy_hash))
+    });
+    let o_oracle = top_k(by_fill);
+    Some(FunnelRegret {
+        capacity_bps: Ratio::from(o_oracle).rel_diff_bps(&Ratio::from(all.amount_out)),
+        ranking_bps: match () {
+            _ if o_oracle.is_zero() => None,
+            _ if o_size >= o_oracle => Some(0),
+            _ => Some(Ratio::from(o_size).rel_diff_bps(&Ratio::from(o_oracle))),
+        },
+    })
+}
+
+/// Funnel decomposition study: at a forced-small K, how much of the top-K funnel's loss is the
+/// intrinsic capacity cost of keeping only K pools, versus out@size ranking picking a worse K than
+/// the all-pools optimum's support. Prints the distribution; the finding (out@size is capacity-
+/// blind) is L9. Not an assertion — it characterizes a known deficiency, not a pass/fail invariant.
+#[test]
+#[ignore = "study — run with --release --ignored --nocapture"]
+fn study_funnel_decomposition() {
+    for k in [2usize, 4] {
+        let (mut mcap, mut mrank, mut checked, mut cap_limited, mut rank_over50) =
+            (0u64, 0u64, 0u32, 0u32, 0u32);
+        let (mut wc, mut wr) = (String::new(), String::new());
+        for seed in 0u64..600 {
+            if let Some(fr) = funnel_regret(seed, k) {
+                checked += 1;
+                if fr.capacity_bps > mcap {
+                    mcap = fr.capacity_bps;
+                    wc = format!("seed={seed}");
+                }
+                match fr.ranking_bps {
+                    None => cap_limited += 1,
+                    Some(r) => {
+                        if r > 50 {
+                            rank_over50 += 1;
+                        }
+                        if r > mrank {
+                            mrank = r;
+                            wr = format!("seed={seed}");
+                        }
+                    }
+                }
+            }
+        }
+        println!("K={k} over {checked}: capacity_max {mcap} [{wc}] cap_limited {cap_limited}  ranking_max {mrank} [{wr}] ranking_over50 {rank_over50}");
+    }
+}
