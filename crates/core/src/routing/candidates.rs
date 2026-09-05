@@ -353,6 +353,7 @@ mod tests {
             },
             balances,
             active: true,
+            program: alloy_primitives::Bytes::new(),
         }
     }
 

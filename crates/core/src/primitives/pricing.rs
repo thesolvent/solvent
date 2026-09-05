@@ -55,6 +55,18 @@ impl Ratio {
         from_bigint(&root)
     }
 
+    /// The greatest integer `≤ self`, as `U256`. `None` only if it exceeds `U256`.
+    #[must_use]
+    pub fn floor(&self) -> Option<U256> {
+        from_bigint(&self.0.floor().to_integer())
+    }
+
+    /// The least integer `≥ self`, as `U256`. `None` only if it exceeds `U256`.
+    #[must_use]
+    pub fn ceil(&self) -> Option<U256> {
+        from_bigint(&self.0.ceil().to_integer())
+    }
+
     /// Half of this ratio — the water-fill's bisection step.
     #[must_use]
     pub fn halved(self) -> Ratio {

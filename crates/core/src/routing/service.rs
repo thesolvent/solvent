@@ -112,6 +112,7 @@ mod tests {
             },
             balances,
             active: true,
+            program: alloy_primitives::Bytes::new(),
         };
         let snapshot = Snapshot::from_strategies([strategy]);
         let caps = AvailableSnapshot(BTreeMap::from([

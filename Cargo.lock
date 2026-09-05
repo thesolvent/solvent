@@ -4448,6 +4448,7 @@ dependencies = [
  "alloy-sol-types",
  "arc-swap",
  "async-trait",
+ "futures",
  "moka",
  "num-bigint",
  "num-rational",

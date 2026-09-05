@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, Bytes, U256};
 
 use super::curve::{decode_strategy, CurveSpec};
 use super::event::StrategyKey;
@@ -17,10 +17,9 @@ pub struct TokenPair {
 impl TokenPair {
     /// Order the two tokens by address (the on-chain `Lt`/`Gt` convention).
     pub fn new(a: Address, b: Address) -> Self {
-        if a <= b {
-            Self { lo: a, hi: b }
-        } else {
-            Self { lo: b, hi: a }
+        Self {
+            lo: a.min(b),
+            hi: a.max(b),
         }
     }
 }
@@ -38,6 +37,8 @@ pub struct MakerStrategy {
     pub balances: BTreeMap<Address, U256>,
     /// False once `Docked`.
     pub active: bool,
+    /// The shipped Aqua `Order`, verbatim — the fill builder needs it to source from this strategy.
+    pub program: Bytes,
 }
 
 impl MakerStrategy {
@@ -48,6 +49,7 @@ impl MakerStrategy {
             curve: decode_strategy(strategy),
             balances: BTreeMap::new(),
             active: true,
+            program: Bytes::copy_from_slice(strategy),
         }
     }
 

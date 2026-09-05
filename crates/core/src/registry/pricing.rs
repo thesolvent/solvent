@@ -75,6 +75,7 @@ mod tests {
             curve,
             balances,
             active: true,
+            program: alloy_primitives::Bytes::new(),
         }
     }
 
