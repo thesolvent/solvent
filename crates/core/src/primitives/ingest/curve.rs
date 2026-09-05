@@ -3,6 +3,8 @@
 //! decay math — the direction of the slope decides it, not the input/output role — so every reader
 //! (routing, the ledger's firm confirm, tests) gets the same amount without re-deriving the rule.
 
+use core::cmp::Ordering;
+
 use alloy_primitives::U256;
 
 use crate::primitives::pricing::Ratio;
@@ -32,6 +34,24 @@ impl AmountCurve {
     /// A non-decaying amount.
     pub fn scalar(amount: U256) -> AmountCurve {
         AmountCurve::Static(amount)
+    }
+
+    /// A Dutch-auction curve from `start` to `end` over `[start_time, end_time]`, rounding in the
+    /// direction the amount moves — a falling amount floors, a rising amount ceils (both in the
+    /// swapper's favour, matching on-chain decay). Collapses to `Static` when it doesn't move.
+    pub fn dutch(start: U256, end: U256, start_time: u64, end_time: u64) -> AmountCurve {
+        let rounding = match start.cmp(&end) {
+            Ordering::Equal => return AmountCurve::Static(start),
+            Ordering::Less => Rounding::Up, // rising amount ceils
+            Ordering::Greater => Rounding::Down, // falling amount floors
+        };
+        AmountCurve::Linear {
+            start,
+            end,
+            start_time,
+            end_time,
+            rounding,
+        }
     }
 
     /// The amount at unix time `t`, clamped to the curve's `[start_time, end_time]` window.
@@ -132,6 +152,35 @@ mod tests {
             rounding: Rounding::Up,
         };
         assert_eq!(c.amount_at(1), U256::from(334u64));
+    }
+
+    #[test]
+    fn dutch_picks_variant_and_rounding_by_direction() {
+        // Falling → Linear/Down; rising → Linear/Up; flat → Static.
+        assert_eq!(
+            AmountCurve::dutch(U256::from(10u64), U256::from(4u64), 0, 5),
+            AmountCurve::Linear {
+                start: U256::from(10u64),
+                end: U256::from(4u64),
+                start_time: 0,
+                end_time: 5,
+                rounding: Rounding::Down,
+            }
+        );
+        assert_eq!(
+            AmountCurve::dutch(U256::from(4u64), U256::from(10u64), 0, 5),
+            AmountCurve::Linear {
+                start: U256::from(4u64),
+                end: U256::from(10u64),
+                start_time: 0,
+                end_time: 5,
+                rounding: Rounding::Up,
+            }
+        );
+        assert_eq!(
+            AmountCurve::dutch(U256::from(7u64), U256::from(7u64), 0, 5),
+            AmountCurve::Static(U256::from(7u64))
+        );
     }
 
     #[test]
