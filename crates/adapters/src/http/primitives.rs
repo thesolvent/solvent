@@ -40,16 +40,6 @@ impl<T> Response<T> {
         }
     }
 
-    /// A success carrying `data` with an explicit status code.
-    pub fn ok_with_status(data: T, status_code: StatusCode) -> Self {
-        Self {
-            status: Status::Ok,
-            result: Some(data),
-            error: None,
-            status_code,
-        }
-    }
-
     /// A failure carrying `error` and the given status code.
     pub fn error<E: ToString>(error: E, status_code: StatusCode) -> Self {
         Self {
@@ -58,11 +48,6 @@ impl<T> Response<T> {
             error: Some(error.to_string()),
             status_code,
         }
-    }
-
-    /// Wrap in axum's `Json` (handy when a `Response` is already in hand).
-    pub fn into_json(self) -> Json<Self> {
-        Json(self)
     }
 }
 
@@ -86,7 +71,7 @@ mod tests {
 
     #[test]
     fn ok_carries_result_and_no_error() {
-        let body = Response::ok("data").into_json();
+        let body = Response::ok("data");
         assert_eq!(body.status, Status::Ok);
         assert_eq!(body.result, Some("data"));
         assert_eq!(body.error, None);
@@ -94,7 +79,7 @@ mod tests {
 
     #[test]
     fn error_carries_message_and_no_result() {
-        let body = Response::<String>::error("boom", StatusCode::BAD_REQUEST).into_json();
+        let body = Response::<String>::error("boom", StatusCode::BAD_REQUEST);
         assert_eq!(body.status, Status::Error);
         assert_eq!(body.result, None);
         assert_eq!(body.error.as_deref(), Some("boom"));
