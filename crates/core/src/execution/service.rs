@@ -125,8 +125,9 @@ impl ExecutionService {
         Ok(())
     }
 
-    /// Reverse a posted fill a chain reorg rolled back. B5 wires the coupling; the trigger — a
-    /// post-finality un-mine detected against the canonical chain — is B6 reconcile.
+    /// Reverse a posted fill a chain reorg rolled back — the compensating ledger transition. The
+    /// caller supplies the reorg signal (detecting a post-finality un-mine against the canonical
+    /// chain is the reconcile worker's job, not this method's).
     pub async fn on_reorg(&self, reservation: ReservationId) -> Result<(), SolventError> {
         self.ledger.void_reorg(reservation).await
     }
