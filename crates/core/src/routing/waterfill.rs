@@ -45,10 +45,9 @@ impl Split {
     /// `net_output` (exact-in) or less `gross_input` (exact-out). The sparsity pass keeps a
     /// leg-drop when the smaller split is `no_worse_than` the current one.
     pub fn no_worse_than(&self, other: &Split, per_leg_cost: U256, exact_in: bool) -> bool {
-        if exact_in {
-            self.net_output(per_leg_cost) >= other.net_output(per_leg_cost)
-        } else {
-            self.gross_input(per_leg_cost) <= other.gross_input(per_leg_cost)
+        match exact_in {
+            true => self.net_output(per_leg_cost) >= other.net_output(per_leg_cost),
+            false => self.gross_input(per_leg_cost) <= other.gross_input(per_leg_cost),
         }
     }
 
@@ -91,11 +90,7 @@ impl<'a> Book<'a> {
 
     /// Leg `i`'s net fill at `level`, raised to its wallet floor; a price failure fills zero.
     fn leg(&self, i: usize, level: &Ratio) -> LimitedQuote {
-        let level = if self.floors[i] > *level {
-            &self.floors[i]
-        } else {
-            level
-        };
+        let level = std::cmp::max(&self.floors[i], level);
         self.candidates[i]
             .net_quote_with_limit(self.bounds[i], level)
             .unwrap_or(NO_FILL)
@@ -113,10 +108,9 @@ impl<'a> Book<'a> {
     fn measure(&self, level: &Ratio) -> U256 {
         (0..self.candidates.len()).fold(U256::ZERO, |sum, i| {
             let leg = self.leg(i, level);
-            let toward = if self.exact_in {
-                leg.amount_in
-            } else {
-                leg.amount_out
+            let toward = match self.exact_in {
+                true => leg.amount_in,
+                false => leg.amount_out,
             };
             sum.saturating_add(toward)
         })
@@ -163,10 +157,9 @@ pub fn solve(
     let level = bracket_level(|l| book.measure(l), target, warm);
     // exact-in assembles at the under-filling side then adds the remainder; exact-out at the
     // over-filling side then trims the overshoot.
-    if book.exact_in {
-        assemble_exact_in(&book, &level.hi, target)
-    } else {
-        assemble_exact_out(&book, &level.lo, target)
+    match book.exact_in {
+        true => assemble_exact_in(&book, &level.hi, target),
+        false => assemble_exact_out(&book, &level.lo, target),
     }
 }
 
@@ -236,7 +229,7 @@ fn wallet_floors(candidates: &[Candidate], bounds: &[U256]) -> Vec<Ratio> {
         }
         // A maker's candidates share one `WalletBudget`; bind only if full fill would exceed it.
         let wallet = candidates[idxs[0]].wallet_cap;
-        if group_output_at(candidates, bounds, &idxs, &Ratio::zero()) <= wallet {
+        if group_output_at_level(candidates, bounds, &idxs, &Ratio::zero()) <= wallet {
             continue;
         }
         let floor = group_floor_level(candidates, bounds, &idxs, wallet);
@@ -248,7 +241,7 @@ fn wallet_floors(candidates: &[Candidate], bounds: &[U256]) -> Vec<Ratio> {
 }
 
 /// A maker group's combined net output at water level `level`.
-fn group_output_at(
+fn group_output_at_level(
     candidates: &[Candidate],
     bounds: &[U256],
     idxs: &[usize],
@@ -272,7 +265,7 @@ fn group_floor_level(
     wallet: U256,
 ) -> Ratio {
     bracket_level(
-        |level| group_output_at(candidates, bounds, idxs, level),
+        |level| group_output_at_level(candidates, bounds, idxs, level),
         wallet,
         None,
     )
@@ -287,32 +280,29 @@ fn unbounded_input() -> U256 {
     U256::from(1u8) << 112
 }
 
-/// Per-candidate gross-input ceiling for the fill. For exact-in, the box cap's input, capped by
-/// the whole request. For exact-out, enough input to *reach* the binding output: the target when
-/// it sits below the cap — rounded up, so the feasibility measure can actually see the target and
-/// the assembly trims the overshoot back to it — else the cap, stepped back so no leg delivers
-/// past it. An un-priceable bound (an XYC asymptote, or arithmetic beyond the fixed-point range)
-/// ⇒ the sentinel, which the numerical fill backs off within.
+/// Per-candidate gross-input ceiling for the fill: enough input to reach the leg's binding
+/// output (the per-arm comments cover each direction). An un-priceable bound — an XYC asymptote,
+/// or arithmetic beyond the fixed-point range — falls back to the sentinel, which the fill backs
+/// off within.
 fn input_bounds(candidates: &[Candidate], request: &RouteRequest) -> Vec<U256> {
     candidates
         .iter()
-        .map(|c| {
-            if request.exact_in {
-                c.input_within_output(c.cap_out)
-                    .unwrap_or_else(unbounded_input)
-                    .min(request.amount)
-            } else if request.amount < c.cap_out {
-                // The target binds below the cap: round the input up so the leg can reach the
-                // target — the feasibility measure must see it, and the assembly trims the
-                // overshoot back to exactly the target, which stays under the cap.
-                c.net_quote_exact_out(request.amount)
-                    .ok()
-                    .unwrap_or_else(unbounded_input)
-            } else {
-                // The cap binds: step back so the leg never delivers past its cap.
-                c.input_within_output(c.cap_out)
-                    .unwrap_or_else(unbounded_input)
-            }
+        .map(|c| match request.exact_in {
+            // exact-in: the box cap's input, capped by the whole request.
+            true => c
+                .input_within_output(c.cap_out)
+                .unwrap_or_else(unbounded_input)
+                .min(request.amount),
+            // exact-out, target below cap: round the input up so the feasibility measure can
+            // reach the target — the assembly trims the overshoot back to it, under the cap.
+            false if request.amount < c.cap_out => c
+                .net_quote_exact_out(request.amount)
+                .ok()
+                .unwrap_or_else(unbounded_input),
+            // exact-out, cap binds: step back so the leg never delivers past its cap.
+            false => c
+                .input_within_output(c.cap_out)
+                .unwrap_or_else(unbounded_input),
         })
         .collect()
 }
@@ -830,8 +820,8 @@ mod tests {
     #[test]
     fn sparsify_charges_gas_on_exact_out() {
         // Eight equal pools, an exact-out target one pool can meet ⇒ the gas-free optimum
-        // fragments, and high per-leg gas (in input units) collapses it — exact-out now prices
-        // gas via `gross_input`, where it was previously blind.
+        // fragments, and high per-leg gas (in input units) collapses it — exact-out prices gas
+        // through `gross_input`.
         let cs: Vec<Candidate> = (1u8..=8)
             .map(|n| cand(n, xyc(e18(2000), e18(2000)), e18(10_000), &[]))
             .collect();
