@@ -6,6 +6,7 @@
 pub mod dto;
 pub mod error;
 pub mod handlers;
+pub mod openapi;
 pub mod primitives;
 pub mod state;
 
@@ -32,6 +33,7 @@ pub fn router(state: AppState) -> Router {
         .route("/config", get(handlers::config::config))
         .route("/stats", get(handlers::stats::stats))
         .route("/assets", get(handlers::assets::assets))
+        .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
 
     Router::new()
@@ -141,5 +143,13 @@ mod tests {
         assert_eq!(json["status"], "Ok");
         assert_eq!(json["result"]["items"][0]["symbol"], "WETH");
         assert_eq!(json["result"]["items"][0]["supported"], false);
+    }
+
+    #[tokio::test]
+    async fn openapi_doc_is_served() {
+        let (status, json) = get("/v1/openapi.json").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["openapi"].is_string());
+        assert!(json["paths"]["/v1/assets"].is_object());
     }
 }

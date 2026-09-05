@@ -10,14 +10,14 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 /// Whether an API call succeeded.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 pub enum Status {
     Ok,
     Error,
 }
 
 /// The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct Response<T> {
     pub status: Status,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -25,6 +25,7 @@ pub struct Response<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip)]
+    #[schema(ignore)]
     pub status_code: StatusCode,
 }
 
