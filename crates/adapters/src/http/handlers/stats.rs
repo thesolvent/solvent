@@ -1,6 +1,6 @@
-//! `GET /v1/stats` — the protocol stat tiles. Only `block_height` is live in M0, read from the
-//! cached chain head (not an RPC per request); the counts and rates arrive with the trade store
-//! (M2) and pricing (M3), so they serialize as `null` until then.
+//! `GET /v1/stats` — the protocol stat tiles. Only `block_height` is populated, read from the
+//! cached chain head (not an RPC per request); the counts and rates have no data source yet, so
+//! they serialize as `null`.
 
 use axum::extract::State;
 use serde::Serialize;
