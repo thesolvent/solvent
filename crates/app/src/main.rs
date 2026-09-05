@@ -13,6 +13,7 @@ use solvent_adapters::http::{self};
 use solvent_adapters::registry::SqliteStore;
 use solvent_core::asset::AssetManager;
 use solvent_core::deps::registry::Store;
+use solvent_core::pool::PoolService;
 use solvent_core::primitives::registry::Snapshot;
 use solvent_core::primitives::ChainId;
 use solvent_core::registry::SharedSnapshot;
@@ -45,13 +46,15 @@ async fn main() -> Result<(), StartupError> {
         Arc::new(hydrate(config.database_url.as_deref(), ChainId(config.chain_id)).await?);
     let assets = Arc::new(AssetManager::new(
         load_token_list(&config.token_list)?,
-        registry,
+        Arc::clone(&registry),
     ));
+    let pools = Arc::new(PoolService::new(Arc::clone(&registry), Arc::clone(&assets)));
 
     let state = AppState {
         config: Arc::new(config.app_config()),
         head,
         assets,
+        pools,
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;

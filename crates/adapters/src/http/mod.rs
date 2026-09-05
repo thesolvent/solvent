@@ -33,6 +33,7 @@ pub fn router(state: AppState) -> Router {
         .route("/config", get(handlers::config::config))
         .route("/stats", get(handlers::stats::stats))
         .route("/assets", get(handlers::assets::assets))
+        .route("/pools", get(handlers::pools::pools))
         .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
 
@@ -65,6 +66,7 @@ mod tests {
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use solvent_core::asset::{AssetManager, TokenList, TokenMeta};
+    use solvent_core::pool::PoolService;
     use solvent_core::registry::SharedSnapshot;
     use tower::ServiceExt;
 
@@ -84,7 +86,9 @@ mod tests {
                 tags: vec![],
             }],
         };
-        let assets = Arc::new(AssetManager::new(list, Arc::new(SharedSnapshot::default())));
+        let registry = Arc::new(SharedSnapshot::default());
+        let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
+        let pools = Arc::new(PoolService::new(Arc::clone(&registry), Arc::clone(&assets)));
         AppState {
             config: Arc::new(AppConfig {
                 chain_id: 31337,
@@ -99,6 +103,7 @@ mod tests {
             }),
             head: ChainHead::stub(0),
             assets,
+            pools,
         }
     }
 
@@ -151,5 +156,13 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert!(json["openapi"].is_string());
         assert!(json["paths"]["/v1/assets"].is_object());
+    }
+
+    #[tokio::test]
+    async fn pools_serves_a_list() {
+        let (status, json) = get("/v1/pools").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["status"], "Ok");
+        assert!(json["result"]["items"].is_array());
     }
 }
