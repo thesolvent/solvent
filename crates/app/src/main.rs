@@ -8,12 +8,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use alloy::providers::{Provider, ProviderBuilder};
+use solvent_adapters::balances::AlloyBalancesOracle;
 use solvent_adapters::chain::ChainHead;
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
 use solvent_adapters::ledger::AlloyBudgetSource;
 use solvent_adapters::registry::SqliteStore;
 use solvent_core::asset::AssetManager;
+use solvent_core::balances::BalancesService;
+use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::ledger::BudgetSource;
 use solvent_core::deps::registry::Store;
 use solvent_core::ledger::BudgetCache;
@@ -58,6 +61,13 @@ async fn main() -> Result<(), StartupError> {
     // Every maker's executable cap, synced off the request path: the cache batch-reads all active
     // makers' pullable wallets each tick, and depth reads its caps from it lock-free — no per-request
     // RPC. (The quote path converges on one net-of-reservations snapshot in M2; see BudgetCache.)
+    // The wallet-balances endpoint reads an arbitrary user's holdings on demand (it can't be
+    // pre-synced), batched into one round-trip per request.
+    let balances_oracle: Arc<dyn BalancesOracle> = Arc::new(AlloyBalancesOracle::new(
+        provider.clone(),
+        config.aqua_address,
+    ));
+    let balances = Arc::new(BalancesService::new(balances_oracle, Arc::clone(&assets)));
     let source: Arc<dyn BudgetSource> = Arc::new(AlloyBudgetSource::new(
         provider,
         config.aqua_address,
@@ -84,6 +94,7 @@ async fn main() -> Result<(), StartupError> {
         assets,
         pools,
         depth,
+        balances,
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
