@@ -3,4 +3,5 @@
 
 pub mod assets;
 pub mod config;
+pub mod pools;
 pub mod stats;
