@@ -8,7 +8,7 @@ use alloy::primitives::Address;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use serde::Deserialize;
-use solvent_core::pool::{Pool, PoolDetail, PoolType};
+use solvent_core::pool::{Pool, PoolDepth, PoolDetail, PoolType, Side};
 use solvent_core::primitives::registry::TokenPair;
 use solvent_core::SolventError;
 
@@ -66,6 +66,28 @@ pub async fn pool_detail(
     let pair = TokenPair::new(parse_addr(&query.base)?, parse_addr(&query.quote)?);
     match state.pools.pool_detail(&pair) {
         Some(detail) => Ok(Response::ok(detail)),
+        None => Err(Response::error("pool not found", StatusCode::NOT_FOUND)),
+    }
+}
+
+/// The pool plus the depth-curve controls: `side` (defaults to `sell`) and a `range` zoom hint.
+#[derive(Debug, Deserialize)]
+pub struct DepthQuery {
+    base: String,
+    quote: String,
+    side: Option<Side>,
+    range: Option<String>,
+}
+
+/// The pair's executable-liquidity depth curve for one side.
+pub async fn pool_depth(
+    State(state): State<AppState>,
+    Query(query): Query<DepthQuery>,
+) -> ApiResult<PoolDepth> {
+    let pair = TokenPair::new(parse_addr(&query.base)?, parse_addr(&query.quote)?);
+    let side = query.side.unwrap_or(Side::Sell);
+    match state.depth.depth(&pair, side, query.range.as_deref()) {
+        Some(depth) => Ok(Response::ok(depth)),
         None => Err(Response::error("pool not found", StatusCode::NOT_FOUND)),
     }
 }
