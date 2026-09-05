@@ -5184,6 +5184,7 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "async-trait",
+ "axum",
  "futures",
  "parking_lot",
  "rust_decimal",
@@ -5195,6 +5196,8 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tokio-tungstenite 0.24.0",
+ "tower",
+ "tower-http",
  "tracing",
  "walletkit-rs",
 ]
@@ -5862,10 +5865,13 @@ dependencies = [
  "http",
  "http-body",
  "pin-project-lite",
+ "tokio",
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
  "url",
+ "uuid 1.26.0",
 ]
 
 [[package]]
