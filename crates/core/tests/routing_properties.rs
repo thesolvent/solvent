@@ -521,7 +521,7 @@ fn kkt_trial(seed: u64) -> Option<Certificate> {
 fn solve_is_kkt_optimal_on_a_pegged_book() {
     if let Some(cert) = kkt_trial(386) {
         assert!(
-            cert.residual_bps <= 100 && cert.violation_bps <= 100,
+            cert.residual_bps <= 25 && cert.violation_bps <= 25,
             "seed=386: KKT residual={} violation={} (bps) — not at the equimarginal optimum",
             cert.residual_bps,
             cert.violation_bps,
@@ -538,15 +538,114 @@ fn solve_is_kkt_optimal() {
     for seed in 0u64..1500 {
         if let Some(cert) = kkt_trial(seed) {
             assert!(
-                cert.residual_bps <= 100,
+                cert.residual_bps <= 25,
                 "seed={seed}: active legs off the equimarginal level by {} bps",
                 cert.residual_bps,
             );
             assert!(
-                cert.violation_bps <= 100,
+                cert.violation_bps <= 25,
                 "seed={seed}: an unused leg beats the split by {} bps",
                 cert.violation_bps,
             );
         }
+    }
+}
+
+/// Round-trip: sourcing `X` input exact-in yields `Y` output, and buying `Y` output exact-out
+/// should cost `~X` again. Returns `|X − X'|` in bps of `X` (`None` when the book has no interior
+/// trade). Catches asymmetry between the two assemble paths.
+fn roundtrip_bps(seed: u64) -> Option<u64> {
+    let mut rng = Rng(0x0022_11AA ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(1, 12) as usize;
+    let cs = random_book(&mut rng, n);
+    let out_target = deliverable_lower_bound(&cs) / U256::from(3u64);
+    if out_target.is_zero() {
+        return None;
+    }
+    let x = solve(&cs, &request(out_target, false), None)?.amount_in;
+    let y = solve(&cs, &request(x, true), None)?.amount_out;
+    if x.is_zero() || y.is_zero() {
+        return None;
+    }
+    let x2 = solve(&cs, &request(y, false), None)?.amount_in;
+    Some(Ratio::from(x2).rel_diff_bps(&Ratio::from(x)))
+}
+
+/// Round-trip consistency holds on a book: exact-in X → Y, then exact-out Y → X' returns to X
+/// within a bp. Fast always-on guard.
+#[test]
+fn roundtrip_is_consistent_on_a_book() {
+    if let Some(bps) = roundtrip_bps(7) {
+        assert!(bps <= 20, "round-trip off by {bps} bps");
+    }
+}
+
+/// Round-trip oracle: the two assemble paths agree — sourcing X input exact-in then buying that
+/// output exact-out returns to ~X. Catches asymmetry between the top-up and the trim.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn solve_round_trips_between_directions() {
+    for seed in 0u64..1500 {
+        if let Some(bps) = roundtrip_bps(seed) {
+            assert!(bps <= 20, "seed={seed}: round-trip off by {bps} bps");
+        }
+    }
+}
+
+/// Output-monotonicity breaks on a fixed book swept over increasing exact-in sizes: more input
+/// must never buy less output. Returns the count of breaks (0 = clean). (λ-monotonicity is not
+/// asserted — the water level is only resolved to the bisection tolerance, so it can tick the
+/// wrong way by a hair; a non-monotone `measure(λ)` would instead surface as a conservation or
+/// KKT failure, which it does not.)
+fn output_monotonicity_breaks(seed: u64) -> u32 {
+    let mut rng = Rng(0x30D0_30D0 ^ seed.wrapping_mul(0x9E37_79B9));
+    let n = rng.range(1, 12) as usize;
+    let cs = random_book(&mut rng, n);
+    let out_cap = deliverable_lower_bound(&cs);
+    if out_cap.is_zero() {
+        return 0;
+    }
+    let Some(x_cap) = solve(&cs, &request(out_cap / U256::from(2u64), false), None) else {
+        return 0;
+    };
+    let x_cap = x_cap.amount_in;
+    let mut breaks = 0;
+    let mut prev_out = U256::ZERO;
+    for k in 1u64..=8 {
+        let x = x_cap * U256::from(k) / U256::from(8u64);
+        let Some(sol) = solve(&cs, &request(x, true), None) else {
+            continue;
+        };
+        if sol.amount_out < prev_out {
+            breaks += 1;
+        }
+        prev_out = sol.amount_out;
+    }
+    breaks
+}
+
+/// Output rises with trade size on a book — more input never buys less output. Fast always-on
+/// guard.
+#[test]
+fn output_rises_with_trade_size_on_a_book() {
+    assert_eq!(
+        output_monotonicity_breaks(7),
+        0,
+        "output decreased as input grew"
+    );
+}
+
+/// Monotonicity oracle: solve output is non-decreasing in trade size across the random books — a
+/// dip would be an arbitrageable quote.
+#[test]
+#[ignore = "heavy fuzz — run with --release --ignored"]
+fn solve_output_is_monotone_in_trade_size() {
+    // Fewer books than the other fuzzes: this one solves a full trade-size sweep per book.
+    for seed in 0u64..500 {
+        assert_eq!(
+            output_monotonicity_breaks(seed),
+            0,
+            "seed={seed}: output decreased as input grew",
+        );
     }
 }
