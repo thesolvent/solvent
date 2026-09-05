@@ -50,7 +50,7 @@ pub struct Asset {
     pub decimals: u8,
     pub tags: Vec<String>,
     pub logo_uri: Option<String>,
-    /// USD price and its 24h change — `None` until the price feed is wired (M3).
+    /// USD price and its 24h change — `None` until the price feed is wired.
     pub price_usd: Option<f64>,
     pub change_24h_pct: Option<f64>,
     /// Whether ≥1 active strategy quotes this asset, how many, and the pairs it trades in.

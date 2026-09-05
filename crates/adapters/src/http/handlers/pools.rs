@@ -1,11 +1,15 @@
-//! `GET /v1/pools` — the pool list. A pool is a bidirectional pair, so `token_a`/`token_b` are
-//! order-independent asset filters (a pool matches if its pair contains every token given), not a
-//! sell/buy direction. `type` and `fee` match the pool's classification and popular tier.
+//! `GET /v1/pools` — the pool list, and `GET /v1/pools/detail?base=&quote=` — one pool's detail.
+//! A pool is a bidirectional pair, so the list's `token_a`/`token_b` are order-independent asset
+//! filters (a pool matches if its pair contains every token given), not a sell/buy direction, and
+//! detail's `base`/`quote` identify a pool regardless of order. `type` and `fee` match the pool's
+//! classification and popular tier.
 
 use alloy::primitives::Address;
 use axum::extract::{Query, State};
+use axum::http::StatusCode;
 use serde::Deserialize;
-use solvent_core::pool::{Pool, PoolType};
+use solvent_core::pool::{Pool, PoolDetail, PoolType};
+use solvent_core::primitives::registry::TokenPair;
 use solvent_core::SolventError;
 
 use crate::http::dto::List;
@@ -19,8 +23,8 @@ pub struct PoolsQuery {
     token_a: Option<String>,
     token_b: Option<String>,
     fee: Option<String>,
-    // `sort` is accepted but M1 always returns maker-count-desc order — apr/tvl/newest sorts need
-    // pricing (M3) / a created-block read, so the field is added with its first backed key.
+    // No `sort` field yet: the list is always maker-count-desc. apr/tvl/newest sorts need pricing
+    // or a created-block read that has no data source, so the field lands with its first backed key.
 }
 
 /// List active pools, filtered and ordered by most makers first.
@@ -47,15 +51,34 @@ pub async fn pools(
     Ok(Response::ok(List::all(pools)))
 }
 
+/// The two tokens identifying one pool (order-independent).
+#[derive(Debug, Deserialize)]
+pub struct PairQuery {
+    base: String,
+    quote: String,
+}
+
+/// Detail for one pool, identified by `base` and `quote`.
+pub async fn pool_detail(
+    State(state): State<AppState>,
+    Query(query): Query<PairQuery>,
+) -> ApiResult<PoolDetail> {
+    let pair = TokenPair::new(parse_addr(&query.base)?, parse_addr(&query.quote)?);
+    match state.pools.pool_detail(&pair) {
+        Some(detail) => Ok(Response::ok(detail)),
+        None => Err(Response::error("pool not found", StatusCode::NOT_FOUND)),
+    }
+}
+
+fn parse_addr(s: &str) -> Result<Address, SolventError> {
+    s.parse::<Address>().map_err(|e| SolventError::InvalidId {
+        id_type: "token",
+        reason: e.to_string(),
+    })
+}
+
 fn parse_token(value: Option<&str>) -> Result<Option<Address>, SolventError> {
-    value
-        .map(|s| {
-            s.parse::<Address>().map_err(|e| SolventError::InvalidId {
-                id_type: "token",
-                reason: e.to_string(),
-            })
-        })
-        .transpose()
+    value.map(parse_addr).transpose()
 }
 
 fn matches(

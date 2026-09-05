@@ -2,11 +2,12 @@
 
 use axum::extract::State;
 
-use crate::http::primitives::{ApiResult, Response};
+use crate::http::primitives::Response;
 use crate::http::state::{AppConfig, AppState};
 
-/// Returns the runtime config verbatim; the FE reads it once at startup.
+/// Returns the runtime config verbatim; the FE reads it once at startup. Infallible (an in-memory
+/// clone), so it returns `Response` directly rather than `ApiResult`.
 #[utoipa::path(get, path = "/v1/config", responses((status = 200, body = Response<AppConfig>)))]
-pub async fn config(State(state): State<AppState>) -> ApiResult<AppConfig> {
-    Ok(Response::ok((*state.config).clone()))
+pub async fn config(State(state): State<AppState>) -> Response<AppConfig> {
+    Response::ok((*state.config).clone())
 }
