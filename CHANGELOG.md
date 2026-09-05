@@ -134,8 +134,21 @@ the project is pre-1.0 and evolving.
     hook. Confirmation is finality-anchored (walletkit).
   - **Full-loop live E2E** over anvil through the **production execution path** — order → … → reserve
     → sim → submit → confirm → post the actual pulled amount; plus a stale-order sim-reject → void.
+- **S2 · M0 — HTTP API scaffold**: the app becomes a running axum server (was `fn main(){}`),
+  exposing the read foundation of the product API.
+  - Inbound HTTP adapter (`crates/adapters/http`): the garden-rs `Response<T>` envelope, `SolventError`
+    → HTTP mapping (redacted 5xx, real cause logged), `List<T>` + opaque cursor pagination, and a
+    tower-http middleware stack (request-id, trace, timeout, CORS).
+  - Composition root (`crates/app`): TOML config (`config` crate), registry snapshot hydrated once
+    from the durable log, a background chain-head poller (block number cached — no RPC per request),
+    graceful shutdown.
+  - **`AssetManager`** — one authority answering everything about an asset by composing a
+    Uniswap-shape token list with the live snapshot (`supported` / count / pairs); one rich `Asset`,
+    serialized directly. `Snapshot::active_assets()` defines "supported".
+  - Endpoints: `GET /healthz`, `/v1/config`, `/v1/stats`, `/v1/assets` (`?supported`), and a
+    code-generated `/v1/openapi.json` (utoipa).
 
-_Next: B6 — reconcile._
+_Next: S2 M1 — discovery read paths (pools, pool detail, wallet balances)._
 
 ## [0.1.0] — 2026-08-28
 
