@@ -16,6 +16,12 @@ pub struct AssetsQuery {
     supported: Option<bool>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/assets",
+    params(("supported" = Option<bool>, Query, description = "Only assets with active liquidity")),
+    responses((status = 200, body = Response<List<Asset>>))
+)]
 pub async fn assets(
     State(state): State<AppState>,
     Query(query): Query<AssetsQuery>,

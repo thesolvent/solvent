@@ -10,7 +10,7 @@ use solvent_core::SolventError;
 
 /// A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an
 /// optional `total`. Carried inside the response envelope's `result`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
 pub struct List<T> {
     pub items: Vec<T>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::http::primitives::Response;
 use crate::http::state::AppState;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct Stats {
     pub block_height: u64,
     pub events_24h: Option<u64>,
@@ -19,6 +19,7 @@ pub struct Stats {
     pub quoting_now: Option<u64>,
 }
 
+#[utoipa::path(get, path = "/v1/stats", responses((status = 200, body = Response<Stats>)))]
 pub async fn stats(State(state): State<AppState>) -> Response<Stats> {
     Response::ok(Stats {
         block_height: state.head.latest(),
