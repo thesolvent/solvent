@@ -6,6 +6,7 @@
 pub mod aqua;
 pub mod events;
 pub mod execution;
+pub mod http;
 pub mod ingest;
 pub mod ledger;
 pub mod registry;
