@@ -39,6 +39,27 @@ pub struct Candidate {
 /// Aqua flat-fee denominator (`Fee.BPS`, 1e9 = 100%).
 const BPS: u64 = 1_000_000_000;
 
+/// Per-thread count of curve-quote requests, for the latency benchmark's cost model. Compiled
+/// only under `quote-metrics`, so production carries no counter.
+#[cfg(feature = "quote-metrics")]
+mod metrics {
+    use std::cell::Cell;
+    thread_local! { static CALLS: Cell<u64> = const { Cell::new(0) }; }
+    pub(super) fn bump() {
+        CALLS.with(|c| c.set(c.get() + 1));
+    }
+    /// Quote requests counted since the last reset.
+    pub fn quote_calls() -> u64 {
+        CALLS.with(Cell::get)
+    }
+    /// Zero the counter.
+    pub fn reset_quote_calls() {
+        CALLS.with(|c| c.set(0));
+    }
+}
+#[cfg(feature = "quote-metrics")]
+pub use metrics::{quote_calls, reset_quote_calls};
+
 impl Candidate {
     /// A frozen venue; built internally by [`select`], public so tests and tools can build one.
     pub fn new(
@@ -74,12 +95,16 @@ impl Candidate {
 
     /// Fee-inclusive output for a gross input: flat fees shrink the input, then the curve.
     pub fn net_quote_exact_in(&self, gross_in: U256) -> Result<U256, CurveError> {
+        #[cfg(feature = "quote-metrics")]
+        metrics::bump();
         self.pool
             .quote_exact_in(shrink_by_fees(gross_in, &self.fees_in_bps)?)
     }
 
     /// Fee-inclusive gross input for an output: the curve, then fees gross the input up.
     pub fn net_quote_exact_out(&self, amount_out: U256) -> Result<U256, CurveError> {
+        #[cfg(feature = "quote-metrics")]
+        metrics::bump();
         gross_up_by_fees(self.pool.quote_exact_out(amount_out)?, &self.fees_in_bps)
     }
 
@@ -104,6 +129,8 @@ impl Candidate {
         gross_bound: U256,
         limit: &Ratio,
     ) -> Result<LimitedQuote, CurveError> {
+        #[cfg(feature = "quote-metrics")]
+        metrics::bump();
         let net_limit = limit.clone() * self.gamma()?.invert().ok_or(CurveError::DivByZero)?;
         let net_bound = shrink_by_fees(gross_bound, &self.fees_in_bps)?;
         let net = self.pool.quote_with_limit(net_bound, &net_limit)?;

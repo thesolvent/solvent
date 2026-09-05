@@ -5,6 +5,8 @@ pub mod candidates;
 pub mod service;
 pub mod waterfill;
 
+#[cfg(feature = "quote-metrics")]
+pub use candidates::{quote_calls, reset_quote_calls};
 pub use candidates::{select, Candidate, Selection};
 pub use service::{resolve_leg_cost, route};
 pub use waterfill::{solve, solve_sparse, Split};
