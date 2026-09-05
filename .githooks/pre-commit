@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Pre-commit gate. Enable with: git config core.hooksPath .githooks
+# Bypass a genuine false positive with `git commit --no-verify`.
+set -euo pipefail
+
+# 1. Solidity formatting must be clean.
+if git diff --cached --name-only --diff-filter=AM | grep -qE '\.sol$'; then
+  if command -v forge >/dev/null 2>&1; then
+    ( cd contracts && forge fmt --check ) || {
+      echo "✗ commit blocked — run 'just fmt' (forge fmt) on the contracts."; exit 1;
+    }
+  fi
+fi
+
+# 2. Comment standard (walletkit): reject newly-added Rust comments that narrate
+#    dev-process, code history, or a future roadmap. Comments describe the code as it is.
+added=$(git diff --cached --unified=0 --diff-filter=AM -- '*.rs' \
+        | grep -E '^\+[^+]' | grep -E '//' || true)
+if [ -z "$added" ]; then exit 0; fi
+
+violations=""
+check() {
+  local hits
+  hits=$(printf '%s\n' "$added" | grep -inE "$2" || true)
+  if [ -n "$hits" ]; then
+    violations+=$'\n'"  ✗ $1"$'\n'"$(printf '%s\n' "$hits" | sed 's/^/      /')"$'\n'
+  fi
+}
+check "dev-process breadcrumb (Task/Step/Phase N)" '//.*\b(task|step|phase)[[:space:]]+[0-9]'
+check "code-history narration" '//.*\b(used to|formerly|refactored|was renamed|was moved)\b'
+check "future-promise / roadmap reference" '//.*(grows in phase|arrives (later|in phase)|will (grow|arrive|land|be added))'
+check "design/plan doc reference (§ / design § / Lab vector)" '//.*(§|design[[:space:]]+§|\blab vector\b)'
+
+if [ -n "$violations" ]; then
+  printf '%s\n' "✗ commit blocked — comments violate the standard:$violations"
+  echo "  Rewrite the flagged lines, or 'git commit --no-verify' for a true false positive."
+  exit 1
+fi

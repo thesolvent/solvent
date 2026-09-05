@@ -1,0 +1,31 @@
+# --- Dev artifacts: local-only, never pushed to origin ---
+docs/plans/
+docs/superpowers/
+.claude/
+
+# --- Node (1inch deps resolve via npm) ---
+node_modules/
+
+# --- Rust (backend, added later) ---
+/backend/target
+/target
+
+# --- Foundry ---
+/contracts/out
+/contracts/cache
+/contracts/broadcast
+
+# --- env / secrets ---
+.env
+.env.*
+!.env.example
+*.log
+
+# --- editor / OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# --- proptest failure-seed artifacts (regenerable, not tracked) ---
+proptest-regressions/
