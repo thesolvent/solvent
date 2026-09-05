@@ -11,6 +11,7 @@ use solvent_adapters::chain::ChainHead;
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
 use solvent_adapters::registry::SqliteStore;
+use solvent_core::asset::AssetManager;
 use solvent_core::deps::registry::Store;
 use solvent_core::primitives::registry::Snapshot;
 use solvent_core::primitives::ChainId;
@@ -18,7 +19,7 @@ use solvent_core::registry::SharedSnapshot;
 use solvent_core::SolventError;
 use sqlx::SqlitePool;
 
-use crate::config::{Config, StartupError};
+use crate::config::{load_token_list, Config, StartupError};
 
 /// How often the background poller refreshes the cached chain head.
 const BLOCK_POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -42,11 +43,15 @@ async fn main() -> Result<(), StartupError> {
 
     let registry =
         Arc::new(hydrate(config.database_url.as_deref(), ChainId(config.chain_id)).await?);
+    let assets = Arc::new(AssetManager::new(
+        load_token_list(&config.token_list)?,
+        registry,
+    ));
 
     let state = AppState {
         config: Arc::new(config.app_config()),
         head,
-        registry,
+        assets,
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;

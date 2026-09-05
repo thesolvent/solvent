@@ -31,6 +31,7 @@ pub fn router(state: AppState) -> Router {
     let v1 = Router::new()
         .route("/config", get(handlers::config::config))
         .route("/stats", get(handlers::stats::stats))
+        .route("/assets", get(handlers::assets::assets))
         .with_state(state);
 
     Router::new()
@@ -58,8 +59,10 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
+    use alloy::primitives::Address;
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
+    use solvent_core::asset::{AssetManager, TokenList, TokenMeta};
     use solvent_core::registry::SharedSnapshot;
     use tower::ServiceExt;
 
@@ -67,6 +70,19 @@ mod tests {
     use crate::http::state::{AppConfig, Features};
 
     fn test_state() -> AppState {
+        let list = TokenList {
+            name: "test".to_string(),
+            tokens: vec![TokenMeta {
+                chain_id: 31337,
+                address: Address::from([1; 20]),
+                symbol: "WETH".to_string(),
+                name: "Wrapped Ether".to_string(),
+                decimals: 18,
+                logo_uri: None,
+                tags: vec![],
+            }],
+        };
+        let assets = Arc::new(AssetManager::new(list, Arc::new(SharedSnapshot::default())));
         AppState {
             config: Arc::new(AppConfig {
                 chain_id: 31337,
@@ -80,7 +96,7 @@ mod tests {
                 block_explorer_url: "http://localhost:5100".to_string(),
             }),
             head: ChainHead::stub(0),
-            registry: Arc::new(SharedSnapshot::default()),
+            assets,
         }
     }
 
@@ -116,5 +132,14 @@ mod tests {
         assert_eq!(json["status"], "Ok");
         assert_eq!(json["result"]["chain_id"], 31337);
         assert_eq!(json["result"]["features"]["earn"], false);
+    }
+
+    #[tokio::test]
+    async fn assets_returns_the_catalog() {
+        let (status, json) = get("/v1/assets").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["status"], "Ok");
+        assert_eq!(json["result"]["items"][0]["symbol"], "WETH");
+        assert_eq!(json["result"]["items"][0]["supported"], false);
     }
 }
