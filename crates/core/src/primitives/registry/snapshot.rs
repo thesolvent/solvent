@@ -4,10 +4,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use alloy_primitives::U256;
+use alloy_primitives::{Address, U256};
 
 use super::event::{AquaEvent, StrategyKey};
 use super::strategy::{MakerStrategy, TokenPair};
+
+/// Per-asset activity derived from the snapshot: how many active strategies quote a token and in
+/// which pairs. The source for the supported-asset list.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ActiveAsset {
+    pub strategy_count: usize,
+    pub pairs: BTreeSet<TokenPair>,
+}
 
 /// The event-sourced picture of all maker liquidity.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -42,6 +50,23 @@ impl Snapshot {
             .into_iter()
             .flatten()
             .filter_map(move |key| self.strategies.get(key).filter(|s| s.active))
+    }
+
+    /// Every token quoted by an active, pair-routable strategy → its active-strategy count and the
+    /// pairs it trades. Each active strategy contributes to both of its pair's tokens.
+    pub fn active_assets(&self) -> BTreeMap<Address, ActiveAsset> {
+        let mut out: BTreeMap<Address, ActiveAsset> = BTreeMap::new();
+        for strategy in self.strategies.values().filter(|s| s.active) {
+            let Some(pair) = strategy.pair() else {
+                continue;
+            };
+            for token in [pair.lo, pair.hi] {
+                let entry = out.entry(token).or_default();
+                entry.strategy_count += 1;
+                entry.pairs.insert(pair);
+            }
+        }
+        out
     }
 
     /// Fold one event into the snapshot — a pure step: `Shipped` registers,
@@ -236,6 +261,38 @@ mod tests {
         for ev in events {
             snap.apply(ev);
         }
+    }
+
+    #[test]
+    fn active_assets_counts_active_strategies_and_pairs_per_token() {
+        let mut snap = Snapshot::default();
+        apply_seq(
+            &mut snap,
+            [
+                shipped(0),
+                pushed(0, 1, 100),
+                pushed(0, 2, 100), // active pair (1,2)
+                shipped(1),
+                pushed(1, 2, 100),
+                pushed(1, 3, 100), // active pair (2,3), shares token 2
+                shipped(2),
+                pushed(2, 1, 100),
+                pushed(2, 2, 100),
+                docked(2), // docked pair (1,2) — excluded
+            ],
+        );
+
+        let assets = snap.active_assets();
+        let pair12 = TokenPair::new(token(1), token(2));
+        let pair23 = TokenPair::new(token(2), token(3));
+
+        assert_eq!(assets.len(), 3);
+        assert_eq!(assets[&token(1)].strategy_count, 1); // docked strategy 2 not counted
+        assert_eq!(assets[&token(2)].strategy_count, 2);
+        assert_eq!(assets[&token(3)].strategy_count, 1);
+        assert!(assets[&token(2)].pairs.contains(&pair12));
+        assert!(assets[&token(2)].pairs.contains(&pair23));
+        assert_eq!(assets[&token(1)].pairs.len(), 1);
     }
 
     #[test]

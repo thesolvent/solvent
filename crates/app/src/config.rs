@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 
 use serde::Deserialize;
 use solvent_adapters::http::state::{AppConfig, Features};
+use solvent_core::asset::TokenList;
 use solvent_core::SolventError;
 
 /// Everything the server needs to boot, deserialized from the config file. `database_url` is
@@ -24,6 +25,8 @@ pub struct Config {
     pub networks: Vec<String>,
     #[serde(default = "default_true")]
     pub faucet: bool,
+    #[serde(default = "default_token_list")]
+    pub token_list: String,
 }
 
 impl Config {
@@ -63,6 +66,16 @@ fn default_networks() -> Vec<String> {
 fn default_true() -> bool {
     true
 }
+fn default_token_list() -> String {
+    "tokens.devnet.json".to_string()
+}
+
+/// Read and parse the token list JSON at `path`.
+pub fn load_token_list(path: &str) -> Result<TokenList, StartupError> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| StartupError::TokenList(format!("{path}: {e}")))?;
+    serde_json::from_str(&text).map_err(|e| StartupError::TokenList(format!("{path}: {e}")))
+}
 
 /// A failure during boot; each aborts startup with a clear message.
 #[derive(Debug, thiserror::Error)]
@@ -71,6 +84,8 @@ pub enum StartupError {
     Config(#[from] config::ConfigError),
     #[error("rpc url: {0}")]
     RpcUrl(String),
+    #[error("token list: {0}")]
+    TokenList(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error("db: {0}")]

@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use serde::Serialize;
-use solvent_core::registry::SharedSnapshot;
+use solvent_core::asset::AssetManager;
 
 use crate::chain::ChainHead;
 
@@ -32,5 +32,5 @@ pub struct AppConfig {
 pub struct AppState {
     pub config: Arc<AppConfig>,
     pub head: ChainHead,
-    pub registry: Arc<SharedSnapshot>,
+    pub assets: Arc<AssetManager>,
 }
