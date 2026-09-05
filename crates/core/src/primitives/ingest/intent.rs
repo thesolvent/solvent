@@ -9,7 +9,7 @@ use crate::primitives::{ChainId, IntentId};
 
 /// The source protocol of an intent; selects the normalizer that produced it and the fill builder
 /// that will consume `raw`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ProtocolId {
     UniswapXV2,
