@@ -1,176 +1,28 @@
 //! Live full-loop E2E: a self-hosted UniswapX order → normalize → route → reserve → **fill on-chain**
-//! through the deployed reactor + `UniswapXAquaFiller`, sourcing the output from a shipped Aqua maker.
-//! The proof that the whole ingest→fill path holds against the real contracts. Gated on anvil.
+//! through the deployed reactor + `UniswapXAquaFiller` via a direct `fill()` call, sourcing the
+//! output from a shipped Aqua maker. Proves the ingest→fill path against the real contracts; the
+//! sibling `e2e_execution` drives the same loop through the production execution service. Gated on anvil.
 
 mod common;
 
-use std::sync::Arc;
-
-use alloy::primitives::{address, Address, Bytes, U256};
-use alloy::providers::ext::AnvilApi;
+use alloy::primitives::{address, U256};
 use alloy::providers::Provider;
 use alloy::rpc::types::{TransactionInput, TransactionRequest};
-use alloy::sol;
+use alloy::signers::local::PrivateKeySigner;
+use futures::StreamExt;
 
-use common::{pipeline, Harness, MockERC20, StrategySpec, CHAIN};
+use common::{
+    balance_of, budget_source, first_supported, ledger, quote_caps, rid, setup, synced, MockERC20,
+    PERMIT2,
+};
 use solvent_adapters::ingest::uniswapx::{
     OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXFillBuilder, UniswapXV2Normalizer,
 };
-use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_core::deps::ingest::{FillBuilder, Normalizer, OrderFeed};
-use solvent_core::deps::ledger::BudgetSource;
-use solvent_core::ledger::{AvailableSnapshot, LedgerService};
 use solvent_core::primitives::ingest::RawOrder;
 use solvent_core::primitives::ledger::{AccountKey, ReservationSource};
-use solvent_core::primitives::registry::{Snapshot, TokenPair};
 use solvent_core::primitives::routing::{RouteRequest, RoutingConfig};
-use solvent_core::primitives::ReservationId;
-use solvent_core::registry::SharedSnapshot;
 use solvent_core::routing::route;
-
-use alloy::signers::local::PrivateKeySigner;
-use futures::StreamExt;
-use sqlx::SqlitePool;
-use tempfile::TempDir;
-
-sol!(
-    #[sol(rpc)]
-    V2DutchOrderReactor,
-    "tests/fixtures/artifacts/V2DutchOrderReactor.json"
-);
-sol!(
-    #[sol(rpc)]
-    UniswapXAquaFiller,
-    "tests/fixtures/artifacts/UniswapXAquaFiller.json"
-);
-
-const MULTICALL3: Address = address!("cA11bde05977b3631167028862bE2a173976CA11");
-const MULTICALL3_CODE: &str = include_str!("fixtures/multicall3_runtime.hex");
-const PERMIT2: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
-const PERMIT2_CODE: &str = include_str!("fixtures/permit2_runtime.hex");
-
-fn rid(n: u8) -> ReservationId {
-    ReservationId(alloy::primitives::B256::from([n; 32]))
-}
-
-/// The deployed stack plus the reactor + filler for the fill path.
-struct Stack {
-    h: Harness,
-    reactor: Address,
-    filler: Address,
-    chain_id: u64,
-}
-
-async fn setup() -> Stack {
-    let h = Harness::setup().await;
-    let etch = |addr: Address, code: &str| {
-        let bytes: Bytes = code.trim().parse().expect("bytecode");
-        (addr, bytes)
-    };
-    for (addr, code) in [
-        etch(MULTICALL3, MULTICALL3_CODE),
-        etch(PERMIT2, PERMIT2_CODE),
-    ] {
-        h.maker_provider
-            .anvil_set_code(addr, code)
-            .await
-            .expect("etch");
-    }
-    let reactor = V2DutchOrderReactor::deploy(h.maker_provider.clone(), PERMIT2, Address::ZERO)
-        .await
-        .expect("deploy reactor");
-    let filler = UniswapXAquaFiller::deploy(h.maker_provider.clone(), h.maker)
-        .await
-        .expect("deploy filler");
-    let chain_id = h.maker_provider.get_chain_id().await.expect("chain id");
-    Stack {
-        h,
-        reactor: *reactor.address(),
-        filler: *filler.address(),
-        chain_id,
-    }
-}
-
-async fn synced(h: &Harness) -> (Arc<SharedSnapshot>, SqlitePool, TempDir) {
-    let (sync, snapshot, pool, dir) = pipeline(h, CHAIN).await;
-    sync.sync_once(h.latest_block().await).await.expect("sync");
-    (snapshot, pool, dir)
-}
-
-fn budget_source(
-    h: &Harness,
-    snapshot: &Arc<SharedSnapshot>,
-) -> AlloyBudgetSource<alloy::providers::DynProvider> {
-    AlloyBudgetSource::new(
-        h.maker_provider.clone(),
-        *h.aqua.address(),
-        h.app,
-        snapshot.clone(),
-    )
-}
-
-async fn ledger(h: &Harness, snapshot: &Arc<SharedSnapshot>) -> (LedgerService, TempDir) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite://{}?mode=rwc",
-        dir.path().join("ledger.db").display()
-    );
-    let pool = SqlitePool::connect(&url).await.expect("open ledger sqlite");
-    SqliteLedgerStore::new(pool.clone())
-        .migrate()
-        .await
-        .expect("migrate ledger");
-    let svc = LedgerService::new(
-        Arc::new(SqliteLedgerStore::new(pool)),
-        Arc::new(budget_source(h, snapshot)),
-        Arc::new(SystemClock),
-    );
-    (svc, dir)
-}
-
-/// Quote-time caps for the pair, on the payout token, read from the budget source.
-async fn quote_caps(
-    snap: &Snapshot,
-    budgets: &AlloyBudgetSource<alloy::providers::DynProvider>,
-    token_out: Address,
-    token_in: Address,
-) -> AvailableSnapshot {
-    let mut map = std::collections::BTreeMap::new();
-    for s in snap.active_strategies_for_pair(TokenPair::new(token_in, token_out)) {
-        for account in [
-            AccountKey::WalletBudget {
-                maker: s.key.maker,
-                token: token_out,
-            },
-            AccountKey::StrategyVirtual {
-                maker: s.key.maker,
-                strategy_hash: s.key.strategy_hash,
-                token: token_out,
-            },
-        ] {
-            if let std::collections::btree_map::Entry::Vacant(e) = map.entry(account) {
-                e.insert(budgets.budget(&account).await.unwrap_or(U256::ZERO));
-            }
-        }
-    }
-    AvailableSnapshot(map)
-}
-
-fn first_supported(h: &Harness) -> StrategySpec {
-    h.fx.strategies
-        .iter()
-        .find(|s| s.supported && !s.guarded)
-        .cloned()
-        .expect("a supported strategy")
-}
-
-async fn balance_of(h: &Harness, token: Address, who: Address) -> U256 {
-    MockERC20::new(token, h.maker_provider.clone())
-        .balanceOf(who)
-        .call()
-        .await
-        .expect("balanceOf")
-}
 
 #[tokio::test]
 async fn e2e_self_hosted_order_fills_on_chain() {

@@ -1,7 +1,7 @@
-//! Shared live-E2E harness: a real anvil with a deployed Aqua, AquaSwapVMRouter,
-//! and two ERC20s, plus helpers to ship/push/swap and read on-chain state. Used
-//! by the pricing-matrix test (`e2e_registry`) and the watcher-lifecycle test
-//! (`e2e_watcher`). Everything here is test-only, so `expect`/`unwrap` are fine.
+//! Shared live-E2E harness: a real anvil with a deployed Aqua, AquaSwapVMRouter, and two ERC20s,
+//! plus helpers to ship/push/swap and read on-chain state, and the fill-path stack (reactor +
+//! `UniswapXAquaFiller`, a durable SQLite ledger, and order→reserve helpers) that the ingest and
+//! execution E2Es reuse. Everything here is test-only, so `expect`/`unwrap` are fine.
 
 #![allow(dead_code)] // each test binary uses a different subset of the harness.
 
@@ -10,19 +10,23 @@ use std::sync::Arc;
 use alloy::{
     network::EthereumWallet,
     node_bindings::{Anvil, AnvilInstance},
-    primitives::{keccak256, Address, Bytes, U256},
-    providers::{DynProvider, Provider, ProviderBuilder},
+    primitives::{address, keccak256, Address, Bytes, B256, U256},
+    providers::{ext::AnvilApi, DynProvider, Provider, ProviderBuilder},
     signers::local::PrivateKeySigner,
     sol,
     sol_types::SolValue,
 };
 use serde::Deserialize;
+use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::registry::{AlloyChainSource, SqliteStore};
 use solvent_core::{
+    deps::ledger::BudgetSource,
     deps::registry::ChainSource,
+    ledger::{AvailableSnapshot, LedgerService},
     primitives::{
-        registry::{MakerStrategy, Snapshot, StrategyKey},
-        ChainConfig, ChainId, MakerId, StrategyHash,
+        ledger::AccountKey,
+        registry::{MakerStrategy, Snapshot, StrategyKey, TokenPair},
+        ChainConfig, ChainId, MakerId, ReservationId, StrategyHash,
     },
     registry::{price, RegistrySync, SharedSnapshot},
 };
@@ -133,7 +137,10 @@ pub struct Harness {
     _anvil: AnvilInstance,
     pub maker: Address,
     pub taker: Address,
+    pub maker_signer: PrivateKeySigner,
     pub taker_signer: PrivateKeySigner,
+    /// The node's HTTP endpoint — for building a standalone walletkit `Transport`.
+    pub endpoint: String,
     pub maker_provider: DynProvider,
     pub taker_provider: DynProvider,
     pub aqua: Aqua::AquaInstance<DynProvider>,
@@ -148,6 +155,10 @@ impl Harness {
     pub async fn setup() -> Self {
         let anvil = Anvil::new()
             .arg("--disable-code-size-limit")
+            // Finalize a couple blocks behind head: anvil's default epoch never finalizes within a
+            // test's block budget, so walletkit's finalized-tag confirmation would never advance.
+            .arg("--slots-in-an-epoch")
+            .arg("1")
             .try_spawn()
             .expect("spawn anvil (is it on PATH?)");
         let fx = load_fixture();
@@ -157,9 +168,10 @@ impl Harness {
         let maker = maker_signer.address();
         let taker = taker_signer.address();
         assert_eq!(maker, fx.maker, "harness maker must match the fixture's");
+        let endpoint = anvil.endpoint();
 
         let maker_provider = ProviderBuilder::new()
-            .wallet(EthereumWallet::from(maker_signer))
+            .wallet(EthereumWallet::from(maker_signer.clone()))
             .connect_http(anvil.endpoint_url())
             .erased();
         let taker_provider = ProviderBuilder::new()
@@ -220,7 +232,9 @@ impl Harness {
             _anvil: anvil,
             maker,
             taker,
+            maker_signer,
             taker_signer,
+            endpoint,
             maker_provider,
             taker_provider,
             aqua,
@@ -560,4 +574,150 @@ pub async fn pipeline(
     let snapshot = Arc::new(SharedSnapshot::default());
     let sync = RegistrySync::new(&config, h.chain_source(), Arc::new(store), snapshot.clone());
     (sync, snapshot, pool, dir)
+}
+
+// ---- fill-path harness (shared by e2e_ingest + e2e_execution) ---------------
+
+// The filler's ABI pulls in `ISwapVM` (its `SourceSwap.order`), which the router's `sol!` at module
+// root also defines — isolate the reactor + filler in a submodule so that generated type can't
+// collide with the router's own.
+mod fill_abi {
+    use super::sol;
+    sol!(
+        #[sol(rpc)]
+        V2DutchOrderReactor,
+        "tests/fixtures/artifacts/V2DutchOrderReactor.json"
+    );
+    sol!(
+        #[sol(rpc)]
+        UniswapXAquaFiller,
+        "tests/fixtures/artifacts/UniswapXAquaFiller.json"
+    );
+}
+use fill_abi::{UniswapXAquaFiller, V2DutchOrderReactor};
+
+pub const MULTICALL3: Address = address!("cA11bde05977b3631167028862bE2a173976CA11");
+const MULTICALL3_CODE: &str = include_str!("../fixtures/multicall3_runtime.hex");
+pub const PERMIT2: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
+const PERMIT2_CODE: &str = include_str!("../fixtures/permit2_runtime.hex");
+
+pub fn rid(n: u8) -> ReservationId {
+    ReservationId(B256::from([n; 32]))
+}
+
+/// The deployed stack plus the reactor + filler for the fill path.
+pub struct Stack {
+    pub h: Harness,
+    pub reactor: Address,
+    pub filler: Address,
+    pub chain_id: u64,
+}
+
+/// Deploy the ingest→fill stack: the base harness, etched Permit2 + Multicall3, and the reactor +
+/// `UniswapXAquaFiller` (owned by the maker, who is the filler's `onlyOwner`).
+pub async fn setup() -> Stack {
+    let h = Harness::setup().await;
+    for (addr, code) in [(MULTICALL3, MULTICALL3_CODE), (PERMIT2, PERMIT2_CODE)] {
+        let bytes: Bytes = code.trim().parse().expect("bytecode");
+        h.maker_provider
+            .anvil_set_code(addr, bytes)
+            .await
+            .expect("etch");
+    }
+    let reactor = V2DutchOrderReactor::deploy(h.maker_provider.clone(), PERMIT2, Address::ZERO)
+        .await
+        .expect("deploy reactor");
+    let filler = UniswapXAquaFiller::deploy(h.maker_provider.clone(), h.maker)
+        .await
+        .expect("deploy filler");
+    let chain_id = h.maker_provider.get_chain_id().await.expect("chain id");
+    Stack {
+        h,
+        reactor: *reactor.address(),
+        filler: *filler.address(),
+        chain_id,
+    }
+}
+
+/// Sync the registry once against the current head, returning the live snapshot.
+pub async fn synced(h: &Harness) -> (Arc<SharedSnapshot>, SqlitePool, TempDir) {
+    let (sync, snapshot, pool, dir) = pipeline(h, CHAIN).await;
+    sync.sync_once(h.latest_block().await).await.expect("sync");
+    (snapshot, pool, dir)
+}
+
+pub fn budget_source(
+    h: &Harness,
+    snapshot: &Arc<SharedSnapshot>,
+) -> AlloyBudgetSource<DynProvider> {
+    AlloyBudgetSource::new(
+        h.maker_provider.clone(),
+        *h.aqua.address(),
+        h.app,
+        snapshot.clone(),
+    )
+}
+
+/// A durable SQLite-backed ledger over the harness's budget source.
+pub async fn ledger(h: &Harness, snapshot: &Arc<SharedSnapshot>) -> (LedgerService, TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite://{}?mode=rwc",
+        dir.path().join("ledger.db").display()
+    );
+    let pool = SqlitePool::connect(&url).await.expect("open ledger sqlite");
+    SqliteLedgerStore::new(pool.clone())
+        .migrate()
+        .await
+        .expect("migrate ledger");
+    let svc = LedgerService::new(
+        Arc::new(SqliteLedgerStore::new(pool)),
+        Arc::new(budget_source(h, snapshot)),
+        Arc::new(SystemClock),
+    );
+    (svc, dir)
+}
+
+/// Quote-time caps for the pair on the payout token, read from the budget source.
+pub async fn quote_caps(
+    snap: &Snapshot,
+    budgets: &AlloyBudgetSource<DynProvider>,
+    token_out: Address,
+    token_in: Address,
+) -> AvailableSnapshot {
+    let mut map = std::collections::BTreeMap::new();
+    for s in snap.active_strategies_for_pair(TokenPair::new(token_in, token_out)) {
+        for account in [
+            AccountKey::WalletBudget {
+                maker: s.key.maker,
+                token: token_out,
+            },
+            AccountKey::StrategyVirtual {
+                maker: s.key.maker,
+                strategy_hash: s.key.strategy_hash,
+                token: token_out,
+            },
+        ] {
+            if let std::collections::btree_map::Entry::Vacant(e) = map.entry(account) {
+                e.insert(budgets.budget(&account).await.unwrap_or(U256::ZERO));
+            }
+        }
+    }
+    AvailableSnapshot(map)
+}
+
+pub fn first_supported(h: &Harness) -> StrategySpec {
+    h.fx.strategies
+        .iter()
+        .find(|s| s.supported && !s.guarded)
+        .cloned()
+        .expect("a supported strategy")
+}
+
+pub async fn balance_of(h: &Harness, token: Address, who: Address) -> U256 {
+    MockERC20::new(token, h.maker_provider.clone())
+        .balanceOf(who)
+        .call()
+        .await
+        .expect("balanceOf")
 }

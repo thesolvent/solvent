@@ -4,6 +4,7 @@
 
 use thiserror::Error;
 
+use crate::deps::execution::{ExecutionError, SettlementError, SimError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
 use crate::deps::registry::{ChainSourceError, StoreError};
 use crate::primitives::ledger::LedgerError;
@@ -33,4 +34,13 @@ pub enum SolventError {
     /// Reading a settleable budget failed.
     #[error("budget source: {0}")]
     BudgetSource(#[from] BudgetSourceError),
+    /// The tx engine failed to submit or track a fill.
+    #[error("execution: {0}")]
+    Execution(#[from] ExecutionError),
+    /// The simulation engine failed to evaluate a fill.
+    #[error("simulation: {0}")]
+    Sim(#[from] SimError),
+    /// Reading a confirmed fill's on-chain settlement failed.
+    #[error("settlement: {0}")]
+    Settlement(#[from] SettlementError),
 }

@@ -184,3 +184,29 @@ re-confirms a known finding, or needs calibrated market data. Pick up if a speci
   single-output, static-input orders, so the tests don't exercise multi-output or the ceil/input-decay
   path end-to-end. The curve math is proven direction-agnostic in `curve.rs`; add order shapes when a
   protocol/order needs them.
+
+# Deferred execution work (B5)
+
+- **Post-finality reorg detection** — the `ExecutionService::on_reorg` → `ledger.void_reorg` coupling
+  is wired and tested, but the *trigger* (detecting that an already-confirmed fill un-mined deeper than
+  the confirmation depth) is deferred to **B6 (reconcile)**, watching the canonical chain. walletkit
+  absorbs sub-confirmation reorgs itself, so the normal path never calls it.
+- **In-flight crash recovery** — the service's in-flight map (intent → handle + reservation) is
+  in-memory, so a crash mid-fill loses the tracking. walletkit's durable store still holds the tx and
+  the ledger still holds the open reservation; rebuilding the map from those on restart is **B6**.
+- **Batch fills** — `fillBatch` + fate-compatible grouping + all-post-or-all-void reservation sets are
+  deferred: the router emits one `RoutePlan` per intent, so batching across intents has no consumer
+  yet. The single-fill loop is the full production path.
+- **revm fork-sim gate** — v1 simulates via walletkit `dry_run` (eth_call at head), which the P1
+  filler's on-chain guards make sufficient for the reject decision. A richer revm fork-sim (state
+  overrides, exact profit net of gas) is a second `SimGate` adapter behind the same port.
+- **Per-fill gas ceiling** — the RBF bump loop is bounded by a static wallet-level `gas_ceiling`, not
+  by *this fill's* expected profit; a per-fill-tight ceiling needs a per-send gas envelope in walletkit.
+- **`Dropped` / deep-reorg E2E** — the reservation `void` on a dropped fill and the `void_reorg`
+  coupling are unit-tested with fakes; forcing a deterministic on-chain nonce-steal or reorg belongs to
+  walletkit's own localnet harness, so the anvil E2E covers the happy + sim-reject paths.
+- **Finality-stall confirmation freeze** — walletkit anchors confirmation on the chain's `finalized`
+  tag when the RPC exposes one (falling back to a depth count only when it does not). If a chain stops
+  finalizing, confirmations freeze (fills stay tentative `Mined`) rather than settling on depth alone —
+  correct (nothing is truly final during a stall), but worth operational awareness. Anvil never
+  advances the tag by default, so the E2E runs the node with `--slots-in-an-epoch 1`.

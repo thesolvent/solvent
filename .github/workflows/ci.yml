@@ -25,7 +25,10 @@ jobs:
       # 1inch Aqua/SwapVM deps resolve via npm into node_modules/
       - run: yarn install --frozen-lockfile
 
+      # Pinned: forge fmt rules change across releases, so a floating latest breaks fmt --check.
       - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: "v1.5.0"
 
       - run: forge fmt --check
       - run: forge build

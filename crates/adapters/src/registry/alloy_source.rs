@@ -7,24 +7,12 @@
 
 use solvent_core::{
     deps::registry::{ChainSource, ChainSourceError},
-    primitives::{
-        registry::{AquaEvent, EventExt},
-        MakerId, StrategyHash,
-    },
+    primitives::registry::{AquaEvent, EventExt},
 };
 
+use crate::aqua::{into_domain, IAqua};
 use crate::{event_provider, events::prelude::*};
-use alloy::sol;
 use async_trait::async_trait;
-
-sol! {
-    interface IAqua {
-        event Shipped(address maker, address app, bytes32 strategyHash, bytes strategy);
-        event Pushed(address maker, address app, bytes32 strategyHash, address token, uint256 amount);
-        event Pulled(address maker, address app, bytes32 strategyHash, address token, uint256 amount);
-        event Docked(address maker, address app, bytes32 strategyHash);
-    }
-}
 
 event_provider!(aqua_events, (aqua, IAqua::IAquaEvents));
 
@@ -78,43 +66,13 @@ impl ChainSource for AlloyChainSource {
     }
 }
 
-/// Lift a decoded chain-ABI event into its domain form.
-fn into_domain(event: IAqua::IAquaEvents) -> AquaEvent {
-    match event {
-        IAqua::IAquaEvents::Shipped(e) => AquaEvent::Shipped {
-            maker: MakerId(e.maker),
-            app: e.app,
-            strategy_hash: StrategyHash(e.strategyHash),
-            strategy: e.strategy,
-        },
-        IAqua::IAquaEvents::Pushed(e) => AquaEvent::Pushed {
-            maker: MakerId(e.maker),
-            app: e.app,
-            strategy_hash: StrategyHash(e.strategyHash),
-            token: e.token,
-            amount: e.amount,
-        },
-        IAqua::IAquaEvents::Pulled(e) => AquaEvent::Pulled {
-            maker: MakerId(e.maker),
-            app: e.app,
-            strategy_hash: StrategyHash(e.strategyHash),
-            token: e.token,
-            amount: e.amount,
-        },
-        IAqua::IAquaEvents::Docked(e) => AquaEvent::Docked {
-            maker: MakerId(e.maker),
-            app: e.app,
-            strategy_hash: StrategyHash(e.strategyHash),
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::events::prelude::process_logs;
     use alloy::primitives::{Bytes, LogData, B256, U256};
     use alloy::rpc::types::Log;
+    use solvent_core::primitives::{MakerId, StrategyHash};
 
     /// The fixture written by the study lab's `gen-logs` test: real Aqua logs
     /// from a ship+swap+dock against the deployed contract on anvil.
