@@ -3,7 +3,6 @@
 //! whose real cause is logged and whose body is generic — internals never reach the client.
 
 use axum::http::StatusCode;
-use solvent_core::obs::error;
 use solvent_core::SolventError;
 
 use crate::http::primitives::Response;
@@ -24,7 +23,7 @@ impl From<SolventError> for Response<()> {
     fn from(err: SolventError) -> Self {
         let status = status_for(&err);
         if status == StatusCode::INTERNAL_SERVER_ERROR {
-            error!(error = %err, "request failed");
+            tracing::error!(error = %err, "request failed");
             Response::error(INTERNAL, status)
         } else {
             Response::error(err.to_string(), status)
