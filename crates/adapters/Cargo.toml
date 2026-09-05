@@ -15,6 +15,7 @@ alloy = { version = "1", features = [
     "sol-types",
 ] }
 async-trait = "0.1"
+axum = "0.8"
 futures = "0.3"
 sqlx = { version = "0.8", features = [
     "runtime-tokio",
@@ -29,6 +30,8 @@ rust_decimal = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["time"] }
 tokio-tungstenite = { version = "0.24", features = ["connect", "rustls-tls-webpki-roots"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "request-id", "timeout", "cors"] }
 tracing = "0.1"
 walletkit = { package = "walletkit-rs", git = "https://github.com/21r21a33333/walletkit.git", rev = "3e75a5d2385da13d6ab813104f1e2473860e32cb", default-features = false }
 
