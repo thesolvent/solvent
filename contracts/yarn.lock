@@ -10,6 +10,15 @@
     "@openzeppelin/contracts" "5.4.0"
     forge-std "github:foundry-rs/forge-std#v1.11.0"
 
+"@1inch/aqua@github:1inch/aqua#v1.0.0":
+  version "0.1.0"
+  uid "81c26e4619ce21556ab02b3284ee2685de21fb18"
+  resolved "https://codeload.github.com/1inch/aqua/tar.gz/81c26e4619ce21556ab02b3284ee2685de21fb18"
+  dependencies:
+    "@1inch/solidity-utils" "6.9.7"
+    "@openzeppelin/contracts" "5.4.0"
+    forge-std "github:foundry-rs/forge-std#v1.11.0"
+
 "@1inch/solidity-utils@6.9.5":
   version "6.9.5"
   resolved "https://registry.yarnpkg.com/@1inch/solidity-utils/-/solidity-utils-6.9.5.tgz#922b45f3f721042a97449adb5d46656169d5c765"
