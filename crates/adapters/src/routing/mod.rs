@@ -36,6 +36,11 @@ impl MarketCache {
     fn set_price(&self, token: Address, price: UsdPrice) {
         self.prices.write().insert(token, price);
     }
+    /// Seed a fixed price at boot — for a stablecoin pegged to USD that has no Binance pair (USDT).
+    /// The feed never writes such a symbol, so the peg persists.
+    pub fn seed_price(&self, token: Address, price: UsdPrice) {
+        self.set_price(token, price);
+    }
     fn set_gas(&self, wei: u128) {
         *self.gas_wei.write() = wei;
     }
@@ -191,6 +196,14 @@ fn mid_price(ticker: &BookTicker) -> Option<Decimal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seed_price_reads_back() {
+        let usdt = Address::from([9u8; 20]);
+        let cache = MarketCache::new();
+        cache.seed_price(usdt, UsdPrice::PAR);
+        assert_eq!(cache.prices.read().get(&usdt).copied(), Some(UsdPrice::PAR));
+    }
 
     #[test]
     fn ingests_book_ticker_as_mid_price() {

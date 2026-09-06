@@ -14,5 +14,6 @@ pub mod reconcile;
 pub mod registry;
 pub mod routing;
 pub mod swap;
+pub mod valuation;
 
 pub use primitives::SolventError;
