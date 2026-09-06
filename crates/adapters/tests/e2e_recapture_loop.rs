@@ -10,16 +10,17 @@ mod common;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use alloy::primitives::{address, Address, Bytes, U256};
+use alloy::primitives::{address, Address, Bytes, B256, U256};
 use alloy::providers::Provider;
+use alloy::rpc::types::Filter;
 use alloy::signers::local::PrivateKeySigner;
 use async_trait::async_trait;
 use futures::StreamExt;
 use rust_decimal::Decimal;
 
 use common::{
-    balance_of, budget_source, first_supported, ledger, quote_caps, rid, setup, synced, Harness,
-    MockERC20, Stack, PERMIT2,
+    balance_of, budget_source, first_supported, ledger, quote_caps, rid, setup, setup_attached,
+    synced, Harness, MockERC20, Stack, PERMIT2,
 };
 use solvent_adapters::execution::{AquaSettlementReader, WalletkitExecutor};
 use solvent_adapters::ingest::uniswapx::{
@@ -31,7 +32,7 @@ use solvent_core::deps::recapture::RecaptureStore;
 use solvent_core::deps::routing::{PriceOracle, PriceOracleError};
 use solvent_core::execution::ExecutionService;
 use solvent_core::ledger::{AvailableSnapshot, LedgerService};
-use solvent_core::primitives::execution::{FillOutcome, FillTx, PendingFill};
+use solvent_core::primitives::execution::{ConfirmedFill, FillOutcome, FillTx, PendingFill};
 use solvent_core::primitives::ingest::{Intent, RawOrder};
 use solvent_core::primitives::ledger::ReservationSource;
 use solvent_core::primitives::recapture::RecapturePolicy;
@@ -183,7 +184,8 @@ fn execution_service(h: &Harness, led: Arc<LedgerService>) -> ExecutionService {
     ExecutionService::new(exec.clone(), exec, settlement, led)
 }
 
-async fn drive(svc: &ExecutionService, h: &Harness) {
+async fn drive(svc: &ExecutionService, h: &Harness) -> Vec<ConfirmedFill> {
+    let mut confirmed = Vec::new();
     for _ in 0..10 {
         if svc.pending().await == 0 {
             break;
@@ -193,16 +195,37 @@ async fn drive(svc: &ExecutionService, h: &Harness) {
             .raw_request("anvil_mine".into(), (2u64,))
             .await
             .expect("anvil_mine");
-        svc.reconcile().await.expect("reconcile");
+        confirmed.extend(svc.reconcile().await.expect("reconcile"));
     }
+    confirmed
 }
 
-#[tokio::test]
-async fn e2e_imbalance_then_reverse_fill_recaptures_and_rebates_the_maker() {
-    if common::skip_without_anvil() {
-        return;
-    }
-    let stack = setup().await;
+/// A base-unit (18-dp) amount as whole tokens, for the walkthrough trace.
+fn whole(amount: U256) -> Decimal {
+    to_decimal(amount) / to_decimal(U256::from(10u64).pow(U256::from(18u64)))
+}
+
+/// The most recent ERC-20 `Transfer` of `token` to `who` at or after `from_block` — the rebate's
+/// on-chain tx, read back so the walkthrough can link it in the explorer.
+async fn transfer_tx(h: &Harness, token: Address, who: Address, from_block: u64) -> Option<B256> {
+    let filter = Filter::new()
+        .address(token)
+        .from_block(from_block)
+        .event("Transfer(address,address,uint256)")
+        .topic2(who.into_word());
+    h.maker_provider
+        .get_logs(&filter)
+        .await
+        .expect("transfer logs")
+        .last()
+        .and_then(|log| log.transaction_hash)
+}
+
+/// The whole recapture thesis, one run: ship a maker → imbalance its pool with forward flow → a
+/// reverse counter-intent internalizes into that maker and fills on chain → the real fill legs drive
+/// the recapture credit → the payout worker rebates the maker as a real ERC-20 transfer. Asserts
+/// every hop and prints a walkthrough trace; given an explorer base URL, links the on-chain steps.
+async fn run_full_arc(stack: &Stack, otterscan: Option<&str>) {
     let h = &stack.h;
     let spec = first_supported(h);
     h.ship(&spec).await;
@@ -215,6 +238,8 @@ async fn e2e_imbalance_then_reverse_fill_recaptures_and_rebates_the_maker() {
     for _ in 0..4 {
         h.swap(&spec, h.t1, h.t0, t1_pre / U256::from(20u64)).await;
     }
+    let (t0_post, t1_post) = h.on_chain_balances(&spec).await;
+    let cheap_price_t1 = to_decimal(t0_post) / to_decimal(t1_post);
 
     let (snapshot, _rp, _rd) = synced(h).await;
     let (svc_ledger, _ld) = ledger(h, &snapshot).await;
@@ -224,7 +249,7 @@ async fn e2e_imbalance_then_reverse_fill_recaptures_and_rebates_the_maker() {
     let output = spec.ship_hi / U256::from(10u64);
     let input = spec.ship_lo / U256::from(2u64);
     let (intent, plan, calldata, _caps) =
-        reserve_order(&stack, &snapshot, &led, output, input).await;
+        reserve_order(stack, &snapshot, &led, output, input).await;
     assert!(
         plan.legs.iter().all(|l| l.maker == MakerId(h.maker)),
         "the reverse buy sourced from the imbalanced maker"
@@ -239,7 +264,11 @@ async fn e2e_imbalance_then_reverse_fill_recaptures_and_rebates_the_maker() {
         svc.fill(fill).await.expect("fill"),
         FillOutcome::Submitted { .. }
     ));
-    drive(&svc, h).await;
+    let fill_tx = drive(&svc, h)
+        .await
+        .into_iter()
+        .find(|c| c.intent == intent.id)
+        .map(|c| c.tx);
     assert_eq!(svc.pending().await, 0, "the reverse fill settled");
     assert!(
         plan.expected_profit > U256::ZERO,
@@ -292,17 +321,92 @@ async fn e2e_imbalance_then_reverse_fill_recaptures_and_rebates_the_maker() {
         .await
         .expect("fund mined");
     let before = balance_of(h, h.t0, h.maker).await;
+    let pre_payout = h.latest_block().await;
     let payer = Arc::new(AlloyRebatePayer::new(h.taker_provider.clone()));
     let payout = PayoutService::new(store.clone(), payer);
     assert_eq!(payout.settle_outstanding().await.expect("settle"), 1);
+    let after = balance_of(h, h.t0, h.maker).await;
+    let rebate_tx = transfer_tx(h, h.t0, h.maker, pre_payout).await;
 
-    assert_eq!(
-        balance_of(h, h.t0, h.maker).await,
-        before + owed,
-        "the maker was rebated on chain"
-    );
+    assert_eq!(after, before + owed, "the maker was rebated on chain");
     assert!(
         store.outstanding().await.expect("outstanding").is_empty(),
         "the credit is settled"
     );
+
+    println!("\n========== Solvent recapture — full arc on chain ==========");
+    println!("maker:                {}", h.maker);
+    println!("pool (t0,t1):         {} / {}", h.t0, h.t1);
+    println!(
+        "  reserves pre-flow:  ({}, {})  → t1 fair mid {} t0",
+        whole(t0_pre),
+        whole(t1_pre),
+        fair_price_t1.round_dp(4)
+    );
+    println!(
+        "  after forward flow: ({}, {})  → t1 now {} t0 (cheap)",
+        whole(t0_post),
+        whole(t1_post),
+        cheap_price_t1.round_dp(4)
+    );
+    println!(
+        "reverse counter-intent: buy {} t1 for ≤ {} t0 — internalized into the maker",
+        whole(output),
+        whole(input)
+    );
+    println!(
+        "  filled on chain:    {}",
+        fill_tx.map_or("(hash unavailable)".into(), |t| t.to_string())
+    );
+    println!("  resolver spread:    {} t0", whole(plan.expected_profit));
+    println!(
+        "recapture credit:     {} t0  (80% of fair-mid LVR, capped by spread)",
+        whole(owed)
+    );
+    println!(
+        "maker rebated:        {} → {} t0  (+{})",
+        whole(before),
+        whole(after),
+        whole(owed)
+    );
+    println!(
+        "  rebate transfer:    {}",
+        rebate_tx.map_or("(hash unavailable)".into(), |t| t.to_string())
+    );
+    if let Some(base) = otterscan {
+        println!("explorer:");
+        if let Some(tx) = fill_tx {
+            println!("  reverse fill        {base}/tx/{tx}");
+        }
+        if let Some(tx) = rebate_tx {
+            println!("  maker rebate        {base}/tx/{tx}");
+        }
+        println!("  maker               {base}/address/{}", h.maker);
+    }
+    println!("===========================================================\n");
+}
+
+#[tokio::test]
+async fn e2e_imbalance_then_reverse_fill_recaptures_and_rebates_the_maker() {
+    if common::skip_without_anvil() {
+        return;
+    }
+    run_full_arc(&setup().await, None).await;
+}
+
+/// The same full arc, run against an already-running node (the docker devnet) so every step —
+/// ship, forward swaps, the reverse fill, and the rebate transfer — is browsable in Otterscan.
+/// Skipped unless `DEVNET_RPC` is set (so it never fires in the offline gate):
+///   `DEVNET_RPC=http://localhost:8545 cargo test -p solvent-adapters --test e2e_recapture_loop \
+///      e2e_full_arc_on_devnet -- --ignored --nocapture`
+#[tokio::test]
+#[ignore = "needs the docker devnet; set DEVNET_RPC"]
+async fn e2e_full_arc_on_devnet() {
+    let Ok(rpc) = std::env::var("DEVNET_RPC") else {
+        eprintln!("DEVNET_RPC unset — skipping the on-devnet full-arc walkthrough");
+        return;
+    };
+    let otterscan =
+        std::env::var("OTTERSCAN").unwrap_or_else(|_| "http://localhost:5100".to_string());
+    run_full_arc(&setup_attached(&rpc).await, Some(&otterscan)).await;
 }
