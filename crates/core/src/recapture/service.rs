@@ -45,26 +45,28 @@ impl RecaptureService {
 
     /// Compute and accrue the recapture credits for a confirmed fill of `intent` settled by `tx`. The
     /// `plan_legs` supply each leg's identity (maker, strategy, token sides); the *actual* amounts are
-    /// read from the settlement, so a partial fill credits only what really moved. `fill_spread` (in
-    /// `spread_token`) bounds the total rebate. Best-effort/fail-closed: an unreadable settlement, an
-    /// unpriceable token, or a store error drops the credit and logs — none is propagated, so
-    /// recapture can never fail a settled fill. Returns the credits computed (empty when nothing was
-    /// recaptured).
+    /// read from the settlement, so a partial fill credits only what really moved. The rebate is capped
+    /// at `α ×` the fill's *realized* spread — `expected_spread` adjusted by how much less (or more) the
+    /// fill actually spent sourcing than the plan assumed (see [`realized_spread`]) — so the resolver
+    /// never rebates past what it truly earned. Best-effort/fail-closed: an unreadable settlement, an
+    /// unpriceable token, or a store error drops the credit and logs — none is propagated, so recapture
+    /// can never fail a settled fill. Returns the credits computed (empty when nothing was recaptured).
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, fields(intent = %intent)))]
     pub async fn on_settled(
         &self,
         intent: IntentId,
         tx: B256,
         plan_legs: &[RouteLeg],
-        fill_spread: U256,
+        expected_spread: U256,
         spread_token: Address,
     ) -> Vec<RecaptureCredit> {
         let Ok(legs) = self.settled_legs.actual_legs(tx, plan_legs).await else {
             warn!(intent = %intent, "settled legs unreadable; nothing recaptured");
             return Vec::new();
         };
+        let spread = realized_spread(expected_spread, plan_legs, &legs, spread_token);
         let prices = self.prices_for(&legs, spread_token).await;
-        let credits = recapture_split(&legs, &prices, fill_spread, spread_token, &self.policy);
+        let credits = recapture_split(&legs, &prices, spread, spread_token, &self.policy);
         if !credits.is_empty() && self.store.accrue(intent, &credits).await.is_err() {
             warn!(intent = %intent, "recapture credits computed but not accrued");
         }
@@ -99,6 +101,29 @@ impl RecaptureService {
         }
         prices
     }
+}
+
+/// The fill's *realized* resolver spread in `spread_token`, from the plan's `expected` spread and how
+/// the actual sourcing cost drifted. For an exact-out fill the taker's payment is fixed, so the
+/// resolver's spread is `taker_payment − sourcing_cost`, and only the sourcing cost drifts from plan
+/// to fill: `realized = expected + plan_cost − actual_cost`. "Cost" is what the makers were paid in
+/// `spread_token` (`amount_in` on legs whose `token_in` is the spread token); on an exact-in fill no
+/// leg sources in the spread token, so this is a no-op and the expected spread stands. Saturating: a
+/// fill that cost more than planned tightens the cap, never below zero.
+fn realized_spread(
+    expected: U256,
+    plan: &[RouteLeg],
+    actual: &[RouteLeg],
+    spread_token: Address,
+) -> U256 {
+    let sourced = |legs: &[RouteLeg]| {
+        legs.iter()
+            .filter(|leg| leg.token_in == spread_token)
+            .fold(U256::ZERO, |sum, leg| sum.saturating_add(leg.amount_in))
+    };
+    expected
+        .saturating_add(sourced(plan))
+        .saturating_sub(sourced(actual))
 }
 
 #[cfg(test)]
@@ -323,6 +348,29 @@ mod tests {
             .on_settled(IntentId(B256::ZERO), B256::ZERO, &plan, e6(300), usdc())
             .await;
         assert_eq!(credits.first().map(|c| c.amount), Some(e6(120)));
+    }
+
+    // The cap keys off the *realized* spread, not the plan's: a fill that sourced dearer than planned
+    // (2900 vs 2700 USDC for the 1 ETH) shrinks what the resolver actually earned, tightening the α cap.
+    #[tokio::test]
+    async fn realized_spread_from_actual_sourcing_tightens_the_cap() {
+        let store = Arc::new(MemStore::default());
+        // Actual fill: the maker was paid 2900 USDC (200 more than planned) for the same 1 ETH.
+        let actual = vec![reverse_leg(5, e6(2900), e18(1))];
+        let svc = RecaptureService::new(
+            oracle(),
+            store.clone(),
+            Arc::new(FixedLegs(actual)),
+            decimals(),
+            policy(8000, 5000, 0),
+        );
+        // Plan sourced 1 ETH for 2700 USDC; expected spread 300 USDC; α = 50%.
+        let plan = [reverse_leg(5, e6(2700), e18(1))];
+        let credits = svc
+            .on_settled(IntentId(B256::ZERO), B256::ZERO, &plan, e6(300), usdc())
+            .await;
+        // realized spread = 300 + 2700 − 2900 = 100; cap = 50% × 100 = 50; the 80 rebate scales to 50.
+        assert_eq!(credits.first().map(|c| c.amount), Some(e6(50)));
     }
 
     // Fail-closed: an unreadable settlement computes and accrues nothing (never fails the fill).
