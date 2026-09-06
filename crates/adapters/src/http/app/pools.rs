@@ -28,6 +28,17 @@ pub struct PoolsQuery {
 }
 
 /// List active pools, filtered and ordered by most makers first.
+#[utoipa::path(
+    get,
+    path = "/v1/pools",
+    params(
+        ("type" = Option<String>, Query, description = "All|Stable|Correlated|Volatile"),
+        ("token_a" = Option<String>, Query, description = "Pair must contain this token"),
+        ("token_b" = Option<String>, Query, description = "Pair must contain this token"),
+        ("fee" = Option<String>, Query, description = "Popular fee tier, e.g. 0.05%"),
+    ),
+    responses((status = 200, body = Response<List<Pool>>))
+)]
 pub async fn pools(
     State(state): State<AppState>,
     Query(query): Query<PoolsQuery>,
@@ -59,6 +70,18 @@ pub struct PairQuery {
 }
 
 /// Detail for one pool, identified by `base` and `quote`.
+#[utoipa::path(
+    get,
+    path = "/v1/pools/detail",
+    params(
+        ("base" = String, Query, description = "Base token address"),
+        ("quote" = String, Query, description = "Quote token address"),
+    ),
+    responses(
+        (status = 200, body = Response<PoolDetail>),
+        (status = 404, description = "No active pool for the pair"),
+    )
+)]
 pub async fn pool_detail(
     State(state): State<AppState>,
     Query(query): Query<PairQuery>,
@@ -70,23 +93,35 @@ pub async fn pool_detail(
     }
 }
 
-/// The pool plus the depth-curve controls: `side` (defaults to `sell`) and a `range` zoom hint.
+/// The pool plus the depth-curve direction: `side` (defaults to `sell`).
 #[derive(Debug, Deserialize)]
 pub struct DepthQuery {
     base: String,
     quote: String,
     side: Option<Side>,
-    range: Option<String>,
 }
 
 /// The pair's executable-liquidity depth curve for one side.
+#[utoipa::path(
+    get,
+    path = "/v1/pools/depth",
+    params(
+        ("base" = String, Query, description = "Base token address"),
+        ("quote" = String, Query, description = "Quote token address"),
+        ("side" = Option<String>, Query, description = "buy|sell (default sell)"),
+    ),
+    responses(
+        (status = 200, body = Response<PoolDepth>),
+        (status = 404, description = "No active pool for the pair"),
+    )
+)]
 pub async fn pool_depth(
     State(state): State<AppState>,
     Query(query): Query<DepthQuery>,
 ) -> ApiResult<PoolDepth> {
     let pair = TokenPair::new(parse_addr(&query.base)?, parse_addr(&query.quote)?);
     let side = query.side.unwrap_or(Side::Sell);
-    match state.depth.depth(&pair, side, query.range.as_deref()) {
+    match state.depth.depth(&pair, side) {
         Some(depth) => Ok(Response::ok(depth)),
         None => Err(Response::error("pool not found", StatusCode::NOT_FOUND)),
     }

@@ -1,5 +1,6 @@
-//! Amount wire types: a token amount as base units + a human display + optional USD. One
-//! representation for every token amount in a response.
+//! Token-amount wire types: an amount as base units + a human display + optional USD, and the
+//! shapes that pair it with a token (a roster entry, a set, a wallet holding). One representation
+//! for every token amount in a response.
 
 use alloy_primitives::U256;
 use serde::Serialize;
@@ -38,6 +39,23 @@ pub struct TokenAmount {
 pub struct TokenAmounts {
     pub entries: Vec<TokenAmount>,
     pub total_usd: Option<f64>,
+}
+
+/// One token a wallet holds: its on-chain `balance` and the `pullable` amount a pull could take now
+/// (`min(balance, allowance→settlement)`).
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct TokenBalance {
+    pub token: Token,
+    pub balance: Amount,
+    pub pullable: Amount,
+}
+
+/// The raw on-chain figures for one token, as the
+/// [`BalancesOracle`](crate::deps::balances::BalancesOracle) returns them — before decimals turn
+/// them into a display [`Amount`].
+pub struct Holdings {
+    pub balance: U256,
+    pub pullable: U256,
 }
 
 /// Format `raw` base units as a human decimal string, trailing zeros trimmed (`"1.5"`, `"4"`). Wraps

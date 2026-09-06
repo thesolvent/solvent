@@ -148,7 +148,32 @@ the project is pre-1.0 and evolving.
   - Endpoints: `GET /healthz`, `/v1/config`, `/v1/stats`, `/v1/assets` (`?supported`), and a
     code-generated `/v1/openapi.json` (utoipa).
 
-_Next: S2 M1 — discovery read paths (pools, pool detail, wallet balances)._
+- **S2 · M1 — discovery read paths**: the Pools list, Pool-detail, and Swap/Create balance screens
+  render against a live server.
+  - Endpoints: `GET /v1/pools` (list; symmetric `token_a`/`token_b` + `type`/`fee` filters, most-liquid
+    first), `/v1/pools/detail?base&quote` (KPIs + maker roster), `/v1/pools/depth?base&quote&side`
+    (executable-liquidity curve), `/v1/wallets/{addr}/balances` (per-token balance + pullable across
+    the whole catalog).
+  - **Pool read-surface** — `Snapshot::pool_stats()` folds active strategies per pair (maker count,
+    spread band, popular fee tier, curve mix) with `itertools` grouping; `PoolService` composes it
+    with the `AssetManager` for labels + Stable/Correlated/Volatile classification. Detail composes
+    the list row (`#[serde(flatten)]`) plus the roster.
+  - **Depth = the router, plotted** — reuses candidate `select` + the water-fill `solve`, swept by
+    target output across an impact-anchored ladder (0.1–10%, bisected per bucket). No new curve math;
+    impact is exact via `Ratio::rel_diff_bps`.
+  - **Shared budget cache** — one synced `ArcSwap<AvailableSnapshot>` of every active maker's
+    executable cap (`min(pullable wallet, registry virtual)`), refreshed off the request path by a
+    supervised poller (batched — two Multicall3 aggregates for the whole book); depth reads it
+    lock-free, no per-request RPC. (The router's quote path converges on one net-of-reservations
+    snapshot in M2.)
+  - **Wallet balances** — a `BalancesOracle` returning *both* balance and pullable (unlike
+    `BudgetSource`'s `min`), read on demand for an arbitrary wallet in two Multicall3 aggregates; a
+    shared `erc20` read helper backs both the budget source and the oracle.
+  - Money crosses the wire as `Amount { raw, display, usd }` — exact base-unit strings, never floats.
+  - **Live-run dependency:** Multicall3 predeployed on the devnet (the S1 coordination item); the
+    depth/balances chain reads are otherwise unit- and (for the shared reader) anvil-E2E-tested.
+
+_Next: S2 M2 — the core loop (swap quote/submit, trades, activity)._
 
 ## [0.1.0] — 2026-08-28
 
