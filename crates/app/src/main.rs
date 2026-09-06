@@ -61,7 +61,7 @@ const RECONCILE_INTERVAL: Duration = Duration::from_secs(4);
 /// at this nominal block time. Devnet-generous; tune per chain.
 const SCAN_OVERLAP_BLOCKS: u64 = 25;
 const BLOCK_TIME_SECS: u64 = 2;
-/// Routing funnel + split caps for the quote path (gas units unused until M3 wires gas pricing).
+/// Routing funnel + split caps for the quote path (gas units unused until gas pricing is wired).
 const MAX_CANDIDATES: usize = 16;
 const MAX_LEGS: usize = 4;
 
@@ -117,8 +117,8 @@ async fn main() -> Result<(), StartupError> {
     registry_sync.recover().await?;
 
     // The ledger: durable reservations plus the synced caps snapshot the read paths share. Sequenced
-    // after the registry recovers (L6.1) so strategy virtuals are non-zero — rebuild holds, then
-    // publish the first caps snapshot.
+    // after the registry recovers so strategy virtuals are non-zero — rebuild holds, then publish
+    // the first caps snapshot.
     let budget_source: Arc<dyn BudgetSource> = Arc::new(AlloyBudgetSource::new(
         provider.clone(),
         config.aqua_address,

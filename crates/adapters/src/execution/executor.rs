@@ -75,8 +75,9 @@ fn to_exec_status(status: TxStatus, mined_tx: B256) -> ExecStatus {
 }
 
 /// Turn a simulation outcome into a submit/drop verdict. Fail-closed: only a confirmed `Success`
-/// passes; a revert (the P1 filler's own guards — under-delivery, stale caps, profit threshold —
-/// surface here) and any outcome the engine can't classify both reject before a nonce is spent.
+/// passes; a revert (the filler contract's own on-chain guards — under-delivery, stale caps, profit
+/// threshold — surface here) and any outcome the engine can't classify both reject before a nonce
+/// is spent.
 fn to_verdict(outcome: SimOutcome) -> SimVerdict {
     match outcome {
         SimOutcome::Success => SimVerdict::Ok,

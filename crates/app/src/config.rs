@@ -10,7 +10,7 @@ use solvent_core::asset::TokenList;
 use solvent_core::SolventError;
 
 /// Everything the server needs to boot, deserialized from the config file. `database_url` is
-/// optional: absent starts with an empty registry snapshot (the M2 worker hydrates it), present
+/// optional: absent starts with an empty registry snapshot (a live watcher hydrates it), present
 /// hydrates from that store at boot.
 #[derive(Debug, Deserialize)]
 pub struct Config {

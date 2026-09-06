@@ -26,8 +26,8 @@ pub struct QuoteLeg {
 }
 
 /// A read-only quote: the routed split, its blended output, and price impact. `quote_id` is
-/// deterministic from the request; `expires_at` is an advisory RFC-3339 instant (M2 does not bind
-/// a swap to a quote).
+/// deterministic from the request; `expires_at` is an advisory RFC-3339 instant (a quote does not
+/// bind a future swap).
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct QuoteResponse {
     pub quote_id: String,
