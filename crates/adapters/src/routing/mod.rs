@@ -26,6 +26,7 @@ const RECV_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Default)]
 pub struct MarketCache {
     prices: RwLock<HashMap<Address, UsdPrice>>,
+    changes: RwLock<HashMap<Address, f64>>,
     gas_wei: RwLock<u128>,
 }
 
@@ -40,6 +41,13 @@ impl MarketCache {
     /// The feed never writes such a symbol, so the peg persists.
     pub fn seed_price(&self, token: Address, price: UsdPrice) {
         self.set_price(token, price);
+    }
+    fn set_change(&self, token: Address, pct: f64) {
+        self.changes.write().insert(token, pct);
+    }
+    /// The token's 24h price-change percent (`2.5` = +2.5%), or `None` if unfed.
+    pub fn change_24h(&self, token: Address) -> Option<f64> {
+        self.changes.read().get(&token).copied()
     }
     fn set_gas(&self, wei: u128) {
         *self.gas_wei.write() = wei;
@@ -95,9 +103,10 @@ impl<P: Provider> GasPoller<P> {
     }
 }
 
-/// Binance `bookTicker` WebSocket feed into the cache. One combined stream carries every
-/// tracked symbol; each update writes a fresh mid `(bid + ask) / 2`. `symbols` maps a Binance
-/// symbol (e.g. `ETHUSDT`) to every token it prices (WETH across chains all take `ETHUSDT`).
+/// Binance WebSocket feed into the cache. One combined stream carries every tracked symbol on two
+/// channels: `@bookTicker` writes a fresh mid `(bid + ask) / 2`, `@ticker` writes the 24h price
+/// change. `symbols` maps a Binance symbol (e.g. `ETHUSDT`) to every token it prices (WETH across
+/// chains all take `ETHUSDT`).
 pub struct BinanceFeed {
     cache: Arc<MarketCache>,
     ws_base: String,
@@ -136,7 +145,10 @@ impl BinanceFeed {
         let streams = self
             .symbols
             .keys()
-            .map(|s| format!("{}@bookTicker", s.to_lowercase()))
+            .flat_map(|s| {
+                let s = s.to_lowercase();
+                [format!("{s}@bookTicker"), format!("{s}@ticker")]
+            })
             .collect::<Vec<_>>()
             .join("/");
         let url = format!("{}/stream?streams={streams}", self.ws_base);
@@ -156,24 +168,49 @@ impl BinanceFeed {
     }
 
     fn ingest(&self, text: &str) {
-        let Ok(envelope) = serde_json::from_str::<Envelope>(text) else {
+        let Ok(env) = serde_json::from_str::<Envelope>(text) else {
             return;
         };
-        let Some(tokens) = self.symbols.get(&envelope.data.symbol) else {
+        if env.stream.ends_with("@bookTicker") {
+            if let Ok(book) = serde_json::from_value::<BookTicker>(env.data) {
+                self.apply_book(&book);
+            }
+        } else if env.stream.ends_with("@ticker") {
+            if let Ok(stats) = serde_json::from_value::<Ticker24h>(env.data) {
+                self.apply_change(&stats);
+            }
+        }
+    }
+
+    fn apply_book(&self, book: &BookTicker) {
+        let Some(tokens) = self.symbols.get(&book.symbol) else {
             return;
         };
-        if let Some(mid) = mid_price(&envelope.data) {
+        if let Some(mid) = mid_price(book) {
             for &token in tokens {
                 self.cache.set_price(token, UsdPrice(mid));
             }
         }
     }
+
+    fn apply_change(&self, stats: &Ticker24h) {
+        let Some(tokens) = self.symbols.get(&stats.symbol) else {
+            return;
+        };
+        if let Ok(pct) = stats.change_pct.parse::<f64>() {
+            for &token in tokens {
+                self.cache.set_change(token, pct);
+            }
+        }
+    }
 }
 
-/// Combined-stream envelope: `{ "stream": …, "data": { … } }`.
+/// Combined-stream envelope: `{ "stream": "ethusdt@ticker", "data": { … } }`. The `stream` suffix
+/// selects how `data` is read.
 #[derive(Deserialize)]
 struct Envelope {
-    data: BookTicker,
+    stream: String,
+    data: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -184,6 +221,15 @@ struct BookTicker {
     bid: String,
     #[serde(rename = "a")]
     ask: String,
+}
+
+/// The 24h rolling-window stats; `P` is the price-change percent.
+#[derive(Deserialize)]
+struct Ticker24h {
+    #[serde(rename = "s")]
+    symbol: String,
+    #[serde(rename = "P")]
+    change_pct: String,
 }
 
 /// `(bid + ask) / 2`, or `None` if either side doesn't parse.
@@ -221,5 +267,18 @@ mod tests {
             cache.prices.read().get(&weth).copied(),
             Some(UsdPrice(Decimal::from(2000u32)))
         );
+    }
+
+    #[test]
+    fn ingests_ticker_as_change() {
+        let weth = Address::from([1u8; 20]);
+        let cache = MarketCache::new();
+        let feed = BinanceFeed::new(
+            cache.clone(),
+            "wss://x".to_string(),
+            HashMap::from([("ETHUSDT".to_string(), vec![weth])]),
+        );
+        feed.ingest(r#"{"stream":"ethusdt@ticker","data":{"s":"ETHUSDT","P":"2.5"}}"#);
+        assert_eq!(cache.change_24h(weth), Some(2.5));
     }
 }
