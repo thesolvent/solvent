@@ -3,7 +3,6 @@
 
 pub mod amount;
 pub mod asset;
-pub mod balances;
 pub mod execution;
 pub mod ingest;
 pub mod ledger;

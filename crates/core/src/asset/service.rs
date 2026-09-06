@@ -75,12 +75,22 @@ impl AssetManager {
 
     /// A token's identity + display essentials, if it is in the catalog.
     pub fn token(&self, address: &Address) -> Option<Token> {
-        self.catalog.get(address).map(|meta| Token {
+        self.catalog.get(address).map(Self::token_of)
+    }
+
+    /// Every catalog token as its lightweight identity — no snapshot load, no `Asset` assembly. For
+    /// callers that need the token set but not the full market picture (e.g. wallet balances).
+    pub fn catalog_tokens(&self) -> Vec<Token> {
+        self.catalog.values().map(Self::token_of).collect()
+    }
+
+    fn token_of(meta: &TokenMeta) -> Token {
+        Token {
             address: meta.address,
             chain_id: meta.chain_id,
             symbol: meta.symbol.clone(),
             decimals: meta.decimals,
-        })
+        }
     }
 
     /// Whether `address` is tagged as a stablecoin in the catalog.

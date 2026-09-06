@@ -8,7 +8,7 @@ use alloy_primitives::Address;
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::primitives::balances::Holdings;
+use crate::primitives::amount::Holdings;
 
 #[async_trait]
 pub trait BalancesOracle: Send + Sync {

@@ -1,6 +1,6 @@
-//! Wallet balances: the connected wallet's holdings across the whole catalog, for Swap ("~$", Max)
-//! and Create ("bal / 50%"). Composes the balances oracle (on-chain balance + pullable) with the
-//! asset manager (the catalog set + each token's decimals).
+//! The balances slice: the connected wallet's per-token holdings across the whole catalog, for Swap
+//! ("~$", Max) and Create ("bal / 50%"). Composes the balances oracle (on-chain balance + pullable)
+//! with the asset manager (the catalog set + each token's decimals).
 
 use std::sync::Arc;
 
@@ -9,9 +9,9 @@ use alloy_primitives::{Address, U256};
 use crate::asset::AssetManager;
 use crate::deps::balances::BalancesOracle;
 use crate::primitives::amount::Amount;
-use crate::primitives::asset::Token;
-use crate::primitives::balances::TokenBalance;
 use crate::SolventError;
+
+pub use crate::primitives::amount::{Holdings, TokenBalance};
 
 pub struct BalancesService {
     oracle: Arc<dyn BalancesOracle>,
@@ -26,17 +26,7 @@ impl BalancesService {
     /// Every catalog token's `balance` + `pullable` for `owner`, from one batched read. A token the
     /// owner has never held reads as zero, so the picker always shows the full catalog.
     pub async fn balances(&self, owner: Address) -> Result<Vec<TokenBalance>, SolventError> {
-        let tokens: Vec<Token> = self
-            .assets
-            .list(false)
-            .into_iter()
-            .map(|asset| Token {
-                address: asset.address,
-                chain_id: asset.chain_id,
-                symbol: asset.symbol,
-                decimals: asset.decimals,
-            })
-            .collect();
+        let tokens = self.assets.catalog_tokens();
         let addresses: Vec<Address> = tokens.iter().map(|token| token.address).collect();
         let holdings = self.oracle.holdings(owner, &addresses).await?;
         Ok(tokens
@@ -61,8 +51,8 @@ mod tests {
     use super::*;
     use crate::deps::balances::BalancesOracleError;
     use crate::primitives::asset::{TokenList, TokenMeta};
-    use crate::primitives::balances::Holdings;
     use crate::registry::SharedSnapshot;
+    use async_trait::async_trait;
     use std::collections::BTreeMap;
 
     fn addr(n: u8) -> Address {
@@ -84,7 +74,7 @@ mod tests {
     /// Returns the configured holdings for whichever queried tokens it knows; the rest are absent.
     struct FakeOracle(BTreeMap<Address, (U256, U256)>);
 
-    #[async_trait::async_trait]
+    #[async_trait]
     impl BalancesOracle for FakeOracle {
         async fn holdings(
             &self,

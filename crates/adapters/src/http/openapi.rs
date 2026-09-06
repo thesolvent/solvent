@@ -9,16 +9,31 @@ use utoipa::OpenApi;
 #[openapi(
     info(title = "Solvent API", version = "0.1.0"),
     paths(
-        crate::http::handlers::config::config,
-        crate::http::handlers::stats::stats,
-        crate::http::handlers::assets::assets,
+        crate::http::app::config::config,
+        crate::http::app::stats::stats,
+        crate::http::app::assets::assets,
+        crate::http::app::pools::pools,
+        crate::http::app::pools::pool_detail,
+        crate::http::app::pools::pool_depth,
+        crate::http::app::balances::balances,
     ),
     components(schemas(
         crate::http::primitives::Status,
         crate::http::state::AppConfig,
         crate::http::state::Features,
-        crate::http::handlers::stats::Stats,
+        crate::http::app::stats::Stats,
         solvent_core::asset::Asset,
+        solvent_core::asset::Token,
+        solvent_core::pool::Pool,
+        solvent_core::pool::PoolType,
+        solvent_core::pool::PoolMaker,
+        solvent_core::pool::PoolDetail,
+        solvent_core::pool::PoolDepth,
+        solvent_core::pool::DepthPoint,
+        solvent_core::balances::TokenBalance,
+        solvent_core::primitives::amount::Amount,
+        solvent_core::primitives::amount::TokenAmount,
+        solvent_core::primitives::amount::TokenAmounts,
     ))
 )]
 pub struct ApiDoc;
