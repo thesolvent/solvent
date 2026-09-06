@@ -4,10 +4,76 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use alloy_primitives::U256;
+use alloy_primitives::{Address, U256};
+use itertools::Itertools;
 
+use super::curve::{Curve, CurveSpec};
 use super::event::{AquaEvent, StrategyKey};
 use super::strategy::{MakerStrategy, TokenPair};
+
+/// Per-asset activity derived from the snapshot: how many active strategies quote a token and in
+/// which pairs. The source for the supported-asset list.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ActiveAsset {
+    pub strategy_count: usize,
+    pub pairs: BTreeSet<TokenPair>,
+}
+
+/// The three priceable curve shapes, without their parameters — for classifying a pool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurveKind {
+    Xyc,
+    Concentrated,
+    Pegged,
+}
+
+/// How many active makers on a pair use each curve shape; `dominant` drives the pool `type`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StrategyCount {
+    pub xyc: usize,
+    pub concentrated: usize,
+    pub pegged: usize,
+}
+
+impl StrategyCount {
+    fn add(&mut self, curve: &Curve) {
+        match curve {
+            Curve::Xyc => self.xyc += 1,
+            Curve::Concentrate { .. } => self.concentrated += 1,
+            Curve::Pegged(_) => self.pegged += 1,
+        }
+    }
+
+    /// The most-common curve shape (ties broken Xyc > Concentrated > Pegged); `None` if empty.
+    pub fn dominant(&self) -> Option<CurveKind> {
+        [
+            (CurveKind::Xyc, self.xyc),
+            (CurveKind::Concentrated, self.concentrated),
+            (CurveKind::Pegged, self.pegged),
+        ]
+        .into_iter()
+        .filter(|(_, n)| *n > 0)
+        .max_by_key(|(_, n)| *n)
+        .map(|(kind, _)| kind)
+    }
+}
+
+/// A pool = the aggregation of all active, priceable strategies over one pair.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PoolStats {
+    pub maker_count: usize,
+    pub min_fee_bps: u32,
+    pub max_fee_bps: u32,
+    pub popular_fee_bps: u32,
+    pub curve_mix: StrategyCount,
+}
+
+/// A strategy's total flat fee in real bps. SwapVM `bps` are at `1e9` = 100%, so one real bp
+/// (`0.01%`) is `1e5` SwapVM units.
+pub fn fee_in_bps(fees_in_bps: &[u32]) -> u32 {
+    let swapvm: u64 = fees_in_bps.iter().map(|f| *f as u64).sum();
+    (swapvm / 100_000) as u32
+}
 
 /// The event-sourced picture of all maker liquidity.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -28,6 +94,11 @@ impl Snapshot {
         self.strategies.len()
     }
 
+    /// Every active strategy — the budget cache enumerates these to refresh each maker's caps.
+    pub fn active_strategies(&self) -> impl Iterator<Item = &MakerStrategy> {
+        self.strategies.values().filter(|s| s.active)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.strategies.is_empty()
     }
@@ -42,6 +113,63 @@ impl Snapshot {
             .into_iter()
             .flatten()
             .filter_map(move |key| self.strategies.get(key).filter(|s| s.active))
+    }
+
+    /// Every token quoted by an active, pair-routable strategy → its active-strategy count and the
+    /// pairs it trades. Each active strategy contributes to both of its pair's tokens.
+    pub fn active_assets(&self) -> BTreeMap<Address, ActiveAsset> {
+        self.strategies
+            .values()
+            .filter(|s| s.active)
+            .filter_map(|s| s.pair())
+            .flat_map(|pair| [pair.lo, pair.hi].map(move |token| (token, pair)))
+            .into_grouping_map()
+            .fold(ActiveAsset::default(), |mut asset, _token, pair| {
+                asset.strategy_count += 1;
+                asset.pairs.insert(pair);
+                asset
+            })
+            .into_iter()
+            .collect()
+    }
+
+    /// Aggregate active, priceable strategies into per-pair pool stats: maker count, fee range,
+    /// most-common fee, and the curve mix. `Unsupported` strategies (unpriceable) are excluded.
+    pub fn pool_stats(&self) -> BTreeMap<TokenPair, PoolStats> {
+        self.strategies
+            .values()
+            .filter(|s| s.active)
+            .filter_map(|s| match &s.curve {
+                CurveSpec::Priceable { curve, fees_in_bps } => s
+                    .pair()
+                    .map(|pair| (pair, (*curve, fee_in_bps(fees_in_bps)))),
+                CurveSpec::Unsupported => None,
+            })
+            .into_grouping_map()
+            .fold(
+                (StrategyCount::default(), BTreeMap::<u32, usize>::new()),
+                |(mut mix, mut fees), _pair, (curve, fee_bps)| {
+                    mix.add(&curve);
+                    *fees.entry(fee_bps).or_default() += 1;
+                    (mix, fees)
+                },
+            )
+            .into_iter()
+            .map(|(pair, (curve_mix, fees))| {
+                let stats = PoolStats {
+                    maker_count: fees.values().sum(),
+                    min_fee_bps: fees.keys().next().copied().unwrap_or(0),
+                    max_fee_bps: fees.keys().next_back().copied().unwrap_or(0),
+                    popular_fee_bps: fees
+                        .iter()
+                        .max_by_key(|(_, count)| **count)
+                        .map(|(fee, _)| *fee)
+                        .unwrap_or(0),
+                    curve_mix,
+                };
+                (pair, stats)
+            })
+            .collect()
     }
 
     /// Fold one event into the snapshot — a pure step: `Shipped` registers,
@@ -236,6 +364,91 @@ mod tests {
         for ev in events {
             snap.apply(ev);
         }
+    }
+
+    #[test]
+    fn active_assets_counts_active_strategies_and_pairs_per_token() {
+        let mut snap = Snapshot::default();
+        apply_seq(
+            &mut snap,
+            [
+                shipped(0),
+                pushed(0, 1, 100),
+                pushed(0, 2, 100), // active pair (1,2)
+                shipped(1),
+                pushed(1, 2, 100),
+                pushed(1, 3, 100), // active pair (2,3), shares token 2
+                shipped(2),
+                pushed(2, 1, 100),
+                pushed(2, 2, 100),
+                docked(2), // docked pair (1,2) — excluded
+            ],
+        );
+
+        let assets = snap.active_assets();
+        let pair12 = TokenPair::new(token(1), token(2));
+        let pair23 = TokenPair::new(token(2), token(3));
+
+        assert_eq!(assets.len(), 3);
+        assert_eq!(assets[&token(1)].strategy_count, 1); // docked strategy 2 not counted
+        assert_eq!(assets[&token(2)].strategy_count, 2);
+        assert_eq!(assets[&token(3)].strategy_count, 1);
+        assert!(assets[&token(2)].pairs.contains(&pair12));
+        assert!(assets[&token(2)].pairs.contains(&pair23));
+        assert_eq!(assets[&token(1)].pairs.len(), 1);
+    }
+
+    #[test]
+    fn pool_stats_aggregates_active_priceable_strategies() {
+        fn priceable(
+            s: u8,
+            a: Address,
+            b: Address,
+            curve: Curve,
+            fee_swapvm: u32,
+        ) -> MakerStrategy {
+            let mut st = MakerStrategy::new(key(s), &[]);
+            st.curve = CurveSpec::Priceable {
+                curve,
+                fees_in_bps: vec![fee_swapvm],
+            };
+            st.balances.insert(a, U256::from(1u64));
+            st.balances.insert(b, U256::from(1u64));
+            st
+        }
+        let conc = Curve::Concentrate {
+            sqrt_price_min: U256::from(1u64),
+            sqrt_price_max: U256::from(2u64),
+        };
+        let mut docked = priceable(9, token(1), token(2), Curve::Xyc, 900_000);
+        docked.active = false;
+        let unsupported = {
+            let mut st = MakerStrategy::new(key(8), &[]); // empty program → Unsupported
+            st.balances.insert(token(1), U256::from(1u64));
+            st.balances.insert(token(2), U256::from(1u64));
+            st
+        };
+        let snap = Snapshot::from_strategies([
+            priceable(0, token(1), token(2), Curve::Xyc, 500_000), // 5 bps
+            priceable(1, token(1), token(2), Curve::Xyc, 500_000), // 5 bps
+            priceable(2, token(1), token(2), Curve::Xyc, 100_000), // 1 bps
+            priceable(3, token(2), token(3), conc, 3_000_000),     // 30 bps concentrated
+            docked,
+            unsupported,
+        ]);
+
+        let stats = snap.pool_stats();
+        let p12 = &stats[&TokenPair::new(token(1), token(2))];
+        assert_eq!(p12.maker_count, 3); // docked + unsupported excluded
+        assert_eq!(p12.min_fee_bps, 1);
+        assert_eq!(p12.max_fee_bps, 5);
+        assert_eq!(p12.popular_fee_bps, 5); // two makers at 5 bps
+        assert_eq!(p12.curve_mix.dominant(), Some(CurveKind::Xyc));
+
+        let p23 = &stats[&TokenPair::new(token(2), token(3))];
+        assert_eq!(p23.maker_count, 1);
+        assert_eq!(p23.max_fee_bps, 30);
+        assert_eq!(p23.curve_mix.dominant(), Some(CurveKind::Concentrated));
     }
 
     #[test]

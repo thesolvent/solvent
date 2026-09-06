@@ -1,0 +1,23 @@
+# Solvent server config. Copy to `solvent.toml` (or point SOLVENT_CONFIG at another path — the
+# `.toml` extension is implicit). `bind_addr`, `rpc_url`, `chain_id`, `aqua_address`, and
+# `app_address` are required.
+
+bind_addr = "0.0.0.0:8080"
+rpc_url = "http://localhost:8545"
+chain_id = 31337
+
+# The Aqua contract (allowance spender) and the SwapVM router (`app`, which keys strategies). The
+# depth reader reads each maker's pullable wallet against these. Set to the devnet deploy addresses.
+aqua_address = "0x0000000000000000000000000000000000000000"
+app_address = "0x0000000000000000000000000000000000000000"
+
+# Omit to boot with an empty registry snapshot (the M2 worker will hydrate it); set to hydrate now.
+# database_url = "sqlite:solvent.db?mode=rwc"
+
+default_fee_bps = 5
+block_explorer_url = "http://localhost:5100"
+networks = ["Ethereum"]
+faucet = true
+
+# Token metadata (Uniswap Token List JSON). Addresses must match the devnet deploy.
+token_list = "tokens.devnet.json"

@@ -29,3 +29,6 @@ node_modules/
 
 # --- proptest failure-seed artifacts (regenerable, not tracked) ---
 proptest-regressions/
+
+# local server config (copy from solvent.example.toml)
+/solvent.toml
