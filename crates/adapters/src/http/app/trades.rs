@@ -11,6 +11,7 @@ use solvent_core::asset::AssetManager;
 use solvent_core::deps::trade::{Page as StorePage, TradeFilter};
 use solvent_core::primitives::amount::{Amount, TokenAmount};
 use solvent_core::primitives::trade::{Trade as CoreTrade, TradeId, TradeInfo};
+use solvent_core::valuation::Valuation;
 use solvent_core::SolventError;
 
 use crate::http::dto::{Cursor, List, Page};
@@ -128,7 +129,10 @@ pub async fn trades(
     let next_cursor = (rows.len() as u32 == store_page.limit)
         .then(|| rows.last().map(|t| Cursor::encode(&t.id.to_string())))
         .flatten();
-    let items = rows.iter().map(|t| summary(&state.assets, t)).collect();
+    let mut items = Vec::with_capacity(rows.len());
+    for trade in &rows {
+        items.push(summary(&state.assets, &state.valuation, trade).await);
+    }
     Ok(Response::ok(List::page(items, next_cursor, None)))
 }
 
@@ -148,31 +152,45 @@ pub async fn trade_detail(
 ) -> ApiResult<Trade> {
     let id = id.parse::<TradeId>()?;
     match state.trades.info(&id).await.map_err(SolventError::from)? {
-        Some(info) => Ok(Response::ok(detail(&state.assets, &info))),
+        Some(info) => Ok(Response::ok(
+            detail(&state.assets, &state.valuation, &info).await,
+        )),
         None => Err(Response::error("trade not found", StatusCode::NOT_FOUND)),
     }
 }
 
 /// A trade's header as the list DTO — heavy fields left empty.
-fn summary(assets: &AssetManager, trade: &CoreTrade) -> Trade {
+async fn summary(assets: &AssetManager, valuation: &Valuation, trade: &CoreTrade) -> Trade {
     let token_in = assets.token_or_default(trade.token_in);
     let token_out = assets.token_or_default(trade.token_out);
     let delivered = trade.amount_out.unwrap_or(trade.min_amount_out);
+    let input = valuation
+        .amount(trade.amount_in, token_in.address, token_in.decimals)
+        .await;
+    let output = valuation
+        .amount(delivered, token_out.address, token_out.decimals)
+        .await;
+    let surplus = match trade.surplus {
+        Some(s) => Some(
+            valuation
+                .amount(s, token_out.address, token_out.decimals)
+                .await,
+        ),
+        None => None,
+    };
     Trade {
         id: trade.id.to_string(),
         status: trade.status.as_str().to_string(),
         taker: trade.taker,
         input: TokenAmount {
-            amount: Amount::from_base_units(trade.amount_in, token_in.decimals),
+            amount: input,
             token: token_in,
         },
         output: TokenAmount {
-            amount: Amount::from_base_units(delivered, token_out.decimals),
-            token: token_out.clone(),
+            amount: output,
+            token: token_out,
         },
-        surplus: trade
-            .surplus
-            .map(|s| Amount::from_base_units(s, token_out.decimals)),
+        surplus,
         tx_hash: trade.tx_hash.map(|h| h.to_string()),
         block_number: trade.block_number,
         created_at: trade.created_at,
@@ -185,9 +203,22 @@ fn summary(assets: &AssetManager, trade: &CoreTrade) -> Trade {
 }
 
 /// The full detail DTO — the header plus the stage timeline, maker legs, and order coordinates.
-fn detail(assets: &AssetManager, info: &TradeInfo) -> Trade {
+async fn detail(assets: &AssetManager, valuation: &Valuation, info: &TradeInfo) -> Trade {
     let token_in = assets.token_or_default(info.trade.token_in);
     let token_out = assets.token_or_default(info.trade.token_out);
+    let mut legs = Vec::with_capacity(info.legs.len());
+    for leg in &info.legs {
+        legs.push(MakerLeg {
+            maker: leg.maker.to_string(),
+            strategy_hash: leg.strategy_hash.to_string(),
+            amount_in: valuation
+                .amount(leg.amount_in, token_in.address, token_in.decimals)
+                .await,
+            amount_out: valuation
+                .amount(leg.amount_out, token_out.address, token_out.decimals)
+                .await,
+        });
+    }
     Trade {
         lifecycle: Some(
             info.attempts
@@ -198,20 +229,10 @@ fn detail(assets: &AssetManager, info: &TradeInfo) -> Trade {
                 })
                 .collect(),
         ),
-        legs: Some(
-            info.legs
-                .iter()
-                .map(|l| MakerLeg {
-                    maker: l.maker.to_string(),
-                    strategy_hash: l.strategy_hash.to_string(),
-                    amount_in: Amount::from_base_units(l.amount_in, token_in.decimals),
-                    amount_out: Amount::from_base_units(l.amount_out, token_out.decimals),
-                })
-                .collect(),
-        ),
+        legs: Some(legs),
         order_hash: Some(info.trade.order_hash.to_string()),
         deadline_block: Some(info.trade.deadline_block),
-        ..summary(assets, &info.trade)
+        ..summary(assets, valuation, &info.trade).await
     }
 }
 
@@ -226,12 +247,25 @@ fn parse_addr(s: &str) -> Result<Address, SolventError> {
 mod tests {
     use super::*;
     use alloy::primitives::{B256, U256};
+    use async_trait::async_trait;
     use solvent_core::asset::{AssetManager, TokenList, TokenMeta};
+    use solvent_core::deps::routing::{PriceOracle, PriceOracleError};
     use solvent_core::primitives::trade::{TradeAttempt, TradeLeg, TradeStatus};
-    use solvent_core::primitives::{IntentId, MakerId, StrategyHash};
+    use solvent_core::primitives::{IntentId, MakerId, StrategyHash, UsdPrice};
     use solvent_core::registry::SharedSnapshot;
     use std::sync::Arc;
     use ulid::Ulid;
+
+    struct NoPrices;
+    #[async_trait]
+    impl PriceOracle for NoPrices {
+        async fn price(&self, token: Address) -> Result<UsdPrice, PriceOracleError> {
+            Err(PriceOracleError::NotFound(token))
+        }
+    }
+    fn valuation() -> Valuation {
+        Valuation::new(Arc::new(NoPrices))
+    }
 
     fn assets() -> AssetManager {
         let list = TokenList {
@@ -271,9 +305,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn list_summary_omits_the_heavy_fields() {
-        let dto = summary(&assets(), &a_trade());
+    #[tokio::test]
+    async fn list_summary_omits_the_heavy_fields() {
+        let dto = summary(&assets(), &valuation(), &a_trade()).await;
         assert!(dto.lifecycle.is_none());
         assert!(dto.legs.is_none());
         assert!(dto.order_hash.is_none());
@@ -283,8 +317,8 @@ mod tests {
         assert_eq!(dto.output.amount.raw, "500");
     }
 
-    #[test]
-    fn detail_includes_lifecycle_legs_and_order() {
+    #[tokio::test]
+    async fn detail_includes_lifecycle_legs_and_order() {
         let info = TradeInfo {
             trade: a_trade(),
             attempts: vec![TradeAttempt {
@@ -298,7 +332,7 @@ mod tests {
                 amount_out: U256::from(500u64),
             }],
         };
-        let dto = detail(&assets(), &info);
+        let dto = detail(&assets(), &valuation(), &info).await;
         assert_eq!(dto.lifecycle.as_deref().unwrap().len(), 1);
         assert_eq!(dto.legs.as_deref().unwrap().len(), 1);
         assert_eq!(dto.order_hash.unwrap(), info.trade.order_hash.to_string());

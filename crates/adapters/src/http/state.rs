@@ -12,6 +12,7 @@ use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::quote::QuoteService;
 use solvent_core::registry::SharedSnapshot;
 use solvent_core::swap::SwapService;
+use solvent_core::valuation::Valuation;
 
 use crate::chain::ChainHead;
 use crate::ingest::uniswapx::ServerCosigner;
@@ -54,4 +55,6 @@ pub struct AppState {
     pub registry: Arc<SharedSnapshot>,
     /// The durable Aqua event log, read by the `/activity` feed.
     pub registry_store: Arc<dyn EventStore>,
+    /// USD valuation + market data (price, 24h change) — the read DTOs are valued through this.
+    pub valuation: Arc<Valuation>,
 }

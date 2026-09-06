@@ -8,7 +8,7 @@ use alloy_primitives::{Address, U256};
 use rust_decimal::Decimal;
 
 use crate::deps::routing::PriceOracle;
-use crate::primitives::amount::format_units;
+use crate::primitives::amount::{format_units, Amount};
 use crate::primitives::asset::Token;
 use crate::primitives::{Usd, UsdPrice};
 
@@ -26,6 +26,23 @@ impl Valuation {
         self.oracle.price(token).await.ok()
     }
 
+    /// The token's 24h price-change percent, or `None` if unknown.
+    pub async fn change_24h(&self, token: Address) -> Option<f64> {
+        self.oracle.change_24h(token).await
+    }
+
+    /// A wire [`Amount`] with `usd` filled from the current price of `token` (`None` if unpriced).
+    /// Values from the already-computed whole-token `display`, so it does one decimals conversion.
+    pub async fn amount(&self, base_units: U256, token: Address, decimals: u8) -> Amount {
+        let mut a = Amount::from_base_units(base_units, decimals);
+        a.usd = self
+            .price(token)
+            .await
+            .and_then(|p| a.display.parse::<Decimal>().ok().and_then(|w| p.value(w)))
+            .map(Usd::to_f64);
+        a
+    }
+
     /// The USD value of `base_units` of `token`, or `None` if it is unpriced or unparseable.
     pub async fn usd(&self, base_units: U256, token: &Token) -> Option<Usd> {
         let whole = format_units(base_units, token.decimals)
@@ -36,10 +53,10 @@ impl Valuation {
 
     /// The USD total over several holdings, or `None` if any component is unpriced — a total that
     /// silently dropped a token would understate it.
-    pub async fn tvl<'a>(&self, items: impl IntoIterator<Item = (&'a Token, U256)>) -> Option<Usd> {
+    pub async fn tvl(&self, holdings: &[(Token, U256)]) -> Option<Usd> {
         let mut total = Decimal::ZERO;
-        for (token, base_units) in items {
-            total += self.usd(base_units, token).await?.0;
+        for (token, base_units) in holdings {
+            total += self.usd(*base_units, token).await?.0;
         }
         Some(Usd(total))
     }
@@ -116,18 +133,18 @@ mod tests {
         let v = valuation(&[(&usdc, 1), (&weth, 2000)]);
         // $2.50 + $2000 = $2002.50
         assert_eq!(
-            v.tvl([
-                (&usdc, U256::from(2_500_000u64)),
-                (&weth, U256::from(1_000_000_000_000_000_000u64)),
+            v.tvl(&[
+                (usdc.clone(), U256::from(2_500_000u64)),
+                (weth, U256::from(1_000_000_000_000_000_000u64)),
             ])
             .await,
             Some(Usd(Decimal::new(20025, 1)))
         );
         // one unpriced component collapses the whole total
         assert_eq!(
-            v.tvl([
-                (&usdc, U256::from(2_500_000u64)),
-                (&unlisted, U256::from(1u64)),
+            v.tvl(&[
+                (usdc, U256::from(2_500_000u64)),
+                (unlisted, U256::from(1u64)),
             ])
             .await,
             None

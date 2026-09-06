@@ -110,6 +110,7 @@ mod tests {
     use solvent_core::registry::SharedSnapshot;
     use solvent_core::routing::LegCostResolver;
     use solvent_core::swap::{SwapConfig, SwapService};
+    use solvent_core::valuation::Valuation;
     use tower::ServiceExt;
 
     use crate::chain::ChainHead;
@@ -317,26 +318,31 @@ mod tests {
         };
         let registry = Arc::new(SharedSnapshot::default());
         let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
-        let pools = Arc::new(PoolService::new(Arc::clone(&registry), Arc::clone(&assets)));
         let ledger = Arc::new(LedgerService::new(
             Arc::new(NoopLedgerStore),
             Arc::new(ZeroBudget),
             Arc::new(SystemClock),
         ));
-        let depth = Arc::new(DepthService::new(
-            Arc::clone(&registry),
-            Arc::clone(&ledger),
-            Arc::clone(&assets),
-        ));
         let market = MarketCache::new();
         let gas: Arc<dyn GasPrice> = market.clone();
         let oracle: Arc<dyn PriceOracle> = market;
+        let valuation = Arc::new(Valuation::new(Arc::clone(&oracle)));
         let leg_cost = Arc::new(LegCostResolver::new(
             gas,
             oracle,
             Arc::clone(&assets),
             Address::ZERO,
             0,
+        ));
+        let pools = Arc::new(PoolService::new(
+            Arc::clone(&registry),
+            Arc::clone(&assets),
+            Arc::clone(&valuation),
+        ));
+        let depth = Arc::new(DepthService::new(
+            Arc::clone(&registry),
+            Arc::clone(&ledger),
+            Arc::clone(&assets),
         ));
         let quote = Arc::new(QuoteService::new(
             Arc::clone(&registry),
@@ -345,6 +351,7 @@ mod tests {
             RoutingConfig::new(16, 4, 0),
             Arc::new(SystemClock),
             Arc::clone(&leg_cost),
+            Arc::clone(&valuation),
         ));
         let execution = Arc::new(ExecutionService::new(
             Arc::new(FakeSim),
@@ -379,6 +386,7 @@ mod tests {
         let balances = Arc::new(BalancesService::new(
             Arc::new(ZeroOracle),
             Arc::clone(&assets),
+            Arc::clone(&valuation),
         ));
         AppState {
             config: Arc::new(AppConfig {
@@ -403,6 +411,7 @@ mod tests {
             trades,
             registry: Arc::clone(&registry),
             registry_store: Arc::new(NoopEventStore),
+            valuation,
         }
     }
 

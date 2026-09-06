@@ -1,6 +1,6 @@
 //! The asset manager: the single authority that answers everything about an asset by composing the
-//! static token list with live protocol state (and, later, market data). Handlers go through this,
-//! never raw metadata maps.
+//! static token list with live protocol state and market data. Handlers go through this, never raw
+//! metadata maps.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -9,10 +9,12 @@ use alloy_primitives::Address;
 
 use crate::primitives::asset::{Asset, Token, TokenList, TokenMeta};
 use crate::primitives::registry::{ActiveAsset, TokenPair};
+use crate::primitives::UsdPrice;
 use crate::registry::SharedSnapshot;
+use crate::valuation::Valuation;
 
 /// Answers asset queries from one place: the static token list joined with the live registry
-/// snapshot (supported / count / pairs). Market fields stay `None` until the price feed is wired.
+/// snapshot (supported / count / pairs), with market fields valued on `list`.
 pub struct AssetManager {
     catalog: BTreeMap<Address, TokenMeta>,
     registry: Arc<SharedSnapshot>,
@@ -25,19 +27,30 @@ impl AssetManager {
         Self { catalog, registry }
     }
 
-    /// Every catalog asset, or only those with active liquidity when `supported_only`.
-    pub fn list(&self, supported_only: bool) -> Vec<Asset> {
+    /// Every catalog asset with its market fields valued, or only those with active liquidity when
+    /// `supported_only`.
+    pub async fn list(&self, supported_only: bool, valuation: &Valuation) -> Vec<Asset> {
         let snapshot = self.registry.load();
         let active = snapshot.active_assets();
-        self.catalog
-            .values()
-            .map(|meta| self.assemble(meta, active.get(&meta.address)))
-            .filter(|asset| !supported_only || asset.supported)
-            .collect()
+        let mut assets = Vec::with_capacity(self.catalog.len());
+        for meta in self.catalog.values() {
+            let asset = self
+                .assemble(meta, active.get(&meta.address), valuation)
+                .await;
+            if !supported_only || asset.supported {
+                assets.push(asset);
+            }
+        }
+        assets
     }
 
-    /// Compose one `Asset` from its metadata and (optional) live activity.
-    fn assemble(&self, meta: &TokenMeta, active: Option<&ActiveAsset>) -> Asset {
+    /// Compose one `Asset` from its metadata, (optional) live activity, and market data.
+    async fn assemble(
+        &self,
+        meta: &TokenMeta,
+        active: Option<&ActiveAsset>,
+        valuation: &Valuation,
+    ) -> Asset {
         let pairs = active
             .map(|a| a.pairs.iter().map(|p| self.pair_label(p)).collect())
             .unwrap_or_default();
@@ -49,8 +62,8 @@ impl AssetManager {
             decimals: meta.decimals,
             tags: meta.tags.clone(),
             logo_uri: meta.logo_uri.clone(),
-            price_usd: None,
-            change_24h_pct: None,
+            price_usd: valuation.price(meta.address).await.map(UsdPrice::to_f64),
+            change_24h_pct: valuation.change_24h(meta.address).await,
             supported: active.is_some(),
             active_strategy_count: active.map_or(0, |a| a.strategy_count as u64),
             pairs,
@@ -132,9 +145,34 @@ fn short(address: &Address) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deps::routing::{PriceOracle, PriceOracleError};
     use crate::primitives::registry::{MakerStrategy, Snapshot, StrategyKey};
     use crate::primitives::{MakerId, StrategyHash};
     use alloy_primitives::{B256, U256};
+    use async_trait::async_trait;
+    use rust_decimal::Decimal;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct FakeMarket {
+        prices: HashMap<Address, UsdPrice>,
+        changes: HashMap<Address, f64>,
+    }
+    #[async_trait]
+    impl PriceOracle for FakeMarket {
+        async fn price(&self, token: Address) -> Result<UsdPrice, PriceOracleError> {
+            self.prices
+                .get(&token)
+                .copied()
+                .ok_or(PriceOracleError::NotFound(token))
+        }
+        async fn change_24h(&self, token: Address) -> Option<f64> {
+            self.changes.get(&token).copied()
+        }
+    }
+    fn valuation(market: FakeMarket) -> Valuation {
+        Valuation::new(Arc::new(market))
+    }
 
     fn token(n: u8) -> Address {
         Address::from([n; 20])
@@ -177,15 +215,15 @@ mod tests {
         )
     }
 
-    #[test]
-    fn list_marks_supported_and_labels_pairs() {
+    #[tokio::test]
+    async fn list_marks_supported_and_labels_pairs() {
         // WETH & USDC are quoted by one active strategy; DAI is listed but has no liquidity.
         let mgr = manager(
             vec![meta(1, "WETH"), meta(2, "USDC"), meta(3, "DAI")],
             vec![strategy(0, token(1), token(2))],
         );
 
-        let all = mgr.list(false);
+        let all = mgr.list(false, &valuation(FakeMarket::default())).await;
         assert_eq!(all.len(), 3);
 
         let weth = all.iter().find(|a| a.symbol == "WETH").unwrap();
@@ -199,14 +237,31 @@ mod tests {
         assert!(dai.pairs.is_empty());
     }
 
-    #[test]
-    fn supported_only_filters_out_idle_assets() {
+    #[tokio::test]
+    async fn supported_only_filters_out_idle_assets() {
         let mgr = manager(
             vec![meta(1, "WETH"), meta(2, "USDC"), meta(3, "DAI")],
             vec![strategy(0, token(1), token(2))],
         );
-        let supported = mgr.list(true);
+        let supported = mgr.list(true, &valuation(FakeMarket::default())).await;
         assert_eq!(supported.len(), 2);
         assert!(supported.iter().all(|a| a.supported));
+    }
+
+    #[tokio::test]
+    async fn list_values_price_and_change() {
+        let mgr = manager(vec![meta(1, "WETH"), meta(2, "USDC")], vec![]);
+        let market = FakeMarket {
+            prices: HashMap::from([(token(1), UsdPrice(Decimal::from(2000)))]),
+            changes: HashMap::from([(token(1), 1.5)]),
+        };
+        let all = mgr.list(false, &valuation(market)).await;
+
+        let weth = all.iter().find(|a| a.symbol == "WETH").unwrap();
+        assert_eq!(weth.price_usd, Some(2000.0));
+        assert_eq!(weth.change_24h_pct, Some(1.5));
+        let usdc = all.iter().find(|a| a.symbol == "USDC").unwrap();
+        assert_eq!(usdc.price_usd, None); // unpriced → no value
+        assert_eq!(usdc.change_24h_pct, None);
     }
 }

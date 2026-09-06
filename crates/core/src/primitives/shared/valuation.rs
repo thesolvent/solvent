@@ -36,6 +36,11 @@ impl UsdPrice {
         }
         Some(Usd(whole_tokens * self.0))
     }
+
+    /// The price as `f64`, for the wire (`Asset.price_usd`). Lossy — a display concern.
+    pub fn to_f64(self) -> f64 {
+        self.0.to_f64().unwrap_or(0.0)
+    }
 }
 
 #[cfg(test)]

@@ -45,10 +45,6 @@ impl MarketCache {
     fn set_change(&self, token: Address, pct: f64) {
         self.changes.write().insert(token, pct);
     }
-    /// The token's 24h price-change percent (`2.5` = +2.5%), or `None` if unfed.
-    pub fn change_24h(&self, token: Address) -> Option<f64> {
-        self.changes.read().get(&token).copied()
-    }
     fn set_gas(&self, wei: u128) {
         *self.gas_wei.write() = wei;
     }
@@ -62,6 +58,10 @@ impl PriceOracle for MarketCache {
             .get(&token)
             .copied()
             .ok_or(PriceOracleError::NotFound(token))
+    }
+
+    async fn change_24h(&self, token: Address) -> Option<f64> {
+        self.changes.read().get(&token).copied()
     }
 }
 
@@ -279,6 +279,6 @@ mod tests {
             HashMap::from([("ETHUSDT".to_string(), vec![weth])]),
         );
         feed.ingest(r#"{"stream":"ethusdt@ticker","data":{"s":"ETHUSDT","P":"2.5"}}"#);
-        assert_eq!(cache.change_24h(weth), Some(2.5));
+        assert_eq!(cache.changes.read().get(&weth).copied(), Some(2.5));
     }
 }
