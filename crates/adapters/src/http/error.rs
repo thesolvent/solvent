@@ -14,7 +14,8 @@ const INTERNAL: &str = "Internal Error";
 /// infrastructure failures and collapse to `500` until a caller needs finer mapping (YAGNI).
 fn status_for(err: &SolventError) -> StatusCode {
     match err {
-        SolventError::InvalidId { .. } => StatusCode::BAD_REQUEST,
+        // Client input: a bad id, or a malformed/unverifiable order.
+        SolventError::InvalidId { .. } | SolventError::Normalize(_) => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

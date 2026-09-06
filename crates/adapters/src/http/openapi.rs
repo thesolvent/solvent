@@ -17,6 +17,7 @@ use utoipa::OpenApi;
         crate::http::app::pools::pool_depth,
         crate::http::app::balances::balances,
         crate::http::app::swap::quote,
+        crate::http::app::swap::submit,
     ),
     components(schemas(
         crate::http::primitives::Status,
@@ -38,6 +39,8 @@ use utoipa::OpenApi;
         solvent_core::quote::QuoteResponse,
         solvent_core::quote::QuoteLeg,
         crate::http::app::swap::QuoteRequest,
+        crate::http::app::swap::SwapRequest,
+        crate::http::app::swap::SwapResponse,
     ))
 )]
 pub struct ApiDoc;

@@ -9,26 +9,38 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use alloy::providers::{Provider, ProviderBuilder};
+use alloy::signers::local::PrivateKeySigner;
 use solvent_adapters::balances::AlloyBalancesOracle;
 use solvent_adapters::chain::ChainHead;
+use solvent_adapters::execution::{AquaSettlementReader, WalletkitExecutor};
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
+use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::registry::{AlloyChainSource, SqliteStore};
 use solvent_adapters::routing::{BinanceFeed, GasPoller, MarketCache};
+use solvent_adapters::trade::SqliteTradeStore;
 use solvent_core::asset::AssetManager;
 use solvent_core::balances::BalancesService;
 use solvent_core::deps::balances::BalancesOracle;
+use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ledger::BudgetSource;
 use solvent_core::deps::routing::{GasPrice, PriceOracle};
+use solvent_core::deps::trade::TradeStore;
+use solvent_core::execution::ExecutionService;
 use solvent_core::ledger::LedgerService;
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
 use solvent_core::registry::{RegistrySync, SharedSnapshot};
+use solvent_core::swap::{SwapConfig, SwapService};
 use solvent_core::SolventError;
 use sqlx::SqlitePool;
+use walletkit::adapters::policy::{AllowAll, DefaultPolicyEngine};
+use walletkit::adapters::{LocalSigner, Transport};
+use walletkit::core::deps::SubmissionOpts;
+use walletkit::Wallet;
 
 use crate::config::{load_token_list, Config, StartupError};
 
@@ -108,10 +120,11 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&registry),
     ));
     let ledger = Arc::new(LedgerService::new(
-        Arc::new(SqliteLedgerStore::new(pool)),
+        Arc::new(SqliteLedgerStore::new(pool.clone())),
         budget_source,
         Arc::new(SystemClock),
     ));
+    let trade_store: Arc<dyn TradeStore> = Arc::new(SqliteTradeStore::new(pool));
     ledger.recover().await?;
     if let Err(e) = ledger.sync_budgets(&registry.load()).await {
         tracing::warn!(error = %e, "initial budget sync failed; caps are empty until the next tick");
@@ -154,9 +167,83 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&assets),
         RoutingConfig::new(MAX_CANDIDATES, MAX_LEGS, config.gas_units_per_leg),
         Arc::new(SystemClock),
+        gas.clone(),
+        oracle.clone(),
+        config.native_token,
+    ));
+
+    // The swap write path. Signing keys are read from the environment — never the config file or a
+    // log — so the resolver never persists them.
+    let cosigner_key = std::env::var("SOLVENT_COSIGNER_KEY")
+        .map_err(|_| StartupError::MissingSecret("SOLVENT_COSIGNER_KEY"))?;
+    let filler_key = std::env::var("SOLVENT_SIGNER_KEY")
+        .map_err(|_| StartupError::MissingSecret("SOLVENT_SIGNER_KEY"))?;
+    let cosigner_signer: PrivateKeySigner = cosigner_key
+        .parse()
+        .map_err(|_| StartupError::Key("SOLVENT_COSIGNER_KEY is not a valid private key".into()))?;
+    let cosigner = Arc::new(ServerCosigner::new(
+        config.permit2,
+        config.chain_id,
+        cosigner_signer,
+        config.filler,
+        config.decay_window_secs,
+    ));
+    // The account the fill tx is signed and authorized by (the filler's owner).
+    let filler_owner = filler_key
+        .parse::<PrivateKeySigner>()
+        .map_err(|_| StartupError::Key("SOLVENT_SIGNER_KEY is not a valid private key".into()))?
+        .address();
+    let filler_signer = LocalSigner::from_private_key(&filler_key)
+        .map_err(|_| StartupError::Key("SOLVENT_SIGNER_KEY is not a valid private key".into()))?;
+    let policy = DefaultPolicyEngine::new(
+        vec![Box::new(AllowAll)],
+        Arc::new(walletkit::adapters::SystemClock),
+    );
+    let transport = Transport::url(
+        config
+            .rpc_url
+            .parse()
+            .map_err(|e| StartupError::RpcUrl(format!("{e}")))?,
+    )
+    .map_err(|e| StartupError::RpcUrl(format!("{e}")))?;
+    let wallet = Wallet::builder(
+        Arc::new(transport),
+        Arc::new(filler_signer),
+        Arc::new(policy),
+    )
+    .confirmations(config.confirmations)
+    .bump_timeout(0)
+    .build();
+    let executor = Arc::new(WalletkitExecutor::new(wallet, SubmissionOpts::public()));
+    let settlement = Arc::new(AquaSettlementReader::new(
+        Arc::new(provider.clone()),
+        config.aqua_address,
+    ));
+    let execution = Arc::new(ExecutionService::new(
+        executor.clone(),
+        executor,
+        settlement,
+        Arc::clone(&ledger),
+    ));
+    let fill_builder: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(config.app_address));
+    let swap = Arc::new(SwapService::new(
+        Arc::clone(&registry),
+        Arc::clone(&ledger),
+        trade_store,
+        execution,
+        fill_builder,
+        Arc::clone(&assets),
         gas,
         oracle,
-        config.native_token,
+        Arc::new(SystemClock),
+        SwapConfig {
+            routing: RoutingConfig::new(MAX_CANDIDATES, MAX_LEGS, config.gas_units_per_leg),
+            native: config.native_token,
+            chain_id: config.chain_id,
+            filler: config.filler,
+            filler_owner,
+            reservation_ttl_secs: config.reservation_ttl_secs,
+        },
     ));
 
     // Keep the registry live and the caps fresh — both supervised so a transient failure restarts.
@@ -185,6 +272,8 @@ async fn main() -> Result<(), StartupError> {
         depth,
         balances,
         quote,
+        swap,
+        cosigner,
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;

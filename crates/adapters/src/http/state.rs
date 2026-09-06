@@ -8,8 +8,10 @@ use solvent_core::asset::AssetManager;
 use solvent_core::balances::BalancesService;
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::quote::QuoteService;
+use solvent_core::swap::SwapService;
 
 use crate::chain::ChainHead;
+use crate::ingest::uniswapx::ServerCosigner;
 
 /// Feature flags the FE reads at bootstrap. `earn` / `send_buy` are always off in the MVP.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -40,4 +42,7 @@ pub struct AppState {
     pub depth: Arc<DepthService>,
     pub balances: Arc<BalancesService>,
     pub quote: Arc<QuoteService>,
+    pub swap: Arc<SwapService>,
+    /// Cosigns taker-signed orders on the swap path (holds only the resolver's cosigner key).
+    pub cosigner: Arc<ServerCosigner>,
 }

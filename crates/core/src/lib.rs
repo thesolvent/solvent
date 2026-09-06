@@ -12,5 +12,6 @@ pub mod primitives;
 pub mod quote;
 pub mod registry;
 pub mod routing;
+pub mod swap;
 
 pub use primitives::SolventError;
