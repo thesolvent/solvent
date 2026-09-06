@@ -1,5 +1,6 @@
 //! Server configuration, loaded from a TOML file via the `config` crate, plus the startup error.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use alloy::primitives::Address;
@@ -32,6 +33,26 @@ pub struct Config {
     pub faucet: bool,
     #[serde(default = "default_token_list")]
     pub token_list: String,
+    /// The native gas token (WETH), whose USD price values the per-leg gas cost. Unset (zero) routes
+    /// gas-free until a price is configured.
+    #[serde(default)]
+    pub native_token: Address,
+    /// Binance combined-stream WS base for the token-price feed.
+    #[serde(default = "default_binance_ws")]
+    pub binance_ws_url: String,
+    /// Gas a single fill leg costs on this chain, in gas units — sizes the sparsity threshold.
+    #[serde(default = "default_gas_units")]
+    pub gas_units_per_leg: u64,
+    /// Binance symbol → the tokens it prices (e.g. `ETHUSDT` → `[WETH]`). Drives the price feed.
+    #[serde(default)]
+    pub price_symbols: Vec<PriceSymbol>,
+}
+
+/// One Binance price symbol and the tokens whose USD price it feeds.
+#[derive(Debug, Deserialize)]
+pub struct PriceSymbol {
+    pub symbol: String,
+    pub tokens: Vec<Address>,
 }
 
 impl Config {
@@ -41,6 +62,14 @@ impl Config {
             .add_source(config::File::with_name(path))
             .build()?;
         Ok(loaded.try_deserialize()?)
+    }
+
+    /// The price feed's `symbol → tokens` map, as the `BinanceFeed` consumes it.
+    pub fn price_feed_symbols(&self) -> HashMap<String, Vec<Address>> {
+        self.price_symbols
+            .iter()
+            .map(|entry| (entry.symbol.clone(), entry.tokens.clone()))
+            .collect()
     }
 
     /// The subset the FE reads at bootstrap (the `/config` payload). `earn`/`send_buy` are MVP-off.
@@ -73,6 +102,12 @@ fn default_true() -> bool {
 }
 fn default_token_list() -> String {
     "tokens.devnet.json".to_string()
+}
+fn default_binance_ws() -> String {
+    "wss://stream.binance.com:9443".to_string()
+}
+fn default_gas_units() -> u64 {
+    150_000
 }
 
 /// Read and parse the token list JSON at `path`.

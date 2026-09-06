@@ -24,6 +24,7 @@ num-traits = "0.2"
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+time = { version = "0.3", features = ["formatting"] }
 tokio = { version = "1", features = ["sync"] }
 tracing = { version = "0.1", optional = true }
 ulid = "1"

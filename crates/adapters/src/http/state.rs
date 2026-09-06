@@ -7,6 +7,7 @@ use serde::Serialize;
 use solvent_core::asset::AssetManager;
 use solvent_core::balances::BalancesService;
 use solvent_core::pool::{DepthService, PoolService};
+use solvent_core::quote::QuoteService;
 
 use crate::chain::ChainHead;
 
@@ -38,4 +39,5 @@ pub struct AppState {
     pub pools: Arc<PoolService>,
     pub depth: Arc<DepthService>,
     pub balances: Arc<BalancesService>,
+    pub quote: Arc<QuoteService>,
 }

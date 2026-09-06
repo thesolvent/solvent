@@ -143,6 +143,15 @@ therefore makes N round-trips. → batch the whole reserve's confirm into a sing
 calls for "1 batched JIT confirm"). Also: the event-sourced zero-RPC budget cache replaces this on the
 quote path entirely (a later phase).
 
+## P6 — Depth ladder solves cold, without warm-starting
+
+`DepthService` plots its impact ladder by calling `routing::solve` once per bucket and per bisection
+step (~80+ solves), each passing `warm = None` — so every solve bisects λ from cold, though the
+engine explicitly supports a warm-start seed and the ladder is monotone in size (each rung's λ is a
+tight seed for the next). Correct, just slower than necessary on a heavy endpoint. → thread the tip's
+λ (then each rung's) as the warm seed through the ladder solves. Deferred to keep the M2 quote-path
+change focused; depth's method is otherwise correct (`select` once, one solve per *distinct* point).
+
 ---
 
 # Deferred routing test coverage
@@ -166,6 +175,12 @@ re-confirms a known finding, or needs calibrated market data. Pick up if a speci
 
 # Deferred ingest work (B4)
 
+- **Autonomous feed-driven ingestion is dormant in M2** — `IngestPipeline` (fan-in `OrderFeed`s →
+  normalize → dedup → a channel for a decision worker) and `SelfHostedFeed` are built and tested, but
+  the S2 `POST /swap` is *request-driven*: the taker submits the signed order in the HTTP body, so the
+  swap path calls the `Normalizer` + `FillBuilder` (+ `SignedOrderBuilder`) directly, not
+  `IngestPipeline`. The feed-driven pipeline + `OrderFeed` adapters stay unwired until an autonomous
+  decision loop (hosted/replay/RFQ below) is built.
 - **`replay` order feed** — deferred to **B7 (backtest)**, its only real consumer. Building it in B4
   would only support a self-referential "replay ≡ self_hosted" test and would fix a serde archive
   format before the backtest defines what it needs. The design's "self_hosted ≡ replay identical
