@@ -79,9 +79,10 @@ impl ExecutionService {
     }
 
     /// Advance the tx engine, then settle every in-flight fill that reached a terminal state: on
-    /// `Confirmed`, post the actual amounts the fill pulled (read from its own settlement); on
-    /// failure, void. A reservation a redelivery already settled is a no-op, so this is safe to
-    /// call repeatedly.
+    /// `Confirmed`, post the actual amounts the fill pulled (read from its own settlement) and surface
+    /// the fill; on failure, void. Each intent is isolated — a transient read error on one is logged
+    /// and left in flight to retry, never dropping the fills already collected for the others — and a
+    /// reservation a redelivery already settled is a no-op, so this is safe to call repeatedly.
     pub async fn reconcile(&self) -> Result<Vec<ConfirmedFill>, SolventError> {
         self.execution.tick().await?;
 
@@ -93,31 +94,49 @@ impl ExecutionService {
         let mut settled = Vec::new();
         let mut confirmed = Vec::new();
         for (intent, f) in snapshot {
-            let Some(status) = self.execution.status(f.handle).await? else {
-                continue;
+            // Each intent settles on its own: a transient error on one (a status or receipt read) is
+            // logged and left in flight to retry, never aborting the pass and discarding the fills
+            // already collected for its siblings.
+            let status = match self.execution.status(f.handle).await {
+                Ok(Some(status)) => status,
+                Ok(None) => continue,
+                Err(_) => {
+                    warn!(intent = %intent, "fill status unreadable; retrying next cycle");
+                    continue;
+                }
             };
             match status {
                 ExecStatus::Confirmed { tx, .. } => {
-                    match self.ledger.reservation_sources(f.reservation).await {
-                        Some(sources) => {
-                            let filled = self.settlement.settled(tx, &sources).await?;
-                            let posted = self.ledger.post(f.reservation, &filled).await;
-                            // Surface the fill only on a fresh post — a redelivery the ledger FSM
-                            // rejects (`WrongState`) must not drive recapture a second time.
-                            if posted.is_ok() {
-                                confirmed.push(ConfirmedFill::new(intent, tx));
-                            }
-                            settle(posted)?;
-                            info!(intent = %intent, "fill confirmed; reservation posted");
+                    let Some(sources) = self.ledger.reservation_sources(f.reservation).await else {
+                        warn!(intent = %intent, "fill confirmed but reservation is gone; skipping post");
+                        settled.push(intent);
+                        continue;
+                    };
+                    let filled = match self.settlement.settled(tx, &sources).await {
+                        Ok(filled) => filled,
+                        Err(_) => {
+                            warn!(intent = %intent, "settlement unreadable; retrying next cycle");
+                            continue;
                         }
-                        None => {
-                            warn!(intent = %intent, "fill confirmed but reservation is gone; skipping post");
-                        }
+                    };
+                    let posted = self.ledger.post(f.reservation, &filled).await;
+                    // Surface the fill only on a fresh post — a redelivery the ledger FSM rejects
+                    // (`WrongState`) must not drive recapture a second time.
+                    if posted.is_ok() {
+                        confirmed.push(ConfirmedFill::new(intent, tx));
                     }
+                    if settle(posted).is_err() {
+                        warn!(intent = %intent, "posting the confirmed fill failed; retrying next cycle");
+                        continue;
+                    }
+                    info!(intent = %intent, "fill confirmed; reservation posted");
                     settled.push(intent);
                 }
                 ExecStatus::Failed { .. } | ExecStatus::Dropped => {
-                    settle(self.ledger.void(f.reservation).await)?;
+                    if settle(self.ledger.void(f.reservation).await).is_err() {
+                        warn!(intent = %intent, "voiding the failed fill failed; retrying next cycle");
+                        continue;
+                    }
                     warn!(intent = %intent, "fill did not land; reservation voided");
                     settled.push(intent);
                 }
@@ -484,5 +503,65 @@ mod tests {
         // reconcile sees Confirmed and tries to post again -> WrongState -> swallowed, not an error.
         svc.reconcile().await.unwrap();
         assert_eq!(svc.pending().await, 0);
+    }
+
+    /// Confirms one designated handle; every other handle's status read errors — models a transient
+    /// per-intent RPC failure alongside a clean settlement.
+    struct FlakyExec {
+        good: ExecHandle,
+        good_status: ExecStatus,
+    }
+    #[async_trait]
+    impl Execution for FlakyExec {
+        async fn submit(&self, fill: &FillTx) -> Result<ExecHandle, ExecutionError> {
+            Ok(ExecHandle(fill.intent.0))
+        }
+        async fn status(&self, handle: ExecHandle) -> Result<Option<ExecStatus>, ExecutionError> {
+            if handle == self.good {
+                Ok(Some(self.good_status.clone()))
+            } else {
+                Err(ExecutionError::Engine("rpc down".into()))
+            }
+        }
+        async fn tick(&self) -> Result<(), ExecutionError> {
+            Ok(())
+        }
+    }
+
+    // A transient error on one in-flight intent must not discard another's confirmed fill: A settles
+    // cleanly while B's status read errors — A's `ConfirmedFill` is still returned and B stays in
+    // flight to retry.
+    #[tokio::test]
+    async fn one_intents_error_does_not_drop_anothers_confirmed_fill() {
+        let (intent_a, rid_a) = ids(1);
+        let (intent_b, rid_b) = ids(2);
+        let led = ledger(1000);
+        led.reserve(rid_a, intent_a, vec![source(100)], 60)
+            .await
+            .unwrap();
+        led.reserve(rid_b, intent_b, vec![source(100)], 60)
+            .await
+            .unwrap();
+
+        let exec = Arc::new(FlakyExec {
+            good: ExecHandle(intent_a.0),
+            good_status: confirmed(),
+        });
+        let svc = ExecutionService::new(
+            Arc::new(FakeSim(SimVerdict::Ok)),
+            exec,
+            Arc::new(FakeSettle(vec![U256::from(100u64)])),
+            led,
+        );
+        svc.fill(pending(intent_a, rid_a)).await.unwrap();
+        svc.fill(pending(intent_b, rid_b)).await.unwrap();
+
+        let confirmed = svc.reconcile().await.unwrap();
+        assert_eq!(
+            confirmed,
+            vec![ConfirmedFill::new(intent_a, B256::from([2; 32]))],
+            "A's confirmed fill survives B's error"
+        );
+        assert_eq!(svc.pending().await, 1, "B stays in flight to retry");
     }
 }
