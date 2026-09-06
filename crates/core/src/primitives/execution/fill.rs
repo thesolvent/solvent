@@ -59,6 +59,22 @@ pub enum ExecStatus {
     Dropped,
 }
 
+/// A fill that reached confirmation: the intent it settled and its mined tx hash. Surfaced by
+/// [`reconcile`](crate::execution::ExecutionService::reconcile) so downstream slices (recapture) can
+/// act on a settled fill without re-reading the chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ConfirmedFill {
+    pub intent: IntentId,
+    pub tx: B256,
+}
+
+impl ConfirmedFill {
+    pub fn new(intent: IntentId, tx: B256) -> Self {
+        Self { intent, tx }
+    }
+}
+
 /// An opaque handle to a submitted fill. The tx engine's own id is not reconstructable from raw
 /// bytes, so the adapter keys its tracking by this value; the caller only hands it back to
 /// [`status`](crate::deps::execution::Execution::status).

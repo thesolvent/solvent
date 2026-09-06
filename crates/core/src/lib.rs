@@ -6,6 +6,7 @@ pub mod ingest;
 pub mod ledger;
 pub mod obs;
 pub mod primitives;
+pub mod recapture;
 pub mod registry;
 pub mod routing;
 

@@ -12,7 +12,9 @@ use tokio::sync::Mutex;
 use crate::deps::execution::{Execution, SettlementReader, SimGate};
 use crate::ledger::LedgerService;
 use crate::obs::{info, warn};
-use crate::primitives::execution::{ExecHandle, ExecStatus, FillOutcome, PendingFill, SimVerdict};
+use crate::primitives::execution::{
+    ConfirmedFill, ExecHandle, ExecStatus, FillOutcome, PendingFill, SimVerdict,
+};
 use crate::primitives::ledger::LedgerError;
 use crate::primitives::{IntentId, ReservationId, SolventError};
 
@@ -80,7 +82,7 @@ impl ExecutionService {
     /// `Confirmed`, post the actual amounts the fill pulled (read from its own settlement); on
     /// failure, void. A reservation a redelivery already settled is a no-op, so this is safe to
     /// call repeatedly.
-    pub async fn reconcile(&self) -> Result<(), SolventError> {
+    pub async fn reconcile(&self) -> Result<Vec<ConfirmedFill>, SolventError> {
         self.execution.tick().await?;
 
         let snapshot: Vec<(IntentId, InFlight)> = {
@@ -89,6 +91,7 @@ impl ExecutionService {
         };
 
         let mut settled = Vec::new();
+        let mut confirmed = Vec::new();
         for (intent, f) in snapshot {
             let Some(status) = self.execution.status(f.handle).await? else {
                 continue;
@@ -98,7 +101,13 @@ impl ExecutionService {
                     match self.ledger.reservation_sources(f.reservation).await {
                         Some(sources) => {
                             let filled = self.settlement.settled(tx, &sources).await?;
-                            settle(self.ledger.post(f.reservation, &filled).await)?;
+                            let posted = self.ledger.post(f.reservation, &filled).await;
+                            // Surface the fill only on a fresh post — a redelivery the ledger FSM
+                            // rejects (`WrongState`) must not drive recapture a second time.
+                            if posted.is_ok() {
+                                confirmed.push(ConfirmedFill::new(intent, tx));
+                            }
+                            settle(posted)?;
                             info!(intent = %intent, "fill confirmed; reservation posted");
                         }
                         None => {
@@ -122,7 +131,7 @@ impl ExecutionService {
                 in_flight.remove(&intent);
             }
         }
-        Ok(())
+        Ok(confirmed)
     }
 
     /// Reverse a posted fill a chain reorg rolled back — the compensating ledger transition. The
@@ -367,7 +376,11 @@ mod tests {
             led.clone(),
         );
         svc.fill(pending(intent, rid)).await.unwrap();
-        svc.reconcile().await.unwrap();
+        let confirmed = svc.reconcile().await.unwrap();
+        assert_eq!(
+            confirmed,
+            vec![ConfirmedFill::new(intent, B256::from([2; 32]))]
+        );
 
         assert_eq!(svc.pending().await, 0);
         // 60 consumed, the 40 remainder returned to available.
