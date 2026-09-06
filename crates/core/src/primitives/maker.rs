@@ -5,7 +5,7 @@
 use alloy_primitives::Address;
 use serde::Serialize;
 
-use super::amount::TokenAmounts;
+use super::amount::{Amount, TokenAmounts};
 use super::asset::Token;
 use super::pool::PoolType;
 
@@ -144,4 +144,36 @@ pub struct FillShare {
     /// All confirmed fills on the maker's pairs in the window (the share denominator).
     pub pair_fills: u64,
     pub share_pct: Option<f64>,
+}
+
+/// One token in a maker's inventory: its wallet vs committed balances, aggregate economics, and the
+/// positions (`legs`) that hold it. The maker's positions re-grouped by token (the Assets tab).
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct InventoryRow {
+    pub token: Token,
+    /// The maker's wallet balance of this token (uncapped).
+    pub wallet: Amount,
+    /// Committed across all the maker's positions.
+    pub shared: Amount,
+    /// Fees from every position holding this token (a position counts under each token it holds).
+    pub fees_usd: Option<f64>,
+    pub apy_pct: Option<f64>,
+    pub legs: Vec<InventoryLeg>,
+}
+
+/// One position's slice of a token: this token's committed vs opening balance in that position, plus
+/// the position's economics (repeated per leg).
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct InventoryLeg {
+    pub pair: String,
+    pub curve: String,
+    pub fee_bps: u32,
+    /// This token's committed balance in the position.
+    pub current: Amount,
+    /// This token's ship-time balance in the position.
+    pub opening: Amount,
+    pub volume_usd: Option<f64>,
+    pub fees_usd: Option<f64>,
+    pub apy_pct: Option<f64>,
+    pub coverage: Option<f64>,
 }

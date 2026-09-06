@@ -5,7 +5,7 @@
 use alloy::primitives::{Address, B256};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use solvent_core::primitives::maker::{MakerDashboard, MakerSummary, Position};
+use solvent_core::primitives::maker::{InventoryRow, MakerDashboard, MakerSummary, Position};
 use solvent_core::primitives::{MakerId, StrategyHash};
 use solvent_core::SolventError;
 
@@ -33,6 +33,23 @@ pub async fn maker_dashboard(
 ) -> ApiResult<MakerDashboard> {
     let maker = MakerId(parse_maker(&maker)?);
     Ok(Response::ok(state.makers.dashboard(maker).await?))
+}
+
+/// A maker's inventory: its positions re-grouped by token (the Assets tab). `{maker}` is an address.
+#[utoipa::path(
+    get,
+    path = "/v1/makers/{maker}/inventory",
+    params(("maker" = String, Path, description = "Maker address")),
+    responses((status = 200, body = Response<List<InventoryRow>>))
+)]
+pub async fn maker_inventory(
+    State(state): State<AppState>,
+    Path(maker): Path<String>,
+) -> ApiResult<List<InventoryRow>> {
+    let maker = MakerId(parse_maker(&maker)?);
+    Ok(Response::ok(List::all(
+        state.makers.inventory(maker).await?,
+    )))
 }
 
 /// A maker's active positions (list projection). `{maker}` is an address (`me` needs a wallet).
