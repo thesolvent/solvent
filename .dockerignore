@@ -1,0 +1,12 @@
+# Keep the Docker build context small: ship source, not build output or deps.
+# The faucet image compiles the workspace fresh inside the builder.
+target/
+.git/
+**/node_modules/
+contracts/lib/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/deployments/
+docs/
+**/*.log
