@@ -8,7 +8,7 @@ use alloy_primitives::{Address, U256};
 
 use crate::asset::AssetManager;
 use crate::deps::balances::BalancesOracle;
-use crate::primitives::amount::Amount;
+use crate::valuation::Valuation;
 use crate::SolventError;
 
 pub use crate::primitives::amount::{Holdings, TokenBalance};
@@ -16,11 +16,20 @@ pub use crate::primitives::amount::{Holdings, TokenBalance};
 pub struct BalancesService {
     oracle: Arc<dyn BalancesOracle>,
     assets: Arc<AssetManager>,
+    valuation: Arc<Valuation>,
 }
 
 impl BalancesService {
-    pub fn new(oracle: Arc<dyn BalancesOracle>, assets: Arc<AssetManager>) -> Self {
-        Self { oracle, assets }
+    pub fn new(
+        oracle: Arc<dyn BalancesOracle>,
+        assets: Arc<AssetManager>,
+        valuation: Arc<Valuation>,
+    ) -> Self {
+        Self {
+            oracle,
+            assets,
+            valuation,
+        }
     }
 
     /// Every catalog token's `balance` + `pullable` for `owner`, from one batched read. A token the
@@ -29,20 +38,25 @@ impl BalancesService {
         let tokens = self.assets.catalog_tokens();
         let addresses: Vec<Address> = tokens.iter().map(|token| token.address).collect();
         let holdings = self.oracle.holdings(owner, &addresses).await?;
-        Ok(tokens
-            .into_iter()
-            .map(|token| {
-                let (balance, pullable) = holdings
-                    .get(&token.address)
-                    .map(|h| (h.balance, h.pullable))
-                    .unwrap_or((U256::ZERO, U256::ZERO));
-                TokenBalance {
-                    balance: Amount::from_base_units(balance, token.decimals),
-                    pullable: Amount::from_base_units(pullable, token.decimals),
-                    token,
-                }
-            })
-            .collect())
+        let mut out = Vec::with_capacity(tokens.len());
+        for token in tokens {
+            let (balance, pullable) = holdings
+                .get(&token.address)
+                .map(|h| (h.balance, h.pullable))
+                .unwrap_or((U256::ZERO, U256::ZERO));
+            out.push(TokenBalance {
+                balance: self
+                    .valuation
+                    .amount(balance, token.address, token.decimals)
+                    .await,
+                pullable: self
+                    .valuation
+                    .amount(pullable, token.address, token.decimals)
+                    .await,
+                token,
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -50,9 +64,12 @@ impl BalancesService {
 mod tests {
     use super::*;
     use crate::deps::balances::BalancesOracleError;
+    use crate::deps::routing::{PriceOracle, PriceOracleError};
     use crate::primitives::asset::{TokenList, TokenMeta};
+    use crate::primitives::UsdPrice;
     use crate::registry::SharedSnapshot;
     use async_trait::async_trait;
+    use rust_decimal::Decimal;
     use std::collections::BTreeMap;
 
     fn addr(n: u8) -> Address {
@@ -98,13 +115,33 @@ mod tests {
         }
     }
 
-    fn service(oracle: FakeOracle) -> BalancesService {
+    struct FakePrices(BTreeMap<Address, UsdPrice>);
+
+    #[async_trait]
+    impl PriceOracle for FakePrices {
+        async fn price(&self, token: Address) -> Result<UsdPrice, PriceOracleError> {
+            self.0
+                .get(&token)
+                .copied()
+                .ok_or(PriceOracleError::NotFound(token))
+        }
+    }
+
+    fn valuation(prices: &[(Address, u64)]) -> Arc<Valuation> {
+        let map = prices
+            .iter()
+            .map(|(a, dollars)| (*a, UsdPrice(Decimal::from(*dollars))))
+            .collect();
+        Arc::new(Valuation::new(Arc::new(FakePrices(map))))
+    }
+
+    fn service(oracle: FakeOracle, valuation: Arc<Valuation>) -> BalancesService {
         let list = TokenList {
             name: "test".to_string(),
             tokens: vec![meta(1, "USDC", 6), meta(2, "WETH", 18)],
         };
         let assets = Arc::new(AssetManager::new(list, Arc::new(SharedSnapshot::default())));
-        BalancesService::new(Arc::new(oracle), assets)
+        BalancesService::new(Arc::new(oracle), assets, valuation)
     }
 
     #[tokio::test]
@@ -114,7 +151,10 @@ mod tests {
             addr(1),
             (U256::from(100_000_000u64), U256::from(40_000_000u64)),
         )]));
-        let out = service(oracle).balances(addr(9)).await.unwrap();
+        let out = service(oracle, valuation(&[]))
+            .balances(addr(9))
+            .await
+            .unwrap();
 
         assert_eq!(out.len(), 2, "the full catalog, held or not");
         let usdc = out.iter().find(|b| b.token.symbol == "USDC").unwrap();
@@ -123,5 +163,24 @@ mod tests {
         let weth = out.iter().find(|b| b.token.symbol == "WETH").unwrap();
         assert_eq!(weth.balance.display, "0"); // never held → zero, still listed
         assert_eq!(weth.pullable.display, "0");
+    }
+
+    #[tokio::test]
+    async fn values_priced_balances_in_usd() {
+        let oracle = FakeOracle(BTreeMap::from([(
+            addr(1),
+            (U256::from(100_000_000u64), U256::from(40_000_000u64)),
+        )]));
+        // USDC priced at $1; WETH left unpriced.
+        let out = service(oracle, valuation(&[(addr(1), 1)]))
+            .balances(addr(9))
+            .await
+            .unwrap();
+
+        let usdc = out.iter().find(|b| b.token.symbol == "USDC").unwrap();
+        assert_eq!(usdc.balance.usd, Some(100.0));
+        assert_eq!(usdc.pullable.usd, Some(40.0));
+        let weth = out.iter().find(|b| b.token.symbol == "WETH").unwrap();
+        assert_eq!(weth.balance.usd, None); // unpriced → no value
     }
 }

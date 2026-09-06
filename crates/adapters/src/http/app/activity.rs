@@ -8,9 +8,10 @@ use axum::extract::{Query, State};
 use serde::{Deserialize, Serialize};
 use solvent_core::asset::AssetManager;
 use solvent_core::deps::registry::RecordedEvent;
-use solvent_core::primitives::amount::{Amount, TokenAmount};
+use solvent_core::primitives::amount::TokenAmount;
 use solvent_core::primitives::registry::{AquaEvent, EventCursor, EventExt};
 use solvent_core::primitives::{ChainId, MakerId};
+use solvent_core::valuation::Valuation;
 use solvent_core::SolventError;
 
 use crate::http::dto::{Cursor, List, Page};
@@ -91,16 +92,28 @@ pub async fn activity(
         .then(|| rows.iter().rev().find_map(|r| r.event.cursor()))
         .flatten()
         .map(|c| Cursor::encode(&(c.block_number, c.log_index)));
-    let items = rows
-        .iter()
-        .filter_map(|r| shape(&state.assets, r, query.kind.as_deref(), actor, token))
-        .collect();
+    let mut items = Vec::new();
+    for row in &rows {
+        if let Some(event) = shape(
+            &state.assets,
+            &state.valuation,
+            row,
+            query.kind.as_deref(),
+            actor,
+            token,
+        )
+        .await
+        {
+            items.push(event);
+        }
+    }
     Ok(Response::ok(List::page(items, next_cursor, None)))
 }
 
 /// Apply the filters to one recorded event and shape it, or drop it (`None`).
-fn shape(
+async fn shape(
     assets: &AssetManager,
+    valuation: &Valuation,
     rec: &RecordedEvent,
     kind: Option<&str>,
     actor: Option<MakerId>,
@@ -123,17 +136,23 @@ fn shape(
         }
     }
 
+    let moved_amount = match moved {
+        Some((addr, amount)) => {
+            let token = assets.token_or_default(addr);
+            Some(TokenAmount {
+                amount: valuation
+                    .amount(amount, token.address, token.decimals)
+                    .await,
+                token,
+            })
+        }
+        None => None,
+    };
     Some(ActivityEvent {
         kind: kind_name(event).to_string(),
         maker: key.maker.to_string(),
         strategy_hash: key.strategy_hash.to_string(),
-        token: moved.map(|(addr, amount)| {
-            let token = assets.token_or_default(addr);
-            TokenAmount {
-                amount: Amount::from_base_units(amount, token.decimals),
-                token,
-            }
-        }),
+        token: moved_amount,
         at: rec.at,
         block_number: ext.block_number,
         tx_hash: ext.transaction_hash.map(|h| h.to_string()),
@@ -172,9 +191,11 @@ fn parse_addr(s: &str) -> Result<Address, SolventError> {
 mod tests {
     use super::*;
     use alloy::primitives::{B256, U256};
+    use async_trait::async_trait;
     use solvent_core::asset::{AssetManager, TokenList};
+    use solvent_core::deps::routing::{PriceOracle, PriceOracleError};
     use solvent_core::primitives::registry::EventExt;
-    use solvent_core::primitives::StrategyHash;
+    use solvent_core::primitives::{StrategyHash, UsdPrice};
     use solvent_core::registry::SharedSnapshot;
     use std::sync::Arc;
 
@@ -186,6 +207,17 @@ mod tests {
             },
             Arc::new(SharedSnapshot::default()),
         )
+    }
+
+    struct NoPrices;
+    #[async_trait]
+    impl PriceOracle for NoPrices {
+        async fn price(&self, token: Address) -> Result<UsdPrice, PriceOracleError> {
+            Err(PriceOracleError::NotFound(token))
+        }
+    }
+    fn valuation() -> Valuation {
+        Valuation::new(Arc::new(NoPrices))
     }
 
     fn pushed(maker: u8, token: u8, amount: u64) -> RecordedEvent {
@@ -210,36 +242,55 @@ mod tests {
         }
     }
 
-    #[test]
-    fn shapes_a_push_with_its_token_amount() {
-        let dto = shape(&assets(), &pushed(5, 9, 1_000), None, None, None).unwrap();
+    #[tokio::test]
+    async fn shapes_a_push_with_its_token_amount() {
+        let v = valuation();
+        let dto = shape(&assets(), &v, &pushed(5, 9, 1_000), None, None, None)
+            .await
+            .unwrap();
         assert_eq!(dto.kind, "pushed");
         assert_eq!(dto.at, 1_000);
         assert_eq!(dto.token.unwrap().amount.raw, "1000");
     }
 
-    #[test]
-    fn filters_drop_non_matching_events() {
+    #[tokio::test]
+    async fn filters_drop_non_matching_events() {
+        let v = valuation();
         let rec = pushed(5, 9, 1_000);
         // Wrong kind, wrong actor, and wrong token each drop it.
-        assert!(shape(&assets(), &rec, Some("pulled"), None, None).is_none());
+        assert!(shape(&assets(), &v, &rec, Some("pulled"), None, None)
+            .await
+            .is_none());
         assert!(shape(
             &assets(),
+            &v,
             &rec,
             None,
             Some(MakerId(Address::from([6; 20]))),
             None
         )
+        .await
         .is_none());
-        assert!(shape(&assets(), &rec, None, None, Some(Address::from([8; 20]))).is_none());
+        assert!(shape(
+            &assets(),
+            &v,
+            &rec,
+            None,
+            None,
+            Some(Address::from([8; 20]))
+        )
+        .await
+        .is_none());
         // Matching filters keep it.
         assert!(shape(
             &assets(),
+            &v,
             &rec,
             Some("pushed"),
             None,
             Some(Address::from([9; 20]))
         )
+        .await
         .is_some());
     }
 }

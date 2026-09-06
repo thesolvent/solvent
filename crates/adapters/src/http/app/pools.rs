@@ -49,6 +49,7 @@ pub async fn pools(
     let mut pools: Vec<Pool> = state
         .pools
         .pools()
+        .await
         .into_iter()
         .filter(|pool| matches(pool, &query, token_a, token_b))
         .collect();
@@ -87,7 +88,7 @@ pub async fn pool_detail(
     Query(query): Query<PairQuery>,
 ) -> ApiResult<PoolDetail> {
     let pair = TokenPair::new(parse_addr(&query.base)?, parse_addr(&query.quote)?);
-    match state.pools.pool_detail(&pair) {
+    match state.pools.pool_detail(&pair).await {
         Some(detail) => Ok(Response::ok(detail)),
         None => Err(Response::error("pool not found", StatusCode::NOT_FOUND)),
     }

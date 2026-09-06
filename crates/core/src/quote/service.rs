@@ -13,13 +13,13 @@ use time::OffsetDateTime;
 use crate::asset::AssetManager;
 use crate::deps::ledger::Clock;
 use crate::ledger::LedgerService;
-use crate::primitives::amount::Amount;
 use crate::primitives::quote::{QuoteLeg, QuoteResponse};
 use crate::primitives::registry::{curve_label, CurveSpec, Snapshot, TokenPair};
 use crate::primitives::routing::{RouteLeg, RouteRequest, RoutingConfig};
 use crate::primitives::{IntentId, StrategyHash};
 use crate::registry::SharedSnapshot;
 use crate::routing::{price_impact_pct, select, solve_sparse, LegCostResolver};
+use crate::valuation::Valuation;
 
 /// How far ahead a quote's advisory `expires_at` sits.
 const QUOTE_TTL_SECS: u64 = 30;
@@ -31,6 +31,7 @@ pub struct QuoteService {
     config: RoutingConfig,
     clock: Arc<dyn Clock>,
     leg_cost: Arc<LegCostResolver>,
+    valuation: Arc<Valuation>,
 }
 
 impl QuoteService {
@@ -41,6 +42,7 @@ impl QuoteService {
         config: RoutingConfig,
         clock: Arc<dyn Clock>,
         leg_cost: Arc<LegCostResolver>,
+        valuation: Arc<Valuation>,
     ) -> Self {
         Self {
             registry,
@@ -49,6 +51,7 @@ impl QuoteService {
             config,
             clock,
             leg_cost,
+            valuation,
         }
     }
 
@@ -86,15 +89,19 @@ impl QuoteService {
         )?;
 
         let labels = curve_labels(&snapshot, token_in, token_out);
-        let legs = split
-            .legs
-            .iter()
-            .filter_map(|leg| self.leg(leg, &labels, split.amount_out))
-            .collect();
+        let mut legs = Vec::with_capacity(split.legs.len());
+        for leg in &split.legs {
+            if let Some(resolved) = self.leg(leg, &labels, split.amount_out).await {
+                legs.push(resolved);
+            }
+        }
 
         Some(QuoteResponse {
             quote_id: format!("{id:#x}"),
-            amount_out: Amount::from_base_units(split.amount_out, out_decimals),
+            amount_out: self
+                .valuation
+                .amount(split.amount_out, token_out, out_decimals)
+                .await,
             price_impact_pct: price_impact_pct(&selection.chosen, amount_in, split.amount_out),
             makers_sourced: split.legs.len() as u32,
             legs,
@@ -103,7 +110,7 @@ impl QuoteService {
     }
 
     /// Resolve one routed leg to its wire shape, or skip it if a token is missing from the catalog.
-    fn leg(
+    async fn leg(
         &self,
         leg: &RouteLeg,
         labels: &BTreeMap<StrategyHash, &'static str>,
@@ -114,8 +121,14 @@ impl QuoteService {
         Some(QuoteLeg {
             maker: leg.maker.0,
             strategy_hash: format!("{:#x}", leg.strategy_hash.0),
-            amount_in: Amount::from_base_units(leg.amount_in, token_in.decimals),
-            amount_out: Amount::from_base_units(leg.amount_out, token_out.decimals),
+            amount_in: self
+                .valuation
+                .amount(leg.amount_in, token_in.address, token_in.decimals)
+                .await,
+            amount_out: self
+                .valuation
+                .amount(leg.amount_out, token_out.address, token_out.decimals)
+                .await,
             curve: labels
                 .get(&leg.strategy_hash)
                 .copied()
@@ -325,7 +338,7 @@ mod tests {
         ));
         ledger.sync_budgets(&registry.load()).await.unwrap();
         let gas: Arc<dyn GasPrice> = market.clone();
-        let oracle: Arc<dyn PriceOracle> = market;
+        let oracle: Arc<dyn PriceOracle> = market.clone();
         let leg_cost = Arc::new(LegCostResolver::new(
             gas,
             oracle,
@@ -333,6 +346,7 @@ mod tests {
             addr(WETH),
             150_000,
         ));
+        let valuation = Arc::new(Valuation::new(market));
         QuoteService::new(
             registry,
             ledger,
@@ -340,6 +354,7 @@ mod tests {
             RoutingConfig::new(16, 4, 150_000),
             Arc::new(FixedClock),
             leg_cost,
+            valuation,
         )
     }
 
