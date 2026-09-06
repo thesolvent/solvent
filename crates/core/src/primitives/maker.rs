@@ -1,6 +1,6 @@
 //! Maker-facing read types: a position (one shipped strategy, seen as liquidity) and the roster
 //! entry. `Position` is the canonical resource; the positions list is a projection that omits the
-//! detail-only `active_stats` (and, later, the band chart and fills).
+//! detail-only `active_stats` and `opening` balances.
 
 use alloy_primitives::Address;
 use serde::Serialize;
@@ -22,11 +22,7 @@ pub struct Position {
     pub pair_type: PoolType,
     pub state: String,
     pub fee_bps: u32,
-    /// First-`Shipped` / `Docked` block, and the current spot — the on-chain history, filled later.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub since_block: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub docked_block: Option<u64>,
+    /// Current curve spot in `quote per base` — filled by the marginal-price task.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mid_price: Option<String>,
     pub range: PriceRange,
@@ -54,16 +50,18 @@ pub struct PriceRange {
     pub label: String,
 }
 
-/// A position's committed vs. pullable balances. `opening`/`coverage` (from the ship history) fill in
-/// later.
+/// A position's committed vs. pullable balances. `opening` (the ship-time deposit) is detail-only, so
+/// it is empty in the list projection.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct PositionBalances {
     #[serde(rename = "virtual")]
     pub virtual_balances: TokenAmounts,
     pub actual: TokenAmounts,
+    /// Whether every committed token is fully pullable on-chain (no `shortfall`).
     pub backed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shortfall: Option<String>,
+    /// Pullable USD as a fraction of committed USD (`1.0` = fully backed).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coverage: Option<f64>,
     pub opening: TokenAmounts,
@@ -101,4 +99,49 @@ pub struct MakerSummary {
     pub maker: Address,
     pub active_positions: u64,
     pub shared_liquidity_usd: Option<f64>,
+}
+
+/// A maker's dashboard: headline KPIs (with period-over-period deltas), fill-share on the pairs it
+/// quotes, fill latency, and a competitive insight. USD values are `None` when unpriced.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct MakerDashboard {
+    #[schema(value_type = String)]
+    pub maker: Address,
+    /// The window (days) the KPIs and deltas cover.
+    pub window_days: u32,
+    pub active_positions: u64,
+    pub kpis: MakerKpis,
+    pub fill_share: FillShare,
+    pub latency_p50_ms: Option<u64>,
+    /// A cheaper competitor on one of the maker's pairs, if any undercuts it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub insight: Option<String>,
+}
+
+/// The dashboard KPI tiles. `*_change_pct` are period-over-period deltas (previous equal window).
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct MakerKpis {
+    pub shared_liquidity_usd: Option<f64>,
+    pub volume_usd: Option<f64>,
+    pub wallet_balance_usd: Option<f64>,
+    pub pullable_usd: Option<f64>,
+    /// Pullable ÷ shared liquidity — aggregate backing coverage, rendered "×".
+    pub shared_liq_ratio: Option<f64>,
+    pub fees_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_liquidity_change_pct: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume_change_pct: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fees_change_pct: Option<f64>,
+}
+
+/// The maker's fills as a share of all fills on the pairs it quotes.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct FillShare {
+    /// The maker's confirmed fills in the window.
+    pub filled: u64,
+    /// All confirmed fills on the maker's pairs in the window (the share denominator).
+    pub pair_fills: u64,
+    pub share_pct: Option<f64>,
 }

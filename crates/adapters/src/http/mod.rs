@@ -42,6 +42,7 @@ pub fn router(state: AppState) -> Router {
         .route("/trades/{id}", get(app::trades::trade_detail))
         .route("/activity", get(app::activity::activity))
         .route("/makers", get(app::makers::makers))
+        .route("/makers/{maker}", get(app::makers::maker_dashboard))
         .route(
             "/makers/{maker}/positions",
             get(app::makers::maker_positions),
@@ -250,6 +251,13 @@ mod tests {
         async fn events(&self, _: ChainId) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
             Ok(Vec::new())
         }
+        async fn history(
+            &self,
+            _: ChainId,
+            _: StrategyHash,
+        ) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
+            Ok(Vec::new())
+        }
         async fn recent(
             &self,
             _: ChainId,
@@ -285,6 +293,7 @@ mod tests {
                 fills_by_day: [0; 7],
                 last_fill_at: None,
                 volume: Vec::new(),
+                inflow: Vec::new(),
                 quotes: 0,
                 latency_p50_ms: None,
             })
@@ -301,6 +310,9 @@ mod tests {
                 last_fill_at: None,
                 quote_uptime_pct: None,
             })
+        }
+        async fn pair_fills(&self, _: &[TokenPair], _: u64) -> Result<u64, MakerMetricsError> {
+            Ok(0)
         }
     }
 
@@ -448,7 +460,9 @@ mod tests {
             Arc::clone(&valuation),
             Arc::new(NoopMakerMetrics),
             Arc::new(ZeroOracle),
+            Arc::new(NoopEventStore),
             Arc::new(SystemClock),
+            ChainId(31337),
         ));
         AppState {
             config: Arc::new(AppConfig {

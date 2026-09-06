@@ -54,14 +54,22 @@ async fn insert_trade(
     .expect("insert trade");
 }
 
-async fn insert_leg(pool: &SqlitePool, trade_id: &str, maker: u8, strategy: u8, amount_out: &str) {
+async fn insert_leg(
+    pool: &SqlitePool,
+    trade_id: &str,
+    maker: u8,
+    strategy: u8,
+    amount_in: &str,
+    amount_out: &str,
+) {
     sqlx::query(
         "INSERT INTO trade_leg (trade_id, idx, maker, strategy_hash, amount_in, amount_out) \
-         VALUES (?, 0, ?, ?, '0', ?)",
+         VALUES (?, 0, ?, ?, ?, ?)",
     )
     .bind(trade_id)
     .bind(addr(maker).as_slice())
     .bind(B256::from([strategy; 32]).as_slice())
+    .bind(amount_in)
     .bind(amount_out)
     .execute(pool)
     .await
@@ -94,12 +102,12 @@ async fn insert_quote(pool: &SqlitePool, id: &str, latency: i64, maker: u8, stra
 /// pair — three sourcing strategy 1, one sourcing a different maker/strategy.
 async fn seed(pool: &SqlitePool) {
     insert_trade(pool, "t1", 1, "confirmed", NOW - 100, addr(11)).await;
-    insert_leg(pool, "t1", 1, 1, "1000000").await;
+    insert_leg(pool, "t1", 1, 1, "3000000", "1000000").await;
     insert_trade(pool, "t2", 2, "confirmed", NOW - 2 * DAY, addr(11)).await;
-    insert_leg(pool, "t2", 1, 1, "2000000").await;
+    insert_leg(pool, "t2", 1, 1, "6000000", "2000000").await;
     // a non-confirmed trade must not count
     insert_trade(pool, "t3", 3, "failed", NOW - 200, addr(11)).await;
-    insert_leg(pool, "t3", 1, 1, "9000000").await;
+    insert_leg(pool, "t3", 1, 1, "9000000", "9000000").await;
 
     insert_quote(pool, "q1", 100, 1, 1).await;
     insert_quote(pool, "q2", 200, 1, 1).await;
@@ -121,13 +129,47 @@ async fn maker_rollup() {
     assert_eq!(m.last_fill_at, Some((NOW - 100) as u64));
     assert_eq!(m.quotes, 3, "quotes strategy 1 was sourced into");
     assert_eq!(m.latency_p50_ms, Some(200)); // median of 100/200/300
-                                             // volume = 1_000_000 + 2_000_000 of token 11
+                                             // volume = 1_000_000 + 2_000_000 of token 11 (delivered, token_out)
     let vol = m.volume.iter().find(|v| v.token == addr(11)).unwrap();
     assert_eq!(vol.base_units, U256::from(3_000_000u64));
+    // inflow = 3_000_000 + 6_000_000 of token 10 (received, token_in); the failed trade is excluded
+    let inflow = m.inflow.iter().find(|v| v.token == addr(10)).unwrap();
+    assert_eq!(inflow.base_units, U256::from(9_000_000u64));
     // fills land today and 2 days ago
     assert_eq!(m.fills_by_day[6], 1);
     assert_eq!(m.fills_by_day[4], 1);
     assert_eq!(m.fills_by_day.iter().sum::<u64>(), 2);
+}
+
+#[tokio::test]
+async fn pair_fills_counts_confirmed_on_the_pair() {
+    let (pool, metrics) = setup().await;
+    seed(&pool).await;
+
+    // The pair {10, 11} carries two confirmed fills (t1, t2); the failed t3 is excluded.
+    let pair = TokenPair::new(addr(10), addr(11));
+    let on_pair = metrics
+        .pair_fills(&[pair], (NOW - 7 * DAY) as u64)
+        .await
+        .expect("pair_fills");
+    assert_eq!(on_pair, 2);
+
+    // A pair the maker never quoted has no fills, and an empty pair-set is zero.
+    let other = TokenPair::new(addr(20), addr(21));
+    assert_eq!(
+        metrics
+            .pair_fills(&[other], (NOW - 7 * DAY) as u64)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        metrics
+            .pair_fills(&[], (NOW - 7 * DAY) as u64)
+            .await
+            .unwrap(),
+        0
+    );
 }
 
 #[tokio::test]
