@@ -11,6 +11,7 @@ pub mod pricing;
 pub mod registry;
 pub mod routing;
 pub mod shared;
+pub mod trade;
 
 pub use shared::{
     Bps, ChainConfig, ChainId, FillId, IntentId, LeaseId, MakerId, ReservationId, SolventError,
