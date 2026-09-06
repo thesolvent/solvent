@@ -99,6 +99,9 @@ impl RecaptureStore for SqliteRecaptureStore {
     }
 
     async fn mark_settled(&self, credits: &[AccruedCredit]) -> Result<(), RecaptureStoreError> {
+        // One transaction so a group's rows settle all-or-nothing: a failure mid-loop must never leave
+        // part of an already-paid (maker, token) group outstanding for the next sweep to pay again.
+        let mut tx = self.pool.begin().await.map_err(db)?;
         for accrued in credits {
             sqlx::query(
                 "UPDATE recapture_credit SET settled = 1
@@ -107,10 +110,11 @@ impl RecaptureStore for SqliteRecaptureStore {
             .bind(accrued.intent.0.to_vec())
             .bind(accrued.credit.maker.0.to_vec())
             .bind(accrued.credit.token.to_vec())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             .map_err(db)?;
         }
+        tx.commit().await.map_err(db)?;
         Ok(())
     }
 }
