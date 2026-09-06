@@ -89,6 +89,8 @@ pub enum StartupError {
     Config(#[from] config::ConfigError),
     #[error("rpc url: {0}")]
     RpcUrl(String),
+    #[error("database_url is required to run the live server")]
+    MissingDatabase,
     #[error("token list: {0}")]
     TokenList(String),
     #[error(transparent)]
