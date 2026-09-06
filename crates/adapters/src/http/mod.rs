@@ -91,7 +91,9 @@ mod tests {
     use solvent_core::execution::ExecutionService;
     use solvent_core::ledger::LedgerService;
     use solvent_core::pool::{DepthService, PoolService};
-    use solvent_core::primitives::execution::{ExecHandle, ExecStatus, FillTx, SimVerdict};
+    use solvent_core::primitives::execution::{
+        ExecHandle, ExecStatus, FillTx, SimVerdict, TrackedFill,
+    };
     use solvent_core::primitives::ingest::Intent;
     use solvent_core::primitives::ledger::{AccountKey, Reservation, ReservationSource};
     use solvent_core::primitives::registry::Snapshot;
@@ -99,7 +101,7 @@ mod tests {
     use solvent_core::primitives::trade::{
         Trade, TradeAttempt, TradeId, TradeInfo, TradeLeg, TradeStatus,
     };
-    use solvent_core::primitives::ReservationId;
+    use solvent_core::primitives::{IntentId, ReservationId};
     use solvent_core::quote::QuoteService;
     use solvent_core::registry::SharedSnapshot;
     use solvent_core::swap::{SwapConfig, SwapService};
@@ -208,11 +210,21 @@ mod tests {
     struct FakeExec;
     #[async_trait::async_trait]
     impl Execution for FakeExec {
-        async fn submit(&self, fill: &FillTx) -> Result<ExecHandle, ExecutionError> {
+        async fn submit(
+            &self,
+            fill: &FillTx,
+            _: ReservationId,
+        ) -> Result<ExecHandle, ExecutionError> {
             Ok(ExecHandle(fill.intent.0))
         }
         async fn status(&self, _: ExecHandle) -> Result<Option<ExecStatus>, ExecutionError> {
             Ok(Some(ExecStatus::Pending))
+        }
+        async fn forget(&self, _: IntentId) -> Result<(), ExecutionError> {
+            Ok(())
+        }
+        async fn tracked(&self) -> Result<Vec<TrackedFill>, ExecutionError> {
+            Ok(Vec::new())
         }
         async fn tick(&self) -> Result<(), ExecutionError> {
             Ok(())

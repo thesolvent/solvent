@@ -43,4 +43,7 @@ walletkit = { package = "walletkit-rs", git = "https://github.com/21r21a33333/wa
 alloy = { version = "1", features = ["full", "node-bindings"] }
 serde = { version = "1", features = ["derive"] }
 tempfile = "3"
+# E2E only: the durable tx-engine store, to prove in-flight fills recover across a restart. Kept off
+# the library build (which never references it) and enabled only for tests via feature unification.
+walletkit = { package = "walletkit-rs", git = "https://github.com/21r21a33333/walletkit.git", rev = "3e75a5d2385da13d6ab813104f1e2473860e32cb", default-features = false, features = ["redb"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

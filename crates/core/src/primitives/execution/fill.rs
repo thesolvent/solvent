@@ -100,3 +100,22 @@ pub enum FillOutcome {
     Submitted { handle: ExecHandle },
     Rejected { reason: String },
 }
+
+/// A submitted fill the execution engine still tracks, as durably recorded: the intent it settles
+/// and the reservation whose holds it will post or void. Read on reconcile to drive every in-flight
+/// fill to a terminal state — after a restart, these are the fills to recover.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TrackedFill {
+    pub intent: IntentId,
+    pub reservation: ReservationId,
+}
+
+impl TrackedFill {
+    pub fn new(intent: IntentId, reservation: ReservationId) -> Self {
+        Self {
+            intent,
+            reservation,
+        }
+    }
+}

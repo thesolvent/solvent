@@ -61,3 +61,7 @@ permit2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
 confirmations = 1          # blocks a fill waits before it settles
 reservation_ttl_secs = 60  # how long a hold survives before the TTL sweep may release it
 decay_window_secs = 60     # the cosigner's decay window applied to each order
+
+# The tx engine's durable state (redb): in-flight fills are persisted here so a restart recovers
+# and reconciles them rather than losing track. Point it at a persistent volume in production.
+wallet_state_db = "walletkit.redb"

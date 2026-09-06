@@ -61,6 +61,9 @@ pub struct Config {
     /// The cosigner's decay window applied to each order.
     #[serde(default = "default_decay_secs")]
     pub decay_window_secs: u64,
+    /// Path to the tx engine's durable state (redb), so in-flight fills survive a restart.
+    #[serde(default = "default_wallet_state_db")]
+    pub wallet_state_db: String,
 }
 
 /// One Binance price symbol and the tokens whose USD price it feeds.
@@ -136,6 +139,9 @@ fn default_ttl_secs() -> u64 {
 fn default_decay_secs() -> u64 {
     60
 }
+fn default_wallet_state_db() -> String {
+    "walletkit.redb".to_string()
+}
 
 /// Read and parse the token list JSON at `path`.
 pub fn load_token_list(path: &str) -> Result<TokenList, StartupError> {
@@ -157,6 +163,8 @@ pub enum StartupError {
     MissingSecret(&'static str),
     #[error("bad signing key: {0}")]
     Key(String),
+    #[error("wallet state store: {0}")]
+    WalletStore(String),
     #[error("token list: {0}")]
     TokenList(String),
     #[error(transparent)]

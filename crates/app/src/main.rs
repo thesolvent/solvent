@@ -12,7 +12,7 @@ use alloy::providers::{Provider, ProviderBuilder};
 use alloy::signers::local::PrivateKeySigner;
 use solvent_adapters::balances::AlloyBalancesOracle;
 use solvent_adapters::chain::ChainHead;
-use solvent_adapters::execution::{AquaSettlementReader, WalletkitExecutor};
+use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
 use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
@@ -38,7 +38,7 @@ use solvent_core::swap::{SwapConfig, SwapService};
 use solvent_core::SolventError;
 use sqlx::SqlitePool;
 use walletkit::adapters::policy::{AllowAll, DefaultPolicyEngine};
-use walletkit::adapters::{LocalSigner, Transport};
+use walletkit::adapters::{LocalSigner, RedbStateStore, Transport};
 use walletkit::core::deps::SubmissionOpts;
 use walletkit::Wallet;
 
@@ -124,7 +124,7 @@ async fn main() -> Result<(), StartupError> {
         budget_source,
         Arc::new(SystemClock),
     ));
-    let trade_store: Arc<dyn TradeStore> = Arc::new(SqliteTradeStore::new(pool));
+    let trade_store: Arc<dyn TradeStore> = Arc::new(SqliteTradeStore::new(pool.clone()));
     ledger.recover().await?;
     if let Err(e) = ledger.sync_budgets(&registry.load()).await {
         tracing::warn!(error = %e, "initial budget sync failed; caps are empty until the next tick");
@@ -206,15 +206,23 @@ async fn main() -> Result<(), StartupError> {
             .map_err(|e| StartupError::RpcUrl(format!("{e}")))?,
     )
     .map_err(|e| StartupError::RpcUrl(format!("{e}")))?;
+    let wallet_state = RedbStateStore::open(&config.wallet_state_db)
+        .map_err(|e| StartupError::WalletStore(e.to_string()))?;
     let wallet = Wallet::builder(
         Arc::new(transport),
         Arc::new(filler_signer),
         Arc::new(policy),
     )
+    .store(Arc::new(wallet_state))
     .confirmations(config.confirmations)
     .bump_timeout(0)
     .build();
-    let executor = Arc::new(WalletkitExecutor::new(wallet, SubmissionOpts::public()));
+    let fill_store = Arc::new(SqliteFillStore::new(pool.clone()));
+    let executor = Arc::new(WalletkitExecutor::new(
+        wallet,
+        SubmissionOpts::public(),
+        fill_store,
+    ));
     let settlement = Arc::new(AquaSettlementReader::new(
         Arc::new(provider.clone()),
         config.aqua_address,
