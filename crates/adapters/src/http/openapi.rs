@@ -23,6 +23,7 @@ use utoipa::OpenApi;
         crate::http::app::activity::activity,
         crate::http::app::makers::makers,
         crate::http::app::makers::maker_dashboard,
+        crate::http::app::makers::maker_inventory,
         crate::http::app::makers::maker_positions,
         crate::http::app::makers::position_detail,
     ),
@@ -62,6 +63,8 @@ use utoipa::OpenApi;
         solvent_core::primitives::maker::MakerDashboard,
         solvent_core::primitives::maker::MakerKpis,
         solvent_core::primitives::maker::FillShare,
+        solvent_core::primitives::maker::InventoryRow,
+        solvent_core::primitives::maker::InventoryLeg,
     ))
 )]
 pub struct ApiDoc;

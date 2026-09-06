@@ -16,8 +16,8 @@ use crate::deps::maker_metrics::{MakerMetrics, MakerMetricsStore, PositionMetric
 use crate::deps::registry::EventStore;
 use crate::primitives::amount::{Amount, TokenAmount, TokenAmounts};
 use crate::primitives::maker::{
-    ActiveStats, Economics, FillShare, MakerDashboard, MakerKpis, MakerSummary, Position,
-    PositionBalances, PriceRange, Split,
+    ActiveStats, Economics, FillShare, InventoryLeg, InventoryRow, MakerDashboard, MakerKpis,
+    MakerSummary, Position, PositionBalances, PriceRange, Split,
 };
 use crate::primitives::pool::classify_pair;
 use crate::primitives::registry::{
@@ -276,6 +276,80 @@ impl MakerService {
         })
     }
 
+    /// The maker's positions re-grouped by token — the Assets tab. Each token row aggregates the
+    /// positions holding it (its `legs`), with wallet vs committed balances and economics.
+    pub async fn inventory(&self, maker: MakerId) -> Result<Vec<InventoryRow>, SolventError> {
+        // Detail positions carry per-token opening and economics; transpose them into per-token rows.
+        let strategies: Vec<MakerStrategy> = self
+            .registry
+            .load()
+            .strategies_for_maker(maker)
+            .cloned()
+            .collect();
+        let mut grouped: BTreeMap<Address, (crate::primitives::asset::Token, Vec<InventoryLeg>)> =
+            BTreeMap::new();
+        for strategy in &strategies {
+            let Some(position) = self.build(strategy, true).await? else {
+                continue;
+            };
+            for entry in &position.balances.virtual_balances.entries {
+                let addr = entry.token.address;
+                let opening = position
+                    .balances
+                    .opening
+                    .entries
+                    .iter()
+                    .find(|e| e.token.address == addr)
+                    .map(|e| e.amount.clone())
+                    .unwrap_or_else(|| Amount::from_base_units(U256::ZERO, entry.token.decimals));
+                grouped
+                    .entry(addr)
+                    .or_insert_with(|| (entry.token.clone(), Vec::new()))
+                    .1
+                    .push(InventoryLeg {
+                        pair: position.pair.clone(),
+                        curve: position.curve.clone(),
+                        fee_bps: position.fee_bps,
+                        current: entry.amount.clone(),
+                        opening,
+                        volume_usd: position.economics.volume_usd,
+                        fees_usd: position.economics.fees_usd,
+                        apy_pct: position.economics.apy_pct,
+                        coverage: position.balances.coverage,
+                    });
+            }
+        }
+
+        let tokens: Vec<Address> = grouped.keys().copied().collect();
+        let holdings = self.balances.holdings(maker.0, &tokens).await?;
+        let mut rows = Vec::with_capacity(grouped.len());
+        for (addr, (token, legs)) in grouped {
+            let wallet_raw = holdings.get(&addr).map_or(U256::ZERO, |h| h.balance);
+            let wallet = self
+                .valuation
+                .amount(wallet_raw, addr, token.decimals)
+                .await;
+            let shared_raw = legs.iter().fold(U256::ZERO, |acc, leg| {
+                acc.saturating_add(leg.current.raw.parse::<U256>().unwrap_or(U256::ZERO))
+            });
+            let shared = self
+                .valuation
+                .amount(shared_raw, addr, token.decimals)
+                .await;
+            let fees_usd = sum_usd(legs.iter().map(|leg| leg.fees_usd));
+            let apy_pct = annualized_apy(fees_usd, shared.usd);
+            rows.push(InventoryRow {
+                token,
+                wallet,
+                shared,
+                fees_usd,
+                apy_pct,
+                legs,
+            });
+        }
+        Ok(rows)
+    }
+
     async fn build(
         &self,
         strategy: &MakerStrategy,
@@ -483,16 +557,20 @@ impl MakerService {
 /// window's fees over the committed liquidity: `fees/liquidity · 365/window`.
 fn economics(volume_usd: Option<f64>, fee_bps: u32, liquidity_usd: Option<f64>) -> Economics {
     let fees_usd = volume_usd.map(|v| v * f64::from(fee_bps) / 10_000.0);
-    let apy_pct = match (fees_usd, liquidity_usd) {
+    Economics {
+        apy_pct: annualized_apy(fees_usd, liquidity_usd),
+        fees_usd,
+        volume_usd,
+    }
+}
+
+/// Annualize a window's fees over the liquidity that earned them: `fees/liq · 365/window · 100`.
+fn annualized_apy(fees_usd: Option<f64>, liquidity_usd: Option<f64>) -> Option<f64> {
+    match (fees_usd, liquidity_usd) {
         (Some(fees), Some(liq)) if liq > 0.0 => {
             Some(fees / liq * (365.0 / WINDOW_DAYS as f64) * 100.0)
         }
         _ => None,
-    };
-    Economics {
-        fees_usd,
-        apy_pct,
-        volume_usd,
     }
 }
 
@@ -615,6 +693,7 @@ mod tests {
 
     const USDC: u8 = 2; // lower address → the stable quote
     const WETH: u8 = 3;
+    const USDT: u8 = 4;
 
     fn addr(n: u8) -> Address {
         Address::from([n; 20])
@@ -798,6 +877,24 @@ mod tests {
         st
     }
 
+    /// A USDC/USDT strategy (both 6-decimal stables) for the same maker — shares USDC with the
+    /// WETH/USDC position, so inventory grouping puts two legs under the USDC row.
+    fn usdc_usdt_strategy(maker: u8, hash: u8) -> MakerStrategy {
+        let key = StrategyKey {
+            maker: MakerId(addr(maker)),
+            app: Address::ZERO,
+            strategy_hash: StrategyHash(B256::from([hash; 32])),
+        };
+        let mut st = MakerStrategy::new(key, &[]);
+        st.curve = CurveSpec::Priceable {
+            curve: Curve::Xyc,
+            fees_in_bps: vec![100_000], // 1 real bp
+        };
+        st.balances.insert(addr(USDC), U256::from(1_000_000_000u64)); // 1000 USDC
+        st.balances.insert(addr(USDT), U256::from(1_000_000_000u64)); // 1000 USDT
+        st
+    }
+
     fn service(snapshot: Snapshot, pullable: HashMap<Address, U256>) -> MakerService {
         let registry = Arc::new(SharedSnapshot::new(snapshot));
         let list = TokenList {
@@ -821,12 +918,22 @@ mod tests {
                     logo_uri: None,
                     tags: vec![],
                 },
+                TokenMeta {
+                    chain_id: 1,
+                    address: addr(USDT),
+                    symbol: "USDT".into(),
+                    name: "USDT".into(),
+                    decimals: 6,
+                    logo_uri: None,
+                    tags: vec!["stables".into()],
+                },
             ],
         };
         let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
         let valuation = Arc::new(Valuation::new(Arc::new(FakePrices(HashMap::from([
             (addr(WETH), 2000),
             (addr(USDC), 1),
+            (addr(USDT), 1),
         ])))));
         MakerService::new(
             registry,
@@ -931,5 +1038,45 @@ mod tests {
             insight.contains("3 bps") && insight.contains("5 bps"),
             "{insight}"
         );
+    }
+
+    #[tokio::test]
+    async fn inventory_groups_positions_by_token() {
+        // Maker 9 holds a WETH/USDC and a USDC/USDT position, so USDC is shared across both.
+        let holdings = HashMap::from([
+            (addr(USDC), U256::from(5_000_000_000u64)), // 5000 USDC wallet
+            (addr(WETH), U256::from(1_000_000_000_000_000_000u128)), // 1 WETH
+            (addr(USDT), U256::from(1_000_000_000u64)), // 1000 USDT
+        ]);
+        let snap = Snapshot::from_strategies([xyc_strategy(9), usdc_usdt_strategy(9, 8)]);
+        let svc = service(snap, holdings);
+
+        let inv = svc.inventory(MakerId(addr(9))).await.unwrap();
+
+        // Three token rows, ordered by address: USDC(2), WETH(3), USDT(4).
+        assert_eq!(inv.len(), 3);
+
+        let usdc = &inv[0];
+        assert_eq!(usdc.token.symbol, "USDC");
+        assert_eq!(usdc.legs.len(), 2, "USDC is held by both positions");
+        assert_eq!(usdc.shared.display, "3000"); // 2000 + 1000
+        assert_eq!(usdc.shared.usd, Some(3000.0));
+        assert_eq!(usdc.wallet.usd, Some(5000.0));
+        assert!(usdc.legs.iter().any(|l| l.pair.contains("WETH")));
+        assert!(usdc.legs.iter().any(|l| l.pair.contains("USDT")));
+        // Opening comes from the event log: the WETH/USDC position opened at 2000 USDC.
+        let weth_leg = usdc.legs.iter().find(|l| l.pair.contains("WETH")).unwrap();
+        assert_eq!(weth_leg.opening.display, "2000");
+
+        let weth = &inv[1];
+        assert_eq!(weth.token.symbol, "WETH");
+        assert_eq!(weth.legs.len(), 1);
+        assert_eq!(weth.shared.usd, Some(2000.0)); // 1 WETH @ $2000
+        assert_eq!(weth.wallet.usd, Some(2000.0));
+
+        let usdt = &inv[2];
+        assert_eq!(usdt.token.symbol, "USDT");
+        assert_eq!(usdt.legs.len(), 1);
+        assert_eq!(usdt.shared.usd, Some(1000.0));
     }
 }

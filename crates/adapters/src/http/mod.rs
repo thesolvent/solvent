@@ -44,6 +44,10 @@ pub fn router(state: AppState) -> Router {
         .route("/makers", get(app::makers::makers))
         .route("/makers/{maker}", get(app::makers::maker_dashboard))
         .route(
+            "/makers/{maker}/inventory",
+            get(app::makers::maker_inventory),
+        )
+        .route(
             "/makers/{maker}/positions",
             get(app::makers::maker_positions),
         )
