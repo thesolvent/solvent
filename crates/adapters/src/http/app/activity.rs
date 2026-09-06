@@ -85,9 +85,10 @@ pub async fn activity(
         .recent(ChainId(state.config.chain_id), before, limit)
         .await
         .map_err(SolventError::from)?;
-    // The cursor tracks the last *raw* row so paging advances even past filtered-out events.
+    // The cursor tracks the last *raw* row that carries one, so paging advances even when the
+    // final rows lack a cursor rather than halting early.
     let next_cursor = (rows.len() as u32 == limit)
-        .then(|| rows.last().and_then(|r| r.event.cursor()))
+        .then(|| rows.iter().rev().find_map(|r| r.event.cursor()))
         .flatten()
         .map(|c| Cursor::encode(&(c.block_number, c.log_index)));
     let items = rows

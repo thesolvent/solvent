@@ -337,6 +337,7 @@ mod tests {
             Ok(TradeStats {
                 settled: 0,
                 confirmed: 0,
+                failed: 0,
                 median_impact_pct: None,
             })
         }

@@ -399,18 +399,18 @@ impl TradeStore for SqliteTradeStore {
     }
 
     async fn stats(&self) -> Result<TradeStats, TradeStoreError> {
-        let (settled, confirmed): (i64, i64) = sqlx::query_as(
+        let (settled, confirmed, failed): (i64, i64, i64) = sqlx::query_as(
             "SELECT
                  COUNT(*) FILTER (WHERE settled_at IS NOT NULL),
-                 COUNT(*) FILTER (WHERE status = 'confirmed')
+                 COUNT(*) FILTER (WHERE status = 'confirmed'),
+                 COUNT(*) FILTER (WHERE status = 'failed')
              FROM trade",
         )
         .fetch_one(&self.pool)
         .await
         .map_err(db)?;
 
-        // Median in Rust: settled trades don't carry a price impact yet, so this is empty until they
-        // do — the tile is wired to the column, awaiting its first backed value.
+        // Median in Rust over the settled trades that carry a price impact.
         let mut impacts: Vec<f64> = sqlx::query_scalar(
             "SELECT price_impact_pct FROM trade
              WHERE settled_at IS NOT NULL AND price_impact_pct IS NOT NULL",
@@ -422,6 +422,7 @@ impl TradeStore for SqliteTradeStore {
         Ok(TradeStats {
             settled: u64::try_from(settled).map_err(|_| db("negative settled count"))?,
             confirmed: u64::try_from(confirmed).map_err(|_| db("negative confirmed count"))?,
+            failed: u64::try_from(failed).map_err(|_| db("negative failed count"))?,
             median_impact_pct: median(&mut impacts),
         })
     }

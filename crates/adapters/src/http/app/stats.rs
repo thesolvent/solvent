@@ -40,8 +40,10 @@ pub async fn stats(State(state): State<AppState>) -> ApiResult<Stats> {
         .map_err(SolventError::from)?;
 
     let trades = state.trades.stats().await.map_err(SolventError::from)?;
-    let confirmed_pct =
-        (trades.settled > 0).then(|| 100.0 * trades.confirmed as f64 / trades.settled as f64);
+    // Success rate over on-chain outcomes only: confirmed vs failed. Declines are settled but
+    // aren't fill attempts, so they stay out of the denominator.
+    let attempted = trades.confirmed + trades.failed;
+    let confirmed_pct = (attempted > 0).then(|| 100.0 * trades.confirmed as f64 / attempted as f64);
 
     // Distinct makers with a live strategy, and how many of those strategies can quote now.
     let snapshot = state.registry.load();
