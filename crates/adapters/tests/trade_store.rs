@@ -354,5 +354,6 @@ async fn stats_counts_settled_confirmed_and_median_impact() {
     let stats = store.stats().await.unwrap();
     assert_eq!(stats.settled, 3, "three trades reached a terminal state");
     assert_eq!(stats.confirmed, 2, "two of them confirmed");
+    assert_eq!(stats.failed, 1, "one of them failed");
     assert_eq!(stats.median_impact_pct, Some(0.42));
 }

@@ -148,10 +148,15 @@ impl SwapService {
                 .info(&created.id)
                 .await?
                 .map_or(TradeStatus::Quoted, |info| info.trade.status);
-            return Ok(SwapOutcome {
-                trade_id: created.id,
-                status,
-            });
+            // A crash between create and reserve strands a trade at Created/Quoted; a resubmit
+            // re-drives the reserve→fill path below. Reserved-or-later is already in flight (or
+            // terminal), so echo its status without touching it.
+            if !matches!(status, TradeStatus::Created | TradeStatus::Quoted) {
+                return Ok(SwapOutcome {
+                    trade_id: created.id,
+                    status,
+                });
+            }
         }
 
         let reservation = reservation_id(intent.id, &plan);
@@ -250,6 +255,8 @@ impl SwapService {
                 &reached(now, &[TradeStatus::Created, TradeStatus::Declined]),
             )
             .await?;
+        // Stamp `settled_at` like every other decline path, so /stats counts them consistently.
+        self.settle(&created.id, TradeStatus::Declined, now).await?;
         Ok(SwapOutcome {
             trade_id: created.id,
             status: TradeStatus::Declined,
@@ -639,6 +646,7 @@ mod tests {
             Ok(TradeStats {
                 settled: 0,
                 confirmed: 0,
+                failed: 0,
                 median_impact_pct: None,
             })
         }
@@ -789,6 +797,58 @@ mod tests {
             .unwrap();
         assert_eq!(again.trade_id, first.trade_id);
         assert_eq!(h.ledger.available(&virt(3, USDC)), held, "no second hold");
+    }
+
+    #[tokio::test]
+    async fn resubmit_of_a_wedged_quoted_trade_redrives_to_submitted() {
+        let h = harness(vec![xyc(3, e(100, 18), e(300_000, 6))], SimVerdict::Ok).await;
+        let order = intent(7, addr(9), e(2, 18), e(3000, 6));
+        // A crash between create and reserve strands the trade at Quoted, never reserved or filled.
+        let stuck = Trade {
+            id: tid(),
+            order_hash: order.id,
+            taker: addr(9),
+            token_in: addr(WETH),
+            token_out: addr(USDC),
+            amount_in: e(2, 18),
+            min_amount_out: e(3000, 6),
+            amount_out: None,
+            status: TradeStatus::Quoted,
+            deadline_block: order.deadline,
+            signature: Some(order.signature.clone()),
+            price_impact_pct: None,
+            surplus: None,
+            tx_hash: None,
+            block_number: None,
+            created_at: 1_700_000_000,
+            settled_at: None,
+        };
+        h.trades
+            .create(
+                &stuck,
+                &[],
+                &reached(1_700_000_000, &[TradeStatus::Created, TradeStatus::Quoted]),
+            )
+            .await
+            .unwrap();
+
+        // Resubmitting the same order (a new candidate id) re-drives the wedged trade forward
+        // rather than echoing the stuck Quoted status.
+        let out = h
+            .swap
+            .submit(
+                order,
+                addr(9),
+                TradeId(Ulid::from_parts(1_700_000_000_999, 5)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.trade_id, stuck.id, "same trade, not a new one");
+        assert_eq!(
+            out.status,
+            TradeStatus::Submitted,
+            "the wedged trade advanced to submitted"
+        );
     }
 
     #[tokio::test]

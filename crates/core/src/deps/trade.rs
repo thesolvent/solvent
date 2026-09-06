@@ -47,6 +47,9 @@ pub struct TradeStats {
     pub settled: u64,
     /// Of those, how many confirmed on-chain.
     pub confirmed: u64,
+    /// Of those, how many failed on-chain — the confirmation-rate denominator with `confirmed`
+    /// (declines are settled but excluded).
+    pub failed: u64,
     pub median_impact_pct: Option<f64>,
 }
 
