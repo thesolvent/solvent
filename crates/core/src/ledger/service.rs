@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 
 use crate::deps::ledger::{BudgetSource, Clock, LedgerStore};
 use crate::primitives::ledger::{AccountKey, Ledger, Reservation, ReservationSource};
+use crate::primitives::registry::Snapshot;
 use crate::primitives::{IntentId, ReservationId, SolventError};
 
 /// The available room at every known account, republished after each command for lock-free reads.
@@ -148,6 +149,23 @@ impl LedgerService {
         self.available.load().available(account)
     }
 
+    /// The whole caps snapshot (every active account net of holds), read lock-free — the one
+    /// snapshot the depth curve and the router both read, with no per-request RPC.
+    pub fn snapshot(&self) -> Arc<AvailableSnapshot> {
+        self.available.load_full()
+    }
+
+    /// Refresh the full book's budgets off the request path: one batched read of every active
+    /// maker's caps, replacing the fed budgets wholesale (holds are preserved) and republishing.
+    /// A supervised poller drives this; a failed tick keeps the last-good snapshot and retries.
+    pub async fn sync_budgets(&self, registry: &Snapshot) -> Result<(), SolventError> {
+        let budgets = self.budgets.budgets(&active_accounts(registry)).await?;
+        let mut ledger = self.ledger.lock().await;
+        ledger.set_budgets(budgets);
+        self.publish(&ledger);
+        Ok(())
+    }
+
     async fn read_budgets(
         &self,
         accounts: &BTreeSet<AccountKey>,
@@ -167,6 +185,33 @@ impl LedgerService {
 
 fn accounts_of(sources: &[ReservationSource]) -> BTreeSet<AccountKey> {
     sources.iter().flat_map(|s| s.accounts()).collect()
+}
+
+/// The accounts to sync: each active strategy's wallet and virtual on both of its pair's tokens.
+/// Wallets dedup per `(maker, token)` — a maker's strategies share one wallet.
+fn active_accounts(snapshot: &Snapshot) -> Vec<AccountKey> {
+    let mut walleted: BTreeSet<AccountKey> = BTreeSet::new();
+    let mut accounts: Vec<AccountKey> = Vec::new();
+    for strategy in snapshot.active_strategies() {
+        let Some(pair) = strategy.pair() else {
+            continue;
+        };
+        for token in [pair.lo, pair.hi] {
+            let wallet = AccountKey::WalletBudget {
+                maker: strategy.key.maker,
+                token,
+            };
+            if walleted.insert(wallet) {
+                accounts.push(wallet);
+            }
+            accounts.push(AccountKey::StrategyVirtual {
+                maker: strategy.key.maker,
+                strategy_hash: strategy.key.strategy_hash,
+                token,
+            });
+        }
+    }
+    accounts
 }
 
 #[cfg(test)]
@@ -407,5 +452,52 @@ mod tests {
         assert_eq!(restarted.available(&wallet(1, 3)), U256::ZERO);
         restarted.recover().await.unwrap();
         assert_eq!(restarted.available(&wallet(1, 3)), amt(400_000));
+    }
+
+    #[tokio::test]
+    async fn sync_budgets_publishes_the_whole_book_net_of_holds() {
+        use crate::primitives::registry::{Curve, CurveSpec, MakerStrategy, Snapshot, StrategyKey};
+
+        // One active strategy for maker 1 over tokens (3, 4) — its virtuals come from the registry.
+        let key = StrategyKey {
+            maker: maker(1),
+            app: Address::ZERO,
+            strategy_hash: strat(1),
+        };
+        let mut strategy = MakerStrategy::new(key, &[]);
+        strategy.curve = CurveSpec::Priceable {
+            curve: Curve::Xyc,
+            fees_in_bps: vec![],
+        };
+        strategy.balances.insert(token(3), amt(600_000));
+        strategy.balances.insert(token(4), amt(600_000));
+        let registry = Snapshot::from_strategies([strategy]);
+
+        let (svc, _, _) = build(
+            &[
+                (wallet(1, 3), 1_000_000),
+                (virt(1, 1, 3), 600_000),
+                (wallet(1, 4), 1_000_000),
+                (virt(1, 1, 4), 600_000),
+            ],
+            1000,
+        );
+
+        // The whole book is published from the sync alone — no reservation needed to see caps.
+        svc.sync_budgets(&registry).await.unwrap();
+        assert_eq!(svc.available(&wallet(1, 3)), amt(1_000_000));
+        assert_eq!(svc.available(&virt(1, 1, 3)), amt(600_000));
+
+        // A reservation nets its hold out of the same snapshot.
+        svc.reserve(resv(1), intent(1), vec![src(1, 1, 3, 400_000)], 60)
+            .await
+            .unwrap();
+        assert_eq!(svc.available(&wallet(1, 3)), amt(600_000));
+        assert_eq!(svc.available(&virt(1, 1, 3)), amt(200_000));
+
+        // Re-syncing replaces budgets wholesale but preserves the standing hold.
+        svc.sync_budgets(&registry).await.unwrap();
+        assert_eq!(svc.snapshot().available(&wallet(1, 3)), amt(600_000));
+        assert_eq!(svc.snapshot().available(&virt(1, 1, 3)), amt(200_000));
     }
 }

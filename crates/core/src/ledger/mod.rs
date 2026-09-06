@@ -1,9 +1,8 @@
 //! Ledger — the single-writer service that makes the pure reservation engine durable,
-//! concurrency-safe, and recoverable, plus the budget cache that syncs every maker's caps for the
-//! lock-free read paths.
+//! concurrency-safe, and recoverable. It syncs every active maker's caps off the request path and
+//! publishes one lock-free `available` snapshot (caps net of holds) that the depth curve and the
+//! router both read.
 
-pub mod budget_cache;
 pub mod service;
 
-pub use budget_cache::BudgetCache;
 pub use service::{AvailableSnapshot, LedgerService};
