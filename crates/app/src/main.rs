@@ -32,7 +32,7 @@ use solvent_core::execution::ExecutionService;
 use solvent_core::ledger::LedgerService;
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::primitives::routing::RoutingConfig;
-use solvent_core::primitives::{ChainConfig, ChainId};
+use solvent_core::primitives::{ChainConfig, ChainId, UsdPrice};
 use solvent_core::quote::QuoteService;
 use solvent_core::reconcile::ReconcileService;
 use solvent_core::registry::{RegistrySync, SharedSnapshot};
@@ -156,6 +156,9 @@ async fn main() -> Result<(), StartupError> {
     // Market data for the per-leg gas cost: a cache the quote path reads lock-free (no RPC), kept
     // fresh by a gas poller (RPC) and the Binance price feed (WS). Both self-heal.
     let market = MarketCache::new();
+    for token in &config.usd_stable_pegs {
+        market.seed_price(*token, UsdPrice::PAR);
+    }
     tokio::spawn(GasPoller::new(provider.clone(), Arc::clone(&market), GAS_POLL_INTERVAL).run());
     tokio::spawn(
         BinanceFeed::new(
