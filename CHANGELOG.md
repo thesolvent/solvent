@@ -156,8 +156,14 @@ the project is pre-1.0 and evolving.
   - **Tests** — pure-split unit matrix; a hermetic walking skeleton (real `route` internalizes the
     reverse buy into the imbalanced maker → credit); store idempotency/settle; payout aggregation &
     failed-payment retry; a live anvil E2E paying a maker on chain and settling.
-  - **Deferred** (design §4, §14): Tier 1 public counter-intent auction + its ledger-race property
-    tests, auction-set split, an actual (vs. expected) realized-spread cap, cross-chain.
+  - **Realized-spread cap** — the α cap now bounds rebates by the fill's *realized* resolver spread
+    (the plan's expected spread adjusted by the actual-vs-plan sourcing drift), so a partial or
+    dearer-than-planned fill never rebates past what it earned; a no-op on exact-in.
+  - **Scope — internal-only (2026-09-06)**: Tier 1 public counter-intent auction, its ledger-race
+    property tests, and the auction-set split are **out of scope** (that race rides on Tier 1; internal
+    best-effort recapture is the disclosed limit, §12). The in-binary payout worker + config (§6.2/§8)
+    and the oracle-staleness gate (§8/§9) are deferred as blocked on the app composition root / a caching
+    price oracle. Cross-chain remains future work.
 
 _Next: B6 — reconcile._
 

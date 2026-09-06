@@ -111,6 +111,24 @@ or a capacity floor that keeps adding pools until the top-K can absorb the trade
 
 ---
 
+## L10 — Recapture payout is at-least-once until the operator worker is wired
+**Component:** recapture — `crates/adapters/src/recapture/alloy_payer.rs` × `crates/core/src/recapture/payout.rs`
+
+`PayoutService` settles a `(maker, token)` group only after its transfer lands, and `mark_settled`
+commits a group's rows in one transaction (all-or-nothing). The remaining gap is `AlloyRebatePayer::pay`,
+which sends the ERC-20 transfer straight over an `alloy` provider (`send().watch()`) rather than through
+the project's `walletkit` tx engine. An *ambiguous* confirmation — `send` succeeds but `watch` errors on
+an RPC timeout — returns `Err`, leaves the credit outstanding, and the next sweep re-sends; if the first
+(unconfirmed-to-us) transfer already landed, the maker is paid twice. Exactly-once payout is walletkit's
+job — a durable handle + status re-check on retry, exactly as `WalletkitExecutor` gives the fill path —
+and the plan named it (`tier0-recapture-plan.md`, Task 4: "Reuses: the execution tx-engine"). **Inert
+today:** `AlloyRebatePayer` is exercised only by tests; nothing runs the payout worker (the in-binary
+worker is deferred, blocked on the app composition root — see the recapture design's scope note). The
+gate: route the payer through `walletkit::Wallet` *before* that worker is ever enabled, so the
+double-pay window never opens in production.
+
+---
+
 # Performance — refactor before production
 
 MVP-simple choices that are correct but do unwanted work / hold heavy state. None is on the 500 ms

@@ -6,6 +6,15 @@
 > public counter-intent fallback (Tier 1) and cross-chain are designed here at the boundary but
 > **deferred**. Backend phases B0–B4 (watcher → routing → ledger → execution) are prerequisites.
 
+> **Scope decision (2026-09-06) — internal-only.** After Tier 0 shipped (with actual-vs-expected
+> reconciliation and a realized-spread cap, §5.2/§14), Tier 1 (public counter-intent auction) and its
+> ledger-race concurrency work (§6.5) were **taken out of scope**, not merely deferred: the novelty and
+> the zero-inventory thesis live in the internal path, that race exists only for Tier 1's waiting
+> orders, and best-effort recapture is an accepted, disclosed limit (§12). The remaining Tier-0 items —
+> the in-binary payout worker + its config (§6.2/§8) and the oracle-staleness gate (§8/§9) — are
+> deferred as **blocked on infrastructure that does not yet exist** (the app composition root; a
+> caching/timestamped price oracle). The recapture mechanism itself is complete and proven on-chain.
+
 ---
 
 ## 1. Why this exists — the leak
@@ -362,12 +371,14 @@ Not built, and why:
 
 ## 14. Open questions / future
 
-- **Tier 1 counter-intent origination** — how Solvent posts a public Dutch rebalancing order with
-  no user and no inventory (synthetic UniswapX order vs. a Solvent-native open order to a filler
-  network), so recapture no longer depends on organic reverse flow.
-- **Auction-set split** — once Tier 1 exists, the maker/protocol share becomes competition-set
-  (CoW/Fusion norm) rather than a fixed 80/20.
-- **Actual-vs-expected reconciliation** — credit from `SettlementReader` actuals rather than
+- **Tier 1 counter-intent origination** — *out of scope (internal-only, see the scope decision above).*
+  How Solvent would post a public Dutch rebalancing order with no user and no inventory (synthetic
+  UniswapX order vs. a Solvent-native open order to a filler network), so recapture no longer depends
+  on organic reverse flow.
+- **Auction-set split** — *out of scope (rides on Tier 1).* Once Tier 1 exists, the maker/protocol
+  share becomes competition-set (CoW/Fusion norm) rather than a fixed 80/20.
+- **Actual-vs-expected reconciliation** — *done.* Credit is valued from the fill's actual legs
+  (`SettledLegsReader`), and the α cap uses the fill's realized spread (`realized_spread`), rather than
   `RoutePlan` expectations.
-- **Cross-chain recapture** — reverse flow and pool live on the destination chain; interacts with
-  the netting/rebalance layer (L4) of `SPEC.md` §10.
+- **Cross-chain recapture** — *future.* Reverse flow and pool live on the destination chain; interacts
+  with the netting/rebalance layer (L4) of `SPEC.md` §10.
