@@ -4,7 +4,9 @@
 use alloy::primitives::{Address, Bytes, B256, U256};
 use async_trait::async_trait;
 use solvent_core::{
-    deps::trade::{CreateResult, Page, Settlement, TradeFilter, TradeStore, TradeStoreError},
+    deps::trade::{
+        CreateResult, Page, Settlement, TradeFilter, TradeStats, TradeStore, TradeStoreError,
+    },
     primitives::{
         trade::{Trade, TradeAttempt, TradeId, TradeInfo, TradeLeg, TradeStatus},
         IntentId, MakerId, StrategyHash,
@@ -33,6 +35,20 @@ impl SqliteTradeStore {
 
 fn db(e: impl std::fmt::Display) -> TradeStoreError {
     TradeStoreError::Db(e.to_string())
+}
+
+/// The median of `values`, or `None` if empty. Sorts in place (NaN-safe via `total_cmp`).
+fn median(values: &mut [f64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(f64::total_cmp);
+    let mid = values.len() / 2;
+    Some(if values.len().is_multiple_of(2) {
+        (values[mid - 1] + values[mid]) / 2.0
+    } else {
+        values[mid]
+    })
 }
 
 // ---- encoding: domain -> column --------------------------------------------
@@ -380,6 +396,34 @@ impl TradeStore for SqliteTradeStore {
             attempts,
             legs,
         }))
+    }
+
+    async fn stats(&self) -> Result<TradeStats, TradeStoreError> {
+        let (settled, confirmed): (i64, i64) = sqlx::query_as(
+            "SELECT
+                 COUNT(*) FILTER (WHERE settled_at IS NOT NULL),
+                 COUNT(*) FILTER (WHERE status = 'confirmed')
+             FROM trade",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db)?;
+
+        // Median in Rust: settled trades don't carry a price impact yet, so this is empty until they
+        // do — the tile is wired to the column, awaiting its first backed value.
+        let mut impacts: Vec<f64> = sqlx::query_scalar(
+            "SELECT price_impact_pct FROM trade
+             WHERE settled_at IS NOT NULL AND price_impact_pct IS NOT NULL",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+
+        Ok(TradeStats {
+            settled: u64::try_from(settled).map_err(|_| db("negative settled count"))?,
+            confirmed: u64::try_from(confirmed).map_err(|_| db("negative confirmed count"))?,
+            median_impact_pct: median(&mut impacts),
+        })
     }
 
     async fn list(&self, filter: &TradeFilter, page: &Page) -> Result<Vec<Trade>, TradeStoreError> {

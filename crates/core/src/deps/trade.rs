@@ -40,6 +40,16 @@ pub struct Page {
     pub cursor: Option<TradeId>,
 }
 
+/// Aggregate counts over the trade table, for the stat tiles. `median_impact_pct` is `None` until
+/// trades carry a price impact.
+pub struct TradeStats {
+    /// Trades that reached a terminal (settled) state.
+    pub settled: u64,
+    /// Of those, how many confirmed on-chain.
+    pub confirmed: u64,
+    pub median_impact_pct: Option<f64>,
+}
+
 #[async_trait]
 pub trait TradeStore: Send + Sync {
     /// Persist a new trade with its legs and initial timeline, atomically. Idempotent on the order
@@ -72,6 +82,9 @@ pub trait TradeStore: Send + Sync {
 
     /// A page of trade headers (newest first) matching `filter`.
     async fn list(&self, filter: &TradeFilter, page: &Page) -> Result<Vec<Trade>, TradeStoreError>;
+
+    /// Aggregate lifecycle counts for the stat tiles.
+    async fn stats(&self) -> Result<TradeStats, TradeStoreError>;
 }
 
 /// A trade store failure.
