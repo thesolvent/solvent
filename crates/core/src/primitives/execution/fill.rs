@@ -119,3 +119,21 @@ impl TrackedFill {
         }
     }
 }
+
+/// A fill that reconcile drove to a terminal state, reported so the trade lifecycle can settle. The
+/// pre-submit sim-reject never reaches here — it settles the trade as declined on the submit path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Settled {
+    pub intent: IntentId,
+    pub outcome: SettledOutcome,
+}
+
+/// How a reconciled fill ended: confirmed on-chain (the ledger was posted the actual pulled amounts),
+/// or failed/dropped (the hold was released).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SettledOutcome {
+    Confirmed { tx: B256, block: u64 },
+    Failed,
+}

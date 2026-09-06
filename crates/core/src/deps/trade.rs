@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::primitives::trade::{Trade, TradeAttempt, TradeId, TradeInfo, TradeLeg, TradeStatus};
+use crate::primitives::IntentId;
 
 /// The outcome of a [`create`](TradeStore::create): the trade id now representing this order, and
 /// whether it was newly inserted (vs. an existing trade for the same order hash).
@@ -64,6 +65,10 @@ pub trait TradeStore: Send + Sync {
 
     /// Full detail for one trade — header, stage timeline, and legs — or `None` if unknown.
     async fn info(&self, id: &TradeId) -> Result<Option<TradeInfo>, TradeStoreError>;
+
+    /// The trade recorded for a signed order hash, or `None` — the reconcile path's bridge from a
+    /// settled fill (keyed by the order hash) back to its trade.
+    async fn find_by_order(&self, order_hash: &IntentId) -> Result<Option<Trade>, TradeStoreError>;
 
     /// A page of trade headers (newest first) matching `filter`.
     async fn list(&self, filter: &TradeFilter, page: &Page) -> Result<Vec<Trade>, TradeStoreError>;
