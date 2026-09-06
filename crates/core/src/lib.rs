@@ -6,6 +6,7 @@ pub mod deps;
 pub mod execution;
 pub mod ingest;
 pub mod ledger;
+pub mod maker;
 pub mod obs;
 pub mod pool;
 pub mod primitives;

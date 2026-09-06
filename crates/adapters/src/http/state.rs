@@ -9,6 +9,7 @@ use solvent_core::balances::BalancesService;
 use solvent_core::deps::quote_log::QuoteLog;
 use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::trade::TradeStore;
+use solvent_core::maker::MakerService;
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::quote::QuoteService;
 use solvent_core::registry::SharedSnapshot;
@@ -46,6 +47,8 @@ pub struct AppState {
     pub pools: Arc<PoolService>,
     pub depth: Arc<DepthService>,
     pub balances: Arc<BalancesService>,
+    /// The maker read-surface: positions, the positions list, and the roster.
+    pub makers: Arc<MakerService>,
     pub quote: Arc<QuoteService>,
     pub swap: Arc<SwapService>,
     /// Cosigns taker-signed orders on the swap path (holds only the resolver's cosigner key).

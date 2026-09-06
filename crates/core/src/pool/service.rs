@@ -8,9 +8,9 @@ use alloy_primitives::U256;
 use crate::asset::AssetManager;
 use crate::primitives::amount::{TokenAmount, TokenAmounts};
 use crate::primitives::asset::Token;
-use crate::primitives::pool::{Pool, PoolDetail, PoolMaker, PoolType};
+use crate::primitives::pool::{classify_pair, Pool, PoolDetail, PoolMaker, PoolType};
 use crate::primitives::registry::{
-    curve_label, fee_in_bps, CurveKind, CurveSpec, MakerStrategy, PoolStats, Snapshot, TokenPair,
+    curve_label, fee_in_bps, CurveSpec, MakerStrategy, PoolStats, Snapshot, TokenPair,
 };
 use crate::primitives::Usd;
 use crate::registry::SharedSnapshot;
@@ -85,15 +85,11 @@ impl PoolService {
 
     /// Both tokens stable → `Stable`; else pegged-dominant → `Correlated`; else `Volatile`.
     fn classify(&self, pair: &TokenPair, stats: &PoolStats) -> PoolType {
-        match (
+        classify_pair(
             self.assets.is_stable(&pair.lo),
             self.assets.is_stable(&pair.hi),
             stats.curve_mix.dominant(),
-        ) {
-            (true, true, _) => PoolType::Stable,
-            (_, _, Some(CurveKind::Pegged)) => PoolType::Correlated,
-            _ => PoolType::Volatile,
-        }
+        )
     }
 
     /// Full detail for `pair`, or `None` if it has no active pool. The row is the same as the list's;

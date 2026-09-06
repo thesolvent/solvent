@@ -8,6 +8,7 @@ use crate::deps::balances::BalancesOracleError;
 use crate::deps::execution::{ExecutionError, SettlementError, SimError};
 use crate::deps::ingest::{FillBuilderError, NormalizeError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
+use crate::deps::maker_metrics::MakerMetricsError;
 use crate::deps::registry::{ChainSourceError, StoreError};
 use crate::deps::trade::TradeStoreError;
 use crate::primitives::ledger::LedgerError;
@@ -58,4 +59,7 @@ pub enum SolventError {
     /// Building a protocol fill's calldata failed.
     #[error("fill builder: {0}")]
     FillBuilder(#[from] FillBuilderError),
+    /// Reading maker metrics failed.
+    #[error("maker metrics: {0}")]
+    MakerMetrics(#[from] MakerMetricsError),
 }
