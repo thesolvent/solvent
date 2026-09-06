@@ -173,7 +173,40 @@ the project is pre-1.0 and evolving.
   - **Live-run dependency:** Multicall3 predeployed on the devnet (the S1 coordination item); the
     depth/balances chain reads are otherwise unit- and (for the shared reader) anvil-E2E-tested.
 
-_Next: S2 M2 — the core loop (swap quote/submit, trades, activity)._
+- **S2 · M2 — the core swap loop**: the write path and the lifecycle read surface — a signed order is
+  quoted, submitted, reserved, filled, confirmed on-chain, settled, and observable, restart-safe end
+  to end.
+  - **Trade store** — a durable, idempotent trade lifecycle: `TradeStore` port (create dedups on the
+    order hash, `advance` monotonic by status rank, `settle` terminal-guarded by `settled_at`, `info`,
+    filtered/paginated `list`, `find_by_order`, aggregate `stats`); `TradeId` (ULID, time-sortable);
+    a normalized `trade`/`trade_leg`/`trade_attempt` schema (SQLite).
+  - **`POST /v1/swap/quote`** — exact-in quote over one `select` + `solve_sparse` pass (no double
+    solve); best-price impact read straight off the routed candidates; per-leg gas priced from the
+    poller-backed cache (zero RPC on the path).
+  - **`POST /v1/swap`** — the submit path: a taker-signed UniswapX V2 order is verified and cosigned
+    (`ServerCosigner`, keys env-only, no `Debug` leak), normalized, routed **exact-out**, and driven
+    create → reserve → fill; idempotent on the order hash. Request shaped like the UniswapX Orders API.
+  - **Durable execution recovery** — the in-flight set is no longer in memory: each submitted fill's
+    `(order_hash → reservation, engine handle)` is persisted behind a `FillStore` port (SQLite), and
+    walletkit runs on a durable redb store, so a restart recovers and reconciles every in-flight fill
+    through the normal reconcile tick — no separate recovery path. Kill-and-restart E2E.
+  - **Reconcile worker** — a supervised loop that drives in-flight fills to terminal, settles the
+    matching trade (confirmed / failed), and TTL-sweeps orphaned holds *excluding* still-in-flight
+    reservations (so a hold is never released while its tx can land); a swept orphan fails its trade.
+  - **`GET /v1/trades` + `/v1/trades/{id}`** — one `Trade` wire DTO (list omits the heavy
+    lifecycle/legs/order fields, detail fills them); status/taker/pair filters, keyset cursor paging.
+  - **`GET /v1/activity`** — the Aqua event feed (ship/push/pull/dock) from the durable log, keyset
+    paged, with kind/actor/token filters; `aqua_event` gains a clock-stamped `created_at`, backing a
+    real `events_24h`.
+  - **`GET /v1/stats`** filled — `events_24h`, `trades_settled`, `confirmed_pct` (over confirmed +
+    failed), `median_impact_pct`, and `active_makers` / `quoting_now` from the live registry.
+  - **Phase-close refactor** (from a footprint + comment audit): token-decimals and per-leg gas cost
+    de-duplicated across the quote/swap paths (`AssetManager::decimals`, a shared `LegCostResolver`);
+    price impact now computed once in routing and produced onto settled trades; fixes for a
+    crash-between-create-and-reserve wedge, decline-stat consistency, and activity pagination; a
+    codebase-wide comment trim to the house standard.
+
+_Next: S3 — construction / SDK._
 
 ## [0.1.0] — 2026-08-28
 
