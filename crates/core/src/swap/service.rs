@@ -7,10 +7,8 @@ use std::sync::Arc;
 
 use alloy_primitives::{keccak256, Address, U256};
 
-use crate::asset::AssetManager;
 use crate::deps::ingest::FillBuilder;
 use crate::deps::ledger::Clock;
-use crate::deps::routing::{GasPrice, PriceOracle};
 use crate::deps::trade::{Settlement, TradeStore};
 use crate::execution::ExecutionService;
 use crate::ledger::LedgerService;
@@ -22,15 +20,13 @@ use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 use crate::primitives::trade::{Trade, TradeAttempt, TradeId, TradeLeg, TradeStatus};
 use crate::primitives::{IntentId, ReservationId};
 use crate::registry::SharedSnapshot;
-use crate::routing::{resolve_leg_cost, route};
+use crate::routing::{route, LegCostResolver};
 use crate::SolventError;
 
 /// The chain/fill constants and routing knobs the swap path needs, bundled to keep the constructor
 /// small.
 pub struct SwapConfig {
     pub routing: RoutingConfig,
-    /// Native token (WETH) for gas valuation.
-    pub native: Address,
     pub chain_id: u64,
     /// The filler contract and the account authorized to call it.
     pub filler: Address,
@@ -51,9 +47,7 @@ pub struct SwapService {
     trades: Arc<dyn TradeStore>,
     execution: Arc<ExecutionService>,
     fill_builder: Arc<dyn FillBuilder>,
-    assets: Arc<AssetManager>,
-    gas: Arc<dyn GasPrice>,
-    oracle: Arc<dyn PriceOracle>,
+    leg_cost: Arc<LegCostResolver>,
     clock: Arc<dyn Clock>,
     config: SwapConfig,
 }
@@ -66,9 +60,7 @@ impl SwapService {
         trades: Arc<dyn TradeStore>,
         execution: Arc<ExecutionService>,
         fill_builder: Arc<dyn FillBuilder>,
-        assets: Arc<AssetManager>,
-        gas: Arc<dyn GasPrice>,
-        oracle: Arc<dyn PriceOracle>,
+        leg_cost: Arc<LegCostResolver>,
         clock: Arc<dyn Clock>,
         config: SwapConfig,
     ) -> Self {
@@ -78,9 +70,7 @@ impl SwapService {
             trades,
             execution,
             fill_builder,
-            assets,
-            gas,
-            oracle,
+            leg_cost,
             clock,
             config,
         }
@@ -115,16 +105,7 @@ impl SwapService {
             exact_in: false,
         };
         // Exact-out charges gas in the spread token = `token_in`. Cache-read, gas-free if unpriced.
-        let per_leg_cost = resolve_leg_cost(
-            self.gas.as_ref(),
-            self.oracle.as_ref(),
-            self.config.routing.gas_units_per_leg,
-            self.config.native,
-            token_in,
-            self.decimals(token_in),
-        )
-        .await
-        .unwrap_or(U256::ZERO);
+        let per_leg_cost = self.leg_cost.for_request(&request).await;
         // The taker's input is the max-in bound: a plan that can't source the output within it (net
         // of gas) is unprofitable, so the router declines.
         let Some(plan) = route(
@@ -325,10 +306,6 @@ impl SwapService {
             settled_at: None,
         }
     }
-
-    fn decimals(&self, token: Address) -> u8 {
-        self.assets.token(&token).map_or(18, |token| token.decimals)
-    }
 }
 
 /// The reservation id: `keccak(intentId ‖ routePlanHash)`, so it is stable for one intent+plan and a
@@ -388,12 +365,13 @@ mod tests {
     use alloy_primitives::{Bytes, B256};
     use async_trait::async_trait;
 
+    use crate::asset::AssetManager;
     use crate::deps::execution::{
         Execution, ExecutionError, SettlementError, SettlementReader, SimError, SimGate,
     };
     use crate::deps::ingest::FillBuilderError;
     use crate::deps::ledger::{BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError};
-    use crate::deps::routing::{GasPriceError, PriceOracleError};
+    use crate::deps::routing::{GasPrice, GasPriceError, PriceOracle, PriceOracleError};
     use crate::deps::trade::{CreateResult, Page, TradeFilter, TradeStats, TradeStoreError};
     use crate::primitives::asset::{TokenList, TokenMeta};
     use crate::primitives::execution::{ExecHandle, ExecStatus, SimVerdict, TrackedFill};
@@ -713,19 +691,23 @@ mod tests {
             Arc::clone(&ledger),
         ));
         let trades = Arc::new(MemTrades::default());
+        let leg_cost = Arc::new(LegCostResolver::new(
+            Arc::new(NoMarket),
+            Arc::new(NoMarket),
+            assets,
+            addr(WETH),
+            150_000,
+        ));
         let swap = SwapService::new(
             Arc::clone(&registry),
             Arc::clone(&ledger),
             trades.clone(),
             execution,
             Arc::new(FakeFill),
-            assets,
-            Arc::new(NoMarket),
-            Arc::new(NoMarket),
+            leg_cost,
             Arc::new(FixedClock),
             SwapConfig {
                 routing: RoutingConfig::new(16, 4, 150_000),
-                native: addr(WETH),
                 chain_id: 31337,
                 filler: addr(0xF1),
                 filler_owner: addr(0xF0),

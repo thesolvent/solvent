@@ -78,6 +78,21 @@ impl AssetManager {
         self.catalog.get(address).map(Self::token_of)
     }
 
+    /// A token's decimals, defaulting to 18 for one not in the catalog.
+    pub fn decimals(&self, address: &Address) -> u8 {
+        self.catalog.get(address).map_or(18, |meta| meta.decimals)
+    }
+
+    /// The catalog token for `address`, or a bare 18-decimal fallback for one not listed.
+    pub fn token_or_default(&self, address: Address) -> Token {
+        self.token(&address).unwrap_or(Token {
+            address,
+            chain_id: 0,
+            symbol: String::new(),
+            decimals: 18,
+        })
+    }
+
     /// Every catalog token as its lightweight identity — no snapshot load, no `Asset` assembly. For
     /// callers that need the token set but not the full market picture (e.g. wallet balances).
     pub fn catalog_tokens(&self) -> Vec<Token> {

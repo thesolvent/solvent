@@ -17,7 +17,6 @@ use time::OffsetDateTime;
 
 use crate::asset::AssetManager;
 use crate::deps::ledger::Clock;
-use crate::deps::routing::{GasPrice, PriceOracle};
 use crate::ledger::LedgerService;
 use crate::primitives::amount::Amount;
 use crate::primitives::pricing::Ratio;
@@ -26,7 +25,7 @@ use crate::primitives::registry::{curve_label, CurveSpec, Snapshot, TokenPair};
 use crate::primitives::routing::{RouteLeg, RouteRequest, RoutingConfig};
 use crate::primitives::{IntentId, StrategyHash};
 use crate::registry::SharedSnapshot;
-use crate::routing::{resolve_leg_cost, select, solve_sparse};
+use crate::routing::{select, solve_sparse, LegCostResolver};
 
 /// How far ahead a quote's advisory `expires_at` sits.
 const QUOTE_TTL_SECS: u64 = 30;
@@ -37,23 +36,17 @@ pub struct QuoteService {
     assets: Arc<AssetManager>,
     config: RoutingConfig,
     clock: Arc<dyn Clock>,
-    gas: Arc<dyn GasPrice>,
-    oracle: Arc<dyn PriceOracle>,
-    /// The chain's native token (WETH), whose USD price values the gas cost.
-    native: Address,
+    leg_cost: Arc<LegCostResolver>,
 }
 
 impl QuoteService {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         registry: Arc<SharedSnapshot>,
         ledger: Arc<LedgerService>,
         assets: Arc<AssetManager>,
         config: RoutingConfig,
         clock: Arc<dyn Clock>,
-        gas: Arc<dyn GasPrice>,
-        oracle: Arc<dyn PriceOracle>,
-        native: Address,
+        leg_cost: Arc<LegCostResolver>,
     ) -> Self {
         Self {
             registry,
@@ -61,9 +54,7 @@ impl QuoteService {
             assets,
             config,
             clock,
-            gas,
-            oracle,
-            native,
+            leg_cost,
         }
     }
 
@@ -90,17 +81,8 @@ impl QuoteService {
         // The same two steps the swap path runs: funnel, then the gas-aware split. `select` freezes
         // the caps; `solve_sparse` splits under the per-leg gas cost, capped at `max_legs`.
         let selection = select(&snapshot, &caps, &request, self.config.max_candidates);
-        let out_decimals = self.decimals(token_out);
-        let per_leg_cost = resolve_leg_cost(
-            self.gas.as_ref(),
-            self.oracle.as_ref(),
-            self.config.gas_units_per_leg,
-            self.native,
-            token_out,
-            out_decimals,
-        )
-        .await
-        .unwrap_or(U256::ZERO);
+        let out_decimals = self.assets.decimals(&token_out);
+        let per_leg_cost = self.leg_cost.for_request(&request).await;
         let split = solve_sparse(
             &selection.chosen,
             &request,
@@ -157,10 +139,6 @@ impl QuoteService {
             token_in,
             token_out,
         })
-    }
-
-    fn decimals(&self, token: Address) -> u8 {
-        self.assets.token(&token).map_or(18, |token| token.decimals)
     }
 
     /// `now + TTL` as RFC-3339. A near-future unix second is always a valid, formattable instant.
@@ -221,7 +199,7 @@ fn curve_labels(
 mod tests {
     use super::*;
     use crate::deps::ledger::{BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError};
-    use crate::deps::routing::{GasPriceError, PriceOracleError};
+    use crate::deps::routing::{GasPrice, GasPriceError, PriceOracle, PriceOracleError};
     use crate::primitives::asset::{TokenList, TokenMeta};
     use crate::primitives::ledger::{AccountKey, Reservation};
     use crate::primitives::registry::{Curve, CurveSpec, MakerStrategy, Snapshot, StrategyKey};
@@ -370,15 +348,20 @@ mod tests {
         ledger.sync_budgets(&registry.load()).await.unwrap();
         let gas: Arc<dyn GasPrice> = market.clone();
         let oracle: Arc<dyn PriceOracle> = market;
+        let leg_cost = Arc::new(LegCostResolver::new(
+            gas,
+            oracle,
+            Arc::clone(&assets),
+            addr(WETH),
+            150_000,
+        ));
         QuoteService::new(
             registry,
             ledger,
             assets,
             RoutingConfig::new(16, 4, 150_000),
             Arc::new(FixedClock),
-            gas,
-            oracle,
-            addr(WETH),
+            leg_cost,
         )
     }
 

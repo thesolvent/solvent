@@ -108,6 +108,7 @@ mod tests {
     use solvent_core::primitives::{ChainId, IntentId, ReservationId};
     use solvent_core::quote::QuoteService;
     use solvent_core::registry::SharedSnapshot;
+    use solvent_core::routing::LegCostResolver;
     use solvent_core::swap::{SwapConfig, SwapService};
     use tower::ServiceExt;
 
@@ -329,15 +330,20 @@ mod tests {
         let market = MarketCache::new();
         let gas: Arc<dyn GasPrice> = market.clone();
         let oracle: Arc<dyn PriceOracle> = market;
+        let leg_cost = Arc::new(LegCostResolver::new(
+            gas,
+            oracle,
+            Arc::clone(&assets),
+            Address::ZERO,
+            0,
+        ));
         let quote = Arc::new(QuoteService::new(
             Arc::clone(&registry),
             Arc::clone(&ledger),
             Arc::clone(&assets),
             RoutingConfig::new(16, 4, 0),
             Arc::new(SystemClock),
-            gas.clone(),
-            oracle.clone(),
-            Address::ZERO,
+            Arc::clone(&leg_cost),
         ));
         let execution = Arc::new(ExecutionService::new(
             Arc::new(FakeSim),
@@ -352,13 +358,10 @@ mod tests {
             Arc::clone(&trades),
             execution,
             Arc::new(FakeFill),
-            Arc::clone(&assets),
-            gas,
-            oracle,
+            Arc::clone(&leg_cost),
             Arc::new(SystemClock),
             SwapConfig {
                 routing: RoutingConfig::new(16, 4, 0),
-                native: Address::ZERO,
                 chain_id: 31337,
                 filler: Address::ZERO,
                 filler_owner: Address::ZERO,

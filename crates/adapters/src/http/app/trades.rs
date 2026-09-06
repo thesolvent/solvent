@@ -7,7 +7,7 @@ use alloy::primitives::Address;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
-use solvent_core::asset::{AssetManager, Token};
+use solvent_core::asset::AssetManager;
 use solvent_core::deps::trade::{Page as StorePage, TradeFilter};
 use solvent_core::primitives::amount::{Amount, TokenAmount};
 use solvent_core::primitives::trade::{Trade as CoreTrade, TradeId, TradeInfo};
@@ -155,8 +155,8 @@ pub async fn trade_detail(
 
 /// A trade's header as the list DTO — heavy fields left empty.
 fn summary(assets: &AssetManager, trade: &CoreTrade) -> Trade {
-    let token_in = resolve_token(assets, trade.token_in);
-    let token_out = resolve_token(assets, trade.token_out);
+    let token_in = assets.token_or_default(trade.token_in);
+    let token_out = assets.token_or_default(trade.token_out);
     let delivered = trade.amount_out.unwrap_or(trade.min_amount_out);
     Trade {
         id: trade.id.to_string(),
@@ -186,8 +186,8 @@ fn summary(assets: &AssetManager, trade: &CoreTrade) -> Trade {
 
 /// The full detail DTO — the header plus the stage timeline, maker legs, and order coordinates.
 fn detail(assets: &AssetManager, info: &TradeInfo) -> Trade {
-    let token_in = resolve_token(assets, info.trade.token_in);
-    let token_out = resolve_token(assets, info.trade.token_out);
+    let token_in = assets.token_or_default(info.trade.token_in);
+    let token_out = assets.token_or_default(info.trade.token_out);
     Trade {
         lifecycle: Some(
             info.attempts
@@ -213,16 +213,6 @@ fn detail(assets: &AssetManager, info: &TradeInfo) -> Trade {
         deadline_block: Some(info.trade.deadline_block),
         ..summary(assets, &info.trade)
     }
-}
-
-/// The catalog token for `addr`, or a bare 18-decimal fallback for one no longer listed.
-fn resolve_token(assets: &AssetManager, addr: Address) -> Token {
-    assets.token(&addr).unwrap_or(Token {
-        address: addr,
-        chain_id: 0,
-        symbol: String::new(),
-        decimals: 18,
-    })
 }
 
 fn parse_addr(s: &str) -> Result<Address, SolventError> {

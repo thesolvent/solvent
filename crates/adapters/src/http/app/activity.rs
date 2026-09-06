@@ -6,7 +6,7 @@
 use alloy::primitives::Address;
 use axum::extract::{Query, State};
 use serde::{Deserialize, Serialize};
-use solvent_core::asset::{AssetManager, Token};
+use solvent_core::asset::AssetManager;
 use solvent_core::deps::registry::RecordedEvent;
 use solvent_core::primitives::amount::{Amount, TokenAmount};
 use solvent_core::primitives::registry::{AquaEvent, EventCursor, EventExt};
@@ -127,7 +127,7 @@ fn shape(
         maker: key.maker.to_string(),
         strategy_hash: key.strategy_hash.to_string(),
         token: moved.map(|(addr, amount)| {
-            let token = resolve_token(assets, addr);
+            let token = assets.token_or_default(addr);
             TokenAmount {
                 amount: Amount::from_base_units(amount, token.decimals),
                 token,
@@ -158,16 +158,6 @@ fn kind_name(event: &AquaEvent) -> &'static str {
         AquaEvent::Docked { .. } => "docked",
         _ => "unknown",
     }
-}
-
-/// The catalog token for `addr`, or a bare 18-decimal fallback for one not listed.
-fn resolve_token(assets: &AssetManager, addr: Address) -> Token {
-    assets.token(&addr).unwrap_or(Token {
-        address: addr,
-        chain_id: 0,
-        symbol: String::new(),
-        decimals: 18,
-    })
 }
 
 fn parse_addr(s: &str) -> Result<Address, SolventError> {

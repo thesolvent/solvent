@@ -36,6 +36,7 @@ use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
 use solvent_core::reconcile::ReconcileService;
 use solvent_core::registry::{RegistrySync, SharedSnapshot};
+use solvent_core::routing::LegCostResolver;
 use solvent_core::swap::{SwapConfig, SwapService};
 use solvent_core::SolventError;
 use sqlx::SqlitePool;
@@ -166,15 +167,21 @@ async fn main() -> Result<(), StartupError> {
     );
     let gas: Arc<dyn GasPrice> = market.clone();
     let oracle: Arc<dyn PriceOracle> = market;
+    // One per-leg gas resolver shared by both routing paths — quote and swap price gas the same way.
+    let leg_cost = Arc::new(LegCostResolver::new(
+        gas,
+        oracle,
+        Arc::clone(&assets),
+        config.native_token,
+        config.gas_units_per_leg,
+    ));
     let quote = Arc::new(QuoteService::new(
         Arc::clone(&registry),
         Arc::clone(&ledger),
         Arc::clone(&assets),
         RoutingConfig::new(MAX_CANDIDATES, MAX_LEGS, config.gas_units_per_leg),
         Arc::new(SystemClock),
-        gas.clone(),
-        oracle.clone(),
-        config.native_token,
+        Arc::clone(&leg_cost),
     ));
 
     // The swap write path. Signing keys are read from the environment — never the config file or a
@@ -251,13 +258,10 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&trade_store),
         Arc::clone(&execution),
         fill_builder,
-        Arc::clone(&assets),
-        gas,
-        oracle,
+        Arc::clone(&leg_cost),
         Arc::new(SystemClock),
         SwapConfig {
             routing: RoutingConfig::new(MAX_CANDIDATES, MAX_LEGS, config.gas_units_per_leg),
-            native: config.native_token,
             chain_id: config.chain_id,
             filler: config.filler,
             filler_owner,
