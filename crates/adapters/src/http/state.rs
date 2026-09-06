@@ -6,6 +6,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use solvent_core::asset::AssetManager;
 use solvent_core::balances::BalancesService;
+use solvent_core::deps::quote_log::QuoteLog;
 use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::trade::TradeStore;
 use solvent_core::pool::{DepthService, PoolService};
@@ -57,4 +58,6 @@ pub struct AppState {
     pub registry_store: Arc<dyn EventStore>,
     /// USD valuation + market data (price, 24h change) — the read DTOs are valued through this.
     pub valuation: Arc<Valuation>,
+    /// Records each served quote, for maker uptime / latency / fill-share analytics.
+    pub quote_log: Arc<dyn QuoteLog>,
 }
