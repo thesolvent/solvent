@@ -6,9 +6,11 @@ use std::sync::Arc;
 use serde::Serialize;
 use solvent_core::asset::AssetManager;
 use solvent_core::balances::BalancesService;
+use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::trade::TradeStore;
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::quote::QuoteService;
+use solvent_core::registry::SharedSnapshot;
 use solvent_core::swap::SwapService;
 
 use crate::chain::ChainHead;
@@ -48,4 +50,8 @@ pub struct AppState {
     pub cosigner: Arc<ServerCosigner>,
     /// The trade lifecycle store, read by the `/trades` endpoints.
     pub trades: Arc<dyn TradeStore>,
+    /// The live registry snapshot — the stat tiles read active-maker counts lock-free.
+    pub registry: Arc<SharedSnapshot>,
+    /// The durable Aqua event log, read by the `/activity` feed.
+    pub registry_store: Arc<dyn EventStore>,
 }

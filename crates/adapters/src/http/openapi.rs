@@ -20,6 +20,7 @@ use utoipa::OpenApi;
         crate::http::app::swap::submit,
         crate::http::app::trades::trades,
         crate::http::app::trades::trade_detail,
+        crate::http::app::activity::activity,
     ),
     components(schemas(
         crate::http::primitives::Status,
@@ -46,6 +47,7 @@ use utoipa::OpenApi;
         crate::http::app::trades::Trade,
         crate::http::app::trades::Action,
         crate::http::app::trades::MakerLeg,
+        crate::http::app::activity::ActivityEvent,
     ))
 )]
 pub struct ApiDoc;

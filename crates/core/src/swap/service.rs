@@ -394,7 +394,7 @@ mod tests {
     use crate::deps::ingest::FillBuilderError;
     use crate::deps::ledger::{BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError};
     use crate::deps::routing::{GasPriceError, PriceOracleError};
-    use crate::deps::trade::{CreateResult, Page, TradeFilter, TradeStoreError};
+    use crate::deps::trade::{CreateResult, Page, TradeFilter, TradeStats, TradeStoreError};
     use crate::primitives::asset::{TokenList, TokenMeta};
     use crate::primitives::execution::{ExecHandle, ExecStatus, SimVerdict, TrackedFill};
     use crate::primitives::ingest::{AmountCurve, IntentInput, IntentOutput, ProtocolId};
@@ -656,6 +656,13 @@ mod tests {
         }
         async fn list(&self, _: &TradeFilter, _: &Page) -> Result<Vec<Trade>, TradeStoreError> {
             Ok(Vec::new())
+        }
+        async fn stats(&self) -> Result<TradeStats, TradeStoreError> {
+            Ok(TradeStats {
+                settled: 0,
+                confirmed: 0,
+                median_impact_pct: None,
+            })
         }
     }
 

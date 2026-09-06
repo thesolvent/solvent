@@ -40,6 +40,7 @@ pub fn router(state: AppState) -> Router {
         .route("/swap", post(app::swap::submit))
         .route("/trades", get(app::trades::trades))
         .route("/trades/{id}", get(app::trades::trade_detail))
+        .route("/activity", get(app::activity::activity))
         .route("/wallets/{addr}/balances", get(app::balances::balances))
         .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
@@ -86,9 +87,10 @@ mod tests {
     use solvent_core::deps::ledger::{
         BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError,
     };
+    use solvent_core::deps::registry::{EventStore, RecordedEvent, StoreError};
     use solvent_core::deps::routing::{GasPrice, PriceOracle};
     use solvent_core::deps::trade::{
-        CreateResult, Page, Settlement, TradeFilter, TradeStore, TradeStoreError,
+        CreateResult, Page, Settlement, TradeFilter, TradeStats, TradeStore, TradeStoreError,
     };
     use solvent_core::execution::ExecutionService;
     use solvent_core::ledger::LedgerService;
@@ -98,12 +100,12 @@ mod tests {
     };
     use solvent_core::primitives::ingest::Intent;
     use solvent_core::primitives::ledger::{AccountKey, Reservation, ReservationSource};
-    use solvent_core::primitives::registry::Snapshot;
+    use solvent_core::primitives::registry::{AquaEvent, EventCursor, EventExt, Snapshot};
     use solvent_core::primitives::routing::{RoutePlan, RoutingConfig};
     use solvent_core::primitives::trade::{
         Trade, TradeAttempt, TradeId, TradeInfo, TradeLeg, TradeStatus,
     };
-    use solvent_core::primitives::{IntentId, ReservationId};
+    use solvent_core::primitives::{ChainId, IntentId, ReservationId};
     use solvent_core::quote::QuoteService;
     use solvent_core::registry::SharedSnapshot;
     use solvent_core::swap::{SwapConfig, SwapService};
@@ -202,6 +204,46 @@ mod tests {
         }
         async fn list(&self, _: &TradeFilter, _: &Page) -> Result<Vec<Trade>, TradeStoreError> {
             Ok(Vec::new())
+        }
+        async fn stats(&self) -> Result<TradeStats, TradeStoreError> {
+            Ok(TradeStats {
+                settled: 0,
+                confirmed: 0,
+                median_impact_pct: None,
+            })
+        }
+    }
+
+    /// An empty registry event store — the activity/stats endpoints read nothing in these tests.
+    struct NoopEventStore;
+    #[async_trait::async_trait]
+    impl EventStore for NoopEventStore {
+        async fn cursor(&self, _: ChainId) -> Result<Option<EventCursor>, StoreError> {
+            Ok(None)
+        }
+        async fn insert(
+            &self,
+            _: ChainId,
+            _: &[EventExt<AquaEvent>],
+        ) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
+            Ok(Vec::new())
+        }
+        async fn save_cursor(&self, _: ChainId, _: EventCursor) -> Result<(), StoreError> {
+            Ok(())
+        }
+        async fn events(&self, _: ChainId) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
+            Ok(Vec::new())
+        }
+        async fn recent(
+            &self,
+            _: ChainId,
+            _: Option<EventCursor>,
+            _: u32,
+        ) -> Result<Vec<RecordedEvent>, StoreError> {
+            Ok(Vec::new())
+        }
+        async fn count_since(&self, _: ChainId, _: u64) -> Result<u64, StoreError> {
+            Ok(0)
         }
     }
 
@@ -355,6 +397,8 @@ mod tests {
             swap,
             cosigner,
             trades,
+            registry: Arc::clone(&registry),
+            registry_store: Arc::new(NoopEventStore),
         }
     }
 
@@ -574,5 +618,27 @@ mod tests {
     async fn trade_detail_malformed_id_is_400() {
         let (status, _) = get("/v1/trades/not-a-ulid").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn activity_feed_is_ok() {
+        let (status, json) = get("/v1/activity").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["status"], "Ok");
+    }
+
+    #[tokio::test]
+    async fn activity_bad_actor_is_400() {
+        let (status, _) = get("/v1/activity?actor=not-an-address").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn stats_serves_tiles() {
+        let (status, json) = get("/v1/stats").await;
+        assert_eq!(status, StatusCode::OK);
+        // Trade + event tiles are populated (zero over an empty store), not null.
+        assert_eq!(json["result"]["trades_settled"], 0);
+        assert_eq!(json["result"]["events_24h"], 0);
     }
 }

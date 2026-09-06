@@ -315,3 +315,44 @@ async fn list_filters_and_paginates_newest_first() {
         .unwrap();
     assert_eq!(pair.len(), 5);
 }
+
+#[tokio::test]
+async fn stats_counts_settled_confirmed_and_median_impact() {
+    let store = setup().await;
+    // Four trades; every trade() carries price_impact_pct = 0.42.
+    for (i, order, taker) in [(0u64, 1u8, 1u8), (1, 2, 1), (2, 3, 2), (3, 4, 2)] {
+        store
+            .create(
+                &trade(tid(i), order, taker, TradeStatus::Created),
+                &[],
+                &created(1),
+            )
+            .await
+            .unwrap();
+    }
+    let settlement = |status| Settlement {
+        status,
+        amount_out: Some(U256::from(900u64)),
+        tx_hash: None,
+        block_number: None,
+        at: 1_700_000_100,
+    };
+    // Settle two confirmed, one failed; leave the fourth open.
+    store
+        .settle(&tid(0), &settlement(TradeStatus::Confirmed))
+        .await
+        .unwrap();
+    store
+        .settle(&tid(1), &settlement(TradeStatus::Confirmed))
+        .await
+        .unwrap();
+    store
+        .settle(&tid(2), &settlement(TradeStatus::Failed))
+        .await
+        .unwrap();
+
+    let stats = store.stats().await.unwrap();
+    assert_eq!(stats.settled, 3, "three trades reached a terminal state");
+    assert_eq!(stats.confirmed, 2, "two of them confirmed");
+    assert_eq!(stats.median_impact_pct, Some(0.42));
+}

@@ -25,6 +25,7 @@ use solvent_core::balances::BalancesService;
 use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ledger::BudgetSource;
+use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::routing::{GasPrice, PriceOracle};
 use solvent_core::deps::trade::TradeStore;
 use solvent_core::execution::ExecutionService;
@@ -89,6 +90,7 @@ async fn main() -> Result<(), StartupError> {
     let pool = SqlitePool::connect(db_url).await?;
     let registry_store = Arc::new(SqliteStore::new(pool.clone()));
     registry_store.migrate().await.map_err(SolventError::from)?;
+    let registry_store: Arc<dyn EventStore> = registry_store;
 
     // Watcher loop: recover the snapshot from the durable log for immediate readiness, then keep it
     // current by scanning the chain up to the head each tick.
@@ -108,7 +110,7 @@ async fn main() -> Result<(), StartupError> {
     let registry_sync = Arc::new(RegistrySync::new(
         &chain_config,
         chain_source,
-        registry_store,
+        Arc::clone(&registry_store),
         Arc::clone(&registry),
     ));
     registry_sync.recover().await?;
@@ -273,10 +275,11 @@ async fn main() -> Result<(), StartupError> {
             REGISTRY_SYNC_INTERVAL,
         )
     }));
+    let ledger_registry = Arc::clone(&registry);
     tokio::spawn(supervise("ledger-sync", move || {
         run_ledger_sync(
             Arc::clone(&ledger),
-            Arc::clone(&registry),
+            Arc::clone(&ledger_registry),
             BUDGET_POLL_INTERVAL,
         )
     }));
@@ -295,6 +298,8 @@ async fn main() -> Result<(), StartupError> {
         swap,
         cosigner,
         trades: trade_store,
+        registry: Arc::clone(&registry),
+        registry_store,
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
