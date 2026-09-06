@@ -3,6 +3,7 @@
 //! prices squared, adjusted for token decimals and oriented to `quote per base`.
 
 use alloy_primitives::U256;
+use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 
 use super::curve::{Curve, PeggedParams};
@@ -54,9 +55,63 @@ pub fn price_range(curve: &Curve, dec_lo: u8, dec_hi: u8, base_is_lo: bool) -> P
             sqrt_price_min,
             sqrt_price_max,
         } => concentrated(*sqrt_price_min, *sqrt_price_max, dec_lo, dec_hi, base_is_lo),
-        // Peg price + band are derived in T1b (needs pegged fixture vectors).
-        Curve::Pegged(PeggedParams { .. }) => PositionRange::empty(RangeKind::Peg),
+        Curve::Pegged(params) => pegged(params, dec_lo, dec_hi, base_is_lo),
     }
+}
+
+/// One US-dollar of `1e18` fixed-point — the base the concentrate sqrt bounds and pegged marginal
+/// share.
+const E18: u64 = 1_000_000_000_000_000_000;
+
+fn pegged(p: &PeggedParams, dec_lo: u8, dec_hi: u8, base_is_lo: bool) -> PositionRange {
+    let band = symmetric_range_pct(p.linear_width);
+    PositionRange {
+        kind: RangeKind::Peg,
+        lower_price: None,
+        upper_price: None,
+        peg_price: peg_price(p, dec_lo, dec_hi, base_is_lo),
+        below_pct: band,
+        above_pct: band,
+    }
+}
+
+/// The central peg (marginal at the balanced point, where the curve's slopes cancel):
+/// `(y0/x0)·(rate_lt/rate_gt)` is the `hi-per-lo` base-unit price, then decimals-adjusted and
+/// oriented to `quote per base`. Reserve-independent — it is the peg the band sits around.
+fn peg_price(p: &PeggedParams, dec_lo: u8, dec_hi: u8, base_is_lo: bool) -> Option<String> {
+    // `hi-per-lo` base-unit price × 1e18 = (y0/x0)·(rate_lt/rate_gt)·1e18, in two mulDivs so the
+    // intermediates stay in U256.
+    let ratio = mul_div(p.y0, U256::from(E18), p.x0)?;
+    let peg_1e18 = mul_div(ratio, p.rate_lt, p.rate_gt)?;
+    // Fold the token decimals in U256 too — a mixed-decimals base price is huge, and only the
+    // human result (≈ the peg, near 1e18) is small enough for `Decimal`.
+    let human_1e18 = mul_div(peg_1e18, pow10(dec_lo)?, pow10(dec_hi)?)?;
+    let human =
+        Decimal::from_u128(u128::try_from(human_1e18).ok()?)?.checked_div(Decimal::from(E18))?;
+    let oriented = if base_is_lo {
+        human
+    } else {
+        Decimal::ONE.checked_div(human)?
+    };
+    Some(fmt(oriented))
+}
+
+fn pow10(exp: u8) -> Option<U256> {
+    Some(U256::from(10u128.checked_pow(u32::from(exp))?))
+}
+
+/// The symmetric `±%` band a `linearWidth` (A, at `1e27`) encodes, matching the SDK's
+/// `symmetricRangePercentFromLinearWidth`: `100 · ONE / (2A + ONE)` at the SDK's `1e13` precision.
+fn symmetric_range_pct(a: U256) -> Option<f64> {
+    let one = U256::from(10u128.pow(27));
+    let denom = a.checked_mul(U256::from(2u64))?.checked_add(one)?;
+    let x = mul_div(one, one, denom)?;
+    let scaled = mul_div(x, U256::from(100u64) * U256::from(10u128.pow(13)), one)?;
+    Some(u128::try_from(scaled).ok()? as f64 / 1e13)
+}
+
+fn mul_div(a: U256, b: U256, c: U256) -> Option<U256> {
+    a.checked_mul(b)?.checked_div(c)
 }
 
 fn concentrated(
@@ -83,7 +138,7 @@ fn concentrated(
 /// `(sqrt / 1e18)^2 · 10^(dec_lo - dec_hi)`. `None` if it overflows `Decimal`.
 fn price_hi_per_lo(sqrt: U256, dec_lo: u8, dec_hi: u8) -> Option<Decimal> {
     let sqrt = Decimal::from(u128::try_from(sqrt).ok()?);
-    let s = sqrt.checked_div(Decimal::from(1_000_000_000_000_000_000u64))?;
+    let s = sqrt.checked_div(Decimal::from(E18))?;
     let base_units = s.checked_mul(s)?;
     let diff = i32::from(dec_lo) - i32::from(dec_hi);
     let factor = Decimal::from(10u64.checked_pow(diff.unsigned_abs())?);
@@ -171,18 +226,33 @@ mod tests {
         assert_eq!(r.upper_price.as_deref(), Some("1"));
     }
 
+    fn pegged(x0: u64, y0: u64, rate_lt: u64, rate_gt: u64, linear_width: u128) -> Curve {
+        Curve::Pegged(PeggedParams {
+            x0: U256::from(x0),
+            y0: U256::from(y0),
+            linear_width: U256::from(linear_width),
+            rate_lt: U256::from(rate_lt),
+            rate_gt: U256::from(rate_gt),
+        })
+    }
+
     #[test]
-    fn pegged_is_a_peg_placeholder_until_t1b() {
-        let params = PeggedParams {
-            x0: U256::from(1u64),
-            y0: U256::from(1u64),
-            linear_width: U256::from(1u64),
-            rate_lt: U256::from(1u64),
-            rate_gt: U256::from(1u64),
-        };
-        let r = price_range(&Curve::Pegged(params), 18, 18, true);
+    fn pegged_peg_is_the_rate_scaled_ratio() {
+        // peg (hi per lo) = (y0/x0)·(rate_lt/rate_gt); rates cancel here → 2.0.
+        let r = price_range(&pegged(1, 2, 1, 1, 100 * 10u128.pow(27)), 18, 18, true);
         assert_eq!(r.kind, RangeKind::Peg);
-        assert_eq!(r.peg_price, None);
-        assert_eq!(r.below_pct, None);
+        assert_eq!(r.peg_price.as_deref(), Some("2"));
+        // base is the higher token → quote-per-base inverts → 0.5.
+        let inv = price_range(&pegged(1, 2, 1, 1, 100 * 10u128.pow(27)), 18, 18, false);
+        assert_eq!(inv.peg_price.as_deref(), Some("0.5"));
+    }
+
+    #[test]
+    fn pegged_band_matches_the_sdk_formula() {
+        // A = 100e27 → 100·ONE/(2A+ONE) = 100/201 ≈ 0.4975%.
+        let r = price_range(&pegged(1, 1, 1, 1, 100 * 10u128.pow(27)), 18, 18, true);
+        let band = r.below_pct.expect("band");
+        assert!((band - 0.497_512_437_810_9).abs() < 1e-9, "band was {band}");
+        assert_eq!(r.above_pct, r.below_pct);
     }
 }
