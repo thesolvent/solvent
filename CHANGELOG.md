@@ -123,8 +123,46 @@ the project is pre-1.0 and evolving.
     hook. Confirmation is finality-anchored (walletkit).
   - **Full-loop live E2E** over anvil through the **production execution path** — order → … → reserve
     → sim → submit → confirm → post the actual pulled amount; plus a stale-order sim-reject → void.
+- **S2 · M0 — HTTP API scaffold**: the app becomes a running axum server (was `fn main(){}`),
+  exposing the read foundation of the product API.
+  - Inbound HTTP adapter (`crates/adapters/http`): the garden-rs `Response<T>` envelope, `SolventError`
+    → HTTP mapping (redacted 5xx, real cause logged), `List<T>` + opaque cursor pagination, and a
+    tower-http middleware stack (request-id, trace, timeout, CORS).
+  - Composition root (`crates/app`): TOML config (`config` crate), registry snapshot hydrated once
+    from the durable log, a background chain-head poller (block number cached — no RPC per request),
+    graceful shutdown.
+  - **`AssetManager`** — one authority answering everything about an asset by composing a
+    Uniswap-shape token list with the live snapshot (`supported` / count / pairs); one rich `Asset`,
+    serialized directly. `Snapshot::active_assets()` defines "supported".
+  - Endpoints: `GET /healthz`, `/v1/config`, `/v1/stats`, `/v1/assets` (`?supported`), and a
+    code-generated `/v1/openapi.json` (utoipa).
 
-_Next: B6 — reconcile._
+- **S2 · M1 — discovery read paths**: the Pools list, Pool-detail, and Swap/Create balance screens
+  render against a live server.
+  - Endpoints: `GET /v1/pools` (list; symmetric `token_a`/`token_b` + `type`/`fee` filters, most-liquid
+    first), `/v1/pools/detail?base&quote` (KPIs + maker roster), `/v1/pools/depth?base&quote&side`
+    (executable-liquidity curve), `/v1/wallets/{addr}/balances` (per-token balance + pullable across
+    the whole catalog).
+  - **Pool read-surface** — `Snapshot::pool_stats()` folds active strategies per pair (maker count,
+    spread band, popular fee tier, curve mix) with `itertools` grouping; `PoolService` composes it
+    with the `AssetManager` for labels + Stable/Correlated/Volatile classification. Detail composes
+    the list row (`#[serde(flatten)]`) plus the roster.
+  - **Depth = the router, plotted** — reuses candidate `select` + the water-fill `solve`, swept by
+    target output across an impact-anchored ladder (0.1–10%, bisected per bucket). No new curve math;
+    impact is exact via `Ratio::rel_diff_bps`.
+  - **Shared budget cache** — one synced `ArcSwap<AvailableSnapshot>` of every active maker's
+    executable cap (`min(pullable wallet, registry virtual)`), refreshed off the request path by a
+    supervised poller (batched — two Multicall3 aggregates for the whole book); depth reads it
+    lock-free, no per-request RPC. (The router's quote path converges on one net-of-reservations
+    snapshot in M2.)
+  - **Wallet balances** — a `BalancesOracle` returning *both* balance and pullable (unlike
+    `BudgetSource`'s `min`), read on demand for an arbitrary wallet in two Multicall3 aggregates; a
+    shared `erc20` read helper backs both the budget source and the oracle.
+  - Money crosses the wire as `Amount { raw, display, usd }` — exact base-unit strings, never floats.
+  - **Live-run dependency:** Multicall3 predeployed on the devnet (the S1 coordination item); the
+    depth/balances chain reads are otherwise unit- and (for the shared reader) anvil-E2E-tested.
+
+_Next: S2 M2 — the core loop (swap quote/submit, trades, activity)._
 
 ## [0.1.0] — 2026-08-28
 

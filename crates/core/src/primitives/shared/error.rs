@@ -4,6 +4,7 @@
 
 use thiserror::Error;
 
+use crate::deps::balances::BalancesOracleError;
 use crate::deps::execution::{ExecutionError, SettlementError, SimError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
 use crate::deps::registry::{ChainSourceError, StoreError};
@@ -34,6 +35,9 @@ pub enum SolventError {
     /// Reading a settleable budget failed.
     #[error("budget source: {0}")]
     BudgetSource(#[from] BudgetSourceError),
+    /// Reading a wallet's on-chain balances failed.
+    #[error("balances oracle: {0}")]
+    BalancesOracle(#[from] BalancesOracleError),
     /// The tx engine failed to submit or track a fill.
     #[error("execution: {0}")]
     Execution(#[from] ExecutionError),
