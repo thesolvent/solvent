@@ -21,9 +21,10 @@ test:
 test-fork:
     cd contracts && forge test --fork-url mainnet
 
-# Export the filler ABI for the (future) backend to consume — a stable artifact, not out/.
+# Export ABIs for the (future) backend to consume — stable artifacts, not out/.
 abi:
     cd contracts && forge inspect src/UniswapXAquaFiller.sol:UniswapXAquaFiller abi --json > abi/UniswapXAquaFiller.json
+    cd contracts && forge inspect src/DevToken.sol:DevToken abi --json > abi/DevToken.json
 
 fmt:
     cd contracts && forge fmt
@@ -53,3 +54,23 @@ be-test:
 
 # The gate a backend phase must pass before it closes.
 be-gate: be-fmt-check be-clippy be-test
+
+# --- devnet (docker compose) ---
+COMPOSE := "docker compose -f devnet/docker-compose.yml"
+
+# Boot the devnet: chain + explorer + one-shot seed + faucet (builds the faucet image).
+devnet-up:
+    {{COMPOSE}} up -d --build
+    @echo "devnet: RPC http://127.0.0.1:8545 · explorer http://127.0.0.1:5100 · faucet http://127.0.0.1:8080"
+    @echo "devnet: follow the deploy with 'just devnet-logs seed'"
+
+# Tear down and delete volumes (drops the deploy manifest).
+devnet-down:
+    {{COMPOSE}} down -v
+
+devnet-logs service="":
+    {{COMPOSE}} logs -f {{service}}
+
+# Smoke: finality advances, faucet drips, explorer reachable. Run after `devnet-up`.
+devnet-smoke:
+    sh devnet/smoke.sh

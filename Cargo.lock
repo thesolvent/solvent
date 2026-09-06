@@ -5309,6 +5309,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "solvent-devnet"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "axum",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "spin"
 version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
