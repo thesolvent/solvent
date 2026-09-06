@@ -17,7 +17,7 @@ use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
 use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
-use solvent_adapters::metrics::SqliteQuoteLog;
+use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
 use solvent_adapters::registry::{AlloyChainSource, SqliteStore};
 use solvent_adapters::routing::{BinanceFeed, GasPoller, MarketCache};
 use solvent_adapters::trade::SqliteTradeStore;
@@ -26,12 +26,14 @@ use solvent_core::balances::BalancesService;
 use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ledger::BudgetSource;
+use solvent_core::deps::maker_metrics::MakerMetricsStore;
 use solvent_core::deps::quote_log::QuoteLog;
 use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::routing::{GasPrice, PriceOracle};
 use solvent_core::deps::trade::TradeStore;
 use solvent_core::execution::ExecutionService;
 use solvent_core::ledger::LedgerService;
+use solvent_core::maker::MakerService;
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::{ChainConfig, ChainId, UsdPrice};
@@ -184,9 +186,18 @@ async fn main() -> Result<(), StartupError> {
         config.aqua_address,
     ));
     let balances = Arc::new(BalancesService::new(
-        balances_oracle,
+        Arc::clone(&balances_oracle),
         Arc::clone(&assets),
         Arc::clone(&valuation),
+    ));
+    let maker_metrics: Arc<dyn MakerMetricsStore> = Arc::new(SqliteMakerMetrics::new(pool.clone()));
+    let makers = Arc::new(MakerService::new(
+        Arc::clone(&registry),
+        Arc::clone(&assets),
+        Arc::clone(&valuation),
+        maker_metrics,
+        Arc::clone(&balances_oracle),
+        Arc::new(SystemClock),
     ));
     let depth = Arc::new(DepthService::new(
         Arc::clone(&registry),
@@ -317,6 +328,7 @@ async fn main() -> Result<(), StartupError> {
         pools,
         depth,
         balances,
+        makers,
         quote,
         swap,
         cosigner,

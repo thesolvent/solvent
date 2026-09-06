@@ -5,6 +5,7 @@ pub mod activity;
 pub mod assets;
 pub mod balances;
 pub mod config;
+pub mod makers;
 pub mod pools;
 pub mod stats;
 pub mod swap;

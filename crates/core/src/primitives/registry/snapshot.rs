@@ -10,7 +10,7 @@ use itertools::Itertools;
 use super::curve::{Curve, CurveSpec};
 use super::event::{AquaEvent, StrategyKey};
 use super::strategy::{MakerStrategy, TokenPair};
-use crate::primitives::MakerId;
+use crate::primitives::{MakerId, StrategyHash};
 
 /// Per-asset activity derived from the snapshot: how many active strategies quote a token and in
 /// which pairs. The source for the supported-asset list.
@@ -104,6 +104,13 @@ impl Snapshot {
     pub fn strategies_for_maker(&self, maker: MakerId) -> impl Iterator<Item = &MakerStrategy> {
         self.active_strategies()
             .filter(move |s| s.key.maker == maker)
+    }
+
+    /// A strategy by its hash (active or docked) — the `/positions/{hash}` lookup.
+    pub fn strategy_by_hash(&self, hash: StrategyHash) -> Option<&MakerStrategy> {
+        self.strategies
+            .values()
+            .find(|s| s.key.strategy_hash == hash)
     }
 
     pub fn is_empty(&self) -> bool {

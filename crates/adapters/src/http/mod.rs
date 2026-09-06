@@ -41,6 +41,12 @@ pub fn router(state: AppState) -> Router {
         .route("/trades", get(app::trades::trades))
         .route("/trades/{id}", get(app::trades::trade_detail))
         .route("/activity", get(app::activity::activity))
+        .route("/makers", get(app::makers::makers))
+        .route(
+            "/makers/{maker}/positions",
+            get(app::makers::maker_positions),
+        )
+        .route("/positions/{hash}", get(app::makers::position_detail))
         .route("/wallets/{addr}/balances", get(app::balances::balances))
         .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
@@ -87,6 +93,9 @@ mod tests {
     use solvent_core::deps::ledger::{
         BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError,
     };
+    use solvent_core::deps::maker_metrics::{
+        MakerMetrics, MakerMetricsError, MakerMetricsStore, PositionMetrics,
+    };
     use solvent_core::deps::quote_log::{QuoteLog, QuoteLogError, QuoteServed};
     use solvent_core::deps::registry::{EventStore, RecordedEvent, StoreError};
     use solvent_core::deps::routing::{GasPrice, PriceOracle};
@@ -95,18 +104,21 @@ mod tests {
     };
     use solvent_core::execution::ExecutionService;
     use solvent_core::ledger::LedgerService;
+    use solvent_core::maker::MakerService;
     use solvent_core::pool::{DepthService, PoolService};
     use solvent_core::primitives::execution::{
         ExecHandle, ExecStatus, FillTx, SimVerdict, TrackedFill,
     };
     use solvent_core::primitives::ingest::Intent;
     use solvent_core::primitives::ledger::{AccountKey, Reservation, ReservationSource};
+    use solvent_core::primitives::registry::TokenPair;
     use solvent_core::primitives::registry::{AquaEvent, EventCursor, EventExt, Snapshot};
     use solvent_core::primitives::routing::{RoutePlan, RoutingConfig};
     use solvent_core::primitives::trade::{
         Trade, TradeAttempt, TradeId, TradeInfo, TradeLeg, TradeStatus,
     };
     use solvent_core::primitives::{ChainId, IntentId, ReservationId};
+    use solvent_core::primitives::{MakerId, StrategyHash};
     use solvent_core::quote::QuoteService;
     use solvent_core::registry::SharedSnapshot;
     use solvent_core::routing::LegCostResolver;
@@ -259,6 +271,39 @@ mod tests {
         }
     }
 
+    struct NoopMakerMetrics;
+    #[async_trait::async_trait]
+    impl MakerMetricsStore for NoopMakerMetrics {
+        async fn maker(
+            &self,
+            _: MakerId,
+            _: u64,
+            _: u64,
+        ) -> Result<MakerMetrics, MakerMetricsError> {
+            Ok(MakerMetrics {
+                fills: 0,
+                fills_by_day: [0; 7],
+                last_fill_at: None,
+                volume: Vec::new(),
+                quotes: 0,
+                latency_p50_ms: None,
+            })
+        }
+        async fn position(
+            &self,
+            _: StrategyHash,
+            _: TokenPair,
+            _: u64,
+        ) -> Result<PositionMetrics, MakerMetricsError> {
+            Ok(PositionMetrics {
+                fills: 0,
+                volume: Vec::new(),
+                last_fill_at: None,
+                quote_uptime_pct: None,
+            })
+        }
+    }
+
     struct FakeSim;
     #[async_trait::async_trait]
     impl SimGate for FakeSim {
@@ -397,6 +442,14 @@ mod tests {
             Arc::clone(&assets),
             Arc::clone(&valuation),
         ));
+        let makers = Arc::new(MakerService::new(
+            Arc::clone(&registry),
+            Arc::clone(&assets),
+            Arc::clone(&valuation),
+            Arc::new(NoopMakerMetrics),
+            Arc::new(ZeroOracle),
+            Arc::new(SystemClock),
+        ));
         AppState {
             config: Arc::new(AppConfig {
                 chain_id: 31337,
@@ -414,6 +467,7 @@ mod tests {
             pools,
             depth,
             balances,
+            makers,
             quote,
             swap,
             cosigner,

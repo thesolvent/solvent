@@ -21,6 +21,9 @@ use utoipa::OpenApi;
         crate::http::app::trades::trades,
         crate::http::app::trades::trade_detail,
         crate::http::app::activity::activity,
+        crate::http::app::makers::makers,
+        crate::http::app::makers::maker_positions,
+        crate::http::app::makers::position_detail,
     ),
     components(schemas(
         crate::http::primitives::Status,
@@ -48,6 +51,13 @@ use utoipa::OpenApi;
         crate::http::app::trades::Action,
         crate::http::app::trades::MakerLeg,
         crate::http::app::activity::ActivityEvent,
+        solvent_core::primitives::maker::Position,
+        solvent_core::primitives::maker::PriceRange,
+        solvent_core::primitives::maker::PositionBalances,
+        solvent_core::primitives::maker::Split,
+        solvent_core::primitives::maker::Economics,
+        solvent_core::primitives::maker::ActiveStats,
+        solvent_core::primitives::maker::MakerSummary,
     ))
 )]
 pub struct ApiDoc;
