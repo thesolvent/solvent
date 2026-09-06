@@ -206,9 +206,15 @@ re-confirms a known finding, or needs calibrated market data. Pick up if a speci
   is wired and tested, but the *trigger* (detecting that an already-confirmed fill un-mined deeper than
   the confirmation depth) is deferred to **B6 (reconcile)**, watching the canonical chain. walletkit
   absorbs sub-confirmation reorgs itself, so the normal path never calls it.
-- **In-flight crash recovery** — the service's in-flight map (intent → handle + reservation) is
-  in-memory, so a crash mid-fill loses the tracking. walletkit's durable store still holds the tx and
-  the ledger still holds the open reservation; rebuilding the map from those on restart is **B6**.
+- **In-flight crash recovery** — RESOLVED (S2·M2·T4b). The in-flight set is no longer in memory: each
+  submitted fill's `(order_hash → reservation, handle_id)` is persisted in `inflight_fill`, and
+  walletkit runs on a durable redb store, so a restart recovers and reconciles every in-flight fill
+  through the normal reconcile tick (no separate recovery step). One narrow residual window remains: a
+  crash in the moment between `wallet.send_with` broadcasting and the `inflight_fill` row committing
+  leaves a submitted tx our reconcile can't correlate to its reservation. This is backstopped by the
+  core thesis — on-chain `transferFrom` atomicity plus the sim gate reject any over-committed later
+  fill — so the worst case degrades to a later fill sim-declining, never a loss. Closing it fully
+  (persist-before-broadcast + calldata-decode correlation) is not worth the cost for the window size.
 - **Batch fills** — `fillBatch` + fate-compatible grouping + all-post-or-all-void reservation sets are
   deferred: the router emits one `RoutePlan` per intent, so batching across intents has no consumer
   yet. The single-fill loop is the full production path.

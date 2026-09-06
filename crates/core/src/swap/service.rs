@@ -396,7 +396,7 @@ mod tests {
     use crate::deps::routing::{GasPriceError, PriceOracleError};
     use crate::deps::trade::{CreateResult, Page, TradeFilter, TradeStoreError};
     use crate::primitives::asset::{TokenList, TokenMeta};
-    use crate::primitives::execution::{ExecHandle, ExecStatus, SimVerdict};
+    use crate::primitives::execution::{ExecHandle, ExecStatus, SimVerdict, TrackedFill};
     use crate::primitives::ingest::{AmountCurve, IntentInput, IntentOutput, ProtocolId};
     use crate::primitives::ledger::{AccountKey, Reservation};
     use crate::primitives::registry::{Curve, CurveSpec, MakerStrategy, Snapshot, StrategyKey};
@@ -543,11 +543,21 @@ mod tests {
     struct FakeExec;
     #[async_trait]
     impl Execution for FakeExec {
-        async fn submit(&self, fill: &FillTx) -> Result<ExecHandle, ExecutionError> {
+        async fn submit(
+            &self,
+            fill: &FillTx,
+            _: ReservationId,
+        ) -> Result<ExecHandle, ExecutionError> {
             Ok(ExecHandle(fill.intent.0))
         }
         async fn status(&self, _: ExecHandle) -> Result<Option<ExecStatus>, ExecutionError> {
             Ok(Some(ExecStatus::Pending))
+        }
+        async fn forget(&self, _: IntentId) -> Result<(), ExecutionError> {
+            Ok(())
+        }
+        async fn tracked(&self) -> Result<Vec<TrackedFill>, ExecutionError> {
+            Ok(Vec::new())
         }
         async fn tick(&self) -> Result<(), ExecutionError> {
             Ok(())
