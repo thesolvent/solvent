@@ -1,0 +1,473 @@
+//! The quote read-path: route an intent read-only over the live registry and the ledger's synced
+//! caps, returning the split as a [`QuoteResponse`]. It reuses the exact building blocks the swap
+//! path uses — `select` then `solve_sparse` — with the same per-leg gas cost, so the quoted split is
+//! the one the swap would execute. No reservation, no persistence.
+//!
+//! Everything is read lock-free with no per-request RPC: the registry snapshot, the ledger's caps,
+//! and the gas/price cache (`resolve_leg_cost` reads the poller-fed [`MarketCache`], never the
+//! chain). Price impact reuses the routed candidates' [`spot_marginal`](crate::routing) — it needs
+//! no second solve.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use alloy_primitives::{keccak256, Address, B256, U256};
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
+
+use crate::asset::AssetManager;
+use crate::deps::ledger::Clock;
+use crate::deps::routing::{GasPrice, PriceOracle};
+use crate::ledger::LedgerService;
+use crate::primitives::amount::Amount;
+use crate::primitives::pricing::Ratio;
+use crate::primitives::quote::{QuoteLeg, QuoteResponse};
+use crate::primitives::registry::{curve_label, CurveSpec, Snapshot, TokenPair};
+use crate::primitives::routing::{RouteLeg, RouteRequest, RoutingConfig};
+use crate::primitives::{IntentId, StrategyHash};
+use crate::registry::SharedSnapshot;
+use crate::routing::{resolve_leg_cost, select, solve_sparse};
+
+/// How far ahead a quote's advisory `expires_at` sits.
+const QUOTE_TTL_SECS: u64 = 30;
+
+pub struct QuoteService {
+    registry: Arc<SharedSnapshot>,
+    ledger: Arc<LedgerService>,
+    assets: Arc<AssetManager>,
+    config: RoutingConfig,
+    clock: Arc<dyn Clock>,
+    gas: Arc<dyn GasPrice>,
+    oracle: Arc<dyn PriceOracle>,
+    /// The chain's native token (WETH), whose USD price values the gas cost.
+    native: Address,
+}
+
+impl QuoteService {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        registry: Arc<SharedSnapshot>,
+        ledger: Arc<LedgerService>,
+        assets: Arc<AssetManager>,
+        config: RoutingConfig,
+        clock: Arc<dyn Clock>,
+        gas: Arc<dyn GasPrice>,
+        oracle: Arc<dyn PriceOracle>,
+        native: Address,
+    ) -> Self {
+        Self {
+            registry,
+            ledger,
+            assets,
+            config,
+            clock,
+            gas,
+            oracle,
+            native,
+        }
+    }
+
+    /// A read-only quote for `amount_in` of `token_in` into `token_out`, or `None` when no route
+    /// exists (no makers, or the size is beyond the book). Async only to read the gas/price cache;
+    /// it does no I/O.
+    pub async fn quote(
+        &self,
+        token_in: Address,
+        token_out: Address,
+        amount_in: U256,
+    ) -> Option<QuoteResponse> {
+        let id = quote_hash(token_in, token_out, amount_in);
+        let request = RouteRequest {
+            intent: IntentId(id),
+            token_in,
+            token_out,
+            amount: amount_in,
+            exact_in: true,
+        };
+        let snapshot = self.registry.load();
+        let caps = self.ledger.snapshot();
+
+        // The same two steps the swap path runs: funnel, then the gas-aware split. `select` freezes
+        // the caps; `solve_sparse` splits under the per-leg gas cost, capped at `max_legs`.
+        let selection = select(&snapshot, &caps, &request, self.config.max_candidates);
+        let out_decimals = self.decimals(token_out);
+        let per_leg_cost = resolve_leg_cost(
+            self.gas.as_ref(),
+            self.oracle.as_ref(),
+            self.config.gas_units_per_leg,
+            self.native,
+            token_out,
+            out_decimals,
+        )
+        .await
+        .unwrap_or(U256::ZERO);
+        let split = solve_sparse(
+            &selection.chosen,
+            &request,
+            per_leg_cost,
+            self.config.max_legs,
+            None,
+        )?;
+
+        // Best price = the tightest maker's near-zero-impact rate, read straight off the candidates
+        // (a single tiny quote each) — no second solve.
+        let best_price = selection
+            .chosen
+            .iter()
+            .filter_map(|candidate| candidate.spot_marginal(amount_in))
+            .max();
+
+        let labels = curve_labels(&snapshot, token_in, token_out);
+        let legs = split
+            .legs
+            .iter()
+            .filter_map(|leg| self.leg(leg, &labels, split.amount_out))
+            .collect();
+
+        Some(QuoteResponse {
+            quote_id: format!("{id:#x}"),
+            amount_out: Amount::from_base_units(split.amount_out, out_decimals),
+            price_impact_pct: impact_pct(split.amount_out, amount_in, best_price.as_ref()),
+            makers_sourced: split.legs.len() as u32,
+            legs,
+            expires_at: self.expires_at(),
+        })
+    }
+
+    /// Resolve one routed leg to its wire shape, or skip it if a token is missing from the catalog.
+    fn leg(
+        &self,
+        leg: &RouteLeg,
+        labels: &BTreeMap<StrategyHash, &'static str>,
+        total_out: U256,
+    ) -> Option<QuoteLeg> {
+        let token_in = self.assets.token(&leg.token_in)?;
+        let token_out = self.assets.token(&leg.token_out)?;
+        Some(QuoteLeg {
+            maker: leg.maker.0,
+            strategy_hash: format!("{:#x}", leg.strategy_hash.0),
+            amount_in: Amount::from_base_units(leg.amount_in, token_in.decimals),
+            amount_out: Amount::from_base_units(leg.amount_out, token_out.decimals),
+            curve: labels
+                .get(&leg.strategy_hash)
+                .copied()
+                .unwrap_or_default()
+                .to_string(),
+            share_pct: share_pct(leg.amount_out, total_out),
+            token_in,
+            token_out,
+        })
+    }
+
+    fn decimals(&self, token: Address) -> u8 {
+        self.assets.token(&token).map_or(18, |token| token.decimals)
+    }
+
+    /// `now + TTL` as RFC-3339. A near-future unix second is always a valid, formattable instant.
+    fn expires_at(&self) -> String {
+        let secs = self.clock.now_unix().saturating_add(QUOTE_TTL_SECS);
+        OffsetDateTime::from_unix_timestamp(secs as i64)
+            .ok()
+            .and_then(|instant| instant.format(&Rfc3339).ok())
+            .expect("a near-future unix timestamp formats as RFC-3339")
+    }
+}
+
+/// The deterministic quote id: `keccak256(token_in ‖ token_out ‖ amount_in)`, doubling as the
+/// routing intent so the same request always yields the same id.
+fn quote_hash(token_in: Address, token_out: Address, amount_in: U256) -> B256 {
+    let mut bytes = Vec::with_capacity(20 + 20 + 32);
+    bytes.extend_from_slice(token_in.as_slice());
+    bytes.extend_from_slice(token_out.as_slice());
+    bytes.extend_from_slice(&amount_in.to_be_bytes::<32>());
+    keccak256(bytes)
+}
+
+/// A leg's share of the blended output, in percent, via integer bps (no `U256`→`f64` precision loss).
+fn share_pct(leg_out: U256, total_out: U256) -> f64 {
+    if total_out.is_zero() {
+        return 0.0;
+    }
+    let bps = leg_out.saturating_mul(U256::from(10_000u64)) / total_out;
+    u64::try_from(bps).unwrap_or(0) as f64 / 100.0
+}
+
+/// The blended rate's relative shortfall from the best (near-zero-impact) rate, in percent.
+fn impact_pct(total_out: U256, amount_in: U256, best: Option<&Ratio>) -> f64 {
+    match (best, Ratio::new(total_out, amount_in)) {
+        (Some(best), Some(effective)) => effective.rel_diff_bps(best) as f64 / 100.0,
+        _ => 0.0,
+    }
+}
+
+/// Curve label per strategy on the pair, from the same snapshot the route was solved over.
+fn curve_labels(
+    snapshot: &Snapshot,
+    token_in: Address,
+    token_out: Address,
+) -> BTreeMap<StrategyHash, &'static str> {
+    snapshot
+        .active_strategies_for_pair(TokenPair::new(token_in, token_out))
+        .filter_map(|strategy| match &strategy.curve {
+            CurveSpec::Priceable { curve, .. } => {
+                Some((strategy.key.strategy_hash, curve_label(curve)))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deps::ledger::{BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError};
+    use crate::deps::routing::{GasPriceError, PriceOracleError};
+    use crate::primitives::asset::{TokenList, TokenMeta};
+    use crate::primitives::ledger::{AccountKey, Reservation};
+    use crate::primitives::registry::{Curve, CurveSpec, MakerStrategy, Snapshot, StrategyKey};
+    use crate::primitives::{MakerId, ReservationId, UsdPrice};
+    use rust_decimal::Decimal;
+
+    const USDC: u8 = 1;
+    const WETH: u8 = 2;
+
+    fn addr(n: u8) -> Address {
+        Address::from([n; 20])
+    }
+
+    fn e(n: u64, dec: u32) -> U256 {
+        U256::from(n) * U256::from(10u64).pow(U256::from(dec))
+    }
+
+    fn meta(n: u8, symbol: &str, decimals: u8) -> TokenMeta {
+        TokenMeta {
+            chain_id: 31337,
+            address: addr(n),
+            symbol: symbol.to_string(),
+            name: symbol.to_string(),
+            decimals,
+            logo_uri: None,
+            tags: vec![],
+        }
+    }
+
+    /// An active XYC over WETH(2)/USDC(1) with the given raw reserves, keyed to `maker`.
+    fn xyc(maker: u8, weth: U256, usdc: U256) -> MakerStrategy {
+        let key = StrategyKey {
+            maker: MakerId(addr(maker)),
+            app: Address::ZERO,
+            strategy_hash: crate::primitives::StrategyHash(B256::from([maker; 32])),
+        };
+        let mut strategy = MakerStrategy::new(key, &[]);
+        strategy.curve = CurveSpec::Priceable {
+            curve: Curve::Xyc,
+            fees_in_bps: vec![],
+        };
+        strategy.balances.insert(addr(WETH), weth);
+        strategy.balances.insert(addr(USDC), usdc);
+        strategy
+    }
+
+    /// Budget source: a strategy virtual is its registry balance, a wallet never binds.
+    struct FakeBudget {
+        registry: Arc<SharedSnapshot>,
+    }
+    #[async_trait::async_trait]
+    impl BudgetSource for FakeBudget {
+        async fn budget(&self, account: &AccountKey) -> Result<U256, BudgetSourceError> {
+            Ok(match account {
+                AccountKey::WalletBudget { .. } => U256::MAX,
+                AccountKey::StrategyVirtual {
+                    maker,
+                    strategy_hash,
+                    token,
+                } => {
+                    let key = StrategyKey {
+                        maker: *maker,
+                        app: Address::ZERO,
+                        strategy_hash: *strategy_hash,
+                    };
+                    self.registry
+                        .load()
+                        .strategy(&key)
+                        .map(|s| s.balance(token))
+                        .unwrap_or(U256::ZERO)
+                }
+            })
+        }
+    }
+
+    struct NoopStore;
+    #[async_trait::async_trait]
+    impl LedgerStore for NoopStore {
+        async fn reserve(&self, _: &Reservation) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn post(&self, _: ReservationId, _: &[U256]) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn void(&self, _: ReservationId) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn expire(&self, _: ReservationId) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn void_reorg(&self, _: ReservationId) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn open_reservations(&self) -> Result<Vec<Reservation>, LedgerStoreError> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct FixedClock;
+    impl Clock for FixedClock {
+        fn now_unix(&self) -> u64 {
+            1_700_000_000
+        }
+    }
+
+    /// A seedable market: `gas_wei == 0` and an empty price map read as "unavailable", so the quote
+    /// routes gas-free (the common cold-cache path); seed both to exercise the gas cost.
+    struct FakeMarket {
+        gas_wei: u128,
+        prices: BTreeMap<Address, UsdPrice>,
+    }
+    #[async_trait::async_trait]
+    impl GasPrice for FakeMarket {
+        async fn gas_price_wei(&self) -> Result<u128, GasPriceError> {
+            match self.gas_wei {
+                0 => Err(GasPriceError::Source("no gas".to_string())),
+                wei => Ok(wei),
+            }
+        }
+    }
+    #[async_trait::async_trait]
+    impl PriceOracle for FakeMarket {
+        async fn price(&self, token: Address) -> Result<UsdPrice, PriceOracleError> {
+            self.prices
+                .get(&token)
+                .copied()
+                .ok_or(PriceOracleError::NotFound(token))
+        }
+    }
+
+    /// A quote service over `strategies` with the caps synced and the given market.
+    async fn service_with(strategies: Vec<MakerStrategy>, market: Arc<FakeMarket>) -> QuoteService {
+        let registry = Arc::new(SharedSnapshot::new(Snapshot::from_strategies(strategies)));
+        let list = TokenList {
+            name: "test".to_string(),
+            tokens: vec![meta(USDC, "USDC", 6), meta(WETH, "WETH", 18)],
+        };
+        let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
+        let ledger = Arc::new(LedgerService::new(
+            Arc::new(NoopStore),
+            Arc::new(FakeBudget {
+                registry: Arc::clone(&registry),
+            }),
+            Arc::new(FixedClock),
+        ));
+        ledger.sync_budgets(&registry.load()).await.unwrap();
+        let gas: Arc<dyn GasPrice> = market.clone();
+        let oracle: Arc<dyn PriceOracle> = market;
+        QuoteService::new(
+            registry,
+            ledger,
+            assets,
+            RoutingConfig::new(16, 4, 150_000),
+            Arc::new(FixedClock),
+            gas,
+            oracle,
+            addr(WETH),
+        )
+    }
+
+    /// Gas-free (cold market) service — the split is the pure marginal optimum.
+    async fn service(strategies: Vec<MakerStrategy>) -> QuoteService {
+        service_with(
+            strategies,
+            Arc::new(FakeMarket {
+                gas_wei: 0,
+                prices: BTreeMap::new(),
+            }),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn quotes_a_single_maker_route() {
+        let svc = service(vec![xyc(3, e(100, 18), e(300_000, 6))]).await;
+        let quote = svc
+            .quote(addr(WETH), addr(USDC), e(1, 18))
+            .await
+            .expect("a route");
+
+        assert_eq!(quote.makers_sourced, 1);
+        assert_eq!(quote.legs.len(), 1);
+        assert_eq!(quote.legs[0].curve, "XYC");
+        assert!((quote.legs[0].share_pct - 100.0).abs() < 0.01);
+        assert!(quote.legs[0].amount_out.raw.parse::<u128>().unwrap() > 0);
+        assert!(quote.amount_out.raw.parse::<u128>().unwrap() > 0);
+        assert!(quote.quote_id.starts_with("0x"));
+        assert!(quote.expires_at.contains('T'), "RFC-3339 instant");
+    }
+
+    #[tokio::test]
+    async fn quote_id_is_deterministic_for_the_same_request() {
+        let svc = service(vec![xyc(3, e(100, 18), e(300_000, 6))]).await;
+        let a = svc.quote(addr(WETH), addr(USDC), e(1, 18)).await.unwrap();
+        let b = svc.quote(addr(WETH), addr(USDC), e(1, 18)).await.unwrap();
+        assert_eq!(a.quote_id, b.quote_id);
+    }
+
+    #[tokio::test]
+    async fn shares_sum_to_one_hundred_across_the_split() {
+        let svc = service(vec![
+            xyc(3, e(100, 18), e(300_000, 6)),
+            xyc(4, e(100, 18), e(300_000, 6)),
+        ])
+        .await;
+        let quote = svc
+            .quote(addr(WETH), addr(USDC), e(50, 18))
+            .await
+            .expect("a route");
+        let total: f64 = quote.legs.iter().map(|leg| leg.share_pct).sum();
+        assert!(
+            (total - 100.0).abs() < 0.5,
+            "shares sum to ~100, got {total}"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_makers_yields_no_route() {
+        let svc = service(vec![]).await;
+        assert!(svc.quote(addr(WETH), addr(USDC), e(1, 18)).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn gas_cost_prunes_the_split_to_one_leg() {
+        // Two makers the gas-free optimum would split; a large per-leg gas (priced from the cache)
+        // makes a second leg not worth it, so the same trade collapses to one.
+        let strategies = vec![
+            xyc(3, e(100, 18), e(300_000, 6)),
+            xyc(4, e(100, 18), e(300_000, 6)),
+        ];
+        let free = service(strategies.clone()).await;
+        let split = free.quote(addr(WETH), addr(USDC), e(50, 18)).await.unwrap();
+        assert!(split.makers_sourced >= 2, "gas-free optimum fragments");
+
+        let priced = Arc::new(FakeMarket {
+            gas_wei: 1_000_000_000_000_000, // absurd gas ⇒ no second leg earns it
+            prices: BTreeMap::from([
+                (addr(WETH), UsdPrice(Decimal::from(3000u64))),
+                (addr(USDC), UsdPrice(Decimal::from(1u64))),
+            ]),
+        });
+        let svc = service_with(strategies, priced).await;
+        let quote = svc
+            .quote(addr(WETH), addr(USDC), e(50, 18))
+            .await
+            .expect("still routes");
+        assert_eq!(quote.makers_sourced, 1, "gas collapses the split");
+    }
+}

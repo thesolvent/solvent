@@ -7,7 +7,7 @@ use crate::asset::AssetManager;
 use crate::primitives::amount::{Amount, TokenAmount, TokenAmounts};
 use crate::primitives::pool::{Pool, PoolDetail, PoolMaker, PoolType};
 use crate::primitives::registry::{
-    fee_in_bps, Curve, CurveKind, CurveSpec, MakerStrategy, PoolStats, TokenPair,
+    curve_label, fee_in_bps, CurveKind, CurveSpec, MakerStrategy, PoolStats, TokenPair,
 };
 use crate::registry::SharedSnapshot;
 
@@ -94,7 +94,7 @@ impl PoolService {
         Some(PoolMaker {
             maker: strategy.key.maker.0,
             strategy_hash: format!("{:#x}", strategy.key.strategy_hash.0),
-            curve: curve_name(curve).to_string(),
+            curve: curve_label(curve).to_string(),
             fee_bps: fee_in_bps(fees_in_bps),
             virtual_balances: TokenAmounts {
                 entries,
@@ -107,15 +107,6 @@ impl PoolService {
 /// Real bps → a percentage tier string, e.g. `5` → `"0.05%"`.
 fn fee_tier(bps: u32) -> String {
     format!("{:.2}%", bps as f64 / 100.0)
-}
-
-/// The curve shape as a wire label.
-fn curve_name(curve: &Curve) -> &'static str {
-    match curve {
-        Curve::Xyc => "XYC",
-        Curve::Concentrate { .. } => "Concentrated",
-        Curve::Pegged(_) => "Pegged",
-    }
 }
 
 #[cfg(test)]

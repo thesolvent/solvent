@@ -21,3 +21,32 @@ faucet = true
 
 # Token metadata (Uniswap Token List JSON). Addresses must match the devnet deploy.
 token_list = "tokens.devnet.json"
+
+# Per-leg gas cost inputs. The router charges each fill leg its gas, valued from the native token's
+# USD price and the chain gas price — both read from a poller-fed cache, so the quote path makes no
+# RPC. Leave native_token zero / price_symbols empty to route gas-free.
+native_token = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"  # WETH
+gas_units_per_leg = 150000
+binance_ws_url = "wss://stream.binance.com:9443"
+
+# Binance symbol -> the tokens it prices. Devnet tokens sit at mainnet addresses, so mainnet
+# symbols apply. Stables quoted against USDT read ~1; USDT itself has no pair and stays gas-free.
+[[price_symbols]]
+symbol = "ETHUSDT"
+tokens = ["0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"]  # WETH
+
+[[price_symbols]]
+symbol = "BTCUSDT"
+tokens = ["0x2260fac5e5542a773aa44fbcfedf7c193bc2c599"]  # WBTC
+
+[[price_symbols]]
+symbol = "USDCUSDT"
+tokens = ["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"]  # USDC
+
+[[price_symbols]]
+symbol = "DAIUSDT"
+tokens = ["0x6b175474e89094c44da98b954eedeac495271d0f"]  # DAI
+
+[[price_symbols]]
+symbol = "LINKUSDT"
+tokens = ["0x514910771af9ca656af840dff83e8264ecf986ca"]  # LINK

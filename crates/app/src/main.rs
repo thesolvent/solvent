@@ -15,13 +15,17 @@ use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::registry::{AlloyChainSource, SqliteStore};
+use solvent_adapters::routing::{BinanceFeed, GasPoller, MarketCache};
 use solvent_core::asset::AssetManager;
 use solvent_core::balances::BalancesService;
 use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::ledger::BudgetSource;
+use solvent_core::deps::routing::{GasPrice, PriceOracle};
 use solvent_core::ledger::LedgerService;
 use solvent_core::pool::{DepthService, PoolService};
+use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::{ChainConfig, ChainId};
+use solvent_core::quote::QuoteService;
 use solvent_core::registry::{RegistrySync, SharedSnapshot};
 use solvent_core::SolventError;
 use sqlx::SqlitePool;
@@ -34,10 +38,15 @@ const BLOCK_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const REGISTRY_SYNC_INTERVAL: Duration = Duration::from_secs(4);
 /// How often the ledger re-reads every active maker's caps (one batched call).
 const BUDGET_POLL_INTERVAL: Duration = Duration::from_secs(12);
+/// How often the gas-price poller refreshes the market cache (off the quote path).
+const GAS_POLL_INTERVAL: Duration = Duration::from_secs(12);
 /// Registry scan window: re-scan the last N blocks each tick (the dedup cache absorbs the overlap),
 /// at this nominal block time. Devnet-generous; tune per chain.
 const SCAN_OVERLAP_BLOCKS: u64 = 25;
 const BLOCK_TIME_SECS: u64 = 2;
+/// Routing funnel + split caps for the quote path (gas units unused until M3 wires gas pricing).
+const MAX_CANDIDATES: usize = 16;
+const MAX_LEGS: usize = 4;
 
 #[tokio::main]
 async fn main() -> Result<(), StartupError> {
@@ -125,6 +134,30 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&ledger),
         Arc::clone(&assets),
     ));
+    // Market data for the per-leg gas cost: a cache the quote path reads lock-free (no RPC), kept
+    // fresh by a gas poller (RPC) and the Binance price feed (WS). Both self-heal.
+    let market = MarketCache::new();
+    tokio::spawn(GasPoller::new(provider.clone(), Arc::clone(&market), GAS_POLL_INTERVAL).run());
+    tokio::spawn(
+        BinanceFeed::new(
+            Arc::clone(&market),
+            config.binance_ws_url.clone(),
+            config.price_feed_symbols(),
+        )
+        .run(),
+    );
+    let gas: Arc<dyn GasPrice> = market.clone();
+    let oracle: Arc<dyn PriceOracle> = market;
+    let quote = Arc::new(QuoteService::new(
+        Arc::clone(&registry),
+        Arc::clone(&ledger),
+        Arc::clone(&assets),
+        RoutingConfig::new(MAX_CANDIDATES, MAX_LEGS, config.gas_units_per_leg),
+        Arc::new(SystemClock),
+        gas,
+        oracle,
+        config.native_token,
+    ));
 
     // Keep the registry live and the caps fresh — both supervised so a transient failure restarts.
     // Each closure owns its handles and re-clones them per restart; nothing below needs them again.
@@ -151,6 +184,7 @@ async fn main() -> Result<(), StartupError> {
         pools,
         depth,
         balances,
+        quote,
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;

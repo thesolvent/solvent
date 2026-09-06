@@ -13,7 +13,7 @@ pub mod state;
 use std::time::Duration;
 
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
@@ -36,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         .route("/pools", get(app::pools::pools))
         .route("/pools/detail", get(app::pools::pool_detail))
         .route("/pools/depth", get(app::pools::pool_depth))
+        .route("/swap/quote", post(app::swap::quote))
         .route("/wallets/{addr}/balances", get(app::balances::balances))
         .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
@@ -77,16 +78,20 @@ mod tests {
     use solvent_core::deps::ledger::{
         BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError,
     };
+    use solvent_core::deps::routing::{GasPrice, PriceOracle};
     use solvent_core::ledger::LedgerService;
     use solvent_core::pool::{DepthService, PoolService};
     use solvent_core::primitives::ledger::{AccountKey, Reservation};
+    use solvent_core::primitives::routing::RoutingConfig;
     use solvent_core::primitives::ReservationId;
+    use solvent_core::quote::QuoteService;
     use solvent_core::registry::SharedSnapshot;
     use tower::ServiceExt;
 
     use crate::chain::ChainHead;
     use crate::http::state::{AppConfig, Features};
     use crate::ledger::SystemClock;
+    use crate::routing::MarketCache;
 
     /// A budget source that funds nothing — enough for the router to wire depth over an empty
     /// registry (the depth tests here exercise routing, not caps).
@@ -163,8 +168,21 @@ mod tests {
         ));
         let depth = Arc::new(DepthService::new(
             Arc::clone(&registry),
-            ledger,
+            Arc::clone(&ledger),
             Arc::clone(&assets),
+        ));
+        let market = MarketCache::new();
+        let gas: Arc<dyn GasPrice> = market.clone();
+        let oracle: Arc<dyn PriceOracle> = market;
+        let quote = Arc::new(QuoteService::new(
+            Arc::clone(&registry),
+            Arc::clone(&ledger),
+            Arc::clone(&assets),
+            RoutingConfig::new(16, 4, 0),
+            Arc::new(SystemClock),
+            gas,
+            oracle,
+            Address::ZERO,
         ));
         let balances = Arc::new(BalancesService::new(
             Arc::new(ZeroOracle),
@@ -187,12 +205,31 @@ mod tests {
             pools,
             depth,
             balances,
+            quote,
         }
     }
 
     async fn get(uri: &str) -> (StatusCode, serde_json::Value) {
         let resp = router(test_state())
             .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = resp.status();
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, json)
+    }
+
+    async fn post(uri: &str, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
+        let resp = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
             .await
             .unwrap();
         let status = resp.status();
@@ -244,6 +281,7 @@ mod tests {
             "/v1/pools",
             "/v1/pools/detail",
             "/v1/pools/depth",
+            "/v1/swap/quote",
             "/v1/wallets/{addr}/balances",
         ] {
             assert!(json["paths"][path].is_object(), "missing path {path}");
@@ -298,6 +336,33 @@ mod tests {
     #[tokio::test]
     async fn wallet_balances_malformed_addr_is_400() {
         let (status, _) = get("/v1/wallets/nope/balances").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn swap_quote_no_route_is_422() {
+        // The test registry is empty, so any pair is unroutable.
+        let (a, b) = (Address::from([1; 20]), Address::from([2; 20]));
+        let (status, json) = post(
+            "/v1/swap/quote",
+            serde_json::json!({
+                "token_in": a.to_string(),
+                "token_out": b.to_string(),
+                "amount_in": "1000",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(json["status"], "Error");
+    }
+
+    #[tokio::test]
+    async fn swap_quote_malformed_address_is_400() {
+        let (status, _) = post(
+            "/v1/swap/quote",
+            serde_json::json!({ "token_in": "nope", "token_out": "nope", "amount_in": "1000" }),
+        )
+        .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 }

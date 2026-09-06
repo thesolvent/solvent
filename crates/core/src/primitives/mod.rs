@@ -8,6 +8,7 @@ pub mod ingest;
 pub mod ledger;
 pub mod pool;
 pub mod pricing;
+pub mod quote;
 pub mod registry;
 pub mod routing;
 pub mod shared;
