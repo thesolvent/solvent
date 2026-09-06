@@ -74,15 +74,19 @@ mod tests {
     use solvent_core::balances::BalancesService;
     use solvent_core::balances::Holdings;
     use solvent_core::deps::balances::{BalancesOracle, BalancesOracleError};
-    use solvent_core::deps::ledger::{BudgetSource, BudgetSourceError};
-    use solvent_core::ledger::BudgetCache;
+    use solvent_core::deps::ledger::{
+        BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError,
+    };
+    use solvent_core::ledger::LedgerService;
     use solvent_core::pool::{DepthService, PoolService};
-    use solvent_core::primitives::ledger::AccountKey;
+    use solvent_core::primitives::ledger::{AccountKey, Reservation};
+    use solvent_core::primitives::ReservationId;
     use solvent_core::registry::SharedSnapshot;
     use tower::ServiceExt;
 
     use crate::chain::ChainHead;
     use crate::http::state::{AppConfig, Features};
+    use crate::ledger::SystemClock;
 
     /// A budget source that funds nothing — enough for the router to wire depth over an empty
     /// registry (the depth tests here exercise routing, not caps).
@@ -92,6 +96,32 @@ mod tests {
     impl BudgetSource for ZeroBudget {
         async fn budget(&self, _: &AccountKey) -> Result<U256, BudgetSourceError> {
             Ok(U256::ZERO)
+        }
+    }
+
+    /// A no-op ledger store — these tests exercise routing over an empty registry, never reserving,
+    /// so the ledger only needs to construct.
+    struct NoopLedgerStore;
+
+    #[async_trait::async_trait]
+    impl LedgerStore for NoopLedgerStore {
+        async fn reserve(&self, _: &Reservation) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn post(&self, _: ReservationId, _: &[U256]) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn void(&self, _: ReservationId) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn expire(&self, _: ReservationId) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn void_reorg(&self, _: ReservationId) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn open_reservations(&self) -> Result<Vec<Reservation>, LedgerStoreError> {
+            Ok(Vec::new())
         }
     }
 
@@ -126,12 +156,14 @@ mod tests {
         let registry = Arc::new(SharedSnapshot::default());
         let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
         let pools = Arc::new(PoolService::new(Arc::clone(&registry), Arc::clone(&assets)));
+        let ledger = Arc::new(LedgerService::new(
+            Arc::new(NoopLedgerStore),
+            Arc::new(ZeroBudget),
+            Arc::new(SystemClock),
+        ));
         let depth = Arc::new(DepthService::new(
             Arc::clone(&registry),
-            Arc::new(BudgetCache::new(
-                Arc::new(ZeroBudget),
-                Arc::clone(&registry),
-            )),
+            ledger,
             Arc::clone(&assets),
         ));
         let balances = Arc::new(BalancesService::new(

@@ -76,6 +76,13 @@ impl Ledger {
         self.budgets.insert(account, budget);
     }
 
+    /// Replace the fed budgets wholesale — the periodic full-book sync. Holds are untouched, so an
+    /// account that drops out of the book loses its budget (its `available` falls to zero) while any
+    /// standing hold on it stays recorded.
+    pub fn set_budgets(&mut self, budgets: BTreeMap<AccountKey, U256>) {
+        self.budgets = budgets;
+    }
+
     /// Admit a reservation, holding each source at both ceilings — atomically. `can_reserve` then
     /// `restore`; on any shortfall nothing is held. The durable-first service splits these across a
     /// persist, so a crash mid-way leaves the durable record as the single source of truth.

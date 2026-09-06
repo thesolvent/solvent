@@ -1,5 +1,6 @@
-//! Solvent server — the composition root. Wires the config, the registry snapshot (hydrated from the
-//! durable event log), a chain provider, and the HTTP adapter into a running axum server.
+//! Solvent server — the composition root. Wires the config, a live registry (recovered from the
+//! durable log and kept current by a chain watcher), the ledger (publishing one caps snapshot net of
+//! holds), a chain provider, and the HTTP adapter into a running axum server.
 
 mod config;
 
@@ -12,18 +13,16 @@ use solvent_adapters::balances::AlloyBalancesOracle;
 use solvent_adapters::chain::ChainHead;
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
-use solvent_adapters::ledger::AlloyBudgetSource;
-use solvent_adapters::registry::SqliteStore;
+use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
+use solvent_adapters::registry::{AlloyChainSource, SqliteStore};
 use solvent_core::asset::AssetManager;
 use solvent_core::balances::BalancesService;
 use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::ledger::BudgetSource;
-use solvent_core::deps::registry::Store;
-use solvent_core::ledger::BudgetCache;
+use solvent_core::ledger::LedgerService;
 use solvent_core::pool::{DepthService, PoolService};
-use solvent_core::primitives::registry::Snapshot;
-use solvent_core::primitives::ChainId;
-use solvent_core::registry::SharedSnapshot;
+use solvent_core::primitives::{ChainConfig, ChainId};
+use solvent_core::registry::{RegistrySync, SharedSnapshot};
 use solvent_core::SolventError;
 use sqlx::SqlitePool;
 
@@ -31,8 +30,14 @@ use crate::config::{load_token_list, Config, StartupError};
 
 /// How often the background poller refreshes the cached chain head.
 const BLOCK_POLL_INTERVAL: Duration = Duration::from_secs(2);
-/// How often the budget cache re-reads every active maker's pullable wallet (one batched call).
+/// How often the registry watcher scans the chain up to the current head.
+const REGISTRY_SYNC_INTERVAL: Duration = Duration::from_secs(4);
+/// How often the ledger re-reads every active maker's caps (one batched call).
 const BUDGET_POLL_INTERVAL: Duration = Duration::from_secs(12);
+/// Registry scan window: re-scan the last N blocks each tick (the dedup cache absorbs the overlap),
+/// at this nominal block time. Devnet-generous; tune per chain.
+const SCAN_OVERLAP_BLOCKS: u64 = 25;
+const BLOCK_TIME_SECS: u64 = 2;
 
 #[tokio::main]
 async fn main() -> Result<(), StartupError> {
@@ -51,42 +56,93 @@ async fn main() -> Result<(), StartupError> {
     let (head, poller) = ChainHead::new(provider.clone(), BLOCK_POLL_INTERVAL);
     tokio::spawn(poller);
 
-    let registry =
-        Arc::new(hydrate(config.database_url.as_deref(), ChainId(config.chain_id)).await?);
+    // The live server needs a durable store to recover the registry and ledger from; one pool backs
+    // both (migrations create every table).
+    let db_url = config
+        .database_url
+        .as_deref()
+        .ok_or(StartupError::MissingDatabase)?;
+    let pool = SqlitePool::connect(db_url).await?;
+    let registry_store = Arc::new(SqliteStore::new(pool.clone()));
+    registry_store.migrate().await.map_err(SolventError::from)?;
+
+    // Watcher loop: recover the snapshot from the durable log for immediate readiness, then keep it
+    // current by scanning the chain up to the head each tick.
+    let registry = Arc::new(SharedSnapshot::default());
+    let chain_config = ChainConfig::new(
+        ChainId(config.chain_id),
+        0,
+        SCAN_OVERLAP_BLOCKS,
+        BLOCK_TIME_SECS,
+    );
+    let chain_source = Arc::new(AlloyChainSource::new(
+        Arc::new(provider.clone()),
+        config.aqua_address,
+        config.app_address,
+        None,
+    ));
+    let registry_sync = Arc::new(RegistrySync::new(
+        &chain_config,
+        chain_source,
+        registry_store,
+        Arc::clone(&registry),
+    ));
+    registry_sync.recover().await?;
+
+    // The ledger: durable reservations plus the synced caps snapshot the read paths share. Sequenced
+    // after the registry recovers (L6.1) so strategy virtuals are non-zero — rebuild holds, then
+    // publish the first caps snapshot.
+    let budget_source: Arc<dyn BudgetSource> = Arc::new(AlloyBudgetSource::new(
+        provider.clone(),
+        config.aqua_address,
+        config.app_address,
+        Arc::clone(&registry),
+    ));
+    let ledger = Arc::new(LedgerService::new(
+        Arc::new(SqliteLedgerStore::new(pool)),
+        budget_source,
+        Arc::new(SystemClock),
+    ));
+    ledger.recover().await?;
+    if let Err(e) = ledger.sync_budgets(&registry.load()).await {
+        tracing::warn!(error = %e, "initial budget sync failed; caps are empty until the next tick");
+    }
+
     let assets = Arc::new(AssetManager::new(
         load_token_list(&config.token_list)?,
         Arc::clone(&registry),
     ));
     let pools = Arc::new(PoolService::new(Arc::clone(&registry), Arc::clone(&assets)));
-    // Every maker's executable cap, synced off the request path: the cache batch-reads all active
-    // makers' pullable wallets each tick, and depth reads its caps from it lock-free — no per-request
-    // RPC. (The quote path converges on one net-of-reservations snapshot in M2; see BudgetCache.)
-    // The wallet-balances endpoint reads an arbitrary user's holdings on demand (it can't be
-    // pre-synced), batched into one round-trip per request.
+    // An arbitrary wallet's holdings can't be pre-synced, so the balances endpoint reads them on
+    // demand, batched into one round-trip per request.
     let balances_oracle: Arc<dyn BalancesOracle> = Arc::new(AlloyBalancesOracle::new(
         provider.clone(),
         config.aqua_address,
     ));
     let balances = Arc::new(BalancesService::new(balances_oracle, Arc::clone(&assets)));
-    let source: Arc<dyn BudgetSource> = Arc::new(AlloyBudgetSource::new(
-        provider,
-        config.aqua_address,
-        config.app_address,
-        Arc::clone(&registry),
-    ));
-    let budgets = Arc::new(BudgetCache::new(source, Arc::clone(&registry)));
-    if let Err(e) = budgets.refresh().await {
-        tracing::warn!(error = %e, "initial budget sync failed; depth is empty until the next tick");
-    }
-    let sync_cache = Arc::clone(&budgets);
-    tokio::spawn(supervise("budget-sync", move || {
-        run_budget_sync(Arc::clone(&sync_cache), BUDGET_POLL_INTERVAL)
-    }));
     let depth = Arc::new(DepthService::new(
         Arc::clone(&registry),
-        budgets,
+        Arc::clone(&ledger),
         Arc::clone(&assets),
     ));
+
+    // Keep the registry live and the caps fresh — both supervised so a transient failure restarts.
+    // Each closure owns its handles and re-clones them per restart; nothing below needs them again.
+    let sync_head = head.clone();
+    tokio::spawn(supervise("registry-sync", move || {
+        run_registry_sync(
+            Arc::clone(&registry_sync),
+            sync_head.clone(),
+            REGISTRY_SYNC_INTERVAL,
+        )
+    }));
+    tokio::spawn(supervise("ledger-sync", move || {
+        run_ledger_sync(
+            Arc::clone(&ledger),
+            Arc::clone(&registry),
+            BUDGET_POLL_INTERVAL,
+        )
+    }));
 
     let state = AppState {
         config: Arc::new(config.app_config()),
@@ -103,20 +159,6 @@ async fn main() -> Result<(), StartupError> {
         .with_graceful_shutdown(shutdown())
         .await?;
     Ok(())
-}
-
-/// Rebuild the registry snapshot from the durable event log, or start empty when no store is set.
-async fn hydrate(db_url: Option<&str>, chain: ChainId) -> Result<SharedSnapshot, StartupError> {
-    let Some(url) = db_url else {
-        return Ok(SharedSnapshot::default());
-    };
-    let store = SqliteStore::new(SqlitePool::connect(url).await?);
-    store.migrate().await.map_err(SolventError::from)?;
-    let mut snapshot = Snapshot::default();
-    for ext in store.events(chain).await.map_err(SolventError::from)? {
-        snapshot.apply(ext.event);
-    }
-    Ok(SharedSnapshot::new(snapshot))
 }
 
 /// Aborts a task via its handle when dropped, so a supervisor that stops takes its child down with
@@ -163,13 +205,33 @@ where
     }
 }
 
-/// Re-sync the budget cache on an interval; a failed tick keeps the last-good caps and retries.
-async fn run_budget_sync(cache: Arc<BudgetCache>, interval: Duration) {
+/// Scan the chain up to the latest head on an interval, folding new events into the live snapshot; a
+/// failed tick keeps the last-good snapshot and retries. Skips until the head poller has a block.
+async fn run_registry_sync(sync: Arc<RegistrySync>, head: ChainHead, interval: Duration) {
+    let mut ticker = tokio::time::interval(interval);
+    loop {
+        ticker.tick().await;
+        let to_block = head.latest();
+        if to_block == 0 {
+            continue;
+        }
+        if let Err(e) = sync.sync_once(to_block).await {
+            tracing::warn!(error = %e, "registry sync failed; retrying next tick");
+        }
+    }
+}
+
+/// Re-sync the ledger's caps on an interval; a failed tick keeps the last-good caps and retries.
+async fn run_ledger_sync(
+    ledger: Arc<LedgerService>,
+    registry: Arc<SharedSnapshot>,
+    interval: Duration,
+) {
     let mut ticker = tokio::time::interval(interval);
     ticker.tick().await; // the immediate first tick — the boot already ran one sync
     loop {
         ticker.tick().await;
-        if let Err(e) = cache.refresh().await {
+        if let Err(e) = ledger.sync_budgets(&registry.load()).await {
             tracing::warn!(error = %e, "budget sync failed; keeping last-good caps");
         }
     }

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use alloy_primitives::{Address, B256, U256};
 
 use crate::asset::AssetManager;
-use crate::ledger::BudgetCache;
+use crate::ledger::LedgerService;
 use crate::primitives::amount::format_units;
 use crate::primitives::pool::{DepthPoint, PoolDepth, Side};
 use crate::primitives::pricing::Ratio;
@@ -30,24 +30,25 @@ const PROBE_DIVISOR: u64 = 1_000_000;
 /// A bisection stops once its bracket is within this fraction of its low end.
 const TOLERANCE_DIVISOR: u64 = 10_000;
 
-/// Serves `GET /pools/depth`. Composes the registry (which makers quote the pair), the budget cache
-/// (each maker's synced executable cap, read lock-free with no RPC), and the asset manager
-/// (orientation + token decimals). Fully in-memory — the chain reads live in the cache's sync tick.
+/// Serves `GET /pools/depth`. Composes the registry (which makers quote the pair), the ledger's
+/// synced caps snapshot (each maker's executable cap net of holds, read lock-free with no RPC), and
+/// the asset manager (orientation + token decimals). Fully in-memory — the chain reads live in the
+/// ledger's sync tick.
 pub struct DepthService {
     registry: Arc<SharedSnapshot>,
-    budgets: Arc<BudgetCache>,
+    ledger: Arc<LedgerService>,
     assets: Arc<AssetManager>,
 }
 
 impl DepthService {
     pub fn new(
         registry: Arc<SharedSnapshot>,
-        budgets: Arc<BudgetCache>,
+        ledger: Arc<LedgerService>,
         assets: Arc<AssetManager>,
     ) -> Self {
         Self {
             registry,
-            budgets,
+            ledger,
             assets,
         }
     }
@@ -62,7 +63,7 @@ impl DepthService {
         let direction = self.direction(pair, side);
         // `select` reads only the accounts it needs from the synced caps. `k = usize::MAX` keeps the
         // whole book (candidates are amount-independent — no funnel here).
-        let caps = self.budgets.load();
+        let caps = self.ledger.snapshot();
         let candidates = select(
             &snapshot,
             &caps,
@@ -356,14 +357,16 @@ fn pow10(n: u8) -> U256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deps::ledger::{BudgetSource, BudgetSourceError};
-    use crate::ledger::BudgetCache;
+    use crate::deps::ledger::{
+        BudgetSource, BudgetSourceError, Clock, LedgerStore, LedgerStoreError,
+    };
+    use crate::ledger::LedgerService;
     use crate::primitives::asset::{TokenList, TokenMeta};
-    use crate::primitives::ledger::AccountKey;
+    use crate::primitives::ledger::{AccountKey, Reservation};
     use crate::primitives::registry::{
         Curve, CurveSpec, MakerStrategy, PeggedParams, Snapshot, StrategyKey,
     };
-    use crate::primitives::{MakerId, StrategyHash};
+    use crate::primitives::{MakerId, ReservationId, StrategyHash};
 
     fn addr(n: u8) -> Address {
         Address::from([n; 20])
@@ -523,6 +526,40 @@ mod tests {
         }
     }
 
+    /// A no-op ledger store: the depth tests never reserve, so caps come purely from `sync_budgets`;
+    /// this satisfies `LedgerService::new` without a database.
+    struct FakeStore;
+
+    #[async_trait::async_trait]
+    impl LedgerStore for FakeStore {
+        async fn reserve(&self, _: &Reservation) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn post(&self, _: ReservationId, _: &[U256]) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn void(&self, _: ReservationId) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn expire(&self, _: ReservationId) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn void_reorg(&self, _: ReservationId) -> Result<(), LedgerStoreError> {
+            Ok(())
+        }
+        async fn open_reservations(&self) -> Result<Vec<Reservation>, LedgerStoreError> {
+            Ok(Vec::new())
+        }
+    }
+
+    /// A fixed clock — reservation TTLs are irrelevant to the depth tests.
+    struct FixedClock;
+    impl Clock for FixedClock {
+        fn now_unix(&self) -> u64 {
+            0
+        }
+    }
+
     /// A test book: the strategies, each maker's on-chain pullable (per token, defaulting to a
     /// wallet that never binds), and the token catalog.
     struct Fixture {
@@ -557,7 +594,11 @@ mod tests {
         /// Build the service with its caps already synced, as a warm server would have them.
         async fn build(self) -> Harness {
             let harness = self.build_cold();
-            harness.budgets.refresh().await.unwrap();
+            harness
+                .ledger
+                .sync_budgets(&harness.registry.load())
+                .await
+                .unwrap();
             harness
         }
 
@@ -576,20 +617,24 @@ mod tests {
                 wallets: self.wallets,
                 default_wallet: self.default_wallet,
             });
-            let budgets = Arc::new(BudgetCache::new(source, Arc::clone(&registry)));
+            let ledger = Arc::new(LedgerService::new(
+                Arc::new(FakeStore),
+                source,
+                Arc::new(FixedClock),
+            ));
             Harness {
-                depth: DepthService::new(Arc::clone(&registry), Arc::clone(&budgets), assets),
+                depth: DepthService::new(Arc::clone(&registry), Arc::clone(&ledger), assets),
                 registry,
-                budgets,
+                ledger,
             }
         }
     }
 
-    /// A built book, keeping the registry and cache reachable so a test can re-sync them.
+    /// A built book, keeping the registry and ledger reachable so a test can re-sync their caps.
     struct Harness {
         depth: DepthService,
         registry: Arc<SharedSnapshot>,
-        budgets: Arc<BudgetCache>,
+        ledger: Arc<LedgerService>,
     }
 
     impl Harness {
@@ -1049,7 +1094,10 @@ mod tests {
         assert!(cold.points.is_empty(), "nothing is pullable before a sync");
         assert_eq!(cold.best_price, "0");
 
-        book.budgets.refresh().await.unwrap();
+        book.ledger
+            .sync_budgets(&book.registry.load())
+            .await
+            .unwrap();
         let warm = book.sell();
         assert!(!warm.points.is_empty());
 
@@ -1063,7 +1111,10 @@ mod tests {
             "stale caps hide the new maker"
         );
 
-        book.budgets.refresh().await.unwrap();
+        book.ledger
+            .sync_budgets(&book.registry.load())
+            .await
+            .unwrap();
         let top = |depth: &PoolDepth| depth.points.last().unwrap().output.parse::<u128>().unwrap();
         assert!(
             top(&book.sell()) > top(&warm),
