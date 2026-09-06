@@ -3,9 +3,9 @@
 //! Handlers stay thin — they translate HTTP to/from the domain and return [`primitives::ApiResult`];
 //! business logic lives in core services.
 
+pub mod app;
 pub mod dto;
 pub mod error;
-pub mod handlers;
 pub mod openapi;
 pub mod primitives;
 pub mod state;
@@ -30,16 +30,13 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// stack (request-id → trace → timeout → CORS).
 pub fn router(state: AppState) -> Router {
     let v1 = Router::new()
-        .route("/config", get(handlers::config::config))
-        .route("/stats", get(handlers::stats::stats))
-        .route("/assets", get(handlers::assets::assets))
-        .route("/pools", get(handlers::pools::pools))
-        .route("/pools/detail", get(handlers::pools::pool_detail))
-        .route("/pools/depth", get(handlers::pools::pool_depth))
-        .route(
-            "/wallets/{addr}/balances",
-            get(handlers::balances::balances),
-        )
+        .route("/config", get(app::config::config))
+        .route("/stats", get(app::stats::stats))
+        .route("/assets", get(app::assets::assets))
+        .route("/pools", get(app::pools::pools))
+        .route("/pools/detail", get(app::pools::pool_detail))
+        .route("/pools/depth", get(app::pools::pool_depth))
+        .route("/wallets/{addr}/balances", get(app::balances::balances))
         .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
 
@@ -75,11 +72,11 @@ mod tests {
     use axum::http::Request;
     use solvent_core::asset::{AssetManager, TokenList, TokenMeta};
     use solvent_core::balances::BalancesService;
+    use solvent_core::balances::Holdings;
     use solvent_core::deps::balances::{BalancesOracle, BalancesOracleError};
     use solvent_core::deps::ledger::{BudgetSource, BudgetSourceError};
     use solvent_core::ledger::BudgetCache;
     use solvent_core::pool::{DepthService, PoolService};
-    use solvent_core::primitives::balances::Holdings;
     use solvent_core::primitives::ledger::AccountKey;
     use solvent_core::registry::SharedSnapshot;
     use tower::ServiceExt;
@@ -209,7 +206,17 @@ mod tests {
         let (status, json) = get("/v1/openapi.json").await;
         assert_eq!(status, StatusCode::OK);
         assert!(json["openapi"].is_string());
-        assert!(json["paths"]["/v1/assets"].is_object());
+        // Every M1 read path and a representative nested schema are in the document.
+        for path in [
+            "/v1/assets",
+            "/v1/pools",
+            "/v1/pools/detail",
+            "/v1/pools/depth",
+            "/v1/wallets/{addr}/balances",
+        ] {
+            assert!(json["paths"][path].is_object(), "missing path {path}");
+        }
+        assert!(json["components"]["schemas"]["PoolDetail"].is_object());
     }
 
     #[tokio::test]

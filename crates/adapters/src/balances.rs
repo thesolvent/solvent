@@ -8,7 +8,7 @@ use alloy::providers::Provider;
 use async_trait::async_trait;
 use solvent_core::{
     deps::balances::{BalancesOracle, BalancesOracleError},
-    primitives::balances::Holdings,
+    primitives::amount::Holdings,
 };
 
 use crate::erc20::read_balance_allowances;

@@ -48,9 +48,9 @@ impl DepthService {
     }
 
     /// The executable-liquidity depth curve for `pair` on `side`, or `None` when the pair has no
-    /// active pool. `range` is accepted as a client-side zoom hint; the curve is always computed from
-    /// the current curves + synced balances (no history, no per-request RPC).
-    pub fn depth(&self, pair: &TokenPair, side: Side, _range: Option<&str>) -> Option<PoolDepth> {
+    /// active pool. Computed from the current curves + synced balances (no history, no per-request
+    /// RPC); the FE zooms the returned curve client-side.
+    pub fn depth(&self, pair: &TokenPair, side: Side) -> Option<PoolDepth> {
         let snapshot = self.registry.load();
         // No active pool for this pair → no depth (404).
         snapshot.active_strategies_for_pair(*pair).next()?;
@@ -184,9 +184,13 @@ fn size_for_impact(
     if impact_bps(&top, best) < target_bps {
         return None;
     }
+    // Stop once the held point is within ~5% of the bucket — no need to bisect to the exact wei.
+    let tolerance = (target_bps / 20).max(1);
     let (mut lo, mut hi, mut hit) = (U256::from(1u64), ceiling, top);
     for _ in 0..BISECT_ITERS {
-        if hi.saturating_sub(lo) <= U256::from(1u64) {
+        if impact_bps(&hit, best).saturating_sub(target_bps) <= tolerance
+            || hi.saturating_sub(lo) <= U256::from(1u64)
+        {
             break;
         }
         let mid = lo.saturating_add(hi.saturating_sub(lo) / U256::from(2u64));
@@ -363,7 +367,7 @@ mod tests {
         let svc = service(strategies, e(1, 30)).await;
         let pair = TokenPair::new(addr(1), addr(2));
 
-        let depth = svc.depth(&pair, Side::Sell, None).unwrap();
+        let depth = svc.depth(&pair, Side::Sell).unwrap();
         assert!(!depth.points.is_empty(), "a priced pool yields a curve");
         // best_price is the ~3000 tip.
         assert!(depth.best_price.starts_with("29") || depth.best_price.starts_with("30"));
@@ -380,7 +384,7 @@ mod tests {
 
         // An unknown pair has no depth.
         assert!(svc
-            .depth(&TokenPair::new(addr(1), addr(9)), Side::Sell, None)
+            .depth(&TokenPair::new(addr(1), addr(9)), Side::Sell)
             .is_none());
     }
 
@@ -395,7 +399,7 @@ mod tests {
         .await;
         let pair = TokenPair::new(addr(1), addr(2));
 
-        let depth = svc.depth(&pair, Side::Sell, None).unwrap();
+        let depth = svc.depth(&pair, Side::Sell).unwrap();
         assert!(
             depth.points.len() < IMPACT_LADDER_BPS.len(),
             "a cap-limited book can't reach every bucket: {} points",
@@ -414,14 +418,14 @@ mod tests {
         let svc = service(strategies, e(1, 30)).await;
         let pair = TokenPair::new(addr(1), addr(2));
 
-        let buy = svc.depth(&pair, Side::Buy, None).unwrap();
+        let buy = svc.depth(&pair, Side::Buy).unwrap();
         assert!(!buy.points.is_empty(), "the buy side yields a curve");
         let out = |p: &DepthPoint| p.output.parse::<u128>().unwrap();
         for w in buy.points.windows(2) {
             assert!(out(&w[1]) > out(&w[0]), "output rises");
             assert!(w[1].impact_pct >= w[0].impact_pct, "impact deepens");
         }
-        let sell = svc.depth(&pair, Side::Sell, None).unwrap();
+        let sell = svc.depth(&pair, Side::Sell).unwrap();
         assert_ne!(
             buy.best_price, sell.best_price,
             "the two directions price differently"
@@ -433,7 +437,7 @@ mod tests {
         let svc = service(vec![xyc(3, e(100, 18), e(300_000, 6))], e(1, 30)).await;
         let pair = TokenPair::new(addr(1), addr(2));
 
-        let depth = svc.depth(&pair, Side::Sell, None).unwrap();
+        let depth = svc.depth(&pair, Side::Sell).unwrap();
         assert!(!depth.points.is_empty());
         assert!(
             depth.points.iter().all(|p| p.makers_used == 1),
@@ -446,7 +450,7 @@ mod tests {
         let svc = service(vec![docked(3, e(100, 18), e(300_000, 6))], e(1, 30)).await;
         let pair = TokenPair::new(addr(1), addr(2));
         assert!(
-            svc.depth(&pair, Side::Sell, None).is_none(),
+            svc.depth(&pair, Side::Sell).is_none(),
             "an inactive-only pair is not a pool"
         );
     }
@@ -458,7 +462,7 @@ mod tests {
         let svc = service(vec![unpriceable(3)], e(1, 30)).await;
         let pair = TokenPair::new(addr(1), addr(2));
 
-        let depth = svc.depth(&pair, Side::Sell, None).unwrap();
+        let depth = svc.depth(&pair, Side::Sell).unwrap();
         assert!(
             depth.points.is_empty(),
             "no priceable liquidity → no points"

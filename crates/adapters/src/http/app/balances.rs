@@ -3,7 +3,7 @@
 
 use alloy::primitives::Address;
 use axum::extract::{Path, State};
-use solvent_core::primitives::balances::TokenBalance;
+use solvent_core::balances::TokenBalance;
 use solvent_core::SolventError;
 
 use crate::http::dto::List;
@@ -11,6 +11,12 @@ use crate::http::primitives::{ApiResult, Response};
 use crate::http::state::AppState;
 
 /// Balances for `addr` over every catalog token. A malformed address → `400`.
+#[utoipa::path(
+    get,
+    path = "/v1/wallets/{addr}/balances",
+    params(("addr" = String, Path, description = "Wallet address")),
+    responses((status = 200, body = Response<List<TokenBalance>>))
+)]
 pub async fn balances(
     State(state): State<AppState>,
     Path(addr): Path<String>,
