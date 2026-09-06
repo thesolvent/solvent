@@ -8,5 +8,6 @@ pub mod events;
 pub mod execution;
 pub mod ingest;
 pub mod ledger;
+pub mod recapture;
 pub mod registry;
 pub mod routing;
