@@ -7,3 +7,4 @@ pub mod config;
 pub mod pools;
 pub mod stats;
 pub mod swap;
+pub mod trades;

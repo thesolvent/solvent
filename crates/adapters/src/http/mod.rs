@@ -38,6 +38,8 @@ pub fn router(state: AppState) -> Router {
         .route("/pools/depth", get(app::pools::pool_depth))
         .route("/swap/quote", post(app::swap::quote))
         .route("/swap", post(app::swap::submit))
+        .route("/trades", get(app::trades::trades))
+        .route("/trades/{id}", get(app::trades::trade_detail))
         .route("/wallets/{addr}/balances", get(app::balances::balances))
         .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
@@ -301,10 +303,11 @@ mod tests {
             Arc::new(FakeSettle),
             Arc::clone(&ledger),
         ));
+        let trades: Arc<dyn TradeStore> = Arc::new(NoopTrades);
         let swap = Arc::new(SwapService::new(
             Arc::clone(&registry),
             Arc::clone(&ledger),
-            Arc::new(NoopTrades),
+            Arc::clone(&trades),
             execution,
             Arc::new(FakeFill),
             Arc::clone(&assets),
@@ -351,6 +354,7 @@ mod tests {
             quote,
             swap,
             cosigner,
+            trades,
         }
     }
 
@@ -537,6 +541,38 @@ mod tests {
             }),
         )
         .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn trades_list_is_ok() {
+        let (status, json) = get("/v1/trades").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["status"], "Ok");
+    }
+
+    #[tokio::test]
+    async fn trades_bad_cursor_is_400() {
+        let (status, _) = get("/v1/trades?cursor=!!!not-base64!!!").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn trades_bad_status_filter_is_400() {
+        let (status, _) = get("/v1/trades?status=nonsense").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn trade_detail_unknown_is_404() {
+        // A well-formed ULID with no trade behind it.
+        let (status, _) = get("/v1/trades/00000000000000000000000000").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn trade_detail_malformed_id_is_400() {
+        let (status, _) = get("/v1/trades/not-a-ulid").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 }
