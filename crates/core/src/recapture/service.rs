@@ -7,9 +7,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, B256, U256};
 
-use crate::deps::recapture::RecaptureStore;
+use crate::deps::recapture::{RecaptureStore, SettledLegsReader};
 use crate::deps::routing::PriceOracle;
 use crate::obs::warn;
 use crate::primitives::recapture::{recapture_split, RecaptureCredit, RecapturePolicy, TokenValue};
@@ -20,6 +20,7 @@ use crate::primitives::IntentId;
 pub struct RecaptureService {
     oracle: Arc<dyn PriceOracle>,
     store: Arc<dyn RecaptureStore>,
+    settled_legs: Arc<dyn SettledLegsReader>,
     /// Per-token base-unit decimals, from the composition root's token metadata.
     decimals: BTreeMap<Address, u8>,
     policy: RecapturePolicy,
@@ -29,31 +30,41 @@ impl RecaptureService {
     pub fn new(
         oracle: Arc<dyn PriceOracle>,
         store: Arc<dyn RecaptureStore>,
+        settled_legs: Arc<dyn SettledLegsReader>,
         decimals: BTreeMap<Address, u8>,
         policy: RecapturePolicy,
     ) -> Self {
         Self {
             oracle,
             store,
+            settled_legs,
             decimals,
             policy,
         }
     }
 
-    /// Compute and accrue the recapture credits for a confirmed fill of `intent` along `legs`, whose
-    /// realized spread is `fill_spread` in `spread_token`. Best-effort: an unpriceable token drops
-    /// its leg's credit and a store error is logged — neither is propagated, so recapture can never
-    /// fail a settled fill. Returns the credits computed (empty when nothing was recaptured).
+    /// Compute and accrue the recapture credits for a confirmed fill of `intent` settled by `tx`. The
+    /// `plan_legs` supply each leg's identity (maker, strategy, token sides); the *actual* amounts are
+    /// read from the settlement, so a partial fill credits only what really moved. `fill_spread` (in
+    /// `spread_token`) bounds the total rebate. Best-effort/fail-closed: an unreadable settlement, an
+    /// unpriceable token, or a store error drops the credit and logs — none is propagated, so
+    /// recapture can never fail a settled fill. Returns the credits computed (empty when nothing was
+    /// recaptured).
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, fields(intent = %intent)))]
     pub async fn on_settled(
         &self,
         intent: IntentId,
-        legs: &[RouteLeg],
+        tx: B256,
+        plan_legs: &[RouteLeg],
         fill_spread: U256,
         spread_token: Address,
     ) -> Vec<RecaptureCredit> {
-        let prices = self.prices_for(legs, spread_token).await;
-        let credits = recapture_split(legs, &prices, fill_spread, spread_token, &self.policy);
+        let Ok(legs) = self.settled_legs.actual_legs(tx, plan_legs).await else {
+            warn!(intent = %intent, "settled legs unreadable; nothing recaptured");
+            return Vec::new();
+        };
+        let prices = self.prices_for(&legs, spread_token).await;
+        let credits = recapture_split(&legs, &prices, fill_spread, spread_token, &self.policy);
         if !credits.is_empty() && self.store.accrue(intent, &credits).await.is_err() {
             warn!(intent = %intent, "recapture credits computed but not accrued");
         }
@@ -100,7 +111,7 @@ mod tests {
     use async_trait::async_trait;
     use rust_decimal::Decimal;
 
-    use crate::deps::recapture::RecaptureStoreError;
+    use crate::deps::recapture::{RecaptureStoreError, SettledLegsError};
     use crate::deps::routing::PriceOracleError;
     use crate::ledger::AvailableSnapshot;
     use crate::primitives::ledger::AccountKey;
@@ -177,6 +188,45 @@ mod tests {
         }
     }
 
+    /// Echoes the plan legs back as the actual legs — the full-fill case (actual == expected).
+    struct EchoLegs;
+    #[async_trait]
+    impl SettledLegsReader for EchoLegs {
+        async fn actual_legs(
+            &self,
+            _tx: B256,
+            legs: &[RouteLeg],
+        ) -> Result<Vec<RouteLeg>, SettledLegsError> {
+            Ok(legs.to_vec())
+        }
+    }
+
+    /// Returns fixed actual legs regardless of the plan — models a fill that moved other amounts.
+    struct FixedLegs(Vec<RouteLeg>);
+    #[async_trait]
+    impl SettledLegsReader for FixedLegs {
+        async fn actual_legs(
+            &self,
+            _tx: B256,
+            _legs: &[RouteLeg],
+        ) -> Result<Vec<RouteLeg>, SettledLegsError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// Fails to read the settlement — the fail-closed case.
+    struct ErrLegs;
+    #[async_trait]
+    impl SettledLegsReader for ErrLegs {
+        async fn actual_legs(
+            &self,
+            _tx: B256,
+            _legs: &[RouteLeg],
+        ) -> Result<Vec<RouteLeg>, SettledLegsError> {
+            Err(SettledLegsError::Read("boom".into()))
+        }
+    }
+
     /// ETH at $3000, USDC at $1.
     fn oracle() -> Arc<FakeOracle> {
         Arc::new(FakeOracle(HashMap::from([
@@ -211,11 +261,16 @@ mod tests {
     #[tokio::test]
     async fn on_settled_accrues_the_credit() {
         let store = Arc::new(MemStore::default());
-        let svc =
-            RecaptureService::new(oracle(), store.clone(), decimals(), policy(8000, 10000, 0));
+        let svc = RecaptureService::new(
+            oracle(),
+            store.clone(),
+            Arc::new(EchoLegs),
+            decimals(),
+            policy(8000, 10000, 0),
+        );
         let legs = [reverse_leg(5, e6(2700), e18(1))];
         let credits = svc
-            .on_settled(IntentId(B256::ZERO), &legs, e6(300), usdc())
+            .on_settled(IntentId(B256::ZERO), B256::ZERO, &legs, e6(300), usdc())
             .await;
         let expected = vec![RecaptureCredit {
             maker: maker(5),
@@ -234,10 +289,56 @@ mod tests {
             usdc(),
             UsdPrice(Decimal::from(1u32)),
         )])));
-        let svc = RecaptureService::new(sparse, store.clone(), decimals(), policy(8000, 10000, 0));
+        let svc = RecaptureService::new(
+            sparse,
+            store.clone(),
+            Arc::new(EchoLegs),
+            decimals(),
+            policy(8000, 10000, 0),
+        );
         let legs = [reverse_leg(5, e6(2700), e18(1))];
         let credits = svc
-            .on_settled(IntentId(B256::ZERO), &legs, e6(300), usdc())
+            .on_settled(IntentId(B256::ZERO), B256::ZERO, &legs, e6(300), usdc())
+            .await;
+        assert!(credits.is_empty());
+        assert!(store.credits().is_empty());
+    }
+
+    // Actuals, not the plan, drive the credit: a fill that moved only half of the planned leg
+    // recaptures half the LVR (240 → 120 USDC), though the plan legs are unchanged.
+    #[tokio::test]
+    async fn actual_legs_scale_the_credit() {
+        let store = Arc::new(MemStore::default());
+        // The fill actually moved half: the maker received 1350 USDC and gave 0.5 ETH.
+        let actual = vec![reverse_leg(5, e6(1350), e18(1) / U256::from(2u64))];
+        let svc = RecaptureService::new(
+            oracle(),
+            store.clone(),
+            Arc::new(FixedLegs(actual)),
+            decimals(),
+            policy(8000, 10000, 0),
+        );
+        let plan = [reverse_leg(5, e6(2700), e18(1))];
+        let credits = svc
+            .on_settled(IntentId(B256::ZERO), B256::ZERO, &plan, e6(300), usdc())
+            .await;
+        assert_eq!(credits.first().map(|c| c.amount), Some(e6(120)));
+    }
+
+    // Fail-closed: an unreadable settlement computes and accrues nothing (never fails the fill).
+    #[tokio::test]
+    async fn unreadable_settlement_accrues_nothing() {
+        let store = Arc::new(MemStore::default());
+        let svc = RecaptureService::new(
+            oracle(),
+            store.clone(),
+            Arc::new(ErrLegs),
+            decimals(),
+            policy(8000, 10000, 0),
+        );
+        let plan = [reverse_leg(5, e6(2700), e18(1))];
+        let credits = svc
+            .on_settled(IntentId(B256::ZERO), B256::ZERO, &plan, e6(300), usdc())
             .await;
         assert!(credits.is_empty());
         assert!(store.credits().is_empty());
@@ -311,10 +412,21 @@ mod tests {
         );
 
         let store = Arc::new(MemStore::default());
-        let svc =
-            RecaptureService::new(oracle(), store.clone(), decimals(), policy(8000, 10000, 0));
+        let svc = RecaptureService::new(
+            oracle(),
+            store.clone(),
+            Arc::new(EchoLegs),
+            decimals(),
+            policy(8000, 10000, 0),
+        );
         let credits = svc
-            .on_settled(req.intent, &plan.legs, plan.expected_profit, eth())
+            .on_settled(
+                req.intent,
+                B256::ZERO,
+                &plan.legs,
+                plan.expected_profit,
+                eth(),
+            )
             .await;
         assert!(!credits.is_empty(), "the rebalanced maker earned a credit");
         assert!(

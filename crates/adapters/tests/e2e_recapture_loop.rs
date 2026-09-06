@@ -26,7 +26,7 @@ use solvent_adapters::execution::{AquaSettlementReader, WalletkitExecutor};
 use solvent_adapters::ingest::uniswapx::{
     OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXFillBuilder, UniswapXV2Normalizer,
 };
-use solvent_adapters::recapture::{AlloyRebatePayer, SqliteRecaptureStore};
+use solvent_adapters::recapture::{AlloyRebatePayer, AquaSettledLegsReader, SqliteRecaptureStore};
 use solvent_core::deps::ingest::{FillBuilder, Normalizer, OrderFeed};
 use solvent_core::deps::recapture::RecaptureStore;
 use solvent_core::deps::routing::{PriceOracle, PriceOracleError};
@@ -293,15 +293,27 @@ async fn run_full_arc(stack: &Stack, otterscan: Option<&str>) {
         Bps(Decimal::from(10000u32)),
         Usd(Decimal::ZERO),
     );
+    let settled_legs = Arc::new(AquaSettledLegsReader::new(
+        Arc::new(h.maker_provider.clone()),
+        *h.aqua.address(),
+    ));
     let recapture = RecaptureService::new(
         oracle,
         store.clone(),
+        settled_legs,
         BTreeMap::from([(h.t0, 18u8), (h.t1, 18u8)]),
         policy,
     );
-    // Exact-out fill ⇒ the resolver's spread token is the input, t0.
+    // Exact-out fill ⇒ the resolver's spread token is the input, t0. The credit is valued from the
+    // fill's *actual* legs, read back from its own Aqua events (not the plan's expectation).
     let credits = recapture
-        .on_settled(intent.id, &plan.legs, plan.expected_profit, h.t0)
+        .on_settled(
+            intent.id,
+            fill_tx.expect("the reverse fill confirmed"),
+            &plan.legs,
+            plan.expected_profit,
+            h.t0,
+        )
         .await;
     assert!(
         !credits.is_empty(),
