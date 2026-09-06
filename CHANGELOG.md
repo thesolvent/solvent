@@ -134,6 +134,28 @@ the project is pre-1.0 and evolving.
     hook. Confirmation is finality-anchored (walletkit).
   - **Full-loop live E2E** over anvil through the **production execution path** — order → … → reserve
     → sim → submit → confirm → post the actual pulled amount; plus a stale-order sim-reject → void.
+- **Recapture (Tier 0) — arbitrage-by-design ★**: after same-direction flow leaves a maker's pool
+  imbalanced, internalize the rebalancing (reverse) trade and rebate the recaptured LVR to that maker —
+  value that otherwise leaks to an MEV searcher. Design:
+  `docs/plans/backend/2026-09-05-arbitrage-recapture-design.md`.
+  - **Pure split** (`primitives::recapture::recapture_split`) — per-leg LVR vs. the oracle mid
+    (positive only on rebalancing legs, so forward/imbalancing fills self-exclude), taker-shared and
+    capped by realized spread, aggregated per (maker, token); stateless, fail-closed, no imbalance ledger.
+  - **Settlement seam** — `ExecutionService::reconcile` now reports `ConfirmedFill`s (fresh-post only,
+    so a redelivery can't double-drive recapture); `RecaptureService` values a confirmed fill's legs
+    via the reused `PriceOracle` and accrues the credits (best-effort — a missing price or store error
+    never fails the fill). Routing is unchanged: the cheap = best-priced preference already steers
+    reverse flow into the imbalanced maker.
+  - **Durable store** — `RecaptureStore` port + SQLite adapter (`recapture_credit`, keyed by
+    (intent, maker, token) so a re-driven reconcile accrues once); `outstanding` / `mark_settled`.
+  - **Payout** — `RebatePayer` port + alloy ERC-20 adapter; `PayoutService` sweeps outstanding credits,
+    one transfer per (maker, token) summed across intents, settling a group only after its payment
+    lands (never double-paid).
+  - **Tests** — pure-split unit matrix; a hermetic walking skeleton (real `route` internalizes the
+    reverse buy into the imbalanced maker → credit); store idempotency/settle; payout aggregation &
+    failed-payment retry; a live anvil E2E paying a maker on chain and settling.
+  - **Deferred** (design §4, §14): Tier 1 public counter-intent auction + its ledger-race property
+    tests, auction-set split, actual-vs-expected credit reconciliation, cross-chain.
 
 _Next: B6 — reconcile._
 
