@@ -1,0 +1,89 @@
+# Solvent devnet — self-contained. `docker compose -f devnet/docker-compose.yml up` boots the chain,
+# an explorer, deploys our contracts + test tokens, and serves the faucet. No wharfnet binary needed.
+# The anvil flags mirror what our wharfnet `feat/anvil-extra-args` PR enables upstream.
+name: solvent-devnet
+
+services:
+  # Local EVM. --disable-code-size-limit: the full AquaSwapVMRouter exceeds EIP-170.
+  # --slots-in-an-epoch 1: make the `finalized` tag advance so finality-anchored confirmation settles.
+  anvil-1:
+    image: ghcr.io/foundry-rs/foundry:stable
+    # Run as root so anvil can write its --state dump into the root-owned named volume.
+    user: "root"
+    entrypoint: ["anvil"]
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8545"
+      - "--chain-id"
+      - "31337"
+      - "--block-time"
+      - "1"
+      - "--disable-code-size-limit"
+      - "--slots-in-an-epoch"
+      - "1"
+      # Persist the chain across restarts: load on boot if present, dump on exit + every interval.
+      - "--state"
+      - "/state/anvil.json"
+      - "--state-interval"
+      - "5"
+    volumes:
+      - "anvil-state:/state"
+    ports:
+      - "8545:8545"
+    restart: unless-stopped
+
+  # Otterscan works directly against anvil's ots_* RPC — no indexer.
+  explorer:
+    image: otterscan/otterscan:v2.11.0
+    depends_on:
+      - anvil-1
+    ports:
+      - "5100:80"
+    volumes:
+      - "./otterscan.json:/usr/share/nginx/html/config.json:ro"
+    restart: unless-stopped
+
+  # One-shot: etch canonical infra, deploy the stack + Core-6, write the manifest into the shared volume.
+  seed:
+    image: ghcr.io/foundry-rs/foundry:stable
+    # Run as root so the one-shot can write the manifest into the root-owned named volume.
+    user: "root"
+    depends_on:
+      - anvil-1
+    working_dir: /work
+    entrypoint: ["sh", "/seed.sh"]
+    environment:
+      RPC_URL: "http://anvil-1:8545"
+      # Standard anvil dev account #0 — a well-known throwaway key. Devnet only.
+      DEPLOYER_KEY: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+    volumes:
+      - "../contracts:/work"
+      - "./seed.sh:/seed.sh:ro"
+      - "manifest:/work/deployments"
+    restart: "no"
+
+  # Rate-limited token/gas faucet the frontend calls. Waits for the seed to finish.
+  faucet:
+    build:
+      context: ..
+      dockerfile: crates/devnet/Dockerfile
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    environment:
+      RPC_URL: "http://anvil-1:8545"
+      FAUCET_PRIVATE_KEY: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      MANIFEST_PATH: "/manifest/solvent-devnet.json"
+      BIND_ADDR: "0.0.0.0:8080"
+      COOLDOWN_SECS: "60"
+    ports:
+      - "8080:8080"
+    volumes:
+      - "manifest:/manifest:ro"
+    restart: unless-stopped
+
+volumes:
+  manifest:
+  anvil-state:
