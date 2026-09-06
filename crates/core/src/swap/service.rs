@@ -298,7 +298,7 @@ impl SwapService {
             status,
             deadline_block: intent.deadline,
             signature: Some(intent.signature.clone()),
-            price_impact_pct: None,
+            price_impact_pct: plan.map(|p| p.price_impact_pct),
             surplus: plan.map(|p| p.expected_profit),
             tx_hash: None,
             block_number: None,

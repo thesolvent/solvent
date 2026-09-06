@@ -213,6 +213,20 @@ pub struct Selection {
     pub best_omitted_spot: Option<Ratio>,
 }
 
+/// The blended rate's relative shortfall from the best (near-zero-impact) rate, in percent. The
+/// best rate is the tightest candidate's spot marginal, read straight off the routed candidates —
+/// no second solve.
+pub fn price_impact_pct(chosen: &[Candidate], amount_in: U256, amount_out: U256) -> f64 {
+    let best = chosen
+        .iter()
+        .filter_map(|c| c.spot_marginal(amount_in))
+        .max();
+    match (best, Ratio::new(amount_out, amount_in)) {
+        (Some(best), Some(effective)) => effective.rel_diff_bps(&best) as f64 / 100.0,
+        _ => 0.0,
+    }
+}
+
 /// A candidate with its rank score (`None` = unpriceable at this size).
 struct Scored {
     score: Option<U256>,
