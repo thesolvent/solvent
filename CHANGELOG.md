@@ -16,6 +16,17 @@ the project is pre-1.0 and evolving.
   fuzz) against source-deployed UniswapX + Aqua/SwapVM, plus an opt-in mainnet-fork test against the
   real V2 reactor + Permit2.
 - **ABI export** — `abi/UniswapXAquaFiller.json` (via `just abi`) for the future backend.
+- **`DevToken`** — a mintable ERC-20 with configurable decimals, for seeding the devnet with
+  real-world-decimal test tokens.
+- **`DeployDevnet` script** — one-shot deploy of Aqua + the SwapVM router + the reactor + filler +
+  the Core-6 tokens, writing an address manifest (`solvent-devnet.json`).
+
+### Added — devnet (`devnet/`, Docker Compose)
+- **Self-contained local devnet** — one `docker compose up` (`just devnet-up`) boots anvil (fast
+  finality via `--slots-in-an-epoch 1`, oversized code allowed, `--state` persistence), Otterscan, a
+  one-shot idempotent deploy of the full stack + Core-6 test tokens, and a rate-limited token/gas
+  **faucet** (`crates/devnet`, receipt-verified mints + per-address cooldown). No wharfnet runtime
+  dependency; a Coolify deploy guide is included.
 
 ### Added — backend (`crates/`, hexagonal Rust workspace)
 - **B0 — foundations**: `core`/`adapters`/`app` workspace; shared primitives (typed ids,
