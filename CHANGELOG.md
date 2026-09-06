@@ -142,10 +142,12 @@ the project is pre-1.0 and evolving.
     (positive only on rebalancing legs, so forward/imbalancing fills self-exclude), taker-shared and
     capped by realized spread, aggregated per (maker, token); stateless, fail-closed, no imbalance ledger.
   - **Settlement seam** — `ExecutionService::reconcile` now reports `ConfirmedFill`s (fresh-post only,
-    so a redelivery can't double-drive recapture); `RecaptureService` values a confirmed fill's legs
-    via the reused `PriceOracle` and accrues the credits (best-effort — a missing price or store error
-    never fails the fill). Routing is unchanged: the cheap = best-priced preference already steers
-    reverse flow into the imbalanced maker.
+    so a redelivery can't double-drive recapture); `RecaptureService` values the fill's *actual* legs —
+    read back from its own Aqua `Pushed`/`Pulled` events via the `SettledLegsReader` port (Aqua adapter
+    reusing the shared receipt decode), so a partial fill credits only what really moved — against the
+    reused `PriceOracle`, and accrues the credits (best-effort — an unreadable settlement, missing price,
+    or store error never fails the fill). Routing is unchanged: the cheap = best-priced preference
+    already steers reverse flow into the imbalanced maker.
   - **Durable store** — `RecaptureStore` port + SQLite adapter (`recapture_credit`, keyed by
     (intent, maker, token) so a re-driven reconcile accrues once); `outstanding` / `mark_settled`.
   - **Payout** — `RebatePayer` port + alloy ERC-20 adapter; `PayoutService` sweeps outstanding credits,
@@ -155,7 +157,7 @@ the project is pre-1.0 and evolving.
     reverse buy into the imbalanced maker → credit); store idempotency/settle; payout aggregation &
     failed-payment retry; a live anvil E2E paying a maker on chain and settling.
   - **Deferred** (design §4, §14): Tier 1 public counter-intent auction + its ledger-race property
-    tests, auction-set split, actual-vs-expected credit reconciliation, cross-chain.
+    tests, auction-set split, an actual (vs. expected) realized-spread cap, cross-chain.
 
 _Next: B6 — reconcile._
 
