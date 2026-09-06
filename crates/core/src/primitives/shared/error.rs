@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::deps::execution::{ExecutionError, SettlementError, SimError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
+use crate::deps::recapture::RecaptureStoreError;
 use crate::deps::registry::{ChainSourceError, StoreError};
 use crate::primitives::ledger::LedgerError;
 
@@ -43,4 +44,7 @@ pub enum SolventError {
     /// Reading a confirmed fill's on-chain settlement failed.
     #[error("settlement: {0}")]
     Settlement(#[from] SettlementError),
+    /// The recapture store failed.
+    #[error("recapture store: {0}")]
+    RecaptureStore(#[from] RecaptureStoreError),
 }
