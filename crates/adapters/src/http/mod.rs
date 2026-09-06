@@ -87,6 +87,7 @@ mod tests {
     use solvent_core::deps::ledger::{
         BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError,
     };
+    use solvent_core::deps::quote_log::{QuoteLog, QuoteLogError, QuoteServed};
     use solvent_core::deps::registry::{EventStore, RecordedEvent, StoreError};
     use solvent_core::deps::routing::{GasPrice, PriceOracle};
     use solvent_core::deps::trade::{
@@ -247,6 +248,14 @@ mod tests {
         }
         async fn count_since(&self, _: ChainId, _: u64) -> Result<u64, StoreError> {
             Ok(0)
+        }
+    }
+
+    struct NoopQuoteLog;
+    #[async_trait::async_trait]
+    impl QuoteLog for NoopQuoteLog {
+        async fn record(&self, _: &QuoteServed) -> Result<(), QuoteLogError> {
+            Ok(())
         }
     }
 
@@ -412,6 +421,7 @@ mod tests {
             registry: Arc::clone(&registry),
             registry_store: Arc::new(NoopEventStore),
             valuation,
+            quote_log: Arc::new(NoopQuoteLog),
         }
     }
 

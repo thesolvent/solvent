@@ -17,6 +17,7 @@ use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
 use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
+use solvent_adapters::metrics::SqliteQuoteLog;
 use solvent_adapters::registry::{AlloyChainSource, SqliteStore};
 use solvent_adapters::routing::{BinanceFeed, GasPoller, MarketCache};
 use solvent_adapters::trade::SqliteTradeStore;
@@ -25,6 +26,7 @@ use solvent_core::balances::BalancesService;
 use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ledger::BudgetSource;
+use solvent_core::deps::quote_log::QuoteLog;
 use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::routing::{GasPrice, PriceOracle};
 use solvent_core::deps::trade::TradeStore;
@@ -132,6 +134,8 @@ async fn main() -> Result<(), StartupError> {
         Arc::new(SystemClock),
     ));
     let trade_store: Arc<dyn TradeStore> = Arc::new(SqliteTradeStore::new(pool.clone()));
+    let quote_log: Arc<dyn QuoteLog> =
+        Arc::new(SqliteQuoteLog::new(pool.clone(), Arc::new(SystemClock)));
     ledger.recover().await?;
     if let Err(e) = ledger.sync_budgets(&registry.load()).await {
         tracing::warn!(error = %e, "initial budget sync failed; caps are empty until the next tick");
@@ -320,6 +324,7 @@ async fn main() -> Result<(), StartupError> {
         registry: Arc::clone(&registry),
         registry_store,
         valuation,
+        quote_log,
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
