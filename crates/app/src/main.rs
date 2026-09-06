@@ -197,7 +197,9 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&valuation),
         maker_metrics,
         Arc::clone(&balances_oracle),
+        Arc::clone(&registry_store),
         Arc::new(SystemClock),
+        ChainId(config.chain_id),
     ));
     let depth = Arc::new(DepthService::new(
         Arc::clone(&registry),

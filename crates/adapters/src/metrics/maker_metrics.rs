@@ -31,36 +31,43 @@ impl SqliteMakerMetrics {
             .map_err(db)
     }
 
-    /// Per-token delivered volume for confirmed fills matching `owner_clause` (`l.maker` or
-    /// `l.strategy_hash`), summed in Rust to keep U256 precision.
-    async fn volume(
+    /// Per-token flow for confirmed fills owned by `owner_col` (`l.maker` or `l.strategy_hash`),
+    /// summed in Rust to keep U256 precision. `token_col`/`amount_col` pick the side: `token_out`/
+    /// `amount_out` for delivered volume (outflow), `token_in`/`amount_in` for received (inflow).
+    async fn flow(
         &self,
-        column: &str,
+        token_col: &str,
+        amount_col: &str,
+        owner_col: &str,
         key: &[u8],
         since: i64,
     ) -> Result<Vec<TokenVolume>, MakerMetricsError> {
         let rows: Vec<(Vec<u8>, String)> = sqlx::query_as(&format!(
-            "SELECT t.token_out, l.amount_out FROM trade t JOIN trade_leg l ON l.trade_id = t.id \
-             WHERE t.status = 'confirmed' AND t.settled_at >= ? AND l.{column} = ?"
+            "SELECT t.{token_col}, l.{amount_col} FROM trade t JOIN trade_leg l ON l.trade_id = t.id \
+             WHERE t.status = 'confirmed' AND t.settled_at >= ? AND l.{owner_col} = ?"
         ))
         .bind(since)
         .bind(key)
         .fetch_all(&self.pool)
         .await
         .map_err(db)?;
-
-        let mut by_token: BTreeMap<Address, U256> = BTreeMap::new();
-        for (token, amount) in rows {
-            let token = Address::from_slice(&token);
-            let amount = U256::from_str_radix(&amount, 10).unwrap_or(U256::ZERO);
-            let entry = by_token.entry(token).or_default();
-            *entry = entry.saturating_add(amount);
-        }
-        Ok(by_token
-            .into_iter()
-            .map(|(token, base_units)| TokenVolume { token, base_units })
-            .collect())
+        Ok(sum_by_token(rows))
     }
+}
+
+/// Sum `(token_bytes, amount_str)` rows per token, keeping U256 precision.
+fn sum_by_token(rows: Vec<(Vec<u8>, String)>) -> Vec<TokenVolume> {
+    let mut by_token: BTreeMap<Address, U256> = BTreeMap::new();
+    for (token, amount) in rows {
+        let token = Address::from_slice(&token);
+        let amount = U256::from_str_radix(&amount, 10).unwrap_or(U256::ZERO);
+        let entry = by_token.entry(token).or_default();
+        *entry = entry.saturating_add(amount);
+    }
+    by_token
+        .into_iter()
+        .map(|(token, base_units)| TokenVolume { token, base_units })
+        .collect()
 }
 
 #[async_trait]
@@ -119,7 +126,24 @@ impl MakerMetricsStore for SqliteMakerMetrics {
             fills: fills as u64,
             fills_by_day: day_buckets(&fill_times, now),
             last_fill_at: last_fill_at.map(|t| t as u64),
-            volume: self.volume("maker", key.as_slice(), since as i64).await?,
+            volume: self
+                .flow(
+                    "token_out",
+                    "amount_out",
+                    "maker",
+                    key.as_slice(),
+                    since as i64,
+                )
+                .await?,
+            inflow: self
+                .flow(
+                    "token_in",
+                    "amount_in",
+                    "maker",
+                    key.as_slice(),
+                    since as i64,
+                )
+                .await?,
             quotes: quotes as u64,
             latency_p50_ms: p50(latencies),
         })
@@ -170,11 +194,42 @@ impl MakerMetricsStore for SqliteMakerMetrics {
         Ok(PositionMetrics {
             fills: fills as u64,
             volume: self
-                .volume("strategy_hash", key.as_slice(), since as i64)
+                .flow(
+                    "token_out",
+                    "amount_out",
+                    "strategy_hash",
+                    key.as_slice(),
+                    since as i64,
+                )
                 .await?,
             last_fill_at: last_fill_at.map(|t| t as u64),
             quote_uptime_pct,
         })
+    }
+
+    async fn pair_fills(&self, pairs: &[TokenPair], since: u64) -> Result<u64, MakerMetricsError> {
+        if pairs.is_empty() {
+            return Ok(0);
+        }
+        // A trade's pair is unordered; match either orientation of each maker pair.
+        let clause = pairs
+            .iter()
+            .map(|_| "(token_in = ? AND token_out = ?) OR (token_in = ? AND token_out = ?)")
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let sql = format!(
+            "SELECT COUNT(*) FROM trade WHERE status = 'confirmed' AND settled_at >= ? AND ({clause})"
+        );
+        let mut q = sqlx::query_scalar(&sql).bind(since as i64);
+        for pair in pairs {
+            q = q
+                .bind(pair.lo.as_slice().to_vec())
+                .bind(pair.hi.as_slice().to_vec())
+                .bind(pair.hi.as_slice().to_vec())
+                .bind(pair.lo.as_slice().to_vec());
+        }
+        let count: i64 = q.fetch_one(&self.pool).await.map_err(db)?;
+        Ok(count as u64)
     }
 }
 

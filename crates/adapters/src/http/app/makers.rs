@@ -1,10 +1,11 @@
-//! `GET /v1/makers` — the active-maker roster. `GET /v1/makers/{maker}/positions` — a maker's
-//! positions (list projection). `GET /v1/positions/{hash}` — one position's full detail.
+//! `GET /v1/makers` — the active-maker roster. `GET /v1/makers/{maker}` — one maker's dashboard.
+//! `GET /v1/makers/{maker}/positions` — a maker's positions (list projection). `GET
+//! /v1/positions/{hash}` — one position's full detail.
 
 use alloy::primitives::{Address, B256};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use solvent_core::primitives::maker::{MakerSummary, Position};
+use solvent_core::primitives::maker::{MakerDashboard, MakerSummary, Position};
 use solvent_core::primitives::{MakerId, StrategyHash};
 use solvent_core::SolventError;
 
@@ -16,6 +17,22 @@ use crate::http::state::AppState;
 #[utoipa::path(get, path = "/v1/makers", responses((status = 200, body = Response<List<MakerSummary>>)))]
 pub async fn makers(State(state): State<AppState>) -> ApiResult<List<MakerSummary>> {
     Ok(Response::ok(List::all(state.makers.roster().await?)))
+}
+
+/// One maker's dashboard (KPIs, fill-share, latency, insight). `{maker}` is an address (`me` needs a
+/// wallet).
+#[utoipa::path(
+    get,
+    path = "/v1/makers/{maker}",
+    params(("maker" = String, Path, description = "Maker address")),
+    responses((status = 200, body = Response<MakerDashboard>))
+)]
+pub async fn maker_dashboard(
+    State(state): State<AppState>,
+    Path(maker): Path<String>,
+) -> ApiResult<MakerDashboard> {
+    let maker = MakerId(parse_maker(&maker)?);
+    Ok(Response::ok(state.makers.dashboard(maker).await?))
 }
 
 /// A maker's active positions (list projection). `{maker}` is an address (`me` needs a wallet).

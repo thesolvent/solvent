@@ -21,9 +21,11 @@ pub struct MakerMetrics {
     /// Fills per day for the last 7 days, oldest bucket first.
     pub fills_by_day: [u64; 7],
     pub last_fill_at: Option<u64>,
-    /// Per-token delivered volume — the base for USD volume and fee figures.
+    /// Per-token delivered volume (outflow) — the base for USD volume and fee figures.
     pub volume: Vec<TokenVolume>,
-    /// Quotes the maker was sourced into (the fill-share denominator).
+    /// Per-token received amount (inflow) — with `volume`, the net liquidity flow from trading.
+    pub inflow: Vec<TokenVolume>,
+    /// Quotes the maker was sourced into.
     pub quotes: u64,
     pub latency_p50_ms: Option<u64>,
 }
@@ -54,6 +56,10 @@ pub trait MakerMetricsStore: Send + Sync {
         pair: TokenPair,
         since: u64,
     ) -> Result<PositionMetrics, MakerMetricsError>;
+
+    /// How many confirmed trades settled on any of `pairs` since `since` — the fill-share
+    /// denominator (the maker's share of the fills on the pairs it quotes).
+    async fn pair_fills(&self, pairs: &[TokenPair], since: u64) -> Result<u64, MakerMetricsError>;
 }
 
 /// A maker-metrics failure.
