@@ -110,20 +110,31 @@ impl LedgerService {
             .map(|r| r.sources.clone())
     }
 
-    /// Expire every pending reservation past its TTL as of now, restoring their holds. Returns how
-    /// many were swept.
-    pub async fn sweep_expired(&self) -> Result<usize, SolventError> {
+    /// Expire every pending reservation past its TTL as of now — except those in `exclude` (fills
+    /// still in flight, whose holds must not be released while their tx can still land) — restoring
+    /// the swept holds. Returns the intents of the swept reservations, so their trades can settle.
+    pub async fn sweep_expired(
+        &self,
+        exclude: &BTreeSet<ReservationId>,
+    ) -> Result<Vec<IntentId>, SolventError> {
         let now = self.clock.now_unix();
         let mut ledger = self.ledger.lock().await;
-        let expired = ledger.expired_as_of(now);
+        let expired: Vec<ReservationId> = ledger
+            .expired_as_of(now)
+            .into_iter()
+            .filter(|id| !exclude.contains(id))
+            .collect();
+        let mut swept = Vec::with_capacity(expired.len());
         for id in &expired {
+            let intent = ledger.reservation(id).map(|r| r.intent);
             self.store.expire(*id).await?;
             ledger.expire(*id)?;
+            swept.extend(intent);
         }
         if !expired.is_empty() {
             self.publish(&ledger);
         }
-        Ok(expired.len())
+        Ok(swept)
     }
 
     /// Rebuild the in-memory holds from the durably-open reservations after a restart; `restore` is
@@ -422,11 +433,27 @@ mod tests {
             .await
             .unwrap();
         // At t=1000 the reservation (expires_at 1060) is not yet due.
-        assert_eq!(svc.sweep_expired().await.unwrap(), 0);
+        assert!(svc
+            .sweep_expired(&BTreeSet::new())
+            .await
+            .unwrap()
+            .is_empty());
         assert_eq!(svc.available(&wallet(1, 3)), amt(400_000));
 
+        // An in-flight reservation is excluded even once its TTL elapses.
         clock.set(1100);
-        assert_eq!(svc.sweep_expired().await.unwrap(), 1);
+        assert!(svc
+            .sweep_expired(&BTreeSet::from([resv(1)]))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(svc.available(&wallet(1, 3)), amt(400_000), "still held");
+
+        // Not excluded: swept, its hold restored, and its intent reported.
+        assert_eq!(
+            svc.sweep_expired(&BTreeSet::new()).await.unwrap(),
+            vec![intent(1)]
+        );
         assert_eq!(svc.available(&wallet(1, 3)), amt(1_000_000));
         assert!(store.open_reservations().await.unwrap().is_empty());
     }

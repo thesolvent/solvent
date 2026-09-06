@@ -421,7 +421,13 @@ async fn e2e_lifecycle_partial_post_void_and_ttl() {
         .await
         .expect("reserve r3 ttl=0");
     assert_eq!(svc.available(&w), a - q - q);
-    assert_eq!(svc.sweep_expired().await.expect("sweep"), 1);
+    assert_eq!(
+        svc.sweep_expired(&std::collections::BTreeSet::new())
+            .await
+            .expect("sweep")
+            .len(),
+        1
+    );
     assert_eq!(svc.available(&w), a - q, "the expired hold is restored");
 }
 

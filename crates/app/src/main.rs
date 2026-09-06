@@ -33,6 +33,7 @@ use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
+use solvent_core::reconcile::ReconcileService;
 use solvent_core::registry::{RegistrySync, SharedSnapshot};
 use solvent_core::swap::{SwapConfig, SwapService};
 use solvent_core::SolventError;
@@ -52,6 +53,8 @@ const REGISTRY_SYNC_INTERVAL: Duration = Duration::from_secs(4);
 const BUDGET_POLL_INTERVAL: Duration = Duration::from_secs(12);
 /// How often the gas-price poller refreshes the market cache (off the quote path).
 const GAS_POLL_INTERVAL: Duration = Duration::from_secs(12);
+/// How often to reconcile in-flight fills and sweep orphaned holds (~2 blocks).
+const RECONCILE_INTERVAL: Duration = Duration::from_secs(4);
 /// Registry scan window: re-scan the last N blocks each tick (the dedup cache absorbs the overlap),
 /// at this nominal block time. Devnet-generous; tune per chain.
 const SCAN_OVERLAP_BLOCKS: u64 = 25;
@@ -234,11 +237,17 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&ledger),
     ));
     let fill_builder: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(config.app_address));
+    let reconcile = Arc::new(ReconcileService::new(
+        Arc::clone(&execution),
+        Arc::clone(&trade_store),
+        Arc::clone(&ledger),
+        Arc::new(SystemClock),
+    ));
     let swap = Arc::new(SwapService::new(
         Arc::clone(&registry),
         Arc::clone(&ledger),
-        trade_store,
-        execution,
+        Arc::clone(&trade_store),
+        Arc::clone(&execution),
         fill_builder,
         Arc::clone(&assets),
         gas,
@@ -270,6 +279,9 @@ async fn main() -> Result<(), StartupError> {
             Arc::clone(&registry),
             BUDGET_POLL_INTERVAL,
         )
+    }));
+    tokio::spawn(supervise("reconcile", move || {
+        run_reconcile(Arc::clone(&reconcile), RECONCILE_INTERVAL)
     }));
 
     let state = AppState {
@@ -364,6 +376,26 @@ async fn run_ledger_sync(
         ticker.tick().await;
         if let Err(e) = ledger.sync_budgets(&registry.load()).await {
             tracing::warn!(error = %e, "budget sync failed; keeping last-good caps");
+        }
+    }
+}
+
+/// Drive in-flight fills to settlement and sweep orphaned holds on an interval; a failed tick is
+/// logged and retried next tick.
+async fn run_reconcile(reconcile: Arc<ReconcileService>, interval: Duration) {
+    let mut ticker = tokio::time::interval(interval);
+    loop {
+        ticker.tick().await;
+        match reconcile.tick().await {
+            Ok(report) if report.settled > 0 || report.swept > 0 => {
+                tracing::info!(
+                    settled = report.settled,
+                    swept = report.swept,
+                    "reconcile tick"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "reconcile tick failed; retrying next tick"),
         }
     }
 }

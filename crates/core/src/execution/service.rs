@@ -8,12 +8,15 @@
 //! [`Execution::tracked`]), so a restart recovers every submitted fill through the same reconcile
 //! path, with no separate recovery step and no memory that can diverge from the durable record.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::deps::execution::{Execution, SettlementReader, SimGate};
 use crate::ledger::LedgerService;
 use crate::obs::{info, warn};
-use crate::primitives::execution::{ExecHandle, ExecStatus, FillOutcome, PendingFill, SimVerdict};
+use crate::primitives::execution::{
+    ExecHandle, ExecStatus, FillOutcome, PendingFill, Settled, SettledOutcome, SimVerdict,
+};
 use crate::primitives::ledger::LedgerError;
 use crate::primitives::{ReservationId, SolventError};
 
@@ -63,18 +66,20 @@ impl ExecutionService {
 
     /// Advance the tx engine, then settle every tracked fill that reached a terminal state: on
     /// `Confirmed`, post the actual amounts the fill pulled (read from its own settlement) and drop
-    /// the tracking; on failure, void and drop. A reservation a redelivery already settled is a
+    /// the tracking; on failure, void and drop. Returns the fills that reached a terminal state so
+    /// the caller can settle the trade lifecycle. A reservation a redelivery already settled is a
     /// no-op, so this is safe to call repeatedly — and after a restart it recovers the durably
     /// tracked fills through this same path.
-    pub async fn reconcile(&self) -> Result<(), SolventError> {
+    pub async fn reconcile(&self) -> Result<Vec<Settled>, SolventError> {
         self.execution.tick().await?;
 
+        let mut settled = Vec::new();
         for f in self.execution.tracked().await? {
             let Some(status) = self.execution.status(ExecHandle(f.intent.0)).await? else {
                 continue;
             };
-            match status {
-                ExecStatus::Confirmed { tx, .. } => {
+            let outcome = match status {
+                ExecStatus::Confirmed { tx, block } => {
                     match self.ledger.reservation_sources(f.reservation).await {
                         Some(sources) => {
                             let filled = self.settlement.settled(tx, &sources).await?;
@@ -85,17 +90,22 @@ impl ExecutionService {
                             warn!(intent = %f.intent, "fill confirmed but reservation is gone; skipping post");
                         }
                     }
-                    self.execution.forget(f.intent).await?;
+                    SettledOutcome::Confirmed { tx, block }
                 }
                 ExecStatus::Failed { .. } | ExecStatus::Dropped => {
                     settle(self.ledger.void(f.reservation).await)?;
                     warn!(intent = %f.intent, "fill did not land; reservation voided");
-                    self.execution.forget(f.intent).await?;
+                    SettledOutcome::Failed
                 }
-                ExecStatus::Pending => {}
-            }
+                ExecStatus::Pending => continue,
+            };
+            self.execution.forget(f.intent).await?;
+            settled.push(Settled {
+                intent: f.intent,
+                outcome,
+            });
         }
-        Ok(())
+        Ok(settled)
     }
 
     /// Reverse a posted fill a chain reorg rolled back — the compensating ledger transition. The
@@ -108,6 +118,18 @@ impl ExecutionService {
     /// How many fills are still in flight — zero once every submitted fill has settled.
     pub async fn pending(&self) -> Result<usize, SolventError> {
         Ok(self.execution.tracked().await?.len())
+    }
+
+    /// The reservations of every fill still in flight — the set a TTL sweep must not touch, since
+    /// their transactions can still land.
+    pub async fn tracked_reservations(&self) -> Result<BTreeSet<ReservationId>, SolventError> {
+        Ok(self
+            .execution
+            .tracked()
+            .await?
+            .iter()
+            .map(|f| f.reservation)
+            .collect())
     }
 }
 
@@ -371,8 +393,15 @@ mod tests {
             led.clone(),
         );
         svc.fill(pending(intent, rid)).await.unwrap();
-        svc.reconcile().await.unwrap();
+        let settled = svc.reconcile().await.unwrap();
 
+        assert!(matches!(
+            settled.as_slice(),
+            [Settled {
+                outcome: SettledOutcome::Confirmed { .. },
+                ..
+            }]
+        ));
         assert_eq!(svc.pending().await.unwrap(), 0);
         // 60 consumed, the 40 remainder returned to available.
         assert_eq!(led.available(&wallet_account()), U256::from(940u64));
@@ -395,8 +424,15 @@ mod tests {
             led.clone(),
         );
         svc.fill(pending(intent, rid)).await.unwrap();
-        svc.reconcile().await.unwrap();
+        let settled = svc.reconcile().await.unwrap();
 
+        assert!(matches!(
+            settled.as_slice(),
+            [Settled {
+                outcome: SettledOutcome::Failed,
+                ..
+            }]
+        ));
         assert_eq!(svc.pending().await.unwrap(), 0);
         assert_eq!(
             led.available(&wallet_account()),

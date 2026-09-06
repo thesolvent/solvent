@@ -195,6 +195,9 @@ mod tests {
         async fn info(&self, _: &TradeId) -> Result<Option<TradeInfo>, TradeStoreError> {
             Ok(None)
         }
+        async fn find_by_order(&self, _: &IntentId) -> Result<Option<Trade>, TradeStoreError> {
+            Ok(None)
+        }
         async fn list(&self, _: &TradeFilter, _: &Page) -> Result<Vec<Trade>, TradeStoreError> {
             Ok(Vec::new())
         }

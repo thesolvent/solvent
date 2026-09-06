@@ -643,6 +643,17 @@ mod tests {
                 .find(|i| i.trade.id == *id)
                 .cloned())
         }
+        async fn find_by_order(
+            &self,
+            order_hash: &IntentId,
+        ) -> Result<Option<Trade>, TradeStoreError> {
+            Ok(self
+                .rows
+                .lock()
+                .unwrap()
+                .get(&order_hash.0)
+                .map(|i| i.trade.clone()))
+        }
         async fn list(&self, _: &TradeFilter, _: &Page) -> Result<Vec<Trade>, TradeStoreError> {
             Ok(Vec::new())
         }

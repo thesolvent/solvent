@@ -334,6 +334,17 @@ impl TradeStore for SqliteTradeStore {
         Ok(())
     }
 
+    async fn find_by_order(&self, order_hash: &IntentId) -> Result<Option<Trade>, TradeStoreError> {
+        sqlx::query("SELECT * FROM trade WHERE order_hash = ?")
+            .bind(bytes_of(order_hash.0))
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db)?
+            .as_ref()
+            .map(row_to_trade)
+            .transpose()
+    }
+
     async fn info(&self, id: &TradeId) -> Result<Option<TradeInfo>, TradeStoreError> {
         let Some(row) = sqlx::query("SELECT * FROM trade WHERE id = ?")
             .bind(id.to_string())
