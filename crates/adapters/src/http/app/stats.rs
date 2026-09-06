@@ -1,8 +1,8 @@
 //! `GET /v1/stats` — the protocol stat tiles. `block_height` comes from the cached chain head;
 //! `events_24h` from the event log's recorded times; `trades_settled`/`confirmed_pct`/
 //! `median_impact_pct` from the trade store; `active_makers`/`quoting_now` from the live registry.
-//! `median_impact_pct` reads `null` until trades carry a price impact (the tile is wired, awaiting
-//! that value); `quoting_now` counts priceable active strategies.
+//! `median_impact_pct` is `null` until a settled trade carries an impact; `quoting_now` counts
+//! priceable active strategies.
 
 use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};

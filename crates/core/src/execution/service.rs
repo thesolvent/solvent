@@ -1,12 +1,8 @@
-//! The execution service: the last leg of the intent lifecycle. `fill` simulates a reserved plan
-//! and, if it passes, submits it (voiding the reservation on a reject, before any nonce is spent).
-//! `reconcile`, driven on a cadence, advances the tx engine and settles each fill that reached a
-//! terminal state — posting the *actual* per-source amounts read from the confirmed fill (the
-//! ledger returns any unfilled remainder), or voiding on failure.
-//!
-//! The in-flight set is not held in memory: the execution engine tracks it durably (via
-//! [`Execution::tracked`]), so a restart recovers every submitted fill through the same reconcile
-//! path, with no separate recovery step and no memory that can diverge from the durable record.
+//! The execution service: the last leg of the intent lifecycle. `fill` simulates a reserved plan and
+//! submits it if it passes (voiding the reservation on a reject, before a nonce is spent);
+//! `reconcile` advances the tx engine and settles each terminal fill with the *actual* per-source
+//! amounts, or voids on failure. The in-flight set lives in the durable engine, not memory (via
+//! [`Execution::tracked`]), so a restart recovers every submitted fill through the same path.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;

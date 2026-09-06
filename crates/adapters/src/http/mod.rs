@@ -472,7 +472,7 @@ mod tests {
         let (status, json) = get("/v1/openapi.json").await;
         assert_eq!(status, StatusCode::OK);
         assert!(json["openapi"].is_string());
-        // Every M1 read path and a representative nested schema are in the document.
+        // Every read path and a representative nested schema are in the document.
         for path in [
             "/v1/assets",
             "/v1/pools",

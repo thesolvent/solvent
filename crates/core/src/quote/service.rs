@@ -1,12 +1,7 @@
-//! The quote read-path: route an intent read-only over the live registry and the ledger's synced
-//! caps, returning the split as a [`QuoteResponse`]. It reuses the exact building blocks the swap
-//! path uses — `select` then `solve_sparse` — with the same per-leg gas cost, so the quoted split is
-//! the one the swap would execute. No reservation, no persistence.
-//!
-//! Everything is read lock-free with no per-request RPC: the registry snapshot, the ledger's caps,
-//! and the gas/price cache (`resolve_leg_cost` reads the poller-fed [`MarketCache`], never the
-//! chain). Price impact reuses the routed candidates' [`spot_marginal`](crate::routing) — it needs
-//! no second solve.
+//! The quote read-path: route an intent read-only over the live registry and the synced caps,
+//! returning the split as a [`QuoteResponse`] — no reservation, no persistence. It reuses the swap
+//! path's `select`/`solve_sparse` at the same per-leg gas cost (all read lock-free, no per-request
+//! RPC), so a quote matches what the swap would execute.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
