@@ -1,5 +1,4 @@
 # --- Dev artifacts: local-only, never pushed to origin ---
-docs/plans/
 docs/superpowers/
 .claude/
 
@@ -29,3 +28,5 @@ node_modules/
 
 # --- proptest failure-seed artifacts (regenerable, not tracked) ---
 proptest-regressions/
+
+.codegraph/
