@@ -32,6 +32,16 @@ pub struct RecapturePolicy {
     pub min_credit: Usd,
 }
 
+impl RecapturePolicy {
+    pub fn new(maker_share: Bps, spread_cap: Bps, min_credit: Usd) -> RecapturePolicy {
+        RecapturePolicy {
+            maker_share,
+            spread_cap,
+            min_credit,
+        }
+    }
+}
+
 /// One maker's rebate from a fill, denominated in `token` — the leg's input, the side the maker's
 /// pool was drained of.
 #[derive(Debug, Clone, PartialEq, Eq)]
