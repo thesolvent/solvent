@@ -19,13 +19,12 @@ use crate::asset::AssetManager;
 use crate::deps::ledger::Clock;
 use crate::ledger::LedgerService;
 use crate::primitives::amount::Amount;
-use crate::primitives::pricing::Ratio;
 use crate::primitives::quote::{QuoteLeg, QuoteResponse};
 use crate::primitives::registry::{curve_label, CurveSpec, Snapshot, TokenPair};
 use crate::primitives::routing::{RouteLeg, RouteRequest, RoutingConfig};
 use crate::primitives::{IntentId, StrategyHash};
 use crate::registry::SharedSnapshot;
-use crate::routing::{select, solve_sparse, LegCostResolver};
+use crate::routing::{price_impact_pct, select, solve_sparse, LegCostResolver};
 
 /// How far ahead a quote's advisory `expires_at` sits.
 const QUOTE_TTL_SECS: u64 = 30;
@@ -91,14 +90,6 @@ impl QuoteService {
             None,
         )?;
 
-        // Best price = the tightest maker's near-zero-impact rate, read straight off the candidates
-        // (a single tiny quote each) — no second solve.
-        let best_price = selection
-            .chosen
-            .iter()
-            .filter_map(|candidate| candidate.spot_marginal(amount_in))
-            .max();
-
         let labels = curve_labels(&snapshot, token_in, token_out);
         let legs = split
             .legs
@@ -109,7 +100,7 @@ impl QuoteService {
         Some(QuoteResponse {
             quote_id: format!("{id:#x}"),
             amount_out: Amount::from_base_units(split.amount_out, out_decimals),
-            price_impact_pct: impact_pct(split.amount_out, amount_in, best_price.as_ref()),
+            price_impact_pct: price_impact_pct(&selection.chosen, amount_in, split.amount_out),
             makers_sourced: split.legs.len() as u32,
             legs,
             expires_at: self.expires_at(),
@@ -168,14 +159,6 @@ fn share_pct(leg_out: U256, total_out: U256) -> f64 {
     }
     let bps = leg_out.saturating_mul(U256::from(10_000u64)) / total_out;
     u64::try_from(bps).unwrap_or(0) as f64 / 100.0
-}
-
-/// The blended rate's relative shortfall from the best (near-zero-impact) rate, in percent.
-fn impact_pct(total_out: U256, amount_in: U256, best: Option<&Ratio>) -> f64 {
-    match (best, Ratio::new(total_out, amount_in)) {
-        (Some(best), Some(effective)) => effective.rel_diff_bps(best) as f64 / 100.0,
-        _ => 0.0,
-    }
 }
 
 /// Curve label per strategy on the pair, from the same snapshot the route was solved over.
