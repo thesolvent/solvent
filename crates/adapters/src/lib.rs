@@ -14,3 +14,4 @@ pub mod ingest;
 pub mod ledger;
 pub mod registry;
 pub mod routing;
+pub mod trade;

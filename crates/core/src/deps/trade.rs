@@ -1,0 +1,79 @@
+//! The trade store port: durable, idempotent persistence of the trade lifecycle. `create` dedups on
+//! the signed order hash; `advance`/`settle` move the lifecycle forward, guarded so a replay is a
+//! no-op.
+
+use alloy_primitives::{Address, B256, U256};
+use async_trait::async_trait;
+use thiserror::Error;
+
+use crate::primitives::trade::{Trade, TradeAttempt, TradeId, TradeInfo, TradeLeg, TradeStatus};
+
+/// The outcome of a [`create`](TradeStore::create): the trade id now representing this order, and
+/// whether it was newly inserted (vs. an existing trade for the same order hash).
+pub struct CreateResult {
+    pub id: TradeId,
+    pub created: bool,
+}
+
+/// A trade's terminal settlement — the filled amount and on-chain coordinates, applied once.
+pub struct Settlement {
+    pub status: TradeStatus,
+    pub amount_out: Option<U256>,
+    pub tx_hash: Option<B256>,
+    pub block_number: Option<u64>,
+    /// Unix seconds.
+    pub at: u64,
+}
+
+/// Server-side list filters. `pair` matches either token orientation.
+#[derive(Default)]
+pub struct TradeFilter {
+    pub status: Option<TradeStatus>,
+    pub taker: Option<Address>,
+    pub pair: Option<(Address, Address)>,
+}
+
+/// One page of a trade listing: newest first, `cursor` the last id of the previous page.
+pub struct Page {
+    pub limit: u32,
+    pub cursor: Option<TradeId>,
+}
+
+#[async_trait]
+pub trait TradeStore: Send + Sync {
+    /// Persist a new trade with its legs and initial timeline, atomically. Idempotent on the order
+    /// hash: a resubmit returns the existing id with `created = false` and writes nothing new.
+    async fn create(
+        &self,
+        trade: &Trade,
+        legs: &[TradeLeg],
+        attempts: &[TradeAttempt],
+    ) -> Result<CreateResult, TradeStoreError>;
+
+    /// Advance a trade to an intermediate stage: append the attempt and move the status forward. A
+    /// backward or duplicate transition is a no-op (the rank guard + the attempt key).
+    async fn advance(
+        &self,
+        id: &TradeId,
+        status: TradeStatus,
+        at: u64,
+    ) -> Result<(), TradeStoreError>;
+
+    /// Apply a trade's terminal settlement. A no-op once already settled, so a replay is safe.
+    async fn settle(&self, id: &TradeId, outcome: &Settlement) -> Result<(), TradeStoreError>;
+
+    /// Full detail for one trade — header, stage timeline, and legs — or `None` if unknown.
+    async fn info(&self, id: &TradeId) -> Result<Option<TradeInfo>, TradeStoreError>;
+
+    /// A page of trade headers (newest first) matching `filter`.
+    async fn list(&self, filter: &TradeFilter, page: &Page) -> Result<Vec<Trade>, TradeStoreError>;
+}
+
+/// A trade store failure.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum TradeStoreError {
+    /// The database call or a payload conversion failed.
+    #[error("db: {0}")]
+    Db(String),
+}
