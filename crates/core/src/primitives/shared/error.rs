@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::deps::balances::BalancesOracleError;
 use crate::deps::execution::{ExecutionError, SettlementError, SimError};
+use crate::deps::ingest::{FillBuilderError, NormalizeError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
 use crate::deps::registry::{ChainSourceError, StoreError};
 use crate::deps::trade::TradeStoreError;
@@ -51,4 +52,10 @@ pub enum SolventError {
     /// The trade store failed.
     #[error("trade store: {0}")]
     TradeStore(#[from] TradeStoreError),
+    /// Normalizing a protocol order into an intent failed — a malformed order (client input).
+    #[error("normalize: {0}")]
+    Normalize(#[from] NormalizeError),
+    /// Building a protocol fill's calldata failed.
+    #[error("fill builder: {0}")]
+    FillBuilder(#[from] FillBuilderError),
 }

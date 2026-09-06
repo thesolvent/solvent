@@ -37,6 +37,7 @@ pub fn router(state: AppState) -> Router {
         .route("/pools/detail", get(app::pools::pool_detail))
         .route("/pools/depth", get(app::pools::pool_depth))
         .route("/swap/quote", post(app::swap::quote))
+        .route("/swap", post(app::swap::submit))
         .route("/wallets/{addr}/balances", get(app::balances::balances))
         .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
@@ -68,28 +69,45 @@ mod tests {
 
     use std::collections::BTreeMap;
 
-    use alloy::primitives::{Address, U256};
+    use alloy::primitives::{Address, Bytes, B256, U256};
+    use alloy::signers::local::PrivateKeySigner;
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use solvent_core::asset::{AssetManager, TokenList, TokenMeta};
     use solvent_core::balances::BalancesService;
     use solvent_core::balances::Holdings;
     use solvent_core::deps::balances::{BalancesOracle, BalancesOracleError};
+    use solvent_core::deps::execution::{
+        Execution, ExecutionError, SettlementError, SettlementReader, SimError, SimGate,
+    };
+    use solvent_core::deps::ingest::{FillBuilder, FillBuilderError};
     use solvent_core::deps::ledger::{
         BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError,
     };
     use solvent_core::deps::routing::{GasPrice, PriceOracle};
+    use solvent_core::deps::trade::{
+        CreateResult, Page, Settlement, TradeFilter, TradeStore, TradeStoreError,
+    };
+    use solvent_core::execution::ExecutionService;
     use solvent_core::ledger::LedgerService;
     use solvent_core::pool::{DepthService, PoolService};
-    use solvent_core::primitives::ledger::{AccountKey, Reservation};
-    use solvent_core::primitives::routing::RoutingConfig;
+    use solvent_core::primitives::execution::{ExecHandle, ExecStatus, FillTx, SimVerdict};
+    use solvent_core::primitives::ingest::Intent;
+    use solvent_core::primitives::ledger::{AccountKey, Reservation, ReservationSource};
+    use solvent_core::primitives::registry::Snapshot;
+    use solvent_core::primitives::routing::{RoutePlan, RoutingConfig};
+    use solvent_core::primitives::trade::{
+        Trade, TradeAttempt, TradeId, TradeInfo, TradeLeg, TradeStatus,
+    };
     use solvent_core::primitives::ReservationId;
     use solvent_core::quote::QuoteService;
     use solvent_core::registry::SharedSnapshot;
+    use solvent_core::swap::{SwapConfig, SwapService};
     use tower::ServiceExt;
 
     use crate::chain::ChainHead;
     use crate::http::state::{AppConfig, Features};
+    use crate::ingest::uniswapx::ServerCosigner;
     use crate::ledger::SystemClock;
     use crate::routing::MarketCache;
 
@@ -145,6 +163,84 @@ mod tests {
         }
     }
 
+    /// No-op swap-path fakes: the handler tests reach `400` before the service is called, so these
+    /// only need to construct.
+    struct NoopTrades;
+    #[async_trait::async_trait]
+    impl TradeStore for NoopTrades {
+        async fn create(
+            &self,
+            trade: &Trade,
+            _: &[TradeLeg],
+            _: &[TradeAttempt],
+        ) -> Result<CreateResult, TradeStoreError> {
+            Ok(CreateResult {
+                id: trade.id,
+                created: true,
+            })
+        }
+        async fn advance(
+            &self,
+            _: &TradeId,
+            _: TradeStatus,
+            _: u64,
+        ) -> Result<(), TradeStoreError> {
+            Ok(())
+        }
+        async fn settle(&self, _: &TradeId, _: &Settlement) -> Result<(), TradeStoreError> {
+            Ok(())
+        }
+        async fn info(&self, _: &TradeId) -> Result<Option<TradeInfo>, TradeStoreError> {
+            Ok(None)
+        }
+        async fn list(&self, _: &TradeFilter, _: &Page) -> Result<Vec<Trade>, TradeStoreError> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct FakeSim;
+    #[async_trait::async_trait]
+    impl SimGate for FakeSim {
+        async fn simulate(&self, _: &FillTx) -> Result<SimVerdict, SimError> {
+            Ok(SimVerdict::Ok)
+        }
+    }
+    struct FakeExec;
+    #[async_trait::async_trait]
+    impl Execution for FakeExec {
+        async fn submit(&self, fill: &FillTx) -> Result<ExecHandle, ExecutionError> {
+            Ok(ExecHandle(fill.intent.0))
+        }
+        async fn status(&self, _: ExecHandle) -> Result<Option<ExecStatus>, ExecutionError> {
+            Ok(Some(ExecStatus::Pending))
+        }
+        async fn tick(&self) -> Result<(), ExecutionError> {
+            Ok(())
+        }
+    }
+    struct FakeSettle;
+    #[async_trait::async_trait]
+    impl SettlementReader for FakeSettle {
+        async fn settled(
+            &self,
+            _: B256,
+            _: &[ReservationSource],
+        ) -> Result<Vec<U256>, SettlementError> {
+            Ok(Vec::new())
+        }
+    }
+    struct FakeFill;
+    impl FillBuilder for FakeFill {
+        fn build(
+            &self,
+            _: &Intent,
+            _: &RoutePlan,
+            _: &Snapshot,
+        ) -> Result<Bytes, FillBuilderError> {
+            Ok(Bytes::new())
+        }
+    }
+
     fn test_state() -> AppState {
         let list = TokenList {
             name: "test".to_string(),
@@ -180,9 +276,41 @@ mod tests {
             Arc::clone(&assets),
             RoutingConfig::new(16, 4, 0),
             Arc::new(SystemClock),
+            gas.clone(),
+            oracle.clone(),
+            Address::ZERO,
+        ));
+        let execution = Arc::new(ExecutionService::new(
+            Arc::new(FakeSim),
+            Arc::new(FakeExec),
+            Arc::new(FakeSettle),
+            Arc::clone(&ledger),
+        ));
+        let swap = Arc::new(SwapService::new(
+            Arc::clone(&registry),
+            Arc::clone(&ledger),
+            Arc::new(NoopTrades),
+            execution,
+            Arc::new(FakeFill),
+            Arc::clone(&assets),
             gas,
             oracle,
+            Arc::new(SystemClock),
+            SwapConfig {
+                routing: RoutingConfig::new(16, 4, 0),
+                native: Address::ZERO,
+                chain_id: 31337,
+                filler: Address::ZERO,
+                filler_owner: Address::ZERO,
+                reservation_ttl_secs: 60,
+            },
+        ));
+        let cosigner = Arc::new(ServerCosigner::new(
             Address::ZERO,
+            31337,
+            PrivateKeySigner::from_bytes(&B256::from([1u8; 32])).unwrap(),
+            Address::ZERO,
+            60,
         ));
         let balances = Arc::new(BalancesService::new(
             Arc::new(ZeroOracle),
@@ -206,6 +334,8 @@ mod tests {
             depth,
             balances,
             quote,
+            swap,
+            cosigner,
         }
     }
 
@@ -361,6 +491,35 @@ mod tests {
         let (status, _) = post(
             "/v1/swap/quote",
             serde_json::json!({ "token_in": "nope", "token_out": "nope", "amount_in": "1000" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn swap_bad_hex_is_400() {
+        let (status, _) = post(
+            "/v1/swap",
+            serde_json::json!({
+                "encodedOrder": "not-hex",
+                "signature": "0x00",
+                "chainId": 31337,
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn swap_undecodable_order_is_400() {
+        // Well-formed hex that is not a V2 Dutch order: the cosigner fails to decode it.
+        let (status, _) = post(
+            "/v1/swap",
+            serde_json::json!({
+                "encodedOrder": "0x1234",
+                "signature": "0x00",
+                "chainId": 31337,
+            }),
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);

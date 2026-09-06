@@ -7,7 +7,13 @@ publish.workspace = true
 [dependencies]
 solvent-core = { path = "../core", features = ["tracing"] }
 solvent-adapters = { path = "../adapters" }
-alloy = { version = "1", features = ["providers", "reqwest-rustls-tls", "rpc-types-eth"] }
+alloy = { version = "1", features = [
+    "providers",
+    "reqwest-rustls-tls",
+    "rpc-types-eth",
+    "signer-local",
+] }
+walletkit = { package = "walletkit-rs", git = "https://github.com/21r21a33333/walletkit.git", rev = "3e75a5d2385da13d6ab813104f1e2473860e32cb", default-features = false }
 axum = "0.8"
 config = { version = "0.15", default-features = false, features = ["toml"] }
 serde = { version = "1", features = ["derive"] }

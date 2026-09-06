@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
-use alloy::primitives::Address;
+use alloy::primitives::{address, Address};
 use serde::Deserialize;
 use solvent_adapters::http::state::{AppConfig, Features};
 use solvent_core::asset::TokenList;
@@ -46,6 +46,21 @@ pub struct Config {
     /// Binance symbol → the tokens it prices (e.g. `ETHUSDT` → `[WETH]`). Drives the price feed.
     #[serde(default)]
     pub price_symbols: Vec<PriceSymbol>,
+    /// The resolver's Aqua filler contract the swap path fills through.
+    #[serde(default)]
+    pub filler: Address,
+    /// The canonical Permit2 (same on every chain); overridable for a bespoke devnet deploy.
+    #[serde(default = "default_permit2")]
+    pub permit2: Address,
+    /// Confirmations a fill waits for before it settles.
+    #[serde(default = "default_confirmations")]
+    pub confirmations: u64,
+    /// How long a reservation holds before the TTL sweep may release it.
+    #[serde(default = "default_ttl_secs")]
+    pub reservation_ttl_secs: u64,
+    /// The cosigner's decay window applied to each order.
+    #[serde(default = "default_decay_secs")]
+    pub decay_window_secs: u64,
 }
 
 /// One Binance price symbol and the tokens whose USD price it feeds.
@@ -109,6 +124,18 @@ fn default_binance_ws() -> String {
 fn default_gas_units() -> u64 {
     150_000
 }
+fn default_permit2() -> Address {
+    address!("000000000022D473030F116dDEE9F6B43aC78BA3")
+}
+fn default_confirmations() -> u64 {
+    1
+}
+fn default_ttl_secs() -> u64 {
+    60
+}
+fn default_decay_secs() -> u64 {
+    60
+}
 
 /// Read and parse the token list JSON at `path`.
 pub fn load_token_list(path: &str) -> Result<TokenList, StartupError> {
@@ -126,6 +153,10 @@ pub enum StartupError {
     RpcUrl(String),
     #[error("database_url is required to run the live server")]
     MissingDatabase,
+    #[error("{0} must be set (the resolver's signing keys are read from the environment)")]
+    MissingSecret(&'static str),
+    #[error("bad signing key: {0}")]
+    Key(String),
     #[error("token list: {0}")]
     TokenList(String),
     #[error(transparent)]

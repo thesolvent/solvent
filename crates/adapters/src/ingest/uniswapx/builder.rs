@@ -174,7 +174,7 @@ pub(crate) fn witness_digest(
 
 /// A 65-byte `r ‖ s ‖ v` signature with `v ∈ {27, 28}`, as the reactor's `ecrecover` expects
 /// (alloy's `as_bytes` lays it out exactly so).
-fn sign65(signer: &PrivateKeySigner, digest: B256) -> Bytes {
+pub(crate) fn sign65(signer: &PrivateKeySigner, digest: B256) -> Bytes {
     let sig = signer
         .sign_hash_sync(&digest)
         .expect("a local signer signs a 32-byte digest infallibly");
