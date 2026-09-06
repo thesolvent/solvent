@@ -294,6 +294,7 @@ async fn main() -> Result<(), StartupError> {
         quote,
         swap,
         cosigner,
+        trades: trade_store,
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;

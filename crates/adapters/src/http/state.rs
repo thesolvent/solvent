@@ -6,6 +6,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use solvent_core::asset::AssetManager;
 use solvent_core::balances::BalancesService;
+use solvent_core::deps::trade::TradeStore;
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::quote::QuoteService;
 use solvent_core::swap::SwapService;
@@ -45,4 +46,6 @@ pub struct AppState {
     pub swap: Arc<SwapService>,
     /// Cosigns taker-signed orders on the swap path (holds only the resolver's cosigner key).
     pub cosigner: Arc<ServerCosigner>,
+    /// The trade lifecycle store, read by the `/trades` endpoints.
+    pub trades: Arc<dyn TradeStore>,
 }

@@ -18,6 +18,8 @@ use utoipa::OpenApi;
         crate::http::app::balances::balances,
         crate::http::app::swap::quote,
         crate::http::app::swap::submit,
+        crate::http::app::trades::trades,
+        crate::http::app::trades::trade_detail,
     ),
     components(schemas(
         crate::http::primitives::Status,
@@ -41,6 +43,9 @@ use utoipa::OpenApi;
         crate::http::app::swap::QuoteRequest,
         crate::http::app::swap::SwapRequest,
         crate::http::app::swap::SwapResponse,
+        crate::http::app::trades::Trade,
+        crate::http::app::trades::Action,
+        crate::http::app::trades::MakerLeg,
     ))
 )]
 pub struct ApiDoc;
