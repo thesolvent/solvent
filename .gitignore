@@ -30,3 +30,6 @@ node_modules/
 proptest-regressions/
 
 .codegraph/
+
+# --- local-only recapture scenario suite (Stager + Validator; kept out of git deliberately) ---
+crates/adapters/tests/scenarios_recapture.rs
