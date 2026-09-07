@@ -21,6 +21,25 @@ the project is pre-1.0 and evolving.
 - **`DeployDevnet` script** — one-shot deploy of Aqua + the SwapVM router + the reactor + filler +
   the Core-6 tokens, writing an address manifest (`solvent-devnet.json`).
 
+- **ERC-7683 end-to-end (P2, task 4)** — the phase's headline, proven rather than asserted.
+  - **`e2e_two_protocol.rs`** — two live tests on anvil. The first takes a signed 7683 order the whole
+    way: `openFor` escrows the input through Permit2 → `IngestPipeline` normalizes it → routing and the
+    ledger (both protocol-blind) reserve it → the filler settles it on-chain, leaving the swapper paid,
+    the escrow released, and **zero output inventory** in the filler. The second is the contention
+    proof: a UniswapX order and a 7683 order are fanned into **one unmodified pipeline**, both route
+    against the **same maker balance**, and the ledger grants one and declines the other — it sees only
+    `Intent`s, so it arbitrates across protocols without knowing either. The declined fill is stopped
+    off-chain, saving the gas Aqua would have burned reverting it.
+  - **`ProtocolId → FillBuilder` dispatch** lives at the E2E call site, deliberately not a port
+    (design §7.1); it moves into the composition root when that exists.
+  - **Devnet** — `DeployDevnet` now deploys the settler + 7683 filler and writes both into the address
+    manifest (`settler`, `erc7683_filler`); `just abi` exports both ABIs.
+  - **Docs** — `KNOWN_LIMITATIONS` L11 (the deliberate filler duplication, with extraction as the
+    post-deadline follow-up) and L12 (the four-leg nesting bound). `RESOLVER_FLOW_CATALOG`'s claim that
+    every 7683 protocol is "reachable for free" is corrected: the fill entrypoint and resolved-order
+    shape transfer, but discovery, the `orderData` decoder and the repayment model stay per-protocol —
+    and every deployed 7683 settler repays after a proof window, which zero inventory cannot fund.
+
 - **ERC-7683 same-chain settlement (P2, tasks 2–3)** — the on-chain half of the second protocol.
   - **`SameChainSettler`** — a generic ERC-7683 v1 settler implementing both `IOriginSettler` and
     `IDestinationSettler` (on one chain they are the same contract). `openFor` verifies the swapper's
