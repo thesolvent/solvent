@@ -432,6 +432,7 @@ mod tests {
             Arc::clone(&assets),
             Arc::clone(&valuation),
             Arc::new(NoopMakerMetrics),
+            Arc::new(ZeroOracle),
             Arc::new(SystemClock),
         ));
         let depth = Arc::new(DepthService::new(

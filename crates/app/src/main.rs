@@ -36,7 +36,7 @@ use solvent_core::ledger::LedgerService;
 use solvent_core::maker::MakerService;
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::primitives::routing::RoutingConfig;
-use solvent_core::primitives::{ChainConfig, ChainId, UsdPrice};
+use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
 use solvent_core::reconcile::ReconcileService;
 use solvent_core::registry::{RegistrySync, SharedSnapshot};
@@ -152,7 +152,7 @@ async fn main() -> Result<(), StartupError> {
     // and the Binance price feed (WS). Both self-heal. It also backs USD valuation across the reads.
     let market = MarketCache::new();
     for token in &config.usd_stable_pegs {
-        market.seed_price(*token, UsdPrice::PAR);
+        market.seed_peg(*token);
     }
     tokio::spawn(GasPoller::new(provider.clone(), Arc::clone(&market), GAS_POLL_INTERVAL).run());
     tokio::spawn(
@@ -177,18 +177,20 @@ async fn main() -> Result<(), StartupError> {
 
     let maker_metrics: Arc<dyn MakerMetricsStore> = Arc::new(SqliteMakerMetrics::new(pool.clone()));
 
+    // An arbitrary wallet's holdings can't be pre-synced, so callers read them on demand, batched
+    // into one round-trip per wallet.
+    let balances_oracle: Arc<dyn BalancesOracle> = Arc::new(AlloyBalancesOracle::new(
+        provider.clone(),
+        config.aqua_address,
+    ));
+
     let pools = Arc::new(PoolService::new(
         Arc::clone(&registry),
         Arc::clone(&assets),
         Arc::clone(&valuation),
         Arc::clone(&maker_metrics),
+        Arc::clone(&balances_oracle),
         Arc::new(SystemClock),
-    ));
-    // An arbitrary wallet's holdings can't be pre-synced, so the balances endpoint reads them on
-    // demand, batched into one round-trip per request.
-    let balances_oracle: Arc<dyn BalancesOracle> = Arc::new(AlloyBalancesOracle::new(
-        provider.clone(),
-        config.aqua_address,
     ));
     let balances = Arc::new(BalancesService::new(
         Arc::clone(&balances_oracle),

@@ -54,6 +54,9 @@ pub struct Pool {
     pub popular_fee_tier: String,
     pub curve_mix: CurveMix,
     pub tvl_usd: Option<f64>,
+    /// How the pool's holdings moved with the market over 24h, value-weighted across its tokens.
+    /// Prices only — a ship or a dock changes the pool's value without appearing here.
+    pub tvl_change_24h_pct: Option<f64>,
     pub volume_24h_usd: Option<f64>,
     pub fills_24h: u64,
     pub apr_pct: Option<f64>,
@@ -70,6 +73,9 @@ pub struct PoolMaker {
     pub fee_bps: u32,
     #[serde(rename = "virtual")]
     pub virtual_balances: TokenAmounts,
+    /// What the maker could actually deliver now — the committed amount capped by what Aqua may
+    /// pull. `None` when the chain read failed, which is not the same as nothing being pullable.
+    pub actual: Option<TokenAmounts>,
 }
 
 /// Pool detail: the list row plus the maker roster. The roster is the only field the detail view

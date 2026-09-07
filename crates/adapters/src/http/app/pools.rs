@@ -198,6 +198,7 @@ mod tests {
             popular_fee_tier: fee.to_string(),
             curve_mix: CurveMix::default(),
             tvl_usd: None,
+            tvl_change_24h_pct: None,
             volume_24h_usd: None,
             fills_24h: 0,
             apr_pct: None,

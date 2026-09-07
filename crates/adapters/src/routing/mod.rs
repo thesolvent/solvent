@@ -37,10 +37,12 @@ impl MarketCache {
     fn set_price(&self, token: Address, price: UsdPrice) {
         self.prices.write().insert(token, price);
     }
-    /// Seed a fixed price at boot — for a stablecoin pegged to USD that has no Binance pair (USDT).
-    /// The feed never writes such a symbol, so the peg persists.
-    pub fn seed_price(&self, token: Address, price: UsdPrice) {
-        self.set_price(token, price);
+    /// Hold a token at par from boot — for a stablecoin with no Binance pair. Pegged by
+    /// configuration means it does not move, so its daily change is zero rather than unknown; the
+    /// feed never writes such a symbol, so both persist.
+    pub fn seed_peg(&self, token: Address) {
+        self.set_price(token, UsdPrice::PAR);
+        self.set_change(token, 0.0);
     }
     fn set_change(&self, token: Address, pct: f64) {
         self.changes.write().insert(token, pct);
@@ -244,11 +246,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn seed_price_reads_back() {
+    fn seed_peg_holds_par_and_reports_no_move() {
         let usdt = Address::from([9u8; 20]);
         let cache = MarketCache::new();
-        cache.seed_price(usdt, UsdPrice::PAR);
+        cache.seed_peg(usdt);
         assert_eq!(cache.prices.read().get(&usdt).copied(), Some(UsdPrice::PAR));
+        // A configured peg has not moved, which is different from having no reading.
+        assert_eq!(cache.changes.read().get(&usdt).copied(), Some(0.0));
     }
 
     #[test]

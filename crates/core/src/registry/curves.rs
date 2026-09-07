@@ -62,6 +62,19 @@ pub trait Pricing {
     }
 }
 
+/// One part in a trillion — the point past which a tighter bracket changes no rendered figure.
+const BISECTION_PRECISION: u64 = 1_000_000_000_000;
+
+/// Whether a bisection has closed far enough to stop.
+///
+/// Converging to the last wei costs ~40 further rounds of curve math on an 18-decimal balance, for
+/// precision no caller can observe. Both bisections below return `lo`, which always satisfies their
+/// predicate, so stopping early can only ever under-fill — never over-promise.
+fn converged(lo: U256, hi: U256) -> bool {
+    let gap = hi - lo;
+    gap <= U256::from(1u64) || gap <= hi / U256::from(BISECTION_PRECISION)
+}
+
 /// Bisect the input for the largest fill whose marginal output-per-input stays at or
 /// above `limit`, using an approximate finite-difference marginal; a drained pool prices
 /// at zero. For curves with no closed-form inverse (Pegged).
@@ -122,7 +135,7 @@ fn fill_to_limit_numerical<P: Pricing + ?Sized>(
     }
     // Largest input that still prices and clears the limit; `lo` therefore always prices.
     let (mut lo, mut hi) = (U256::ZERO, bound);
-    while hi - lo > U256::from(1u64) {
+    while !converged(lo, hi) {
         let mid = lo + (hi - lo) / U256::from(2u64);
         match clears(mid)? {
             true => lo = mid,
@@ -145,7 +158,7 @@ fn feasible_bound<P: Pricing + ?Sized>(pool: &P, hi: U256) -> U256 {
         return hi;
     }
     let (mut lo, mut hi) = (U256::ZERO, hi);
-    while hi - lo > U256::from(1u64) {
+    while !converged(lo, hi) {
         let mid = lo + (hi - lo) / U256::from(2u64);
         match pool.quote_exact_in(mid).is_ok() {
             true => lo = mid,

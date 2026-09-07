@@ -659,6 +659,12 @@ export interface components {
             pair: string;
             popular_fee_tier: string;
             quote: components["schemas"]["Token"];
+            /**
+             * Format: double
+             * @description How the pool's holdings moved with the market over 24h, value-weighted across its tokens.
+             *     Prices only — a ship or a dock changes the pool's value without appearing here.
+             */
+            tvl_change_24h_pct?: number | null;
             /** Format: double */
             tvl_usd?: number | null;
             type: components["schemas"]["PoolType"];
@@ -688,6 +694,7 @@ export interface components {
          *     (on-chain) balances and uptime are absent until the balance reader and metrics capture exist.
          */
         PoolMaker: {
+            actual?: null | components["schemas"]["TokenAmounts"];
             curve: string;
             /** Format: int32 */
             fee_bps: number;
@@ -1017,6 +1024,12 @@ export interface components {
                     pair: string;
                     popular_fee_tier: string;
                     quote: components["schemas"]["Token"];
+                    /**
+                     * Format: double
+                     * @description How the pool's holdings moved with the market over 24h, value-weighted across its tokens.
+                     *     Prices only — a ship or a dock changes the pool's value without appearing here.
+                     */
+                    tvl_change_24h_pct?: number | null;
                     /** Format: double */
                     tvl_usd?: number | null;
                     type: components["schemas"]["PoolType"];

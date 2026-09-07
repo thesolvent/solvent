@@ -3,11 +3,14 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::U256;
+use alloy_primitives::{Address, U256};
+use futures::future::join_all;
 
 use crate::asset::AssetManager;
+use crate::deps::balances::BalancesOracle;
 use crate::deps::ledger::clock::Clock;
 use crate::deps::maker_metrics::{MakerMetricsStore, TokenVolume};
+use crate::primitives::amount::TokenAmounts;
 use crate::primitives::asset::Token;
 use crate::primitives::pool::{classify_pair, CurveMix, Pool, PoolDetail, PoolMaker, PoolType};
 use crate::primitives::registry::{
@@ -26,6 +29,7 @@ pub struct PoolService {
     assets: Arc<AssetManager>,
     valuation: Arc<Valuation>,
     metrics: Arc<dyn MakerMetricsStore>,
+    balances: Arc<dyn BalancesOracle>,
     clock: Arc<dyn Clock>,
 }
 
@@ -35,6 +39,7 @@ impl PoolService {
         assets: Arc<AssetManager>,
         valuation: Arc<Valuation>,
         metrics: Arc<dyn MakerMetricsStore>,
+        balances: Arc<dyn BalancesOracle>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
@@ -42,6 +47,7 @@ impl PoolService {
             assets,
             valuation,
             metrics,
+            balances,
             clock,
         }
     }
@@ -72,7 +78,8 @@ impl PoolService {
             Some(a) => self.usd_of(&a.volume).await,
             None => None,
         };
-        let tvl_usd = self.pair_tvl(snapshot, pair).await;
+        let value = self.pair_value(snapshot, pair).await;
+        let tvl_usd = value.usd;
         Some(Pool {
             pair: self.assets.pair_label(pair),
             base: self.assets.token(&base_addr)?,
@@ -88,10 +95,32 @@ impl PoolService {
                 pegged: stats.curve_mix.pegged as u64,
             },
             tvl_usd,
+            tvl_change_24h_pct: value.change_24h_pct,
             volume_24h_usd,
             fills_24h: activity.as_ref().map_or(0, |a| a.fills),
             apr_pct: yield_pct(volume_24h_usd, tvl_usd, stats.popular_fee_bps),
         })
+    }
+
+    /// What the maker can actually deliver against a commitment: the pullable amount, which Aqua
+    /// caps at the allowance, and never more than was committed.
+    async fn deliverable(
+        &self,
+        maker: Address,
+        committed: &[(Token, U256)],
+    ) -> Option<TokenAmounts> {
+        let tokens: Vec<Address> = committed.iter().map(|(token, _)| token.address).collect();
+        let holdings = self.balances.holdings(maker, &tokens).await.ok()?;
+        let capped: Vec<(Token, U256)> = committed
+            .iter()
+            .map(|(token, amount)| {
+                let pullable = holdings
+                    .get(&token.address)
+                    .map_or(U256::ZERO, |h| h.pullable);
+                (token.clone(), (*amount).min(pullable))
+            })
+            .collect();
+        Some(self.valuation.priced_amounts(&capped).await)
     }
 
     /// The USD value of a per-token flow (all-or-nothing — `None` if any token is unpriced).
@@ -107,16 +136,40 @@ impl PoolService {
         self.clock.now_unix().saturating_sub(WINDOW_SECS)
     }
 
-    /// The pair's total value locked: every active strategy's committed balances, valued. `None` if
-    /// any token is unpriced or missing from the catalog — a partial TVL would understate the pool.
-    async fn pair_tvl(&self, snapshot: &Snapshot, pair: &TokenPair) -> Option<f64> {
+    /// The pair's committed balances, valued, with how that value moved over the last day. Either
+    /// figure is `None` if a token is unpriced or missing from the catalog — a partial total would
+    /// understate the pool.
+    async fn pair_value(&self, snapshot: &Snapshot, pair: &TokenPair) -> PairValue {
         let mut holdings: Vec<(Token, U256)> = Vec::new();
         for strategy in snapshot.active_strategies_for_pair(*pair) {
             for (address, balance) in &strategy.balances {
-                holdings.push((self.assets.token(address)?, *balance));
+                let Some(token) = self.assets.token(address) else {
+                    return PairValue::UNKNOWN;
+                };
+                holdings.push((token, *balance));
             }
         }
-        self.valuation.tvl_usd(&holdings).await
+
+        let priced = self.valuation.priced_amounts(&holdings).await;
+        PairValue {
+            usd: priced.total_usd,
+            change_24h_pct: self.weighted_change(&priced).await,
+        }
+    }
+
+    /// Each token's 24h move, weighted by what the pool holds of it. `None` unless every token
+    /// reports one — averaging over the ones that do would quietly misstate the rest.
+    async fn weighted_change(&self, priced: &TokenAmounts) -> Option<f64> {
+        let total = priced.total_usd?;
+        if total <= 0.0 {
+            return None;
+        }
+        let mut weighted = 0.0;
+        for entry in &priced.entries {
+            let value = entry.amount.usd?;
+            weighted += value * self.valuation.change_24h(entry.token.address).await?;
+        }
+        Some(weighted / total)
     }
 
     /// Both tokens stable → `Stable`; else pegged-dominant → `Correlated`; else `Volatile`.
@@ -134,12 +187,17 @@ impl PoolService {
         let snapshot = self.registry.load();
         let stats = snapshot.pool_stats();
         let pool = self.assemble(&snapshot, pair, stats.get(pair)?).await?;
-        let mut makers = Vec::new();
-        for strategy in snapshot.active_strategies_for_pair(*pair) {
-            if let Some(maker) = self.pool_maker(strategy).await {
-                makers.push(maker);
-            }
-        }
+        // Each row costs its own chain read for the deliverable balance, so the roster is built
+        // concurrently rather than one round-trip after another.
+        let makers = join_all(
+            snapshot
+                .active_strategies_for_pair(*pair)
+                .map(|strategy| self.pool_maker(strategy)),
+        )
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
         Some(PoolDetail { pool, makers })
     }
 
@@ -160,6 +218,7 @@ impl PoolService {
             curve: curve_label(curve).to_string(),
             fee_bps: fee_in_bps(fees_in_bps),
             virtual_balances: self.valuation.priced_amounts(&holdings).await,
+            actual: self.deliverable(strategy.key.maker.0, &holdings).await,
         })
     }
 }
@@ -167,6 +226,19 @@ impl PoolService {
 /// Real bps → a percentage tier string, e.g. `5` → `"0.05%"`.
 fn fee_tier(bps: u32) -> String {
     format!("{:.2}%", bps as f64 / 100.0)
+}
+
+/// A pair's committed value and how it moved over the last day.
+struct PairValue {
+    usd: Option<f64>,
+    change_24h_pct: Option<f64>,
+}
+
+impl PairValue {
+    const UNKNOWN: Self = Self {
+        usd: None,
+        change_24h_pct: None,
+    };
 }
 
 /// Fees the window earned over the capital backing them, annualised.
@@ -185,10 +257,12 @@ fn yield_pct(volume_usd: Option<f64>, tvl_usd: Option<f64>, fee_bps: u32) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deps::balances::BalancesOracleError;
     use crate::deps::maker_metrics::{
         MakerMetrics, MakerMetricsError, PairMetrics, PositionMetrics,
     };
     use crate::deps::routing::{PriceOracle, PriceOracleError};
+    use crate::primitives::amount::Holdings;
     use crate::primitives::asset::{TokenList, TokenMeta};
     use crate::primitives::registry::{
         Curve, CurveSpec, MakerStrategy, PeggedParams, Snapshot, StrategyKey,
@@ -233,6 +307,35 @@ mod tests {
                 volume: vec![],
             })
         }
+    }
+
+    /// Reports the same pullable amount for every token the caller asks about.
+    struct Pullable(u128);
+    #[async_trait]
+    impl BalancesOracle for Pullable {
+        async fn holdings(
+            &self,
+            _: Address,
+            tokens: &[Address],
+        ) -> Result<BTreeMap<Address, Holdings>, BalancesOracleError> {
+            Ok(tokens
+                .iter()
+                .map(|token| {
+                    let amount = U256::from(self.0);
+                    (
+                        *token,
+                        Holdings {
+                            balance: amount,
+                            pullable: amount,
+                        },
+                    )
+                })
+                .collect())
+        }
+    }
+
+    fn pullable(amount: u128) -> Arc<dyn BalancesOracle> {
+        Arc::new(Pullable(amount))
     }
 
     struct FixedClock;
@@ -333,9 +436,16 @@ mod tests {
         ]);
         let registry = Arc::new(SharedSnapshot::new(snap));
         let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
-        let pools = PoolService::new(registry, assets, valuation(&[]), metrics(), clock())
-            .pools()
-            .await;
+        let pools = PoolService::new(
+            registry,
+            assets,
+            valuation(&[]),
+            metrics(),
+            pullable(0),
+            clock(),
+        )
+        .pools()
+        .await;
 
         let stable = pools
             .iter()
@@ -368,7 +478,14 @@ mod tests {
             .insert(addr(1), U256::from(12_000_000_000u64)); // 12000 USDC (6 dec)
         let registry = Arc::new(SharedSnapshot::new(Snapshot::from_strategies([strategy])));
         let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
-        let svc = PoolService::new(registry, assets, valuation(&[]), metrics(), clock());
+        let svc = PoolService::new(
+            registry,
+            assets,
+            valuation(&[]),
+            metrics(),
+            pullable(0),
+            clock(),
+        );
 
         let detail = svc
             .pool_detail(&TokenPair::new(addr(3), addr(1)))
@@ -420,6 +537,7 @@ mod tests {
             assets,
             valuation(&[(addr(3), 2000), (addr(1), 1)]),
             metrics(),
+            pullable(0),
             clock(),
         );
 
@@ -432,6 +550,42 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(detail.makers[0].virtual_balances.total_usd, Some(20000.0));
+    }
+
+    #[tokio::test]
+    async fn actual_is_the_committed_amount_capped_by_what_aqua_may_pull() {
+        let list = TokenList {
+            name: "test".to_string(),
+            tokens: vec![meta(1, "USDC", 6, true), meta(3, "WETH", 18, false)],
+        };
+        let mut strategy = strat(0, addr(3), addr(1), Curve::Xyc);
+        strategy
+            .balances
+            .insert(addr(3), U256::from(10_000_000_000_000_000_000u128)); // 10 WETH committed
+        let registry = Arc::new(SharedSnapshot::new(Snapshot::from_strategies([strategy])));
+        let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
+
+        // The maker may only be pulled for 4 WETH, so that is all the pool can count on.
+        let svc = PoolService::new(
+            registry,
+            assets,
+            valuation(&[(addr(3), 2000), (addr(1), 1)]),
+            metrics(),
+            pullable(4_000_000_000_000_000_000),
+            clock(),
+        );
+
+        let detail = svc
+            .pool_detail(&TokenPair::new(addr(3), addr(1)))
+            .await
+            .unwrap();
+        let maker = &detail.makers[0];
+        let committed = maker.virtual_balances.total_usd.unwrap();
+        let deliverable = maker.actual.as_ref().unwrap().total_usd.unwrap();
+
+        assert!((committed - 20_000.0).abs() < 0.01, "{committed}");
+        // 4 of the 10 committed WETH are pullable, so only that share is deliverable.
+        assert!((deliverable - 8_000.0).abs() < 0.01, "{deliverable}");
     }
 
     #[test]

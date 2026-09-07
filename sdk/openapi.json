@@ -1613,6 +1613,14 @@
           "quote": {
             "$ref": "#/components/schemas/Token"
           },
+          "tvl_change_24h_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "How the pool's holdings moved with the market over 24h, value-weighted across its tokens.\nPrices only — a ship or a dock changes the pool's value without appearing here."
+          },
           "tvl_usd": {
             "type": [
               "number",
@@ -1688,6 +1696,17 @@
           "virtual"
         ],
         "properties": {
+          "actual": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TokenAmounts",
+                "description": "What the maker could actually deliver now — the committed amount capped by what Aqua may\npull. `None` when the chain read failed, which is not the same as nothing being pullable."
+              }
+            ]
+          },
           "curve": {
             "type": "string"
           },
@@ -2722,6 +2741,14 @@
                     },
                     "quote": {
                       "$ref": "#/components/schemas/Token"
+                    },
+                    "tvl_change_24h_pct": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "format": "double",
+                      "description": "How the pool's holdings moved with the market over 24h, value-weighted across its tokens.\nPrices only — a ship or a dock changes the pool's value without appearing here."
                     },
                     "tvl_usd": {
                       "type": [
