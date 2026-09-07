@@ -177,3 +177,16 @@ pub struct InventoryLeg {
     pub apy_pct: Option<f64>,
     pub coverage: Option<f64>,
 }
+
+/// Server-authoritative pre-flight for a ship the SDK already encoded: whether the strategy
+/// already exists, which tokens still need an approval, and any warnings.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct PreviewResponse {
+    /// A strategy with this hash already exists — a re-ship would collide.
+    pub exists: bool,
+    /// Tokens whose allowance to Aqua is below the amount to ship; approve them first.
+    #[schema(value_type = Vec<String>)]
+    pub requires_approval: Vec<Address>,
+    /// Human warnings, e.g. insufficient balance for a leg.
+    pub warnings: Vec<String>,
+}
