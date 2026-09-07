@@ -1,7 +1,6 @@
 //! The settlement-reader port: read the *actual* per-source amounts a confirmed fill pulled, so the
 //! ledger posts what really happened (not the conservative hold). One impl per protocol — the live
-//! reader decodes the fill tx's own settlement events; a canonical-watcher-sourced reader can slot
-//! in behind the same port later.
+//! reader decodes the fill tx's own settlement events.
 
 use alloy_primitives::{B256, U256};
 use async_trait::async_trait;

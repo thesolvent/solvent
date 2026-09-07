@@ -4,5 +4,6 @@
 pub mod fill;
 
 pub use fill::{
-    ConfirmedFill, ExecHandle, ExecStatus, FillOutcome, FillTx, PendingFill, SimVerdict,
+    ExecHandle, ExecStatus, FillOutcome, FillTx, PendingFill, Settled, SettledOutcome, SimVerdict,
+    TrackedFill,
 };

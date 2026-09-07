@@ -10,7 +10,7 @@ use crate::primitives::registry::Snapshot;
 use crate::primitives::routing::gas::per_leg_cost as compute_leg_cost;
 use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 
-use super::{select, solve_sparse};
+use super::{price_impact_pct, select, solve_sparse};
 
 /// Resolve the per-leg gas cost in the **spread token**'s base units from the live cache — gas
 /// price and the native + spread-token USD prices. The spread token is `token_out` for exact-in
@@ -73,7 +73,13 @@ pub fn route(
         true => split.net_output(per_leg_cost).checked_sub(bound)?, // net output clears `min_out`
         false => bound.checked_sub(split.gross_input(per_leg_cost))?, // input + gas stays under `max_in`
     };
-    Some(RoutePlan::new(request.intent, split.legs, expected_profit))
+    let price_impact_pct = price_impact_pct(&selection.chosen, split.amount_in, split.amount_out);
+    Some(RoutePlan::new(
+        request.intent,
+        split.legs,
+        expected_profit,
+        price_impact_pct,
+    ))
 }
 
 #[cfg(test)]
