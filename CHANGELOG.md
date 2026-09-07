@@ -250,7 +250,33 @@ the project is pre-1.0 and evolving.
     each side (a backend test vs `ApiDoc::openapi()`, and the SDK's `codegen:check` vs the generated
     types), so a renamed Rust field surfaces as a compile/gate failure, never a runtime one.
 
-_Next: S4 — the maker/taker frontend._
+### Added — frontend (`fe/`, React + Vite)
+- **S4 · pools — the list and detail views, wired end to end.** The frontend gains the same seam the
+  backend has: `ports/` (the domain types views speak), `adapters/{http,mappers}` (OpenAPI DTO →
+  domain), `services/` (TanStack Query hooks), `lib/` (view-model math), `views/` (as migrated from
+  the design mock). Services never import an adapter; the composition root injects them.
+  - **Pools list** — server-fed rows, with fee-tier / APR / pool-type / TVL filters whose options are
+    drawn from the pools actually present, and a recommendation pinned to the best APR.
+  - **Pool detail** at its own address (`/pools/:pair`) — aggregated depth plotted from the depth
+    endpoint, a maker roster with a **Virtual / Actual** toggle, and impact tiers that put the marker
+    and its readout on the curve while hovered.
+- **`@solvent/scripts`** — a devnet runbook package: manifest bootstrap, a Multicall3 etch, idempotent
+  strategy seeding priced off the server's own oracle, and an endpoint smoke matrix.
+
+### Changed — backend (`crates/`)
+- **Pools carry `tvl_change_24h_pct`** — the value-weighted 24h move of what the pool holds,
+  all-or-nothing across its tokens, so a partial reading can never understate it.
+- **Pool makers carry `actual`** — the committed amount capped by what Aqua may actually pull, so a
+  roster can show deliverable size beside committed size. `None` when the chain read failed, which is
+  not the same as nothing being deliverable.
+
+### Fixed — backend (`crates/`)
+- **A configured stablecoin peg reports a 0% daily move**, not an absent one: a token held at par by
+  configuration has not moved, which is different from having no reading.
+- **Depth bisection stops on a relative tolerance** — converging to the last wei cost ~40 further
+  rounds of curve math for precision no caller can observe.
+
+_Next: S4 — swap, makers, and explorer._
 
 ## [0.1.0] — 2026-08-28
 

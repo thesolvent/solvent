@@ -5,6 +5,7 @@
  * uses, so this exercises the real write path rather than a test-only shortcut.
  */
 import { Strategy, linearWidthFromSymmetricRangePercent, positions } from "@solvent/sdk";
+import { createSolventClient } from "@solvent/sdk/client";
 import {
   createPublicClient,
   createWalletClient,
@@ -20,6 +21,9 @@ import { privateKeyToAccount } from "viem/accounts";
 import { readManifest, type Manifest } from "../lib/manifest.ts";
 
 const RPC_URL = process.env.SOLVENT_RPC_URL ?? "http://127.0.0.1:8545";
+const API_URL = process.env.SOLVENT_API_URL ?? "http://127.0.0.1:8080";
+
+const api = createSolventClient({ baseUrl: API_URL });
 
 // Anvil dev accounts #2.. — #0 deploys and owns the filler, #1 cosigns, so makers start at #2.
 const MAKER_KEYS: readonly Hex[] = [
@@ -35,8 +39,8 @@ const MINT_UNITS = 1_000_000;
 interface PairSpec {
   base: string;
   quote: string;
-  /** Human mid price of base in quote. Omit for a pegged (stable/stable) curve. */
-  mid?: string;
+  /** A stable pair prices off its own reserves rather than a mid. */
+  pegged?: boolean;
   /** Half-width of the quoted range, in percent. */
   widthPct: number;
   feeBps: number;
@@ -45,11 +49,47 @@ interface PairSpec {
 }
 
 const PAIRS: readonly PairSpec[] = [
-  { base: "WETH", quote: "USDC", mid: "3000", widthPct: 8, feeBps: 5, size: 30 },
-  { base: "WBTC", quote: "USDC", mid: "60000", widthPct: 10, feeBps: 30, size: 2 },
-  { base: "LINK", quote: "USDC", mid: "15", widthPct: 12, feeBps: 30, size: 20_000 },
-  { base: "DAI", quote: "USDC", widthPct: 1, feeBps: 1, size: 250_000 },
+  { base: "WETH", quote: "USDC", widthPct: 8, feeBps: 5, size: 30 },
+  { base: "WBTC", quote: "USDC", widthPct: 10, feeBps: 30, size: 2 },
+  { base: "LINK", quote: "USDC", widthPct: 12, feeBps: 30, size: 20_000 },
+  { base: "DAI", quote: "USDC", pegged: true, widthPct: 1, feeBps: 1, size: 250_000 },
 ];
+
+/** How a pair is priced: a stable pair off its own reserves, anything else off a live mid. */
+type Pricing = { kind: "pegged" } | { kind: "ranged"; mid: number };
+
+const pairKey = (spec: PairSpec) => `${spec.base}/${spec.quote}`;
+
+/** Mids come from the server's own oracle, so seeded pools quote near the market rather than a
+ *  number that was current when this file was written. Rounded so a small move does not change
+ *  the program — and with it the strategy hash — on every run. */
+async function midPrices(): Promise<Map<string, number>> {
+  const assets = await api.assets();
+  const usd = new Map(
+    assets.items.flatMap((asset) =>
+      asset.price_usd == null ? [] : [[asset.symbol, asset.price_usd] as const],
+    ),
+  );
+
+  const mids = new Map<string, number>();
+  for (const spec of PAIRS) {
+    const base = usd.get(spec.base);
+    const quote = usd.get(spec.quote);
+    if (spec.pegged || base === undefined || quote === undefined) continue;
+    mids.set(pairKey(spec), Number((base / quote).toPrecision(4)));
+  }
+  return mids;
+}
+
+/** A ranged pair with no mid is a dead feed, not a peg — say so rather than seeding it flat. */
+function pricingFor(spec: PairSpec, mids: Map<string, number>): Pricing {
+  if (spec.pegged) return { kind: "pegged" };
+  const mid = mids.get(pairKey(spec));
+  if (mid === undefined) {
+    throw new Error(`no USD price for ${spec.base}/${spec.quote}; is the price feed up?`);
+  }
+  return { kind: "ranged", mid };
+}
 
 const devnet = defineChain({
   id: 31337,
@@ -112,10 +152,10 @@ function token(manifest: Manifest, symbol: string): TokenRef {
 }
 
 /** Size both legs: the quote leg mirrors the base leg's value at the mid. */
-function legs(manifest: Manifest, spec: PairSpec): Legs {
+function legs(manifest: Manifest, spec: PairSpec, pricing: Pricing): Legs {
   const base = token(manifest, spec.base);
   const quote = token(manifest, spec.quote);
-  const quoteSize = spec.mid === undefined ? spec.size : spec.size * Number(spec.mid);
+  const quoteSize = pricing.kind === "pegged" ? spec.size : spec.size * pricing.mid;
   return {
     base,
     quote,
@@ -125,9 +165,9 @@ function legs(manifest: Manifest, spec: PairSpec): Legs {
 }
 
 /** A pegged curve prices off the shipped reserves; a ranged one off an external mid. */
-function strategyFor(spec: PairSpec, sized: Legs): Strategy {
+function strategyFor(spec: PairSpec, sized: Legs, pricing: Pricing): Strategy {
   const curve =
-    spec.mid === undefined
+    pricing.kind === "pegged"
       ? Strategy.pegged({
           tokenA: { ...sized.base, reserve: sized.baseAmount },
           tokenB: { ...sized.quote, reserve: sized.quoteAmount },
@@ -136,7 +176,7 @@ function strategyFor(spec: PairSpec, sized: Legs): Strategy {
       : Strategy.inRange({
           base: sized.base,
           quote: sized.quote,
-          mid: spec.mid,
+          mid: String(pricing.mid),
           halfWidthPct: spec.widthPct,
         });
   return curve.fee(spec.feeBps);
@@ -185,13 +225,20 @@ function submitter(account: Account) {
   };
 }
 
-async function seedPair(manifest: Manifest, spec: PairSpec, key: Hex): Promise<string> {
+async function seedPair(
+  manifest: Manifest,
+  spec: PairSpec,
+  key: Hex,
+  pricing: Pricing,
+): Promise<string> {
   const account = privateKeyToAccount(key);
   const pos = positions({ aqua: manifest.aqua as Address, app: manifest.router as Address });
-  const sized = legs(manifest, spec);
-  const built = strategyFor(spec, sized).build(account.address);
+  const sized = legs(manifest, spec, pricing);
+  const built = strategyFor(spec, sized, pricing).build(account.address);
 
-  const label = `${spec.base}/${spec.quote}  maker ${account.address.slice(0, 10)}  strategy ${built.strategyHash.slice(0, 10)}`;
+  const at =
+    pricing.kind === "pegged" ? "pegged" : `mid ${pricing.mid.toLocaleString("en-US")}`;
+  const label = `${spec.base}/${spec.quote}  ${at.padEnd(14)} maker ${account.address.slice(0, 10)}`;
   if (await isShipped(manifest, account.address, built.strategyHash, sized.base.address)) {
     return `${label}  (already shipped)`;
   }
@@ -217,12 +264,14 @@ async function seedPair(manifest: Manifest, spec: PairSpec, key: Hex): Promise<s
 
 async function main(): Promise<void> {
   const manifest = readManifest();
+  const mids = await midPrices();
   console.log(`seed: ${RPC_URL} · aqua ${manifest.aqua}\n`);
 
   for (const [index, spec] of PAIRS.entries()) {
     const key = MAKER_KEYS[index % MAKER_KEYS.length];
     try {
-      console.log(`  ok    ${await seedPair(manifest, spec, key)}`);
+      const pricing = pricingFor(spec, mids);
+      console.log(`  ok    ${await seedPair(manifest, spec, key, pricing)}`);
     } catch (error) {
       console.log(`  FAIL  ${spec.base}/${spec.quote}: ${error instanceof Error ? error.message : error}`);
       process.exitCode = 1;
