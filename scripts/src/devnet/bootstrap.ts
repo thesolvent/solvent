@@ -12,6 +12,12 @@ import { readManifest, REPO_ROOT, type Manifest } from "../lib/manifest.ts";
 
 const TOKENS_OUT = resolve(REPO_ROOT, "devnet/generated/tokens.json");
 const CONFIG_OUT = resolve(REPO_ROOT, "solvent.toml");
+const ENV_OUT = resolve(REPO_ROOT, "devnet/generated/env.sh");
+
+// Anvil's deterministic dev accounts. #0 deploys, so it owns the router and filler; #1 cosigns.
+// Publicly known throwaway keys — devnet only, never a real network.
+const DEPLOYER_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const COSIGNER_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
 // Symbol -> token-list tag, mirroring the checked-in list's grouping.
 const TAGS: Record<string, string> = {
@@ -75,6 +81,9 @@ bind_addr = "0.0.0.0:8080"
 rpc_url = "http://127.0.0.1:8545"
 chain_id = ${manifest.chain_id}
 
+# Required to run the live server, despite being optional in the config type.
+database_url = "sqlite:devnet/generated/solvent.db?mode=rwc"
+
 aqua_address = "${manifest.aqua}"
 app_address = "${manifest.router}"
 
@@ -98,7 +107,7 @@ confirmations = 1
 reservation_ttl_secs = 60
 decay_window_secs = 60
 
-wallet_state_db = "walletkit.redb"
+wallet_state_db = "devnet/generated/walletkit.redb"
 `;
 }
 
@@ -109,10 +118,17 @@ function main(): void {
   mkdirSync(dirname(TOKENS_OUT), { recursive: true });
   writeFileSync(TOKENS_OUT, `${JSON.stringify(tokenList(manifest), null, 2)}\n`);
   writeFileSync(CONFIG_OUT, configToml(manifest, tokenListPath));
+  writeFileSync(
+    ENV_OUT,
+    `# Signing keys the server reads from the environment. Anvil dev accounts — devnet only.\n` +
+      `export SOLVENT_SIGNER_KEY=${DEPLOYER_KEY}\n` +
+      `export SOLVENT_COSIGNER_KEY=${COSIGNER_KEY}\n`,
+  );
 
   console.log(`bootstrap: aqua=${manifest.aqua} app=${manifest.router}`);
   console.log(`bootstrap: wrote ${tokenListPath} (${Object.keys(manifest.tokens).length} tokens)`);
   console.log(`bootstrap: wrote ${relative(REPO_ROOT, CONFIG_OUT)}`);
+  console.log(`bootstrap: wrote ${relative(REPO_ROOT, ENV_OUT)}`);
 }
 
 main();

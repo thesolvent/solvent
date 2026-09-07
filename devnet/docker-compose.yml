@@ -45,10 +45,10 @@ services:
       - "./otterscan.json:/usr/share/nginx/html/config.json:ro"
     restart: unless-stopped
 
-  # One-shot: etch canonical infra, deploy the stack + Core-6, write the manifest into the shared volume.
+  # One-shot: deploy the stack + Core-6 and write the address manifest.
   seed:
     image: ghcr.io/foundry-rs/foundry:stable
-    # Run as root so the one-shot can write the manifest into the root-owned named volume.
+    # Run as root so the one-shot can write the manifest into the mounted directory.
     user: "root"
     depends_on:
       - anvil-1
@@ -61,7 +61,9 @@ services:
     volumes:
       - "../contracts:/work"
       - "./seed.sh:/seed.sh:ro"
-      - "manifest:/work/deployments"
+      # Bind-mounted, not a named volume: the server config and the frontend are generated from
+      # these addresses on the host (`pnpm --dir scripts bootstrap`).
+      - "../contracts/deployments:/work/deployments"
     restart: "no"
 
   # Rate-limited token/gas faucet the frontend calls. Waits for the seed to finish.
@@ -79,11 +81,11 @@ services:
       BIND_ADDR: "0.0.0.0:8080"
       COOLDOWN_SECS: "60"
     ports:
-      - "8080:8080"
+      # 8080 on the host belongs to the Solvent server, so the faucet is published beside it.
+      - "8081:8080"
     volumes:
-      - "manifest:/manifest:ro"
+      - "../contracts/deployments:/manifest:ro"
     restart: unless-stopped
 
 volumes:
-  manifest:
   anvil-state:

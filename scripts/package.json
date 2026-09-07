@@ -6,8 +6,9 @@
   "description": "Devnet harness: bootstrap config from the deploy manifest, seed maker liquidity, smoke the API.",
   "scripts": {
     "bootstrap": "node src/devnet/bootstrap.ts",
+    "etch": "node src/devnet/etch.ts",
     "smoke": "node src/smoke/endpoints.ts",
-    "seed": "node src/seed/strategies.ts",
+    "seed": "node --import ./src/lib/register.mjs src/seed/strategies.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

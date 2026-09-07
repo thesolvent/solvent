@@ -7,11 +7,11 @@ docs/superpowers/
 node_modules/
 
 # --- Frontend (Vite/Vitest/Playwright build + test artifacts) ---
-/frontend/dist
-/frontend/.vite
-/frontend/coverage
-/frontend/test-results
-/frontend/playwright-report
+/fe/dist
+/fe/.vite
+/fe/coverage
+/fe/test-results
+/fe/playwright-report
 
 # --- Rust (backend, added later) ---
 /backend/target
@@ -42,3 +42,8 @@ proptest-regressions/
 
 # --- devnet: generated per-deploy from the manifest (untracked) ---
 /devnet/generated/
+/contracts/deployments/
+
+# --- server runtime state (recreated on boot) ---
+*.redb
+

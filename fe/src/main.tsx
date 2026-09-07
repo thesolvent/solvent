@@ -10,6 +10,8 @@ import "@fontsource/ibm-plex-mono/600.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
 
+import { solventApi } from "./adapters/http/client";
+import { ServicesProvider } from "./services/ServicesProvider";
 import { App } from "./App";
 
 const root = document.getElementById("root");
@@ -17,6 +19,8 @@ if (!root) throw new Error("#root missing from index.html");
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <ServicesProvider services={{ api: solventApi }}>
+      <App />
+    </ServicesProvider>
   </StrictMode>,
 );
