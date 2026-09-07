@@ -13,7 +13,7 @@ use solvent_core::primitives::registry::TokenPair;
 use solvent_core::SolventError;
 
 use crate::http::dto::List;
-use crate::http::primitives::{ApiResult, Response};
+use crate::http::primitives::{parse_addr, ApiResult, Response};
 use crate::http::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -87,7 +87,10 @@ pub async fn pool_detail(
     State(state): State<AppState>,
     Query(query): Query<PairQuery>,
 ) -> ApiResult<PoolDetail> {
-    let pair = TokenPair::new(parse_addr(&query.base)?, parse_addr(&query.quote)?);
+    let pair = TokenPair::new(
+        parse_addr("token", &query.base)?,
+        parse_addr("token", &query.quote)?,
+    );
     match state.pools.pool_detail(&pair).await {
         Some(detail) => Ok(Response::ok(detail)),
         None => Err(Response::error("pool not found", StatusCode::NOT_FOUND)),
@@ -120,7 +123,10 @@ pub async fn pool_depth(
     State(state): State<AppState>,
     Query(query): Query<DepthQuery>,
 ) -> ApiResult<PoolDepth> {
-    let pair = TokenPair::new(parse_addr(&query.base)?, parse_addr(&query.quote)?);
+    let pair = TokenPair::new(
+        parse_addr("token", &query.base)?,
+        parse_addr("token", &query.quote)?,
+    );
     let side = query.side.unwrap_or(Side::Sell);
     match state.depth.depth(&pair, side) {
         Some(depth) => Ok(Response::ok(depth)),
@@ -128,15 +134,8 @@ pub async fn pool_depth(
     }
 }
 
-fn parse_addr(s: &str) -> Result<Address, SolventError> {
-    s.parse::<Address>().map_err(|e| SolventError::InvalidId {
-        id_type: "token",
-        reason: e.to_string(),
-    })
-}
-
 fn parse_token(value: Option<&str>) -> Result<Option<Address>, SolventError> {
-    value.map(parse_addr).transpose()
+    value.map(|s| parse_addr("token", s)).transpose()
 }
 
 fn matches(

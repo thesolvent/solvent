@@ -719,7 +719,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Response_List_Trade"
+                  "$ref": "#/components/schemas/Response_List_TradeView"
                 }
               }
             }
@@ -751,7 +751,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Response_Trade"
+                  "$ref": "#/components/schemas/Response_TradeView"
                 }
               }
             }
@@ -797,24 +797,6 @@
   },
   "components": {
     "schemas": {
-      "Action": {
-        "type": "object",
-        "description": "One lifecycle stage a trade reached, and when (unix seconds).",
-        "required": [
-          "status",
-          "at"
-        ],
-        "properties": {
-          "at": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0
-          },
-          "status": {
-            "type": "string"
-          }
-        }
-      },
       "ActiveStats": {
         "type": "object",
         "description": "Recent-activity stats for the position detail.",
@@ -1393,7 +1375,7 @@
       },
       "MakerLeg": {
         "type": "object",
-        "description": "One maker's slice of the routed split.",
+        "description": "One maker's slice of the routed split, on the wire.",
         "required": [
           "maker",
           "strategy_hash",
@@ -1443,7 +1425,7 @@
       "MakerTrade": {
         "allOf": [
           {
-            "$ref": "#/components/schemas/Trade"
+            "$ref": "#/components/schemas/TradeView"
           },
           {
             "type": "object",
@@ -1467,7 +1449,7 @@
             }
           }
         ],
-        "description": "One of a maker's settlements: the trade header plus this maker's share and captured fee."
+        "description": "A settlement in a maker's feed: the trade header plus the maker's share and captured fee."
       },
       "PairInfo": {
         "type": "object",
@@ -2487,7 +2469,7 @@
                 "items": {
                   "allOf": [
                     {
-                      "$ref": "#/components/schemas/Trade"
+                      "$ref": "#/components/schemas/TradeView"
                     },
                     {
                       "type": "object",
@@ -2511,7 +2493,7 @@
                       }
                     }
                   ],
-                  "description": "One of a maker's settlements: the trade header plus this maker's share and captured fee."
+                  "description": "A settlement in a maker's feed: the trade header plus the maker's share and captured fee."
                 }
               },
               "next_cursor": {
@@ -2931,7 +2913,7 @@
           }
         }
       },
-      "Response_List_Trade": {
+      "Response_List_TradeView": {
         "type": "object",
         "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
         "required": [
@@ -2955,7 +2937,7 @@
                 "type": "array",
                 "items": {
                   "type": "object",
-                  "description": "One trade, header-only in a list; a detail also carries `lifecycle`, `legs`, and the order's\ncoordinates (omitted from JSON when absent).",
+                  "description": "One trade on the wire, header-only in a list; a detail also carries `lifecycle`, `legs`, and the\norder's coordinates (omitted from JSON when absent). Assembled by the trade service.",
                   "required": [
                     "id",
                     "status",
@@ -3009,7 +2991,7 @@
                         "null"
                       ],
                       "items": {
-                        "$ref": "#/components/schemas/Action"
+                        "$ref": "#/components/schemas/TradeAction"
                       },
                       "description": "The stage timeline — detail only."
                     },
@@ -3534,7 +3516,7 @@
           }
         }
       },
-      "Response_Trade": {
+      "Response_TradeView": {
         "type": "object",
         "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
         "required": [
@@ -3549,7 +3531,7 @@
           },
           "result": {
             "type": "object",
-            "description": "One trade, header-only in a list; a detail also carries `lifecycle`, `legs`, and the order's\ncoordinates (omitted from JSON when absent).",
+            "description": "One trade on the wire, header-only in a list; a detail also carries `lifecycle`, `legs`, and the\norder's coordinates (omitted from JSON when absent). Assembled by the trade service.",
             "required": [
               "id",
               "status",
@@ -3603,7 +3585,7 @@
                   "null"
                 ],
                 "items": {
-                  "$ref": "#/components/schemas/Action"
+                  "$ref": "#/components/schemas/TradeAction"
                 },
                 "description": "The stage timeline — detail only."
               },
@@ -3870,9 +3852,27 @@
           }
         }
       },
-      "Trade": {
+      "TradeAction": {
         "type": "object",
-        "description": "One trade, header-only in a list; a detail also carries `lifecycle`, `legs`, and the order's\ncoordinates (omitted from JSON when absent).",
+        "description": "One lifecycle stage a trade reached, and when (unix seconds).",
+        "required": [
+          "status",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "TradeView": {
+        "type": "object",
+        "description": "One trade on the wire, header-only in a list; a detail also carries `lifecycle`, `legs`, and the\norder's coordinates (omitted from JSON when absent). Assembled by the trade service.",
         "required": [
           "id",
           "status",
@@ -3926,7 +3926,7 @@
               "null"
             ],
             "items": {
-              "$ref": "#/components/schemas/Action"
+              "$ref": "#/components/schemas/TradeAction"
             },
             "description": "The stage timeline — detail only."
           },

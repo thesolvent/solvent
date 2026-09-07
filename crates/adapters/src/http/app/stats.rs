@@ -39,7 +39,7 @@ pub async fn stats(State(state): State<AppState>) -> ApiResult<Stats> {
         .await
         .map_err(SolventError::from)?;
 
-    let trades = state.trades.stats().await.map_err(SolventError::from)?;
+    let trades = state.trades.stats().await?;
     // Success rate over on-chain outcomes only: confirmed vs failed. Declines are settled but
     // aren't fill attempts, so they stay out of the denominator.
     let attempted = trades.confirmed + trades.failed;

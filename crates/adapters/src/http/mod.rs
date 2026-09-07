@@ -132,6 +132,7 @@ mod tests {
     use solvent_core::registry::SharedSnapshot;
     use solvent_core::routing::LegCostResolver;
     use solvent_core::swap::{SwapConfig, SwapService};
+    use solvent_core::trade::TradeService;
     use solvent_core::valuation::Valuation;
     use tower::ServiceExt;
 
@@ -479,6 +480,11 @@ mod tests {
             Arc::new(SystemClock),
             ChainId(31337),
         ));
+        let trade_svc = Arc::new(TradeService::new(
+            Arc::clone(&trades),
+            Arc::clone(&assets),
+            Arc::clone(&valuation),
+        ));
         AppState {
             config: Arc::new(AppConfig {
                 chain_id: 31337,
@@ -500,7 +506,7 @@ mod tests {
             quote,
             swap,
             cosigner,
-            trades,
+            trades: trade_svc,
             registry: Arc::clone(&registry),
             registry_store: Arc::new(NoopEventStore),
             valuation,

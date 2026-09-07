@@ -1,14 +1,12 @@
 //! `GET /v1/pairs` — the tradeable pairs for the Create wizard. `?search=` filters by symbol or
 //! address; `?wallet=` adds the maker's per-side balance. All assembly is in the `AssetManager`.
 
-use alloy::primitives::Address;
 use axum::extract::{Query, State};
 use serde::Deserialize;
 use solvent_core::asset::PairInfo;
-use solvent_core::SolventError;
 
 use crate::http::dto::List;
-use crate::http::primitives::{ApiResult, Response};
+use crate::http::primitives::{parse_addr, ApiResult, Response};
 use crate::http::state::AppState;
 
 /// The default band (± percent) the wizard suggests when a pair has no better hint.
@@ -34,7 +32,7 @@ pub async fn pairs(
     Query(query): Query<PairsQuery>,
 ) -> ApiResult<List<PairInfo>> {
     let wallet = match query.wallet {
-        Some(ref addr) => Some(state.balances.balances(parse_addr(addr)?).await?),
+        Some(ref addr) => Some(state.balances.balances(parse_addr("wallet", addr)?).await?),
         None => None,
     };
     let pairs = state
@@ -48,11 +46,4 @@ pub async fn pairs(
         )
         .await;
     Ok(Response::ok(List::all(pairs)))
-}
-
-fn parse_addr(s: &str) -> Result<Address, SolventError> {
-    s.parse::<Address>().map_err(|e| SolventError::InvalidId {
-        id_type: "wallet",
-        reason: e.to_string(),
-    })
 }

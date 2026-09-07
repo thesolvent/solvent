@@ -59,6 +59,16 @@ pub struct Holdings {
     pub pullable: U256,
 }
 
+/// A part's share of a total, in percent, via integer bps — no `U256`→`f64` precision loss. `0.0`
+/// when the total is zero.
+pub fn share_pct(part: U256, total: U256) -> f64 {
+    if total.is_zero() {
+        return 0.0;
+    }
+    let bps = part.saturating_mul(U256::from(10_000u64)) / total;
+    u64::try_from(bps).unwrap_or(0) as f64 / 100.0
+}
+
 /// Format `raw` base units as a human decimal string, trailing zeros trimmed (`"1.5"`, `"4"`). Wraps
 /// alloy's `format_units`; a nonsensical `decimals` (> 77) falls back to the raw integer string.
 pub(crate) fn format_units(raw: U256, decimals: u8) -> String {
