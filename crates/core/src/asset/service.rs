@@ -7,7 +7,10 @@ use std::sync::Arc;
 
 use alloy_primitives::Address;
 
-use crate::primitives::asset::{Asset, Token, TokenList, TokenMeta};
+use crate::primitives::amount::TokenBalance;
+use crate::primitives::asset::{
+    Asset, PairInfo, PairKind, PairWallet, Token, TokenList, TokenMeta,
+};
 use crate::primitives::registry::{ActiveAsset, TokenPair};
 use crate::primitives::UsdPrice;
 use crate::registry::SharedSnapshot;
@@ -68,6 +71,58 @@ impl AssetManager {
             active_strategy_count: active.map_or(0, |a| a.strategy_count as u64),
             pairs,
         }
+    }
+
+    /// The tradeable pairs for the Create wizard: every catalog asset quoted against a stablecoin,
+    /// plus stable/stable, each with mid price and the suggested defaults. `search` filters by
+    /// symbol or address on either side; `wallet` (when given) adds the maker's per-side balance.
+    pub async fn pairs(
+        &self,
+        valuation: &Valuation,
+        wallet: Option<&[TokenBalance]>,
+        search: Option<&str>,
+        default_fee_bps: u32,
+        default_band_pct: f64,
+    ) -> Vec<PairInfo> {
+        let tokens = self.catalog_tokens();
+        let mut out = Vec::new();
+        for i in 0..tokens.len() {
+            for j in (i + 1)..tokens.len() {
+                let (a, b) = (&tokens[i], &tokens[j]);
+                let (a_stable, b_stable) = (self.is_stable(&a.address), self.is_stable(&b.address));
+                // A pair is offered only when at least one side is a stablecoin (preset + stable).
+                if !a_stable && !b_stable {
+                    continue;
+                }
+                // Quote is the stablecoin side; base the other (catalog order when both are stable).
+                let (base, quote) = if b_stable {
+                    (a.clone(), b.clone())
+                } else {
+                    (b.clone(), a.clone())
+                };
+                if search.is_some_and(|q| !matches_search(&base, &quote, q)) {
+                    continue;
+                }
+                let wallet = wallet.map(|bals| PairWallet {
+                    base: wallet_balance(bals, &base.address),
+                    quote: wallet_balance(bals, &quote.address),
+                });
+                out.push(PairInfo {
+                    kind: if a_stable && b_stable {
+                        PairKind::Stable
+                    } else {
+                        PairKind::Volatile
+                    },
+                    mid: mid_price(valuation, base.address, quote.address).await,
+                    default_fee_bps,
+                    default_band_pct,
+                    wallet,
+                    base,
+                    quote,
+                });
+            }
+        }
+        out
     }
 
     /// A human pair label as `base/quote` (quote = the stablecoin side when one token is a stable),
@@ -142,10 +197,37 @@ fn short(address: &Address) -> String {
     format!("{}…{}", &s[..6], &s[s.len() - 4..])
 }
 
+/// Mid price as quote per 1 base, from the two USD prices; `None` if either is missing.
+async fn mid_price(valuation: &Valuation, base: Address, quote: Address) -> Option<f64> {
+    let base = valuation.price(base).await?.to_f64();
+    let quote = valuation.price(quote).await?.to_f64();
+    (quote != 0.0).then_some(base / quote)
+}
+
+/// The maker's whole-token balance of `addr`, or `0` when the wallet doesn't hold it.
+fn wallet_balance(balances: &[TokenBalance], addr: &Address) -> f64 {
+    balances
+        .iter()
+        .find(|b| b.token.address == *addr)
+        .and_then(|b| b.balance.display.parse().ok())
+        .unwrap_or(0.0)
+}
+
+/// Whether `search` (case-insensitive) matches either token's symbol or address.
+fn matches_search(base: &Token, quote: &Token, search: &str) -> bool {
+    let needle = search.to_lowercase();
+    let hit = |t: &Token| {
+        t.symbol.to_lowercase().contains(&needle)
+            || t.address.to_string().to_lowercase().contains(&needle)
+    };
+    hit(base) || hit(quote)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::deps::routing::{PriceOracle, PriceOracleError};
+    use crate::primitives::amount::Amount;
     use crate::primitives::registry::{MakerStrategy, Snapshot, StrategyKey};
     use crate::primitives::{MakerId, StrategyHash};
     use alloy_primitives::{B256, U256};
@@ -187,6 +269,26 @@ mod tests {
             decimals: 18,
             logo_uri: None,
             tags: vec![],
+        }
+    }
+
+    fn stable_meta(n: u8, symbol: &str) -> TokenMeta {
+        TokenMeta {
+            tags: vec!["stables".to_string()],
+            ..meta(n, symbol)
+        }
+    }
+
+    fn balance(mgr: &AssetManager, n: u8, display: &str) -> TokenBalance {
+        let amount = Amount {
+            raw: "0".to_string(),
+            display: display.to_string(),
+            usd: None,
+        };
+        TokenBalance {
+            token: mgr.token_or_default(token(n)),
+            balance: amount.clone(),
+            pullable: amount,
         }
     }
 
@@ -263,5 +365,91 @@ mod tests {
         let usdc = all.iter().find(|a| a.symbol == "USDC").unwrap();
         assert_eq!(usdc.price_usd, None); // unpriced → no value
         assert_eq!(usdc.change_24h_pct, None);
+    }
+
+    #[tokio::test]
+    async fn pairs_lists_asset_vs_stable_and_stable_vs_stable() {
+        // WETH is volatile; USDC & DAI are stable → WETH/USDC, WETH/DAI (volatile), USDC/DAI (stable).
+        let mgr = manager(
+            vec![
+                meta(1, "WETH"),
+                stable_meta(2, "USDC"),
+                stable_meta(3, "DAI"),
+            ],
+            vec![],
+        );
+        let market = FakeMarket {
+            prices: HashMap::from([
+                (token(1), UsdPrice(Decimal::from(2000))),
+                (token(2), UsdPrice(Decimal::from(1))),
+                (token(3), UsdPrice(Decimal::from(1))),
+            ]),
+            changes: HashMap::new(),
+        };
+        let pairs = mgr.pairs(&valuation(market), None, None, 30, 5.0).await;
+        assert_eq!(pairs.len(), 3);
+
+        let weth_usdc = pairs
+            .iter()
+            .find(|p| p.base.symbol == "WETH" && p.quote.symbol == "USDC")
+            .unwrap();
+        assert!(matches!(weth_usdc.kind, PairKind::Volatile));
+        assert_eq!(weth_usdc.mid, Some(2000.0));
+        assert_eq!(weth_usdc.default_fee_bps, 30);
+        assert_eq!(weth_usdc.default_band_pct, 5.0);
+        assert!(weth_usdc.wallet.is_none());
+
+        let usdc_dai = pairs
+            .iter()
+            .find(|p| p.base.symbol == "USDC" && p.quote.symbol == "DAI")
+            .unwrap();
+        assert!(matches!(usdc_dai.kind, PairKind::Stable));
+        assert_eq!(usdc_dai.mid, Some(1.0));
+    }
+
+    #[tokio::test]
+    async fn pairs_search_filters_by_symbol() {
+        let mgr = manager(
+            vec![
+                meta(1, "WETH"),
+                stable_meta(2, "USDC"),
+                stable_meta(3, "DAI"),
+            ],
+            vec![],
+        );
+        let pairs = mgr
+            .pairs(
+                &valuation(FakeMarket::default()),
+                None,
+                Some("weth"),
+                30,
+                5.0,
+            )
+            .await;
+        assert_eq!(pairs.len(), 2);
+        assert!(pairs.iter().all(|p| p.base.symbol == "WETH"));
+    }
+
+    #[tokio::test]
+    async fn pairs_include_wallet_balances_when_supplied() {
+        let mgr = manager(vec![meta(1, "WETH"), stable_meta(2, "USDC")], vec![]);
+        let wallet = vec![balance(&mgr, 1, "1.5"), balance(&mgr, 2, "500")];
+        let pairs = mgr
+            .pairs(
+                &valuation(FakeMarket::default()),
+                Some(&wallet),
+                None,
+                30,
+                5.0,
+            )
+            .await;
+
+        let weth_usdc = pairs
+            .iter()
+            .find(|p| p.base.symbol == "WETH" && p.quote.symbol == "USDC")
+            .unwrap();
+        let w = weth_usdc.wallet.as_ref().unwrap();
+        assert_eq!(w.base, 1.5); // WETH
+        assert_eq!(w.quote, 500.0); // USDC
     }
 }

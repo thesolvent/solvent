@@ -1,0 +1,3979 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Solvent API",
+    "description": "",
+    "license": {
+      "name": ""
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/v1/activity": {
+      "get": {
+        "tags": [
+          "crate::http::app::activity"
+        ],
+        "operationId": "activity",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (default 50, max 200)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque next-page cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "shipped|pushed|pulled|docked",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actor",
+            "in": "query",
+            "description": "Maker address filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "description": "Token address filter (push/pull only)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_ActivityEvent"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/assets": {
+      "get": {
+        "tags": [
+          "crate::http::app::assets"
+        ],
+        "operationId": "assets",
+        "parameters": [
+          {
+            "name": "supported",
+            "in": "query",
+            "description": "Only assets with active liquidity",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_Asset"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/config": {
+      "get": {
+        "tags": [
+          "crate::http::app::config"
+        ],
+        "summary": "Returns the runtime config verbatim; the FE reads it once at startup. Infallible (an in-memory\nclone), so it returns `Response` directly rather than `ApiResult`.",
+        "operationId": "config",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_AppConfig"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/makers": {
+      "get": {
+        "tags": [
+          "crate::http::app::makers"
+        ],
+        "summary": "The roster of active makers, each with its position count and shared liquidity.",
+        "operationId": "makers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_MakerSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/makers/{maker}": {
+      "get": {
+        "tags": [
+          "crate::http::app::makers"
+        ],
+        "summary": "One maker's dashboard (KPIs, fill-share, latency, insight). `{maker}` is an address (`me` needs a\nwallet).",
+        "operationId": "maker_dashboard",
+        "parameters": [
+          {
+            "name": "maker",
+            "in": "path",
+            "description": "Maker address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_MakerDashboard"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/makers/{maker}/inventory": {
+      "get": {
+        "tags": [
+          "crate::http::app::makers"
+        ],
+        "summary": "A maker's inventory: its positions re-grouped by token (the Assets tab). `{maker}` is an address.",
+        "operationId": "maker_inventory",
+        "parameters": [
+          {
+            "name": "maker",
+            "in": "path",
+            "description": "Maker address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_InventoryRow"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/makers/{maker}/positions": {
+      "get": {
+        "tags": [
+          "crate::http::app::makers"
+        ],
+        "summary": "A maker's active positions (list projection). `{maker}` is an address (`me` needs a wallet).",
+        "operationId": "maker_positions",
+        "parameters": [
+          {
+            "name": "maker",
+            "in": "path",
+            "description": "Maker address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_Position"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/makers/{maker}/trades": {
+      "get": {
+        "tags": [
+          "crate::http::app::makers"
+        ],
+        "summary": "A maker's settlements (newest first, cursor-paginated) — its trades with per-trade share and fee.",
+        "operationId": "maker_trades",
+        "parameters": [
+          {
+            "name": "maker",
+            "in": "path",
+            "description": "Maker address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (default 50, max 200)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque next-page cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_MakerTrade"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pairs": {
+      "get": {
+        "tags": [
+          "crate::http::app::pairs"
+        ],
+        "operationId": "pairs",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "description": "Filter by token symbol or address",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "wallet",
+            "in": "query",
+            "description": "Include this wallet's per-side balances",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_PairInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pools": {
+      "get": {
+        "tags": [
+          "crate::http::app::pools"
+        ],
+        "summary": "List active pools, filtered and ordered by most makers first.",
+        "operationId": "pools",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "description": "All|Stable|Correlated|Volatile",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token_a",
+            "in": "query",
+            "description": "Pair must contain this token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token_b",
+            "in": "query",
+            "description": "Pair must contain this token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fee",
+            "in": "query",
+            "description": "Popular fee tier, e.g. 0.05%",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_Pool"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pools/depth": {
+      "get": {
+        "tags": [
+          "crate::http::app::pools"
+        ],
+        "summary": "The pair's executable-liquidity depth curve for one side.",
+        "operationId": "pool_depth",
+        "parameters": [
+          {
+            "name": "base",
+            "in": "query",
+            "description": "Base token address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quote",
+            "in": "query",
+            "description": "Quote token address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "side",
+            "in": "query",
+            "description": "buy|sell (default sell)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_PoolDepth"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active pool for the pair"
+          }
+        }
+      }
+    },
+    "/v1/pools/detail": {
+      "get": {
+        "tags": [
+          "crate::http::app::pools"
+        ],
+        "summary": "Detail for one pool, identified by `base` and `quote`.",
+        "operationId": "pool_detail",
+        "parameters": [
+          {
+            "name": "base",
+            "in": "query",
+            "description": "Base token address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quote",
+            "in": "query",
+            "description": "Quote token address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_PoolDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active pool for the pair"
+          }
+        }
+      }
+    },
+    "/v1/positions/preview": {
+      "post": {
+        "tags": [
+          "crate::http::app::positions"
+        ],
+        "operationId": "preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_PreviewResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/positions/{hash}": {
+      "get": {
+        "tags": [
+          "crate::http::app::makers"
+        ],
+        "summary": "One position's full detail, or `404` if the hash is unknown.",
+        "operationId": "position_detail",
+        "parameters": [
+          {
+            "name": "hash",
+            "in": "path",
+            "description": "Strategy hash (position id)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_Position"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown position"
+          }
+        }
+      }
+    },
+    "/v1/stats": {
+      "get": {
+        "tags": [
+          "crate::http::app::stats"
+        ],
+        "operationId": "stats",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_Stats"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/swap": {
+      "post": {
+        "tags": [
+          "crate::http::app::swap"
+        ],
+        "summary": "Submit a taker-signed order: decode → verify the swapper signature → cosign → route → reserve →\npersist → fill. A malformed or unverifiable order is `400`; an unroutable one returns a\n`declined` trade (`200`).",
+        "operationId": "submit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_SwapResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or unverifiable order"
+          }
+        }
+      }
+    },
+    "/v1/swap/quote": {
+      "post": {
+        "tags": [
+          "crate::http::app::swap"
+        ],
+        "summary": "Route `amount_in` of `token_in` into `token_out`, returning the split and its impact. `422` when\nno route exists (no makers, or the size is beyond the book).",
+        "operationId": "quote",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_QuoteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No route for the pair and size"
+          }
+        }
+      }
+    },
+    "/v1/trades": {
+      "get": {
+        "tags": [
+          "crate::http::app::trades"
+        ],
+        "summary": "List trades, newest first, filtered and cursor-paginated.",
+        "operationId": "trades",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (default 50, max 200)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque next-page cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Lifecycle status filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "taker",
+            "in": "query",
+            "description": "Swapper address filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "base",
+            "in": "query",
+            "description": "Pair token (with quote)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quote",
+            "in": "query",
+            "description": "Pair token (with base)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_Trade"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trades/{id}": {
+      "get": {
+        "tags": [
+          "crate::http::app::trades"
+        ],
+        "summary": "One trade's full detail, or `404` if the id is unknown.",
+        "operationId": "trade_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Trade id (ULID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_Trade"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown trade"
+          }
+        }
+      }
+    },
+    "/v1/wallets/{addr}/balances": {
+      "get": {
+        "tags": [
+          "crate::http::app::balances"
+        ],
+        "summary": "Balances for `addr` over every catalog token. A malformed address → `400`.",
+        "operationId": "balances",
+        "parameters": [
+          {
+            "name": "addr",
+            "in": "path",
+            "description": "Wallet address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_TokenBalance"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Action": {
+        "type": "object",
+        "description": "One lifecycle stage a trade reached, and when (unix seconds).",
+        "required": [
+          "status",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ActiveStats": {
+        "type": "object",
+        "description": "Recent-activity stats for the position detail.",
+        "required": [
+          "fills_7d"
+        ],
+        "properties": {
+          "fills_7d": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "last_fill_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "quote_uptime_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "volume_7d_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "ActivityEvent": {
+        "type": "object",
+        "description": "One Aqua event on the feed. `token` is present only for the balance-moving kinds (push / pull).",
+        "required": [
+          "kind",
+          "maker",
+          "strategy_hash",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix seconds the event was recorded.",
+            "minimum": 0
+          },
+          "block_number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "kind": {
+            "type": "string"
+          },
+          "log_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "maker": {
+            "type": "string"
+          },
+          "strategy_hash": {
+            "type": "string"
+          },
+          "token": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TokenAmount"
+              }
+            ]
+          },
+          "tx_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Amount": {
+        "type": "object",
+        "description": "A token amount: `raw` base units (never a float), a human-formatted `display`, and `usd` (`None`\nuntil pricing is wired).",
+        "required": [
+          "raw",
+          "display"
+        ],
+        "properties": {
+          "display": {
+            "type": "string"
+          },
+          "raw": {
+            "type": "string"
+          },
+          "usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "AmountIn": {
+        "type": "object",
+        "description": "One leg of a ship: a token and the amount in base units (a decimal integer string).",
+        "required": [
+          "token",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "AppConfig": {
+        "type": "object",
+        "description": "Runtime config the FE reads instead of hardcoding — also the `/config` response body.",
+        "required": [
+          "chain_id",
+          "features",
+          "default_fee_bps",
+          "networks",
+          "block_explorer_url"
+        ],
+        "properties": {
+          "block_explorer_url": {
+            "type": "string"
+          },
+          "chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "default_fee_bps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "features": {
+            "$ref": "#/components/schemas/Features"
+          },
+          "networks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Asset": {
+        "type": "object",
+        "description": "The complete picture of one asset: identity + static metadata + market + protocol status. Every\nasset query returns this, and the API serializes it verbatim.",
+        "required": [
+          "address",
+          "chain_id",
+          "symbol",
+          "name",
+          "decimals",
+          "tags",
+          "supported",
+          "active_strategy_count",
+          "pairs"
+        ],
+        "properties": {
+          "active_strategy_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "address": {
+            "type": "string"
+          },
+          "chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "change_24h_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "decimals": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "pairs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "price_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "USD price and its 24h change — `None` until the price feed is wired."
+          },
+          "supported": {
+            "type": "boolean",
+            "description": "Whether ≥1 active strategy quotes this asset, how many, and the pairs it trades in."
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DepthPoint": {
+        "type": "object",
+        "description": "One point on the depth curve, anchored to a price-impact bucket. Amounts are base-unit strings;\n`impact_pct` is how far `effective_price` sits below `best_price`, in percent.",
+        "required": [
+          "trade_size",
+          "output",
+          "effective_price",
+          "impact_pct",
+          "makers_used"
+        ],
+        "properties": {
+          "effective_price": {
+            "type": "string"
+          },
+          "impact_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "makers_used": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output": {
+            "type": "string"
+          },
+          "trade_size": {
+            "type": "string"
+          }
+        }
+      },
+      "Economics": {
+        "type": "object",
+        "description": "USD economics for a position over the dashboard's window.",
+        "properties": {
+          "apy_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "fees_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "volume_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "Features": {
+        "type": "object",
+        "description": "Feature flags the FE reads at bootstrap. `earn` / `send_buy` are always off in the MVP.",
+        "required": [
+          "faucet",
+          "earn",
+          "send_buy"
+        ],
+        "properties": {
+          "earn": {
+            "type": "boolean"
+          },
+          "faucet": {
+            "type": "boolean"
+          },
+          "send_buy": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FillShare": {
+        "type": "object",
+        "description": "The maker's fills as a share of all fills on the pairs it quotes.",
+        "required": [
+          "filled",
+          "pair_fills"
+        ],
+        "properties": {
+          "filled": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The maker's confirmed fills in the window.",
+            "minimum": 0
+          },
+          "pair_fills": {
+            "type": "integer",
+            "format": "int64",
+            "description": "All confirmed fills on the maker's pairs in the window (the share denominator).",
+            "minimum": 0
+          },
+          "share_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "InventoryLeg": {
+        "type": "object",
+        "description": "One position's slice of a token: this token's committed vs opening balance in that position, plus\nthe position's economics (repeated per leg).",
+        "required": [
+          "pair",
+          "curve",
+          "fee_bps",
+          "current",
+          "opening"
+        ],
+        "properties": {
+          "apy_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "coverage": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "current": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "This token's committed balance in the position."
+          },
+          "curve": {
+            "type": "string"
+          },
+          "fee_bps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "fees_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "opening": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "This token's ship-time balance in the position."
+          },
+          "pair": {
+            "type": "string"
+          },
+          "volume_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "InventoryRow": {
+        "type": "object",
+        "description": "One token in a maker's inventory: its wallet vs committed balances, aggregate economics, and the\npositions (`legs`) that hold it. The maker's positions re-grouped by token (the Assets tab).",
+        "required": [
+          "token",
+          "wallet",
+          "shared",
+          "legs"
+        ],
+        "properties": {
+          "apy_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "fees_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Fees from every position holding this token (a position counts under each token it holds)."
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryLeg"
+            }
+          },
+          "shared": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "Committed across all the maker's positions."
+          },
+          "token": {
+            "$ref": "#/components/schemas/Token"
+          },
+          "wallet": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "The maker's wallet balance of this token (uncapped)."
+          }
+        }
+      },
+      "MakerDashboard": {
+        "type": "object",
+        "description": "A maker's dashboard: headline KPIs (with period-over-period deltas), fill-share on the pairs it\nquotes, fill latency, and a competitive insight. USD values are `None` when unpriced.",
+        "required": [
+          "maker",
+          "window_days",
+          "active_positions",
+          "kpis",
+          "fill_share"
+        ],
+        "properties": {
+          "active_positions": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "fill_share": {
+            "$ref": "#/components/schemas/FillShare"
+          },
+          "insight": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A cheaper competitor on one of the maker's pairs, if any undercuts it."
+          },
+          "kpis": {
+            "$ref": "#/components/schemas/MakerKpis"
+          },
+          "latency_p50_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "maker": {
+            "type": "string"
+          },
+          "window_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The window (days) the KPIs and deltas cover.",
+            "minimum": 0
+          }
+        }
+      },
+      "MakerKpis": {
+        "type": "object",
+        "description": "The dashboard KPI tiles. `*_change_pct` are period-over-period deltas (previous equal window).",
+        "properties": {
+          "fees_change_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "fees_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "pullable_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "shared_liq_ratio": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Pullable ÷ shared liquidity — aggregate backing coverage, rendered \"×\"."
+          },
+          "shared_liquidity_change_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "shared_liquidity_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "volume_change_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "volume_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "wallet_balance_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "MakerLeg": {
+        "type": "object",
+        "description": "One maker's slice of the routed split.",
+        "required": [
+          "maker",
+          "strategy_hash",
+          "amount_in",
+          "amount_out"
+        ],
+        "properties": {
+          "amount_in": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "amount_out": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "maker": {
+            "type": "string"
+          },
+          "strategy_hash": {
+            "type": "string"
+          }
+        }
+      },
+      "MakerSummary": {
+        "type": "object",
+        "description": "One maker in the roster.",
+        "required": [
+          "maker",
+          "active_positions"
+        ],
+        "properties": {
+          "active_positions": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "maker": {
+            "type": "string"
+          },
+          "shared_liquidity_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "MakerTrade": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Trade"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "fee_usd": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "double",
+                "description": "The maker's captured fee, valued at the trade-time prices — settled trades only."
+              },
+              "share_pct": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "double",
+                "description": "The maker's slice of the trade (delivered ÷ total) — settled trades only."
+              }
+            }
+          }
+        ],
+        "description": "One of a maker's settlements: the trade header plus this maker's share and captured fee."
+      },
+      "PairInfo": {
+        "type": "object",
+        "description": "One tradeable pair offered by the Create wizard: the two tokens, their kind, mid price, the\nsuggested defaults, and (when a wallet is supplied) the maker's balance of each side.",
+        "required": [
+          "base",
+          "quote",
+          "type",
+          "default_fee_bps",
+          "default_band_pct"
+        ],
+        "properties": {
+          "base": {
+            "$ref": "#/components/schemas/Token"
+          },
+          "default_band_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "default_fee_bps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "mid": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Mid price, quote per 1 base — `None` when either side is unpriced."
+          },
+          "quote": {
+            "$ref": "#/components/schemas/Token"
+          },
+          "type": {
+            "$ref": "#/components/schemas/PairKind",
+            "description": "`stable` when both sides are stablecoins, else `volatile`."
+          },
+          "wallet": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PairWallet",
+                "description": "The maker's wallet balance of each side; present only when a wallet was supplied."
+              }
+            ]
+          }
+        }
+      },
+      "PairKind": {
+        "type": "string",
+        "description": "Whether a pair is stable/stable or involves a volatile asset — drives the wizard's default curve.",
+        "enum": [
+          "stable",
+          "volatile"
+        ]
+      },
+      "PairWallet": {
+        "type": "object",
+        "description": "A maker's wallet balance of each side of a pair, in whole tokens.",
+        "required": [
+          "base",
+          "quote"
+        ],
+        "properties": {
+          "base": {
+            "type": "number",
+            "format": "double"
+          },
+          "quote": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "Pool": {
+        "type": "object",
+        "description": "A pool: the aggregation of all active, priceable strategies over one canonical pair. USD and\nvolume/fills fields are absent/zero until their data sources (pricing, the trade store) exist.",
+        "required": [
+          "pair",
+          "base",
+          "quote",
+          "type",
+          "maker_count",
+          "min_spread_bps",
+          "max_spread_bps",
+          "popular_fee_tier",
+          "fills_24h"
+        ],
+        "properties": {
+          "apr_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "base": {
+            "$ref": "#/components/schemas/Token"
+          },
+          "fills_24h": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "maker_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_spread_bps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "min_spread_bps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "pair": {
+            "type": "string"
+          },
+          "popular_fee_tier": {
+            "type": "string"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/Token"
+          },
+          "tvl_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "type": {
+            "$ref": "#/components/schemas/PoolType"
+          },
+          "volume_24h_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "PoolDepth": {
+        "type": "object",
+        "description": "The pool's combined executable liquidity as a curve: for each sampled trade size, the output, its\nblended price, and how far that price sits below the tip. Reconstructs an order book the pool\ndoesn't have by stacking every active maker's curve (the router's split, plotted across sizes).",
+        "required": [
+          "axis_title",
+          "best_price",
+          "points"
+        ],
+        "properties": {
+          "axis_title": {
+            "type": "string"
+          },
+          "best_price": {
+            "type": "string"
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DepthPoint"
+            }
+          }
+        }
+      },
+      "PoolDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Pool"
+          },
+          {
+            "type": "object",
+            "required": [
+              "makers"
+            ],
+            "properties": {
+              "makers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PoolMaker"
+                }
+              }
+            }
+          }
+        ],
+        "description": "Pool detail: the list row plus the maker roster. The roster is the only field the detail view\nadds over [`Pool`], so it composes one rather than restating every KPI. Depth/price-impact and\nrecent fills join as their sources land."
+      },
+      "PoolMaker": {
+        "type": "object",
+        "description": "One maker's strategy in a pool: curve, fee, and committed (`virtual`) balances. Actual/pullable\n(on-chain) balances and uptime are absent until the balance reader and metrics capture exist.",
+        "required": [
+          "maker",
+          "strategy_hash",
+          "curve",
+          "fee_bps",
+          "virtual"
+        ],
+        "properties": {
+          "curve": {
+            "type": "string"
+          },
+          "fee_bps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "maker": {
+            "type": "string"
+          },
+          "strategy_hash": {
+            "type": "string"
+          },
+          "virtual": {
+            "$ref": "#/components/schemas/TokenAmounts"
+          }
+        }
+      },
+      "PoolType": {
+        "type": "string",
+        "description": "How a pool's makers price the pair — drives filtering and display.",
+        "enum": [
+          "Stable",
+          "Correlated",
+          "Volatile"
+        ]
+      },
+      "Position": {
+        "type": "object",
+        "description": "A maker's position — one shipped strategy, valued and analyzed.",
+        "required": [
+          "strategy_hash",
+          "pair",
+          "base",
+          "quote",
+          "maker",
+          "curve",
+          "pair_type",
+          "state",
+          "fee_bps",
+          "range",
+          "balances",
+          "economics"
+        ],
+        "properties": {
+          "active_stats": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ActiveStats",
+                "description": "Detail-only (route 16): omitted from the list projection."
+              }
+            ]
+          },
+          "balances": {
+            "$ref": "#/components/schemas/PositionBalances"
+          },
+          "base": {
+            "$ref": "#/components/schemas/Token"
+          },
+          "curve": {
+            "type": "string"
+          },
+          "economics": {
+            "$ref": "#/components/schemas/Economics"
+          },
+          "fee_bps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "maker": {
+            "type": "string"
+          },
+          "mid_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Current curve spot in `quote per base` — filled by the marginal-price task."
+          },
+          "pair": {
+            "type": "string"
+          },
+          "pair_type": {
+            "$ref": "#/components/schemas/PoolType"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/Token"
+          },
+          "range": {
+            "$ref": "#/components/schemas/PriceRange"
+          },
+          "state": {
+            "type": "string"
+          },
+          "strategy_hash": {
+            "type": "string"
+          }
+        }
+      },
+      "PositionBalances": {
+        "type": "object",
+        "description": "A position's committed vs. pullable balances. `opening` (the ship-time deposit) is detail-only, so\nit is empty in the list projection.",
+        "required": [
+          "virtual",
+          "actual",
+          "backed",
+          "opening",
+          "split"
+        ],
+        "properties": {
+          "actual": {
+            "$ref": "#/components/schemas/TokenAmounts"
+          },
+          "backed": {
+            "type": "boolean",
+            "description": "Whether every committed token is fully pullable on-chain (no `shortfall`)."
+          },
+          "coverage": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Pullable USD as a fraction of committed USD (`1.0` = fully backed)."
+          },
+          "opening": {
+            "$ref": "#/components/schemas/TokenAmounts"
+          },
+          "shortfall": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "split": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Split"
+            }
+          },
+          "virtual": {
+            "$ref": "#/components/schemas/TokenAmounts"
+          }
+        }
+      },
+      "PreviewRequest": {
+        "type": "object",
+        "description": "The SDK-encoded strategy and the amounts the maker intends to ship, keyed to a wallet.",
+        "required": [
+          "maker",
+          "strategy_hash",
+          "amounts"
+        ],
+        "properties": {
+          "amounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AmountIn"
+            }
+          },
+          "maker": {
+            "type": "string"
+          },
+          "strategy_hash": {
+            "type": "string"
+          }
+        }
+      },
+      "PreviewResponse": {
+        "type": "object",
+        "description": "Server-authoritative pre-flight for a ship the SDK already encoded: whether the strategy\nalready exists, which tokens still need an approval, and any warnings.",
+        "required": [
+          "exists",
+          "requires_approval",
+          "warnings"
+        ],
+        "properties": {
+          "exists": {
+            "type": "boolean",
+            "description": "A strategy with this hash already exists — a re-ship would collide."
+          },
+          "requires_approval": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tokens whose allowance to Aqua is below the amount to ship; approve them first."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Human warnings, e.g. insufficient balance for a leg."
+          }
+        }
+      },
+      "PriceRange": {
+        "type": "object",
+        "description": "A position's price range in human `quote per base` terms; which fields are set depends on `kind`.",
+        "required": [
+          "kind",
+          "label"
+        ],
+        "properties": {
+          "above_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "below_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "lower_price": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "peg_price": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "upper_price": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "QuoteLeg": {
+        "type": "object",
+        "description": "One maker's slice of a quoted route.",
+        "required": [
+          "maker",
+          "strategy_hash",
+          "token_in",
+          "token_out",
+          "amount_in",
+          "amount_out",
+          "curve",
+          "share_pct"
+        ],
+        "properties": {
+          "amount_in": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "amount_out": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "curve": {
+            "type": "string",
+            "description": "The curve shape: `XYC` | `Concentrated` | `Pegged`."
+          },
+          "maker": {
+            "type": "string"
+          },
+          "share_pct": {
+            "type": "number",
+            "format": "double",
+            "description": "This leg's share of the blended output, in percent."
+          },
+          "strategy_hash": {
+            "type": "string"
+          },
+          "token_in": {
+            "$ref": "#/components/schemas/Token"
+          },
+          "token_out": {
+            "$ref": "#/components/schemas/Token"
+          }
+        }
+      },
+      "QuoteRequest": {
+        "type": "object",
+        "description": "A quote request: the pair, and the input size in base units.",
+        "required": [
+          "token_in",
+          "token_out",
+          "amount_in"
+        ],
+        "properties": {
+          "amount_in": {
+            "type": "string",
+            "description": "The input amount, in base units (a decimal integer string)."
+          },
+          "token_in": {
+            "type": "string"
+          },
+          "token_out": {
+            "type": "string"
+          }
+        }
+      },
+      "QuoteResponse": {
+        "type": "object",
+        "description": "A read-only quote: the routed split, its blended output, and price impact. `quote_id` is\ndeterministic from the request; `expires_at` is an advisory RFC-3339 instant (a quote does not\nbind a future swap).",
+        "required": [
+          "quote_id",
+          "amount_out",
+          "price_impact_pct",
+          "makers_sourced",
+          "legs",
+          "expires_at"
+        ],
+        "properties": {
+          "amount_out": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteLeg"
+            }
+          },
+          "makers_sourced": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "price_impact_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "quote_id": {
+            "type": "string"
+          }
+        }
+      },
+      "Response_AppConfig": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "Runtime config the FE reads instead of hardcoding — also the `/config` response body.",
+            "required": [
+              "chain_id",
+              "features",
+              "default_fee_bps",
+              "networks",
+              "block_explorer_url"
+            ],
+            "properties": {
+              "block_explorer_url": {
+                "type": "string"
+              },
+              "chain_id": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "default_fee_bps": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "features": {
+                "$ref": "#/components/schemas/Features"
+              },
+              "networks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_List_ActivityEvent": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One Aqua event on the feed. `token` is present only for the balance-moving kinds (push / pull).",
+                  "required": [
+                    "kind",
+                    "maker",
+                    "strategy_hash",
+                    "at"
+                  ],
+                  "properties": {
+                    "at": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "Unix seconds the event was recorded.",
+                      "minimum": 0
+                    },
+                    "block_number": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "log_index": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "maker": {
+                      "type": "string"
+                    },
+                    "strategy_hash": {
+                      "type": "string"
+                    },
+                    "token": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/TokenAmount"
+                        }
+                      ]
+                    },
+                    "tx_hash": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_List_Asset": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "The complete picture of one asset: identity + static metadata + market + protocol status. Every\nasset query returns this, and the API serializes it verbatim.",
+                  "required": [
+                    "address",
+                    "chain_id",
+                    "symbol",
+                    "name",
+                    "decimals",
+                    "tags",
+                    "supported",
+                    "active_strategy_count",
+                    "pairs"
+                  ],
+                  "properties": {
+                    "active_strategy_count": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "address": {
+                      "type": "string"
+                    },
+                    "chain_id": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "change_24h_pct": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "format": "double"
+                    },
+                    "decimals": {
+                      "type": "integer",
+                      "format": "int32",
+                      "minimum": 0
+                    },
+                    "logo_uri": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "pairs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "price_usd": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "format": "double",
+                      "description": "USD price and its 24h change — `None` until the price feed is wired."
+                    },
+                    "supported": {
+                      "type": "boolean",
+                      "description": "Whether ≥1 active strategy quotes this asset, how many, and the pairs it trades in."
+                    },
+                    "symbol": {
+                      "type": "string"
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_List_InventoryRow": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One token in a maker's inventory: its wallet vs committed balances, aggregate economics, and the\npositions (`legs`) that hold it. The maker's positions re-grouped by token (the Assets tab).",
+                  "required": [
+                    "token",
+                    "wallet",
+                    "shared",
+                    "legs"
+                  ],
+                  "properties": {
+                    "apy_pct": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "format": "double"
+                    },
+                    "fees_usd": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "format": "double",
+                      "description": "Fees from every position holding this token (a position counts under each token it holds)."
+                    },
+                    "legs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/InventoryLeg"
+                      }
+                    },
+                    "shared": {
+                      "$ref": "#/components/schemas/Amount",
+                      "description": "Committed across all the maker's positions."
+                    },
+                    "token": {
+                      "$ref": "#/components/schemas/Token"
+                    },
+                    "wallet": {
+                      "$ref": "#/components/schemas/Amount",
+                      "description": "The maker's wallet balance of this token (uncapped)."
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_List_MakerSummary": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One maker in the roster.",
+                  "required": [
+                    "maker",
+                    "active_positions"
+                  ],
+                  "properties": {
+                    "active_positions": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "maker": {
+                      "type": "string"
+                    },
+                    "shared_liquidity_usd": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "format": "double"
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_List_MakerTrade": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Trade"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "fee_usd": {
+                          "type": [
+                            "number",
+                            "null"
+                          ],
+                          "format": "double",
+                          "description": "The maker's captured fee, valued at the trade-time prices — settled trades only."
+                        },
+                        "share_pct": {
+                          "type": [
+                            "number",
+                            "null"
+                          ],
+                          "format": "double",
+                          "description": "The maker's slice of the trade (delivered ÷ total) — settled trades only."
+                        }
+                      }
+                    }
+                  ],
+                  "description": "One of a maker's settlements: the trade header plus this maker's share and captured fee."
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_List_PairInfo": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One tradeable pair offered by the Create wizard: the two tokens, their kind, mid price, the\nsuggested defaults, and (when a wallet is supplied) the maker's balance of each side.",
+                  "required": [
+                    "base",
+                    "quote",
+                    "type",
+                    "default_fee_bps",
+                    "default_band_pct"
+                  ],
+                  "properties": {
+                    "base": {
+                      "$ref": "#/components/schemas/Token"
+                    },
+                    "default_band_pct": {
+                      "type": "number",
+                      "format": "double"
+                    },
+                    "default_fee_bps": {
+                      "type": "integer",
+                      "format": "int32",
+                      "minimum": 0
+                    },
+                    "mid": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "format": "double",
+                      "description": "Mid price, quote per 1 base — `None` when either side is unpriced."
+                    },
+                    "quote": {
+                      "$ref": "#/components/schemas/Token"
+                    },
+                    "type": {
+                      "$ref": "#/components/schemas/PairKind",
+                      "description": "`stable` when both sides are stablecoins, else `volatile`."
+                    },
+                    "wallet": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/PairWallet",
+                          "description": "The maker's wallet balance of each side; present only when a wallet was supplied."
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_List_Pool": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "A pool: the aggregation of all active, priceable strategies over one canonical pair. USD and\nvolume/fills fields are absent/zero until their data sources (pricing, the trade store) exist.",
+                  "required": [
+                    "pair",
+                    "base",
+                    "quote",
+                    "type",
+                    "maker_count",
+                    "min_spread_bps",
+                    "max_spread_bps",
+                    "popular_fee_tier",
+                    "fills_24h"
+                  ],
+                  "properties": {
+                    "apr_pct": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "format": "double"
+                    },
+                    "base": {
+                      "$ref": "#/components/schemas/Token"
+                    },
+                    "fills_24h": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "maker_count": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "max_spread_bps": {
+                      "type": "integer",
+                      "format": "int32",
+                      "minimum": 0
+                    },
+                    "min_spread_bps": {
+                      "type": "integer",
+                      "format": "int32",
+                      "minimum": 0
+                    },
+                    "pair": {
+                      "type": "string"
+                    },
+                    "popular_fee_tier": {
+                      "type": "string"
+                    },
+                    "quote": {
+                      "$ref": "#/components/schemas/Token"
+                    },
+                    "tvl_usd": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "format": "double"
+                    },
+                    "type": {
+                      "$ref": "#/components/schemas/PoolType"
+                    },
+                    "volume_24h_usd": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "format": "double"
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_List_Position": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "A maker's position — one shipped strategy, valued and analyzed.",
+                  "required": [
+                    "strategy_hash",
+                    "pair",
+                    "base",
+                    "quote",
+                    "maker",
+                    "curve",
+                    "pair_type",
+                    "state",
+                    "fee_bps",
+                    "range",
+                    "balances",
+                    "economics"
+                  ],
+                  "properties": {
+                    "active_stats": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/ActiveStats",
+                          "description": "Detail-only (route 16): omitted from the list projection."
+                        }
+                      ]
+                    },
+                    "balances": {
+                      "$ref": "#/components/schemas/PositionBalances"
+                    },
+                    "base": {
+                      "$ref": "#/components/schemas/Token"
+                    },
+                    "curve": {
+                      "type": "string"
+                    },
+                    "economics": {
+                      "$ref": "#/components/schemas/Economics"
+                    },
+                    "fee_bps": {
+                      "type": "integer",
+                      "format": "int32",
+                      "minimum": 0
+                    },
+                    "maker": {
+                      "type": "string"
+                    },
+                    "mid_price": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Current curve spot in `quote per base` — filled by the marginal-price task."
+                    },
+                    "pair": {
+                      "type": "string"
+                    },
+                    "pair_type": {
+                      "$ref": "#/components/schemas/PoolType"
+                    },
+                    "quote": {
+                      "$ref": "#/components/schemas/Token"
+                    },
+                    "range": {
+                      "$ref": "#/components/schemas/PriceRange"
+                    },
+                    "state": {
+                      "type": "string"
+                    },
+                    "strategy_hash": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_List_TokenBalance": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One token a wallet holds: its on-chain `balance` and the `pullable` amount a pull could take now\n(`min(balance, allowance→settlement)`).",
+                  "required": [
+                    "token",
+                    "balance",
+                    "pullable"
+                  ],
+                  "properties": {
+                    "balance": {
+                      "$ref": "#/components/schemas/Amount"
+                    },
+                    "pullable": {
+                      "$ref": "#/components/schemas/Amount"
+                    },
+                    "token": {
+                      "$ref": "#/components/schemas/Token"
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_List_Trade": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One trade, header-only in a list; a detail also carries `lifecycle`, `legs`, and the order's\ncoordinates (omitted from JSON when absent).",
+                  "required": [
+                    "id",
+                    "status",
+                    "taker",
+                    "input",
+                    "output",
+                    "created_at"
+                  ],
+                  "properties": {
+                    "block_number": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "created_at": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "deadline_block": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "input": {
+                      "$ref": "#/components/schemas/TokenAmount",
+                      "description": "The swapper's input token and the maximum it authorized."
+                    },
+                    "legs": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "$ref": "#/components/schemas/MakerLeg"
+                      },
+                      "description": "The maker slices the trade sourced — detail only."
+                    },
+                    "lifecycle": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "$ref": "#/components/schemas/Action"
+                      },
+                      "description": "The stage timeline — detail only."
+                    },
+                    "order_hash": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The signed order hash — detail only."
+                    },
+                    "output": {
+                      "$ref": "#/components/schemas/TokenAmount",
+                      "description": "The output token and the amount delivered (or the signed floor, until it settles)."
+                    },
+                    "settled_at": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "surplus": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/Amount",
+                          "description": "The resolver's surplus over the signed floor, net of gas, in output-token units."
+                        }
+                      ]
+                    },
+                    "taker": {
+                      "type": "string"
+                    },
+                    "tx_hash": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_MakerDashboard": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A maker's dashboard: headline KPIs (with period-over-period deltas), fill-share on the pairs it\nquotes, fill latency, and a competitive insight. USD values are `None` when unpriced.",
+            "required": [
+              "maker",
+              "window_days",
+              "active_positions",
+              "kpis",
+              "fill_share"
+            ],
+            "properties": {
+              "active_positions": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "fill_share": {
+                "$ref": "#/components/schemas/FillShare"
+              },
+              "insight": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "A cheaper competitor on one of the maker's pairs, if any undercuts it."
+              },
+              "kpis": {
+                "$ref": "#/components/schemas/MakerKpis"
+              },
+              "latency_p50_ms": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "maker": {
+                "type": "string"
+              },
+              "window_days": {
+                "type": "integer",
+                "format": "int32",
+                "description": "The window (days) the KPIs and deltas cover.",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_PoolDepth": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "The pool's combined executable liquidity as a curve: for each sampled trade size, the output, its\nblended price, and how far that price sits below the tip. Reconstructs an order book the pool\ndoesn't have by stacking every active maker's curve (the router's split, plotted across sizes).",
+            "required": [
+              "axis_title",
+              "best_price",
+              "points"
+            ],
+            "properties": {
+              "axis_title": {
+                "type": "string"
+              },
+              "best_price": {
+                "type": "string"
+              },
+              "points": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DepthPoint"
+                }
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_PoolDetail": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Pool"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "makers"
+                ],
+                "properties": {
+                  "makers": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/PoolMaker"
+                    }
+                  }
+                }
+              }
+            ],
+            "description": "Pool detail: the list row plus the maker roster. The roster is the only field the detail view\nadds over [`Pool`], so it composes one rather than restating every KPI. Depth/price-impact and\nrecent fills join as their sources land."
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_Position": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A maker's position — one shipped strategy, valued and analyzed.",
+            "required": [
+              "strategy_hash",
+              "pair",
+              "base",
+              "quote",
+              "maker",
+              "curve",
+              "pair_type",
+              "state",
+              "fee_bps",
+              "range",
+              "balances",
+              "economics"
+            ],
+            "properties": {
+              "active_stats": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ActiveStats",
+                    "description": "Detail-only (route 16): omitted from the list projection."
+                  }
+                ]
+              },
+              "balances": {
+                "$ref": "#/components/schemas/PositionBalances"
+              },
+              "base": {
+                "$ref": "#/components/schemas/Token"
+              },
+              "curve": {
+                "type": "string"
+              },
+              "economics": {
+                "$ref": "#/components/schemas/Economics"
+              },
+              "fee_bps": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "maker": {
+                "type": "string"
+              },
+              "mid_price": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Current curve spot in `quote per base` — filled by the marginal-price task."
+              },
+              "pair": {
+                "type": "string"
+              },
+              "pair_type": {
+                "$ref": "#/components/schemas/PoolType"
+              },
+              "quote": {
+                "$ref": "#/components/schemas/Token"
+              },
+              "range": {
+                "$ref": "#/components/schemas/PriceRange"
+              },
+              "state": {
+                "type": "string"
+              },
+              "strategy_hash": {
+                "type": "string"
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_PreviewResponse": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "Server-authoritative pre-flight for a ship the SDK already encoded: whether the strategy\nalready exists, which tokens still need an approval, and any warnings.",
+            "required": [
+              "exists",
+              "requires_approval",
+              "warnings"
+            ],
+            "properties": {
+              "exists": {
+                "type": "boolean",
+                "description": "A strategy with this hash already exists — a re-ship would collide."
+              },
+              "requires_approval": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Tokens whose allowance to Aqua is below the amount to ship; approve them first."
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Human warnings, e.g. insufficient balance for a leg."
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_QuoteResponse": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A read-only quote: the routed split, its blended output, and price impact. `quote_id` is\ndeterministic from the request; `expires_at` is an advisory RFC-3339 instant (a quote does not\nbind a future swap).",
+            "required": [
+              "quote_id",
+              "amount_out",
+              "price_impact_pct",
+              "makers_sourced",
+              "legs",
+              "expires_at"
+            ],
+            "properties": {
+              "amount_out": {
+                "$ref": "#/components/schemas/Amount"
+              },
+              "expires_at": {
+                "type": "string"
+              },
+              "legs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/QuoteLeg"
+                }
+              },
+              "makers_sourced": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "price_impact_pct": {
+                "type": "number",
+                "format": "double"
+              },
+              "quote_id": {
+                "type": "string"
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_Stats": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "required": [
+              "block_height"
+            ],
+            "properties": {
+              "active_makers": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "block_height": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "confirmed_pct": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "double"
+              },
+              "events_24h": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "median_impact_pct": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "double"
+              },
+              "quoting_now": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "trades_settled": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_SwapResponse": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "The created trade and where its lifecycle stands (`created`…`submitted`, or `declined`).",
+            "required": [
+              "trade_id",
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "trade_id": {
+                "type": "string"
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_Trade": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "One trade, header-only in a list; a detail also carries `lifecycle`, `legs`, and the order's\ncoordinates (omitted from JSON when absent).",
+            "required": [
+              "id",
+              "status",
+              "taker",
+              "input",
+              "output",
+              "created_at"
+            ],
+            "properties": {
+              "block_number": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "created_at": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "deadline_block": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "id": {
+                "type": "string"
+              },
+              "input": {
+                "$ref": "#/components/schemas/TokenAmount",
+                "description": "The swapper's input token and the maximum it authorized."
+              },
+              "legs": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "$ref": "#/components/schemas/MakerLeg"
+                },
+                "description": "The maker slices the trade sourced — detail only."
+              },
+              "lifecycle": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "$ref": "#/components/schemas/Action"
+                },
+                "description": "The stage timeline — detail only."
+              },
+              "order_hash": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The signed order hash — detail only."
+              },
+              "output": {
+                "$ref": "#/components/schemas/TokenAmount",
+                "description": "The output token and the amount delivered (or the signed floor, until it settles)."
+              },
+              "settled_at": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "status": {
+                "type": "string"
+              },
+              "surplus": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Amount",
+                    "description": "The resolver's surplus over the signed floor, net of gas, in output-token units."
+                  }
+                ]
+              },
+              "taker": {
+                "type": "string"
+              },
+              "tx_hash": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Split": {
+        "type": "object",
+        "description": "One token's share of a position's committed liquidity.",
+        "required": [
+          "token",
+          "pct"
+        ],
+        "properties": {
+          "pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "token": {
+            "$ref": "#/components/schemas/Token"
+          }
+        }
+      },
+      "Stats": {
+        "type": "object",
+        "required": [
+          "block_height"
+        ],
+        "properties": {
+          "active_makers": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "block_height": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "confirmed_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "events_24h": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "median_impact_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "quoting_now": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "trades_settled": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "Status": {
+        "type": "string",
+        "description": "Whether an API call succeeded.",
+        "enum": [
+          "Ok",
+          "Error"
+        ]
+      },
+      "SwapRequest": {
+        "type": "object",
+        "description": "A taker-signed order submission, mirroring the UniswapX Orders API (`{ encodedOrder, signature,\nchainId, quoteId? }`). The taker's client builds + signs the base order; the server cosigns.",
+        "required": [
+          "encodedOrder",
+          "signature",
+          "chainId"
+        ],
+        "properties": {
+          "chainId": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "encodedOrder": {
+            "type": "string"
+          },
+          "quoteId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "signature": {
+            "type": "string"
+          }
+        }
+      },
+      "SwapResponse": {
+        "type": "object",
+        "description": "The created trade and where its lifecycle stands (`created`…`submitted`, or `declined`).",
+        "required": [
+          "trade_id",
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "trade_id": {
+            "type": "string"
+          }
+        }
+      },
+      "Token": {
+        "type": "object",
+        "description": "A token's identity + display essentials — embedded wherever a response references a token\nwithout the full [`Asset`] (pool base/quote, trade flows, roster).",
+        "required": [
+          "address",
+          "chain_id",
+          "symbol",
+          "decimals"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "decimals": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "symbol": {
+            "type": "string"
+          }
+        }
+      },
+      "TokenAmount": {
+        "type": "object",
+        "description": "One token paired with an amount.",
+        "required": [
+          "token",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "token": {
+            "$ref": "#/components/schemas/Token"
+          }
+        }
+      },
+      "TokenAmounts": {
+        "type": "object",
+        "description": "A set of token amounts (e.g. a strategy's per-token balances) with an optional USD total.",
+        "required": [
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TokenAmount"
+            }
+          },
+          "total_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "TokenBalance": {
+        "type": "object",
+        "description": "One token a wallet holds: its on-chain `balance` and the `pullable` amount a pull could take now\n(`min(balance, allowance→settlement)`).",
+        "required": [
+          "token",
+          "balance",
+          "pullable"
+        ],
+        "properties": {
+          "balance": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "pullable": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "token": {
+            "$ref": "#/components/schemas/Token"
+          }
+        }
+      },
+      "Trade": {
+        "type": "object",
+        "description": "One trade, header-only in a list; a detail also carries `lifecycle`, `legs`, and the order's\ncoordinates (omitted from JSON when absent).",
+        "required": [
+          "id",
+          "status",
+          "taker",
+          "input",
+          "output",
+          "created_at"
+        ],
+        "properties": {
+          "block_number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "deadline_block": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "input": {
+            "$ref": "#/components/schemas/TokenAmount",
+            "description": "The swapper's input token and the maximum it authorized."
+          },
+          "legs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/MakerLeg"
+            },
+            "description": "The maker slices the trade sourced — detail only."
+          },
+          "lifecycle": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Action"
+            },
+            "description": "The stage timeline — detail only."
+          },
+          "order_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The signed order hash — detail only."
+          },
+          "output": {
+            "$ref": "#/components/schemas/TokenAmount",
+            "description": "The output token and the amount delivered (or the signed floor, until it settles)."
+          },
+          "settled_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          },
+          "surplus": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "The resolver's surplus over the signed floor, net of gas, in output-token units."
+              }
+            ]
+          },
+          "taker": {
+            "type": "string"
+          },
+          "tx_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

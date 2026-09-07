@@ -58,3 +58,35 @@ pub struct Asset {
     pub active_strategy_count: u64,
     pub pairs: Vec<String>,
 }
+
+/// One tradeable pair offered by the Create wizard: the two tokens, their kind, mid price, the
+/// suggested defaults, and (when a wallet is supplied) the maker's balance of each side.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct PairInfo {
+    pub base: Token,
+    pub quote: Token,
+    /// `stable` when both sides are stablecoins, else `volatile`.
+    #[serde(rename = "type")]
+    pub kind: PairKind,
+    /// Mid price, quote per 1 base — `None` when either side is unpriced.
+    pub mid: Option<f64>,
+    pub default_fee_bps: u32,
+    pub default_band_pct: f64,
+    /// The maker's wallet balance of each side; present only when a wallet was supplied.
+    pub wallet: Option<PairWallet>,
+}
+
+/// Whether a pair is stable/stable or involves a volatile asset — drives the wizard's default curve.
+#[derive(Debug, Clone, Copy, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum PairKind {
+    Stable,
+    Volatile,
+}
+
+/// A maker's wallet balance of each side of a pair, in whole tokens.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct PairWallet {
+    pub base: f64,
+    pub quote: f64,
+}

@@ -27,6 +27,8 @@ use utoipa::OpenApi;
         crate::http::app::makers::maker_trades,
         crate::http::app::makers::maker_positions,
         crate::http::app::makers::position_detail,
+        crate::http::app::pairs::pairs,
+        crate::http::app::positions::preview,
     ),
     components(schemas(
         crate::http::primitives::Status,
@@ -67,6 +69,12 @@ use utoipa::OpenApi;
         solvent_core::primitives::maker::FillShare,
         solvent_core::primitives::maker::InventoryRow,
         solvent_core::primitives::maker::InventoryLeg,
+        solvent_core::primitives::maker::PreviewResponse,
+        solvent_core::primitives::asset::PairInfo,
+        solvent_core::primitives::asset::PairKind,
+        solvent_core::primitives::asset::PairWallet,
+        crate::http::app::positions::PreviewRequest,
+        crate::http::app::positions::AmountIn,
     ))
 )]
 pub struct ApiDoc;

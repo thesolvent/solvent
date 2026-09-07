@@ -17,7 +17,7 @@ use crate::deps::registry::EventStore;
 use crate::primitives::amount::{Amount, TokenAmount, TokenAmounts};
 use crate::primitives::maker::{
     ActiveStats, Economics, FillShare, InventoryLeg, InventoryRow, MakerDashboard, MakerKpis,
-    MakerSummary, Position, PositionBalances, PriceRange, Split,
+    MakerSummary, Position, PositionBalances, PreviewResponse, PriceRange, Split,
 };
 use crate::primitives::pool::classify_pair;
 use crate::primitives::registry::{
@@ -66,6 +66,42 @@ impl MakerService {
             clock,
             chain,
         }
+    }
+
+    /// Pre-flight a ship the SDK already encoded: whether the strategy already exists, which of
+    /// `amounts` the maker's Aqua allowance can't yet cover (approve first), and any warnings. The
+    /// SDK owns the encoding; the server only checks live chain state.
+    pub async fn preview(
+        &self,
+        maker: Address,
+        strategy_hash: StrategyHash,
+        amounts: &[(Address, U256)],
+    ) -> Result<PreviewResponse, SolventError> {
+        let exists = self
+            .registry
+            .load()
+            .strategy_by_hash(strategy_hash)
+            .is_some();
+        let tokens: Vec<Address> = amounts.iter().map(|(token, _)| *token).collect();
+        let holdings = self.balances.holdings(maker, &tokens).await?;
+
+        let mut requires_approval = Vec::new();
+        let mut warnings = Vec::new();
+        for (token, amount) in amounts {
+            let held = holdings.get(token);
+            let balance = held.map_or(U256::ZERO, |h| h.balance);
+            let pullable = held.map_or(U256::ZERO, |h| h.pullable);
+            if balance < *amount {
+                warnings.push(format!("insufficient balance for {token}"));
+            } else if pullable < *amount {
+                requires_approval.push(*token);
+            }
+        }
+        Ok(PreviewResponse {
+            exists,
+            requires_approval,
+            warnings,
+        })
     }
 
     /// One position by its strategy hash (active or docked), with detail stats — or `None` if unknown
@@ -896,6 +932,10 @@ mod tests {
     }
 
     fn service(snapshot: Snapshot, pullable: HashMap<Address, U256>) -> MakerService {
+        service_with(snapshot, Arc::new(FakeOracle(pullable)))
+    }
+
+    fn service_with(snapshot: Snapshot, balances: Arc<dyn BalancesOracle>) -> MakerService {
         let registry = Arc::new(SharedSnapshot::new(snapshot));
         let list = TokenList {
             name: "t".into(),
@@ -940,11 +980,103 @@ mod tests {
             assets,
             valuation,
             Arc::new(FakeMetrics),
-            Arc::new(FakeOracle(pullable)),
+            balances,
             Arc::new(FakeEvents),
             Arc::new(FixedClock),
             ChainId(1),
         )
+    }
+
+    struct PreviewOracle(HashMap<Address, Holdings>);
+    #[async_trait]
+    impl BalancesOracle for PreviewOracle {
+        async fn holdings(
+            &self,
+            _: Address,
+            tokens: &[Address],
+        ) -> Result<BTreeMap<Address, Holdings>, BalancesOracleError> {
+            Ok(tokens
+                .iter()
+                .filter_map(|t| {
+                    self.0.get(t).map(|h| {
+                        (
+                            *t,
+                            Holdings {
+                                balance: h.balance,
+                                pullable: h.pullable,
+                            },
+                        )
+                    })
+                })
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn preview_flags_an_existing_strategy() {
+        let svc = service(Snapshot::from_strategies([xyc_strategy(9)]), HashMap::new());
+        let out = svc
+            .preview(addr(9), StrategyHash(B256::from([9; 32])), &[])
+            .await
+            .unwrap();
+        assert!(out.exists);
+        assert!(out.requires_approval.is_empty());
+        assert!(out.warnings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn preview_requires_approval_when_allowance_is_short() {
+        // Holds 100 WETH but only 10 is pullable (allowance-capped); shipping 50 needs an approval.
+        let oracle = PreviewOracle(HashMap::from([(
+            addr(WETH),
+            Holdings {
+                balance: U256::from(100u64),
+                pullable: U256::from(10u64),
+            },
+        )]));
+        let svc = service_with(
+            Snapshot::from_strategies([xyc_strategy(9)]),
+            Arc::new(oracle),
+        );
+        let out = svc
+            .preview(
+                addr(1),
+                StrategyHash(B256::from([7; 32])),
+                &[(addr(WETH), U256::from(50u64))],
+            )
+            .await
+            .unwrap();
+        assert!(!out.exists);
+        assert_eq!(out.requires_approval, vec![addr(WETH)]);
+        assert!(out.warnings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn preview_warns_on_insufficient_balance() {
+        let oracle = PreviewOracle(HashMap::from([(
+            addr(WETH),
+            Holdings {
+                balance: U256::from(5u64),
+                pullable: U256::from(5u64),
+            },
+        )]));
+        let svc = service_with(
+            Snapshot::from_strategies([xyc_strategy(9)]),
+            Arc::new(oracle),
+        );
+        let out = svc
+            .preview(
+                addr(1),
+                StrategyHash(B256::from([7; 32])),
+                &[(addr(WETH), U256::from(50u64))],
+            )
+            .await
+            .unwrap();
+        assert!(out
+            .warnings
+            .iter()
+            .any(|w| w.contains("insufficient balance")));
+        assert!(out.requires_approval.is_empty());
     }
 
     #[tokio::test]

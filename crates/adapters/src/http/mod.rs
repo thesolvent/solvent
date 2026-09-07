@@ -52,6 +52,8 @@ pub fn router(state: AppState) -> Router {
             "/makers/{maker}/positions",
             get(app::makers::maker_positions),
         )
+        .route("/pairs", get(app::pairs::pairs))
+        .route("/positions/preview", post(app::positions::preview))
         .route("/positions/{hash}", get(app::makers::position_detail))
         .route("/wallets/{addr}/balances", get(app::balances::balances))
         .route("/openapi.json", get(openapi::openapi_json))
