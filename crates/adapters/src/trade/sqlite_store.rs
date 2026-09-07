@@ -5,7 +5,8 @@ use alloy::primitives::{Address, Bytes, B256, U256};
 use async_trait::async_trait;
 use solvent_core::{
     deps::trade::{
-        CreateResult, Page, Settlement, TradeFilter, TradeStats, TradeStore, TradeStoreError,
+        CreateResult, MakerFill, Page, Settlement, TradeFilter, TradeStats, TradeStore,
+        TradeStoreError,
     },
     primitives::{
         trade::{Trade, TradeAttempt, TradeId, TradeInfo, TradeLeg, TradeStatus},
@@ -161,6 +162,8 @@ fn row_to_trade(row: &SqliteRow) -> Result<Trade, TradeStoreError> {
         block_number: opt_count(row, "block_number")?,
         created_at: count(row, "created_at")?,
         settled_at: opt_count(row, "settled_at")?,
+        token_in_price_usd: row.try_get("token_in_price_usd").map_err(db)?,
+        token_out_price_usd: row.try_get("token_out_price_usd").map_err(db)?,
     })
 }
 
@@ -192,8 +195,8 @@ async fn insert_trade(
         "INSERT INTO trade (
              id, order_hash, taker, token_in, token_out, amount_in, min_amount_out, amount_out,
              status, status_rank, deadline_block, signature, price_impact_pct, surplus, tx_hash,
-             block_number, created_at, settled_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             block_number, created_at, settled_at, token_in_price_usd, token_out_price_usd)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (order_hash) DO NOTHING",
     )
     .bind(trade.id.to_string())
@@ -214,6 +217,8 @@ async fn insert_trade(
     .bind(trade.block_number.map(i64_of).transpose()?)
     .bind(i64_of(trade.created_at)?)
     .bind(trade.settled_at.map(i64_of).transpose()?)
+    .bind(trade.token_in_price_usd)
+    .bind(trade.token_out_price_usd)
     .execute(&mut **tx)
     .await
     .map_err(db)?
@@ -464,4 +469,47 @@ impl TradeStore for SqliteTradeStore {
             .map(row_to_trade)
             .collect()
     }
+
+    async fn list_for_maker(
+        &self,
+        maker: Address,
+        page: &Page,
+    ) -> Result<Vec<MakerFill>, TradeStoreError> {
+        // `trade.*` supplies the header (the leg amounts are aliased so they don't shadow the
+        // trade's own `amount_in`/`amount_out`).
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT trade.*, \
+                    leg.maker AS leg_maker, leg.strategy_hash AS leg_strategy_hash, \
+                    leg.amount_in AS leg_amount_in, leg.amount_out AS leg_amount_out \
+             FROM trade JOIN trade_leg leg ON leg.trade_id = trade.id WHERE leg.maker = ",
+        );
+        query.push_bind(bytes_of(maker));
+        if let Some(cursor) = &page.cursor {
+            query.push(" AND trade.id < ").push_bind(cursor.to_string());
+        }
+        query
+            .push(" ORDER BY trade.id DESC LIMIT ")
+            .push_bind(i64::from(page.limit));
+
+        query
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db)?
+            .iter()
+            .map(row_to_maker_fill)
+            .collect()
+    }
+}
+
+fn row_to_maker_fill(row: &SqliteRow) -> Result<MakerFill, TradeStoreError> {
+    Ok(MakerFill {
+        trade: row_to_trade(row)?,
+        leg: TradeLeg {
+            maker: MakerId(address(row, "leg_maker")?),
+            strategy_hash: StrategyHash(hash(row, "leg_strategy_hash")?),
+            amount_in: amount(row, "leg_amount_in")?,
+            amount_out: amount(row, "leg_amount_out")?,
+        },
+    })
 }

@@ -40,6 +40,13 @@ pub struct Page {
     pub cursor: Option<TradeId>,
 }
 
+/// A trade paired with one maker's leg in it — the maker settlements feed (a maker sees each trade it
+/// sourced, with its own slice for the share and fee).
+pub struct MakerFill {
+    pub trade: Trade,
+    pub leg: TradeLeg,
+}
+
 /// Aggregate counts over the trade table, for the stat tiles. `median_impact_pct` is `None` until
 /// trades carry a price impact.
 pub struct TradeStats {
@@ -85,6 +92,13 @@ pub trait TradeStore: Send + Sync {
 
     /// A page of trade headers (newest first) matching `filter`.
     async fn list(&self, filter: &TradeFilter, page: &Page) -> Result<Vec<Trade>, TradeStoreError>;
+
+    /// A page of a maker's trades (newest first), each with that maker's leg — the settlements feed.
+    async fn list_for_maker(
+        &self,
+        maker: Address,
+        page: &Page,
+    ) -> Result<Vec<MakerFill>, TradeStoreError>;
 
     /// Aggregate lifecycle counts for the stat tiles.
     async fn stats(&self) -> Result<TradeStats, TradeStoreError>;

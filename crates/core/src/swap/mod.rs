@@ -3,4 +3,4 @@
 
 mod service;
 
-pub use service::{SwapConfig, SwapOutcome, SwapService};
+pub use service::{SwapConfig, SwapOutcome, SwapService, TradePrices};

@@ -15,6 +15,7 @@ use solvent_core::primitives::registry::TokenPair;
 use solvent_core::primitives::trade::TradeId;
 use solvent_core::primitives::{ChainId, MakerId, StrategyHash};
 use solvent_core::quote::QuoteResponse;
+use solvent_core::swap::TradePrices;
 use solvent_core::SolventError;
 use std::time::Instant;
 use ulid::Ulid;
@@ -146,9 +147,26 @@ pub async fn submit(
     let intent = UniswapXV2Normalizer
         .normalize(&cosigned.raw)
         .map_err(SolventError::from)?;
+    // Capture trade-time token prices here (the adapter holds the oracle) so the trade's fee/value
+    // figures stay fixed at submit rather than drifting with the market.
+    let prices = TradePrices {
+        token_in_usd: state
+            .valuation
+            .price(intent.input.token)
+            .await
+            .map(|p| p.to_f64()),
+        token_out_usd: match intent.outputs.first() {
+            Some(output) => state
+                .valuation
+                .price(output.token)
+                .await
+                .map(|p| p.to_f64()),
+            None => None,
+        },
+    };
     let outcome = state
         .swap
-        .submit(intent, cosigned.swapper, TradeId(Ulid::new()))
+        .submit(intent, cosigned.swapper, TradeId(Ulid::new()), prices)
         .await?;
     Ok(Response::ok(SwapResponse {
         trade_id: outcome.trade_id.to_string(),

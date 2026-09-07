@@ -47,6 +47,7 @@ pub fn router(state: AppState) -> Router {
             "/makers/{maker}/inventory",
             get(app::makers::maker_inventory),
         )
+        .route("/makers/{maker}/trades", get(app::makers::maker_trades))
         .route(
             "/makers/{maker}/positions",
             get(app::makers::maker_positions),
@@ -105,7 +106,8 @@ mod tests {
     use solvent_core::deps::registry::{EventStore, RecordedEvent, StoreError};
     use solvent_core::deps::routing::{GasPrice, PriceOracle};
     use solvent_core::deps::trade::{
-        CreateResult, Page, Settlement, TradeFilter, TradeStats, TradeStore, TradeStoreError,
+        CreateResult, MakerFill, Page, Settlement, TradeFilter, TradeStats, TradeStore,
+        TradeStoreError,
     };
     use solvent_core::execution::ExecutionService;
     use solvent_core::ledger::LedgerService;
@@ -223,6 +225,13 @@ mod tests {
             Ok(None)
         }
         async fn list(&self, _: &TradeFilter, _: &Page) -> Result<Vec<Trade>, TradeStoreError> {
+            Ok(Vec::new())
+        }
+        async fn list_for_maker(
+            &self,
+            _: Address,
+            _: &Page,
+        ) -> Result<Vec<MakerFill>, TradeStoreError> {
             Ok(Vec::new())
         }
         async fn stats(&self) -> Result<TradeStats, TradeStoreError> {

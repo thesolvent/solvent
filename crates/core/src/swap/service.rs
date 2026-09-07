@@ -85,11 +85,12 @@ impl SwapService {
         intent: Intent,
         taker: Address,
         trade_id: TradeId,
+        prices: TradePrices,
     ) -> Result<SwapOutcome, SolventError> {
         let now = self.clock.now_unix();
         let token_in = intent.input.token;
         let Some(output) = intent.outputs.first() else {
-            return self.declined(trade_id, &intent, taker, now).await;
+            return self.declined(trade_id, &intent, taker, now, prices).await;
         };
         let token_out = output.token;
         let amount_in = intent.input.curve.amount_at(now);
@@ -117,7 +118,7 @@ impl SwapService {
             per_leg_cost,
             None,
         ) else {
-            return self.declined(trade_id, &intent, taker, now).await;
+            return self.declined(trade_id, &intent, taker, now, prices).await;
         };
 
         // Persist first (dedup on the order hash); only a newly-recorded order reserves and fills.
@@ -132,6 +133,7 @@ impl SwapService {
             Some(&plan),
             now,
             TradeStatus::Quoted,
+            &prices,
         );
         let legs = trade_legs(&plan);
         let created = self
@@ -229,6 +231,7 @@ impl SwapService {
         intent: &Intent,
         taker: Address,
         now: u64,
+        prices: TradePrices,
     ) -> Result<SwapOutcome, SolventError> {
         let token_out = intent.outputs.first().map_or(Address::ZERO, |o| o.token);
         let min_out = intent
@@ -246,6 +249,7 @@ impl SwapService {
             None,
             now,
             TradeStatus::Declined,
+            &prices,
         );
         let created = self
             .trades
@@ -292,6 +296,7 @@ impl SwapService {
         plan: Option<&RoutePlan>,
         now: u64,
         status: TradeStatus,
+        prices: &TradePrices,
     ) -> Trade {
         Trade {
             id,
@@ -311,8 +316,18 @@ impl SwapService {
             block_number: None,
             created_at: now,
             settled_at: None,
+            token_in_price_usd: prices.token_in_usd,
+            token_out_price_usd: prices.token_out_usd,
         }
     }
+}
+
+/// The USD prices of a swap's tokens at submit, captured by the adapter (which holds the oracle) and
+/// persisted on the trade so fee and value figures stay at trade-time economics.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TradePrices {
+    pub token_in_usd: Option<f64>,
+    pub token_out_usd: Option<f64>,
 }
 
 /// The reservation id: `keccak(intentId ‖ routePlanHash)`, so it is stable for one intent+plan and a
@@ -379,7 +394,9 @@ mod tests {
     use crate::deps::ingest::FillBuilderError;
     use crate::deps::ledger::{BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError};
     use crate::deps::routing::{GasPrice, GasPriceError, PriceOracle, PriceOracleError};
-    use crate::deps::trade::{CreateResult, Page, TradeFilter, TradeStats, TradeStoreError};
+    use crate::deps::trade::{
+        CreateResult, MakerFill, Page, TradeFilter, TradeStats, TradeStoreError,
+    };
     use crate::primitives::asset::{TokenList, TokenMeta};
     use crate::primitives::execution::{ExecHandle, ExecStatus, SimVerdict, TrackedFill};
     use crate::primitives::ingest::{AmountCurve, IntentInput, IntentOutput, ProtocolId};
@@ -642,6 +659,13 @@ mod tests {
         async fn list(&self, _: &TradeFilter, _: &Page) -> Result<Vec<Trade>, TradeStoreError> {
             Ok(Vec::new())
         }
+        async fn list_for_maker(
+            &self,
+            _: Address,
+            _: &Page,
+        ) -> Result<Vec<MakerFill>, TradeStoreError> {
+            Ok(Vec::new())
+        }
         async fn stats(&self) -> Result<TradeStats, TradeStoreError> {
             Ok(TradeStats {
                 settled: 0,
@@ -747,7 +771,12 @@ mod tests {
         let before = h.ledger.available(&virt(3, USDC));
         let out = h
             .swap
-            .submit(intent(1, addr(9), e(2, 18), e(3000, 6)), addr(9), tid())
+            .submit(
+                intent(1, addr(9), e(2, 18), e(3000, 6)),
+                addr(9),
+                tid(),
+                TradePrices::default(),
+            )
             .await
             .unwrap();
 
@@ -765,7 +794,12 @@ mod tests {
         let h = harness(vec![], SimVerdict::Ok).await;
         let out = h
             .swap
-            .submit(intent(1, addr(9), e(2, 18), e(3000, 6)), addr(9), tid())
+            .submit(
+                intent(1, addr(9), e(2, 18), e(3000, 6)),
+                addr(9),
+                tid(),
+                TradePrices::default(),
+            )
             .await
             .unwrap();
         assert_eq!(out.status, TradeStatus::Declined);
@@ -783,7 +817,11 @@ mod tests {
     async fn resubmit_is_idempotent() {
         let h = harness(vec![xyc(3, e(100, 18), e(300_000, 6))], SimVerdict::Ok).await;
         let order = intent(7, addr(9), e(2, 18), e(3000, 6));
-        let first = h.swap.submit(order.clone(), addr(9), tid()).await.unwrap();
+        let first = h
+            .swap
+            .submit(order.clone(), addr(9), tid(), TradePrices::default())
+            .await
+            .unwrap();
         let held = h.ledger.available(&virt(3, USDC));
         // A second submit of the same order (new candidate id) neither re-reserves nor re-fills.
         let again = h
@@ -792,6 +830,7 @@ mod tests {
                 order,
                 addr(9),
                 TradeId(Ulid::from_parts(1_700_000_000_999, 2)),
+                TradePrices::default(),
             )
             .await
             .unwrap();
@@ -822,6 +861,8 @@ mod tests {
             block_number: None,
             created_at: 1_700_000_000,
             settled_at: None,
+            token_in_price_usd: None,
+            token_out_price_usd: None,
         };
         h.trades
             .create(
@@ -840,6 +881,7 @@ mod tests {
                 order,
                 addr(9),
                 TradeId(Ulid::from_parts(1_700_000_000_999, 5)),
+                TradePrices::default(),
             )
             .await
             .unwrap();
@@ -863,7 +905,12 @@ mod tests {
         let before = h.ledger.available(&virt(3, USDC));
         let out = h
             .swap
-            .submit(intent(1, addr(9), e(2, 18), e(3000, 6)), addr(9), tid())
+            .submit(
+                intent(1, addr(9), e(2, 18), e(3000, 6)),
+                addr(9),
+                tid(),
+                TradePrices::default(),
+            )
             .await
             .unwrap();
         assert_eq!(out.status, TradeStatus::Declined);

@@ -129,6 +129,10 @@ pub struct Trade {
     /// Unix seconds.
     pub created_at: u64,
     pub settled_at: Option<u64>,
+    /// USD price of `token_in`/`token_out` captured when the trade was submitted, so fee and value
+    /// figures stay fixed at trade-time economics rather than drifting with the current market.
+    pub token_in_price_usd: Option<f64>,
+    pub token_out_price_usd: Option<f64>,
 }
 
 /// One maker's slice of the routed split. The tokens and the settlement tx are the trade's — one

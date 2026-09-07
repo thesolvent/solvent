@@ -160,7 +160,11 @@ pub async fn trade_detail(
 }
 
 /// A trade's header as the list DTO — heavy fields left empty.
-async fn summary(assets: &AssetManager, valuation: &Valuation, trade: &CoreTrade) -> Trade {
+pub(crate) async fn summary(
+    assets: &AssetManager,
+    valuation: &Valuation,
+    trade: &CoreTrade,
+) -> Trade {
     let token_in = assets.token_or_default(trade.token_in);
     let token_out = assets.token_or_default(trade.token_out);
     let delivered = trade.amount_out.unwrap_or(trade.min_amount_out);
@@ -302,6 +306,8 @@ mod tests {
             block_number: None,
             created_at: 100,
             settled_at: None,
+            token_in_price_usd: None,
+            token_out_price_usd: None,
         }
     }
 
