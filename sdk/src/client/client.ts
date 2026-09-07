@@ -1,0 +1,150 @@
+import type { components } from "./generated/types";
+import { SolventApiError, SolventNetworkError } from "./errors";
+import { defaultTransport, type Transport } from "./transport";
+
+type Schemas = components["schemas"];
+
+// The DTOs consumers read, re-exported from the generated wire types under API-facing names.
+export type AppConfig = Schemas["AppConfig"];
+export type Asset = Schemas["Asset"];
+export type Pool = Schemas["Pool"];
+export type PoolDetail = Schemas["PoolDetail"];
+export type PoolDepth = Schemas["PoolDepth"];
+export type Stats = Schemas["Stats"];
+export type QuoteRequest = Schemas["QuoteRequest"];
+export type QuoteResponse = Schemas["QuoteResponse"];
+export type SwapRequest = Schemas["SwapRequest"];
+export type SwapResponse = Schemas["SwapResponse"];
+export type Trade = Schemas["Trade"];
+export type ActivityEvent = Schemas["ActivityEvent"];
+export type MakerSummary = Schemas["MakerSummary"];
+export type MakerDashboard = Schemas["MakerDashboard"];
+export type MakerTrade = Schemas["MakerTrade"];
+export type InventoryRow = Schemas["InventoryRow"];
+export type Position = Schemas["Position"];
+export type TokenBalance = Schemas["TokenBalance"];
+export type PairInfo = Schemas["PairInfo"];
+export type PreviewRequest = Schemas["PreviewRequest"];
+export type PreviewResponse = Schemas["PreviewResponse"];
+
+/** A page of a collection (mirrors the wire `List<T>`). */
+export interface List<T> {
+  items: T[];
+  next_cursor?: string;
+  total?: number;
+}
+
+export interface SolventClientConfig {
+  /** API origin, e.g. `https://api.solvent.example` (a trailing slash is fine). */
+  baseUrl: string;
+  /** Injected transport (auth/retry/mock); defaults to the platform `fetch`. */
+  transport?: Transport;
+  /** Headers sent on every request. */
+  headers?: Record<string, string>;
+}
+
+type PageQuery = { cursor?: string; limit?: number };
+type Query = Record<string, string | number | boolean | undefined>;
+
+/** The typed read/write client over the Solvent API. Every method throws {@link SolventApiError}
+ * on a failed response and {@link SolventNetworkError} when the transport itself fails. */
+export interface SolventClient {
+  config(): Promise<AppConfig>;
+  assets(query?: { supported?: boolean }): Promise<List<Asset>>;
+  pools(): Promise<List<Pool>>;
+  poolDetail(query: { base: string; quote: string }): Promise<PoolDetail>;
+  poolDepth(query: { base: string; quote: string }): Promise<PoolDepth>;
+  quote(body: QuoteRequest): Promise<QuoteResponse>;
+  swap(body: SwapRequest): Promise<SwapResponse>;
+  trades(query?: PageQuery): Promise<List<Trade>>;
+  tradeDetail(id: string): Promise<Trade>;
+  activity(query?: PageQuery): Promise<List<ActivityEvent>>;
+  stats(): Promise<Stats>;
+  makers(): Promise<List<MakerSummary>>;
+  maker(maker: string): Promise<MakerDashboard>;
+  makerInventory(maker: string): Promise<List<InventoryRow>>;
+  makerTrades(maker: string, query?: PageQuery): Promise<List<MakerTrade>>;
+  makerPositions(maker: string): Promise<List<Position>>;
+  position(hash: string): Promise<Position>;
+  balances(wallet: string): Promise<List<TokenBalance>>;
+  pairs(query?: { search?: string; wallet?: string }): Promise<List<PairInfo>>;
+  positionsPreview(body: PreviewRequest): Promise<PreviewResponse>;
+}
+
+/** Create a client bound to `baseUrl`. Reads and the two writes go through one `Transport`. */
+export function createSolventClient(config: SolventClientConfig): SolventClient {
+  const transport = config.transport ?? defaultTransport;
+  const base = config.baseUrl.replace(/\/$/, "");
+
+  async function request<T>(
+    method: string,
+    path: string,
+    opts?: { query?: Query; body?: unknown },
+  ): Promise<T> {
+    const hasBody = opts?.body !== undefined;
+    const init: RequestInit = {
+      method,
+      headers: {
+        ...(hasBody ? { "content-type": "application/json" } : {}),
+        ...config.headers,
+      },
+      ...(hasBody ? { body: JSON.stringify(opts?.body) } : {}),
+    };
+
+    let response: Response;
+    try {
+      response = await transport(base + path + queryString(opts?.query), init);
+    } catch (cause) {
+      throw new SolventNetworkError(`request to ${path} failed`, { cause });
+    }
+
+    const envelope = (await response.json().catch(() => ({}))) as {
+      result?: T;
+      error?: string | null;
+    };
+    if (!response.ok || envelope.error != null) {
+      throw new SolventApiError(
+        response.status,
+        envelope.error ?? response.statusText,
+        envelope.error ?? undefined,
+      );
+    }
+    return envelope.result as T;
+  }
+
+  const get = <T>(path: string, query?: Query) => request<T>("GET", path, { query });
+  const post = <T>(path: string, body: unknown) => request<T>("POST", path, { body });
+
+  return {
+    config: () => get<AppConfig>("/v1/config"),
+    assets: (query) => get<List<Asset>>("/v1/assets", query),
+    pools: () => get<List<Pool>>("/v1/pools"),
+    poolDetail: (query) => get<PoolDetail>("/v1/pools/detail", query),
+    poolDepth: (query) => get<PoolDepth>("/v1/pools/depth", query),
+    quote: (body) => post<QuoteResponse>("/v1/swap/quote", body),
+    swap: (body) => post<SwapResponse>("/v1/swap", body),
+    trades: (query) => get<List<Trade>>("/v1/trades", query),
+    tradeDetail: (id) => get<Trade>(`/v1/trades/${id}`),
+    activity: (query) => get<List<ActivityEvent>>("/v1/activity", query),
+    stats: () => get<Stats>("/v1/stats"),
+    makers: () => get<List<MakerSummary>>("/v1/makers"),
+    maker: (maker) => get<MakerDashboard>(`/v1/makers/${maker}`),
+    makerInventory: (maker) => get<List<InventoryRow>>(`/v1/makers/${maker}/inventory`),
+    makerTrades: (maker, query) => get<List<MakerTrade>>(`/v1/makers/${maker}/trades`, query),
+    makerPositions: (maker) => get<List<Position>>(`/v1/makers/${maker}/positions`),
+    position: (hash) => get<Position>(`/v1/positions/${hash}`),
+    balances: (wallet) => get<List<TokenBalance>>(`/v1/wallets/${wallet}/balances`),
+    pairs: (query) => get<List<PairInfo>>("/v1/pairs", query),
+    positionsPreview: (body) => post<PreviewResponse>("/v1/positions/preview", body),
+  };
+}
+
+function queryString(query?: Query): string {
+  if (!query) return "";
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined) params.set(key, String(value));
+  }
+  const s = params.toString();
+  return s ? `?${s}` : "";
+}
