@@ -4,17 +4,23 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use alloy::primitives::{Address, U256};
+use alloy::primitives::U256;
 use axum::extract::{Json, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use solvent_core::deps::ingest::Normalizer;
+use solvent_core::deps::quote_log::{QuoteParticipant, QuoteServed};
+use solvent_core::primitives::quote::QuoteLeg;
+use solvent_core::primitives::registry::TokenPair;
 use solvent_core::primitives::trade::TradeId;
+use solvent_core::primitives::{ChainId, MakerId, StrategyHash};
 use solvent_core::quote::QuoteResponse;
+use solvent_core::swap::TradePrices;
 use solvent_core::SolventError;
+use std::time::Instant;
 use ulid::Ulid;
 
-use crate::http::primitives::{ApiResult, Response};
+use crate::http::primitives::{parse_addr, ApiResult, Response};
 use crate::http::state::AppState;
 use crate::ingest::uniswapx::UniswapXV2Normalizer;
 
@@ -42,10 +48,27 @@ pub async fn quote(
     State(state): State<AppState>,
     Json(body): Json<QuoteRequest>,
 ) -> ApiResult<QuoteResponse> {
-    let token_in = parse_addr(&body.token_in)?;
-    let token_out = parse_addr(&body.token_out)?;
+    let token_in = parse_addr("token", &body.token_in)?;
+    let token_out = parse_addr("token", &body.token_out)?;
     let amount_in = parse_amount(&body.amount_in)?;
-    match state.quote.quote(token_in, token_out, amount_in).await {
+
+    let started = Instant::now();
+    let result = state.quote.quote(token_in, token_out, amount_in).await;
+    let served = QuoteServed {
+        chain_id: ChainId(state.config.chain_id),
+        pair: TokenPair::new(token_in, token_out),
+        latency_ms: started.elapsed().as_millis() as u64,
+        participants: result
+            .as_ref()
+            .map(|q| q.legs.iter().filter_map(participant).collect())
+            .unwrap_or_default(),
+    };
+    // Best-effort analytics: a log failure must never fail the quote.
+    if let Err(err) = state.quote_log.record(&served).await {
+        tracing::warn!(error = %err, "quote log record failed");
+    }
+
+    match result {
         Some(quote) => Ok(Response::ok(quote)),
         None => Err(Response::error(
             "no route for this pair and size",
@@ -54,10 +77,11 @@ pub async fn quote(
     }
 }
 
-fn parse_addr(s: &str) -> Result<Address, SolventError> {
-    s.parse::<Address>().map_err(|e| SolventError::InvalidId {
-        id_type: "token",
-        reason: e.to_string(),
+/// The maker + strategy a quote leg sourced, or `None` if its hash doesn't parse.
+fn participant(leg: &QuoteLeg) -> Option<QuoteParticipant> {
+    Some(QuoteParticipant {
+        maker: MakerId(leg.maker),
+        strategy_hash: StrategyHash(leg.strategy_hash.parse().ok()?),
     })
 }
 
@@ -116,9 +140,26 @@ pub async fn submit(
     let intent = UniswapXV2Normalizer
         .normalize(&cosigned.raw)
         .map_err(SolventError::from)?;
+    // Capture trade-time token prices here (the adapter holds the oracle) so the trade's fee/value
+    // figures stay fixed at submit rather than drifting with the market.
+    let prices = TradePrices {
+        token_in_usd: state
+            .valuation
+            .price(intent.input.token)
+            .await
+            .map(|p| p.to_f64()),
+        token_out_usd: match intent.outputs.first() {
+            Some(output) => state
+                .valuation
+                .price(output.token)
+                .await
+                .map(|p| p.to_f64()),
+            None => None,
+        },
+    };
     let outcome = state
         .swap
-        .submit(intent, cosigned.swapper, TradeId(Ulid::new()))
+        .submit(intent, cosigned.swapper, TradeId(Ulid::new()), prices)
         .await?;
     Ok(Response::ok(SwapResponse {
         trade_id: outcome.trade_id.to_string(),

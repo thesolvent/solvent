@@ -13,13 +13,14 @@ use time::OffsetDateTime;
 use crate::asset::AssetManager;
 use crate::deps::ledger::Clock;
 use crate::ledger::LedgerService;
-use crate::primitives::amount::Amount;
+use crate::primitives::amount::share_pct;
 use crate::primitives::quote::{QuoteLeg, QuoteResponse};
 use crate::primitives::registry::{curve_label, CurveSpec, Snapshot, TokenPair};
 use crate::primitives::routing::{RouteLeg, RouteRequest, RoutingConfig};
 use crate::primitives::{IntentId, StrategyHash};
 use crate::registry::SharedSnapshot;
 use crate::routing::{price_impact_pct, select, solve_sparse, LegCostResolver};
+use crate::valuation::Valuation;
 
 /// How far ahead a quote's advisory `expires_at` sits.
 const QUOTE_TTL_SECS: u64 = 30;
@@ -31,6 +32,7 @@ pub struct QuoteService {
     config: RoutingConfig,
     clock: Arc<dyn Clock>,
     leg_cost: Arc<LegCostResolver>,
+    valuation: Arc<Valuation>,
 }
 
 impl QuoteService {
@@ -41,6 +43,7 @@ impl QuoteService {
         config: RoutingConfig,
         clock: Arc<dyn Clock>,
         leg_cost: Arc<LegCostResolver>,
+        valuation: Arc<Valuation>,
     ) -> Self {
         Self {
             registry,
@@ -49,6 +52,7 @@ impl QuoteService {
             config,
             clock,
             leg_cost,
+            valuation,
         }
     }
 
@@ -86,15 +90,19 @@ impl QuoteService {
         )?;
 
         let labels = curve_labels(&snapshot, token_in, token_out);
-        let legs = split
-            .legs
-            .iter()
-            .filter_map(|leg| self.leg(leg, &labels, split.amount_out))
-            .collect();
+        let mut legs = Vec::with_capacity(split.legs.len());
+        for leg in &split.legs {
+            if let Some(resolved) = self.leg(leg, &labels, split.amount_out).await {
+                legs.push(resolved);
+            }
+        }
 
         Some(QuoteResponse {
             quote_id: format!("{id:#x}"),
-            amount_out: Amount::from_base_units(split.amount_out, out_decimals),
+            amount_out: self
+                .valuation
+                .amount(split.amount_out, token_out, out_decimals)
+                .await,
             price_impact_pct: price_impact_pct(&selection.chosen, amount_in, split.amount_out),
             makers_sourced: split.legs.len() as u32,
             legs,
@@ -103,7 +111,7 @@ impl QuoteService {
     }
 
     /// Resolve one routed leg to its wire shape, or skip it if a token is missing from the catalog.
-    fn leg(
+    async fn leg(
         &self,
         leg: &RouteLeg,
         labels: &BTreeMap<StrategyHash, &'static str>,
@@ -114,8 +122,14 @@ impl QuoteService {
         Some(QuoteLeg {
             maker: leg.maker.0,
             strategy_hash: format!("{:#x}", leg.strategy_hash.0),
-            amount_in: Amount::from_base_units(leg.amount_in, token_in.decimals),
-            amount_out: Amount::from_base_units(leg.amount_out, token_out.decimals),
+            amount_in: self
+                .valuation
+                .amount(leg.amount_in, token_in.address, token_in.decimals)
+                .await,
+            amount_out: self
+                .valuation
+                .amount(leg.amount_out, token_out.address, token_out.decimals)
+                .await,
             curve: labels
                 .get(&leg.strategy_hash)
                 .copied()
@@ -145,15 +159,6 @@ fn quote_hash(token_in: Address, token_out: Address, amount_in: U256) -> B256 {
     bytes.extend_from_slice(token_out.as_slice());
     bytes.extend_from_slice(&amount_in.to_be_bytes::<32>());
     keccak256(bytes)
-}
-
-/// A leg's share of the blended output, in percent, via integer bps (no `U256`→`f64` precision loss).
-fn share_pct(leg_out: U256, total_out: U256) -> f64 {
-    if total_out.is_zero() {
-        return 0.0;
-    }
-    let bps = leg_out.saturating_mul(U256::from(10_000u64)) / total_out;
-    u64::try_from(bps).unwrap_or(0) as f64 / 100.0
 }
 
 /// Curve label per strategy on the pair, from the same snapshot the route was solved over.
@@ -325,7 +330,7 @@ mod tests {
         ));
         ledger.sync_budgets(&registry.load()).await.unwrap();
         let gas: Arc<dyn GasPrice> = market.clone();
-        let oracle: Arc<dyn PriceOracle> = market;
+        let oracle: Arc<dyn PriceOracle> = market.clone();
         let leg_cost = Arc::new(LegCostResolver::new(
             gas,
             oracle,
@@ -333,6 +338,7 @@ mod tests {
             addr(WETH),
             150_000,
         ));
+        let valuation = Arc::new(Valuation::new(market));
         QuoteService::new(
             registry,
             ledger,
@@ -340,6 +346,7 @@ mod tests {
             RoutingConfig::new(16, 4, 150_000),
             Arc::new(FixedClock),
             leg_cost,
+            valuation,
         )
     }
 

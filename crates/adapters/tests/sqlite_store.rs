@@ -147,3 +147,45 @@ async fn recent_pages_newest_first_and_count_since_windows() {
     assert_eq!(store.count_since(chain, 1500).await.unwrap(), 2);
     assert_eq!(store.count_since(chain, 0).await.unwrap(), 3);
 }
+
+#[tokio::test]
+async fn history_returns_one_strategys_events_in_fold_order() {
+    let store = setup().await;
+    let chain = ChainId(1);
+
+    // Two strategies, events interleaved across blocks.
+    store
+        .insert(
+            chain,
+            &[
+                ext(10, 0, shipped(1)),
+                ext(10, 1, pushed(1, 2, 1000)),
+                ext(11, 0, shipped(2)), // a different strategy
+                ext(11, 1, pushed(2, 3, 500)),
+                ext(12, 0, pushed(1, 3, 250)), // strategy 1, a later block
+            ],
+        )
+        .await
+        .unwrap();
+
+    // Only strategy 1's events, in fold order (block/log ascending).
+    let history = store
+        .history(chain, StrategyHash(B256::from([1; 32])))
+        .await
+        .unwrap();
+    assert_eq!(
+        history,
+        vec![
+            ext(10, 0, shipped(1)),
+            ext(10, 1, pushed(1, 2, 1000)),
+            ext(12, 0, pushed(1, 3, 250)),
+        ]
+    );
+
+    // A strategy with no events yields an empty history.
+    let none = store
+        .history(chain, StrategyHash(B256::from([9; 32])))
+        .await
+        .unwrap();
+    assert!(none.is_empty());
+}

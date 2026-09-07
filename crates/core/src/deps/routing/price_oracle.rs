@@ -11,6 +11,12 @@ use crate::primitives::UsdPrice;
 pub trait PriceOracle: Send + Sync {
     /// USD price of one whole `token`.
     async fn price(&self, token: Address) -> Result<UsdPrice, PriceOracleError>;
+
+    /// The token's 24h price-change percent (`2.5` = +2.5%), or `None` if unknown. Display-only, so
+    /// unlike `price` it never errors; defaults to `None` for sources that don't track it.
+    async fn change_24h(&self, _token: Address) -> Option<f64> {
+        None
+    }
 }
 
 /// A price-oracle failure.

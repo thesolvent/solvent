@@ -1,0 +1,54 @@
+{
+  "name": "@solvent/sdk",
+  "version": "0.1.0",
+  "description": "Client-side, non-custodial TypeScript SDK for Solvent: strategy construction, position calldata, and a typed API client.",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@10.17.1",
+  "sideEffects": false,
+  "files": ["dist"],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./construction": {
+      "types": "./dist/construction.d.ts",
+      "import": "./dist/construction.js",
+      "require": "./dist/construction.cjs"
+    },
+    "./positions": {
+      "types": "./dist/positions.d.ts",
+      "import": "./dist/positions.js",
+      "require": "./dist/positions.cjs"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js",
+      "require": "./dist/client.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "codegen": "openapi-typescript ./openapi.json -o ./src/client/generated/types.ts",
+    "codegen:check": "openapi-typescript ./openapi.json | diff - ./src/client/generated/types.ts"
+  },
+  "dependencies": {
+    "@1inch/aqua-sdk": "0.3.1",
+    "@1inch/swap-vm-sdk": "0.4.1",
+    "viem": "^2"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "openapi-typescript": "^7",
+    "typescript": "^5",
+    "tsup": "^8",
+    "vitest": "^3"
+  }
+}

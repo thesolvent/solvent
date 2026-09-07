@@ -4,10 +4,21 @@
 //! (success) or `error` (failure). `status_code` is not serialized; it drives the HTTP status in
 //! `IntoResponse`. Handlers return [`ApiResult`], so success and failure share one wire shape.
 
+use alloy::primitives::Address;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response as AxumResponse};
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use solvent_core::SolventError;
+
+/// Parse a hex address, mapping a bad value to a `400` whose message names `field` as what was
+/// invalid (`"token"`, `"wallet"`, …). The one address parser the handlers share.
+pub fn parse_addr(field: &'static str, s: &str) -> Result<Address, SolventError> {
+    s.parse::<Address>().map_err(|e| SolventError::InvalidId {
+        id_type: field,
+        reason: e.to_string(),
+    })
+}
 
 /// Whether an API call succeeded.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]

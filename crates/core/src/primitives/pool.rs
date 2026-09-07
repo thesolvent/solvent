@@ -14,6 +14,21 @@ pub enum PoolType {
     Volatile,
 }
 
+/// Classify a pair: both tokens stable → `Stable`; else a pegged-dominant curve → `Correlated`; else
+/// `Volatile`. Shared by the pool list (dominant = the pool's mix) and a position (its own curve).
+pub fn classify_pair(
+    stable_lo: bool,
+    stable_hi: bool,
+    dominant: Option<super::registry::CurveKind>,
+) -> PoolType {
+    use super::registry::CurveKind;
+    match (stable_lo, stable_hi, dominant) {
+        (true, true, _) => PoolType::Stable,
+        (_, _, Some(CurveKind::Pegged)) => PoolType::Correlated,
+        _ => PoolType::Volatile,
+    }
+}
+
 /// A pool: the aggregation of all active, priceable strategies over one canonical pair. USD and
 /// volume/fills fields are absent/zero until their data sources (pricing, the trade store) exist.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]

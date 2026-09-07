@@ -3,36 +3,55 @@
 
 use std::sync::Arc;
 
+use alloy_primitives::U256;
+
 use crate::asset::AssetManager;
-use crate::primitives::amount::{Amount, TokenAmount, TokenAmounts};
-use crate::primitives::pool::{Pool, PoolDetail, PoolMaker, PoolType};
+use crate::primitives::asset::Token;
+use crate::primitives::pool::{classify_pair, Pool, PoolDetail, PoolMaker, PoolType};
 use crate::primitives::registry::{
-    curve_label, fee_in_bps, CurveKind, CurveSpec, MakerStrategy, PoolStats, TokenPair,
+    curve_label, fee_in_bps, CurveSpec, MakerStrategy, PoolStats, Snapshot, TokenPair,
 };
 use crate::registry::SharedSnapshot;
+use crate::valuation::Valuation;
 
 pub struct PoolService {
     registry: Arc<SharedSnapshot>,
     assets: Arc<AssetManager>,
+    valuation: Arc<Valuation>,
 }
 
 impl PoolService {
-    pub fn new(registry: Arc<SharedSnapshot>, assets: Arc<AssetManager>) -> Self {
-        Self { registry, assets }
+    pub fn new(
+        registry: Arc<SharedSnapshot>,
+        assets: Arc<AssetManager>,
+        valuation: Arc<Valuation>,
+    ) -> Self {
+        Self {
+            registry,
+            assets,
+            valuation,
+        }
     }
 
-    /// One row per active pair, registry-derived. `$`/volume fields are `None`/`0` until their data
-    /// sources exist. A pair whose tokens are missing from the catalog is skipped (no metadata).
-    pub fn pools(&self) -> Vec<Pool> {
+    /// One row per active pair, registry-derived. `volume`/`fills`/`apr` stay `None`/`0` until their
+    /// data sources exist (M4). A pair whose tokens are missing from the catalog is skipped.
+    pub async fn pools(&self) -> Vec<Pool> {
         let snapshot = self.registry.load();
-        snapshot
-            .pool_stats()
-            .into_iter()
-            .filter_map(|(pair, stats)| self.assemble(&pair, &stats))
-            .collect()
+        let mut pools = Vec::new();
+        for (pair, stats) in snapshot.pool_stats() {
+            if let Some(pool) = self.assemble(&snapshot, &pair, &stats).await {
+                pools.push(pool);
+            }
+        }
+        pools
     }
 
-    fn assemble(&self, pair: &TokenPair, stats: &PoolStats) -> Option<Pool> {
+    async fn assemble(
+        &self,
+        snapshot: &Snapshot,
+        pair: &TokenPair,
+        stats: &PoolStats,
+    ) -> Option<Pool> {
         let (base_addr, quote_addr) = self.assets.base_quote(pair);
         Some(Pool {
             pair: self.assets.pair_label(pair),
@@ -43,63 +62,66 @@ impl PoolService {
             min_spread_bps: stats.min_fee_bps,
             max_spread_bps: stats.max_fee_bps,
             popular_fee_tier: fee_tier(stats.popular_fee_bps),
-            tvl_usd: None,
+            tvl_usd: self.pair_tvl(snapshot, pair).await,
             volume_24h_usd: None,
             fills_24h: 0,
             apr_pct: None,
         })
     }
 
+    /// The pair's total value locked: every active strategy's committed balances, valued. `None` if
+    /// any token is unpriced or missing from the catalog — a partial TVL would understate the pool.
+    async fn pair_tvl(&self, snapshot: &Snapshot, pair: &TokenPair) -> Option<f64> {
+        let mut holdings: Vec<(Token, U256)> = Vec::new();
+        for strategy in snapshot.active_strategies_for_pair(*pair) {
+            for (address, balance) in &strategy.balances {
+                holdings.push((self.assets.token(address)?, *balance));
+            }
+        }
+        self.valuation.tvl_usd(&holdings).await
+    }
+
     /// Both tokens stable → `Stable`; else pegged-dominant → `Correlated`; else `Volatile`.
     fn classify(&self, pair: &TokenPair, stats: &PoolStats) -> PoolType {
-        match (
+        classify_pair(
             self.assets.is_stable(&pair.lo),
             self.assets.is_stable(&pair.hi),
             stats.curve_mix.dominant(),
-        ) {
-            (true, true, _) => PoolType::Stable,
-            (_, _, Some(CurveKind::Pegged)) => PoolType::Correlated,
-            _ => PoolType::Volatile,
-        }
+        )
     }
 
     /// Full detail for `pair`, or `None` if it has no active pool. The row is the same as the list's;
     /// the roster is registry-derived (actual/pullable on-chain and recent fills join later).
-    pub fn pool_detail(&self, pair: &TokenPair) -> Option<PoolDetail> {
+    pub async fn pool_detail(&self, pair: &TokenPair) -> Option<PoolDetail> {
         let snapshot = self.registry.load();
-        let pool = self.assemble(pair, snapshot.pool_stats().get(pair)?)?;
-        let makers = snapshot
-            .active_strategies_for_pair(*pair)
-            .filter_map(|strategy| self.pool_maker(strategy))
-            .collect();
+        let stats = snapshot.pool_stats();
+        let pool = self.assemble(&snapshot, pair, stats.get(pair)?).await?;
+        let mut makers = Vec::new();
+        for strategy in snapshot.active_strategies_for_pair(*pair) {
+            if let Some(maker) = self.pool_maker(strategy).await {
+                makers.push(maker);
+            }
+        }
         Some(PoolDetail { pool, makers })
     }
 
-    /// One roster entry: curve, fee, and committed balances. `None` for an unpriceable strategy.
-    fn pool_maker(&self, strategy: &MakerStrategy) -> Option<PoolMaker> {
+    /// One roster entry: curve, fee, and committed balances (valued). `None` for an unpriceable
+    /// strategy. `total_usd` is `None` if any of the maker's tokens is unpriced.
+    async fn pool_maker(&self, strategy: &MakerStrategy) -> Option<PoolMaker> {
         let CurveSpec::Priceable { curve, fees_in_bps } = &strategy.curve else {
             return None;
         };
-        let entries = strategy
+        let holdings: Vec<(Token, U256)> = strategy
             .balances
             .iter()
-            .filter_map(|(address, balance)| {
-                let token = self.assets.token(address)?;
-                Some(TokenAmount {
-                    amount: Amount::from_base_units(*balance, token.decimals),
-                    token,
-                })
-            })
+            .filter_map(|(address, balance)| Some((self.assets.token(address)?, *balance)))
             .collect();
         Some(PoolMaker {
             maker: strategy.key.maker.0,
             strategy_hash: format!("{:#x}", strategy.key.strategy_hash.0),
             curve: curve_label(curve).to_string(),
             fee_bps: fee_in_bps(fees_in_bps),
-            virtual_balances: TokenAmounts {
-                entries,
-                total_usd: None,
-            },
+            virtual_balances: self.valuation.priced_amounts(&holdings).await,
         })
     }
 }
@@ -112,15 +134,39 @@ fn fee_tier(bps: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deps::routing::{PriceOracle, PriceOracleError};
     use crate::primitives::asset::{TokenList, TokenMeta};
     use crate::primitives::registry::{
         Curve, CurveSpec, MakerStrategy, PeggedParams, Snapshot, StrategyKey,
     };
-    use crate::primitives::{MakerId, StrategyHash};
+    use crate::primitives::{MakerId, StrategyHash, UsdPrice};
     use alloy_primitives::{Address, B256, U256};
+    use async_trait::async_trait;
+    use rust_decimal::Decimal;
+    use std::collections::BTreeMap;
 
     fn addr(n: u8) -> Address {
         Address::from([n; 20])
+    }
+
+    struct FakePrices(BTreeMap<Address, UsdPrice>);
+
+    #[async_trait]
+    impl PriceOracle for FakePrices {
+        async fn price(&self, token: Address) -> Result<UsdPrice, PriceOracleError> {
+            self.0
+                .get(&token)
+                .copied()
+                .ok_or(PriceOracleError::NotFound(token))
+        }
+    }
+
+    fn valuation(prices: &[(Address, u64)]) -> Arc<Valuation> {
+        let map = prices
+            .iter()
+            .map(|(a, dollars)| (*a, UsdPrice(Decimal::from(*dollars))))
+            .collect();
+        Arc::new(Valuation::new(Arc::new(FakePrices(map))))
     }
 
     fn meta(n: u8, symbol: &str, decimals: u8, stable: bool) -> TokenMeta {
@@ -166,8 +212,8 @@ mod tests {
         st
     }
 
-    #[test]
-    fn classifies_pools_and_orders_base_quote() {
+    #[tokio::test]
+    async fn classifies_pools_and_orders_base_quote() {
         let list = TokenList {
             name: "test".to_string(),
             tokens: vec![
@@ -182,7 +228,9 @@ mod tests {
         ]);
         let registry = Arc::new(SharedSnapshot::new(snap));
         let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
-        let pools = PoolService::new(registry, assets).pools();
+        let pools = PoolService::new(registry, assets, valuation(&[]))
+            .pools()
+            .await;
 
         let stable = pools
             .iter()
@@ -200,8 +248,8 @@ mod tests {
         assert_eq!(volatile.popular_fee_tier, "0.05%");
     }
 
-    #[test]
-    fn pool_detail_has_roster_with_decimal_balances() {
+    #[tokio::test]
+    async fn pool_detail_has_roster_with_decimal_balances() {
         let list = TokenList {
             name: "test".to_string(),
             tokens: vec![meta(3, "WETH", 18, false), meta(1, "USDC", 6, true)],
@@ -215,9 +263,12 @@ mod tests {
             .insert(addr(1), U256::from(12_000_000_000u64)); // 12000 USDC (6 dec)
         let registry = Arc::new(SharedSnapshot::new(Snapshot::from_strategies([strategy])));
         let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
-        let svc = PoolService::new(registry, assets);
+        let svc = PoolService::new(registry, assets, valuation(&[]));
 
-        let detail = svc.pool_detail(&TokenPair::new(addr(3), addr(1))).unwrap();
+        let detail = svc
+            .pool_detail(&TokenPair::new(addr(3), addr(1)))
+            .await
+            .unwrap();
         assert_eq!(detail.pool.pair, "WETH/USDC");
         assert_eq!(detail.pool.maker_count, 1);
         let maker = &detail.makers[0];
@@ -237,6 +288,42 @@ mod tests {
         assert_eq!(amount("USDC"), "12000");
 
         // an unknown pair has no detail
-        assert!(svc.pool_detail(&TokenPair::new(addr(1), addr(2))).is_none());
+        assert!(svc
+            .pool_detail(&TokenPair::new(addr(1), addr(2)))
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn values_pool_tvl_from_registry_balances() {
+        let list = TokenList {
+            name: "test".to_string(),
+            tokens: vec![meta(3, "WETH", 18, false), meta(1, "USDC", 6, true)],
+        };
+        let mut strategy = strat(1, addr(3), addr(1), Curve::Xyc);
+        strategy
+            .balances
+            .insert(addr(3), U256::from(4_000_000_000_000_000_000u128)); // 4 WETH
+        strategy
+            .balances
+            .insert(addr(1), U256::from(12_000_000_000u64)); // 12000 USDC
+        let registry = Arc::new(SharedSnapshot::new(Snapshot::from_strategies([strategy])));
+        let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
+        // WETH $2000, USDC $1 → 4·2000 + 12000·1 = 20000
+        let svc = PoolService::new(
+            registry,
+            assets,
+            valuation(&[(addr(3), 2000), (addr(1), 1)]),
+        );
+
+        let pools = svc.pools().await;
+        assert_eq!(pools.len(), 1);
+        assert_eq!(pools[0].tvl_usd, Some(20000.0));
+
+        let detail = svc
+            .pool_detail(&TokenPair::new(addr(3), addr(1)))
+            .await
+            .unwrap();
+        assert_eq!(detail.makers[0].virtual_balances.total_usd, Some(20000.0));
     }
 }

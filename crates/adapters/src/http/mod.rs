@@ -41,6 +41,20 @@ pub fn router(state: AppState) -> Router {
         .route("/trades", get(app::trades::trades))
         .route("/trades/{id}", get(app::trades::trade_detail))
         .route("/activity", get(app::activity::activity))
+        .route("/makers", get(app::makers::makers))
+        .route("/makers/{maker}", get(app::makers::maker_dashboard))
+        .route(
+            "/makers/{maker}/inventory",
+            get(app::makers::maker_inventory),
+        )
+        .route("/makers/{maker}/trades", get(app::makers::maker_trades))
+        .route(
+            "/makers/{maker}/positions",
+            get(app::makers::maker_positions),
+        )
+        .route("/pairs", get(app::pairs::pairs))
+        .route("/positions/preview", post(app::positions::preview))
+        .route("/positions/{hash}", get(app::makers::position_detail))
         .route("/wallets/{addr}/balances", get(app::balances::balances))
         .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
@@ -87,29 +101,39 @@ mod tests {
     use solvent_core::deps::ledger::{
         BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError,
     };
+    use solvent_core::deps::maker_metrics::{
+        MakerMetrics, MakerMetricsError, MakerMetricsStore, PositionMetrics,
+    };
+    use solvent_core::deps::quote_log::{QuoteLog, QuoteLogError, QuoteServed};
     use solvent_core::deps::registry::{EventStore, RecordedEvent, StoreError};
     use solvent_core::deps::routing::{GasPrice, PriceOracle};
     use solvent_core::deps::trade::{
-        CreateResult, Page, Settlement, TradeFilter, TradeStats, TradeStore, TradeStoreError,
+        CreateResult, MakerFill, Page, Settlement, TradeFilter, TradeStats, TradeStore,
+        TradeStoreError,
     };
     use solvent_core::execution::ExecutionService;
     use solvent_core::ledger::LedgerService;
+    use solvent_core::maker::MakerService;
     use solvent_core::pool::{DepthService, PoolService};
     use solvent_core::primitives::execution::{
         ExecHandle, ExecStatus, FillTx, SimVerdict, TrackedFill,
     };
     use solvent_core::primitives::ingest::Intent;
     use solvent_core::primitives::ledger::{AccountKey, Reservation, ReservationSource};
+    use solvent_core::primitives::registry::TokenPair;
     use solvent_core::primitives::registry::{AquaEvent, EventCursor, EventExt, Snapshot};
     use solvent_core::primitives::routing::{RoutePlan, RoutingConfig};
     use solvent_core::primitives::trade::{
         Trade, TradeAttempt, TradeId, TradeInfo, TradeLeg, TradeStatus,
     };
     use solvent_core::primitives::{ChainId, IntentId, ReservationId};
+    use solvent_core::primitives::{MakerId, StrategyHash};
     use solvent_core::quote::QuoteService;
     use solvent_core::registry::SharedSnapshot;
     use solvent_core::routing::LegCostResolver;
     use solvent_core::swap::{SwapConfig, SwapService};
+    use solvent_core::trade::TradeService;
+    use solvent_core::valuation::Valuation;
     use tower::ServiceExt;
 
     use crate::chain::ChainHead;
@@ -206,6 +230,13 @@ mod tests {
         async fn list(&self, _: &TradeFilter, _: &Page) -> Result<Vec<Trade>, TradeStoreError> {
             Ok(Vec::new())
         }
+        async fn list_for_maker(
+            &self,
+            _: Address,
+            _: &Page,
+        ) -> Result<Vec<MakerFill>, TradeStoreError> {
+            Ok(Vec::new())
+        }
         async fn stats(&self) -> Result<TradeStats, TradeStoreError> {
             Ok(TradeStats {
                 settled: 0,
@@ -236,6 +267,13 @@ mod tests {
         async fn events(&self, _: ChainId) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
             Ok(Vec::new())
         }
+        async fn history(
+            &self,
+            _: ChainId,
+            _: StrategyHash,
+        ) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
+            Ok(Vec::new())
+        }
         async fn recent(
             &self,
             _: ChainId,
@@ -245,6 +283,51 @@ mod tests {
             Ok(Vec::new())
         }
         async fn count_since(&self, _: ChainId, _: u64) -> Result<u64, StoreError> {
+            Ok(0)
+        }
+    }
+
+    struct NoopQuoteLog;
+    #[async_trait::async_trait]
+    impl QuoteLog for NoopQuoteLog {
+        async fn record(&self, _: &QuoteServed) -> Result<(), QuoteLogError> {
+            Ok(())
+        }
+    }
+
+    struct NoopMakerMetrics;
+    #[async_trait::async_trait]
+    impl MakerMetricsStore for NoopMakerMetrics {
+        async fn maker(
+            &self,
+            _: MakerId,
+            _: u64,
+            _: u64,
+        ) -> Result<MakerMetrics, MakerMetricsError> {
+            Ok(MakerMetrics {
+                fills: 0,
+                fills_by_day: [0; 7],
+                last_fill_at: None,
+                volume: Vec::new(),
+                inflow: Vec::new(),
+                quotes: 0,
+                latency_p50_ms: None,
+            })
+        }
+        async fn position(
+            &self,
+            _: StrategyHash,
+            _: TokenPair,
+            _: u64,
+        ) -> Result<PositionMetrics, MakerMetricsError> {
+            Ok(PositionMetrics {
+                fills: 0,
+                volume: Vec::new(),
+                last_fill_at: None,
+                quote_uptime_pct: None,
+            })
+        }
+        async fn pair_fills(&self, _: &[TokenPair], _: u64) -> Result<u64, MakerMetricsError> {
             Ok(0)
         }
     }
@@ -317,26 +400,31 @@ mod tests {
         };
         let registry = Arc::new(SharedSnapshot::default());
         let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
-        let pools = Arc::new(PoolService::new(Arc::clone(&registry), Arc::clone(&assets)));
         let ledger = Arc::new(LedgerService::new(
             Arc::new(NoopLedgerStore),
             Arc::new(ZeroBudget),
             Arc::new(SystemClock),
         ));
-        let depth = Arc::new(DepthService::new(
-            Arc::clone(&registry),
-            Arc::clone(&ledger),
-            Arc::clone(&assets),
-        ));
         let market = MarketCache::new();
         let gas: Arc<dyn GasPrice> = market.clone();
         let oracle: Arc<dyn PriceOracle> = market;
+        let valuation = Arc::new(Valuation::new(Arc::clone(&oracle)));
         let leg_cost = Arc::new(LegCostResolver::new(
             gas,
             oracle,
             Arc::clone(&assets),
             Address::ZERO,
             0,
+        ));
+        let pools = Arc::new(PoolService::new(
+            Arc::clone(&registry),
+            Arc::clone(&assets),
+            Arc::clone(&valuation),
+        ));
+        let depth = Arc::new(DepthService::new(
+            Arc::clone(&registry),
+            Arc::clone(&ledger),
+            Arc::clone(&assets),
         ));
         let quote = Arc::new(QuoteService::new(
             Arc::clone(&registry),
@@ -345,6 +433,7 @@ mod tests {
             RoutingConfig::new(16, 4, 0),
             Arc::new(SystemClock),
             Arc::clone(&leg_cost),
+            Arc::clone(&valuation),
         ));
         let execution = Arc::new(ExecutionService::new(
             Arc::new(FakeSim),
@@ -379,6 +468,22 @@ mod tests {
         let balances = Arc::new(BalancesService::new(
             Arc::new(ZeroOracle),
             Arc::clone(&assets),
+            Arc::clone(&valuation),
+        ));
+        let makers = Arc::new(MakerService::new(
+            Arc::clone(&registry),
+            Arc::clone(&assets),
+            Arc::clone(&valuation),
+            Arc::new(NoopMakerMetrics),
+            Arc::new(ZeroOracle),
+            Arc::new(NoopEventStore),
+            Arc::new(SystemClock),
+            ChainId(31337),
+        ));
+        let trade_svc = Arc::new(TradeService::new(
+            Arc::clone(&trades),
+            Arc::clone(&assets),
+            Arc::clone(&valuation),
         ));
         AppState {
             config: Arc::new(AppConfig {
@@ -397,12 +502,15 @@ mod tests {
             pools,
             depth,
             balances,
+            makers,
             quote,
             swap,
             cosigner,
-            trades,
+            trades: trade_svc,
             registry: Arc::clone(&registry),
             registry_store: Arc::new(NoopEventStore),
+            valuation,
+            quote_log: Arc::new(NoopQuoteLog),
         }
     }
 
