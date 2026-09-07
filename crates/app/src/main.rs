@@ -42,6 +42,7 @@ use solvent_core::reconcile::ReconcileService;
 use solvent_core::registry::{RegistrySync, SharedSnapshot};
 use solvent_core::routing::LegCostResolver;
 use solvent_core::swap::{SwapConfig, SwapService};
+use solvent_core::trade::TradeService;
 use solvent_core::valuation::Valuation;
 use solvent_core::SolventError;
 use sqlx::SqlitePool;
@@ -323,6 +324,11 @@ async fn main() -> Result<(), StartupError> {
         run_reconcile(Arc::clone(&reconcile), RECONCILE_INTERVAL)
     }));
 
+    let trades = Arc::new(TradeService::new(
+        Arc::clone(&trade_store),
+        Arc::clone(&assets),
+        Arc::clone(&valuation),
+    ));
     let state = AppState {
         config: Arc::new(config.app_config()),
         head,
@@ -334,7 +340,7 @@ async fn main() -> Result<(), StartupError> {
         quote,
         swap,
         cosigner,
-        trades: trade_store,
+        trades,
         registry: Arc::clone(&registry),
         registry_store,
         valuation,

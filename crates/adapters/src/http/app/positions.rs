@@ -8,7 +8,7 @@ use solvent_core::primitives::maker::PreviewResponse;
 use solvent_core::primitives::StrategyHash;
 use solvent_core::SolventError;
 
-use crate::http::primitives::{ApiResult, Response};
+use crate::http::primitives::{parse_addr, ApiResult, Response};
 use crate::http::state::AppState;
 
 /// The SDK-encoded strategy and the amounts the maker intends to ship, keyed to a wallet.
@@ -46,13 +46,6 @@ pub async fn preview(
     Ok(Response::ok(
         state.makers.preview(maker, hash, &amounts).await?,
     ))
-}
-
-fn parse_addr(field: &'static str, s: &str) -> Result<Address, SolventError> {
-    s.parse::<Address>().map_err(|e| SolventError::InvalidId {
-        id_type: field,
-        reason: e.to_string(),
-    })
 }
 
 fn parse_hash(s: &str) -> Result<B256, SolventError> {

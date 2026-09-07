@@ -15,7 +15,7 @@ use solvent_core::valuation::Valuation;
 use solvent_core::SolventError;
 
 use crate::http::dto::{Cursor, List, Page};
-use crate::http::primitives::{ApiResult, Response};
+use crate::http::primitives::{parse_addr, ApiResult, Response};
 use crate::http::state::AppState;
 
 /// One Aqua event on the feed. `token` is present only for the balance-moving kinds (push / pull).
@@ -76,10 +76,14 @@ pub async fn activity(
     let actor = query
         .actor
         .as_deref()
-        .map(parse_addr)
+        .map(|s| parse_addr("address", s))
         .transpose()?
         .map(MakerId);
-    let token = query.token.as_deref().map(parse_addr).transpose()?;
+    let token = query
+        .token
+        .as_deref()
+        .map(|s| parse_addr("address", s))
+        .transpose()?;
 
     let rows = state
         .registry_store
@@ -178,13 +182,6 @@ fn kind_name(event: &AquaEvent) -> &'static str {
         AquaEvent::Docked { .. } => "docked",
         _ => "unknown",
     }
-}
-
-fn parse_addr(s: &str) -> Result<Address, SolventError> {
-    s.parse::<Address>().map_err(|e| SolventError::InvalidId {
-        id_type: "address",
-        reason: e.to_string(),
-    })
 }
 
 #[cfg(test)]

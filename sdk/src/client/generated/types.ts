@@ -356,12 +356,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description One lifecycle stage a trade reached, and when (unix seconds). */
-        Action: {
-            /** Format: int64 */
-            at: number;
-            status: string;
-        };
         /** @description Recent-activity stats for the position detail. */
         ActiveStats: {
             /** Format: int64 */
@@ -570,7 +564,7 @@ export interface components {
             /** Format: double */
             wallet_balance_usd?: number | null;
         };
-        /** @description One maker's slice of the routed split. */
+        /** @description One maker's slice of the routed split, on the wire. */
         MakerLeg: {
             amount_in: components["schemas"]["Amount"];
             amount_out: components["schemas"]["Amount"];
@@ -585,8 +579,8 @@ export interface components {
             /** Format: double */
             shared_liquidity_usd?: number | null;
         };
-        /** @description One of a maker's settlements: the trade header plus this maker's share and captured fee. */
-        MakerTrade: components["schemas"]["Trade"] & {
+        /** @description A settlement in a maker's feed: the trade header plus the maker's share and captured fee. */
+        MakerTrade: components["schemas"]["TradeView"] & {
             /**
              * Format: double
              * @description The maker's captured fee, valued at the trade-time prices — settled trades only.
@@ -935,7 +929,7 @@ export interface components {
              *     optional `total`. Carried inside the response envelope's `result`.
              */
             result?: {
-                items: (components["schemas"]["Trade"] & {
+                items: (components["schemas"]["TradeView"] & {
                     /**
                      * Format: double
                      * @description The maker's captured fee, valued at the trade-time prices — settled trades only.
@@ -1070,7 +1064,7 @@ export interface components {
             status: components["schemas"]["Status"];
         };
         /** @description The envelope wrapping every response. `status_code` sets the HTTP status (never serialized). */
-        Response_List_Trade: {
+        Response_List_TradeView: {
             error?: string | null;
             /**
              * @description A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an
@@ -1090,7 +1084,7 @@ export interface components {
                     /** @description The maker slices the trade sourced — detail only. */
                     legs?: components["schemas"]["MakerLeg"][] | null;
                     /** @description The stage timeline — detail only. */
-                    lifecycle?: components["schemas"]["Action"][] | null;
+                    lifecycle?: components["schemas"]["TradeAction"][] | null;
                     /** @description The signed order hash — detail only. */
                     order_hash?: string | null;
                     /** @description The output token and the amount delivered (or the signed floor, until it settles). */
@@ -1254,11 +1248,11 @@ export interface components {
             status: components["schemas"]["Status"];
         };
         /** @description The envelope wrapping every response. `status_code` sets the HTTP status (never serialized). */
-        Response_Trade: {
+        Response_TradeView: {
             error?: string | null;
             /**
-             * @description One trade, header-only in a list; a detail also carries `lifecycle`, `legs`, and the order's
-             *     coordinates (omitted from JSON when absent).
+             * @description One trade on the wire, header-only in a list; a detail also carries `lifecycle`, `legs`, and the
+             *     order's coordinates (omitted from JSON when absent). Assembled by the trade service.
              */
             result?: {
                 /** Format: int64 */
@@ -1273,7 +1267,7 @@ export interface components {
                 /** @description The maker slices the trade sourced — detail only. */
                 legs?: components["schemas"]["MakerLeg"][] | null;
                 /** @description The stage timeline — detail only. */
-                lifecycle?: components["schemas"]["Action"][] | null;
+                lifecycle?: components["schemas"]["TradeAction"][] | null;
                 /** @description The signed order hash — detail only. */
                 order_hash?: string | null;
                 /** @description The output token and the amount delivered (or the signed floor, until it settles). */
@@ -1362,11 +1356,17 @@ export interface components {
             pullable: components["schemas"]["Amount"];
             token: components["schemas"]["Token"];
         };
+        /** @description One lifecycle stage a trade reached, and when (unix seconds). */
+        TradeAction: {
+            /** Format: int64 */
+            at: number;
+            status: string;
+        };
         /**
-         * @description One trade, header-only in a list; a detail also carries `lifecycle`, `legs`, and the order's
-         *     coordinates (omitted from JSON when absent).
+         * @description One trade on the wire, header-only in a list; a detail also carries `lifecycle`, `legs`, and the
+         *     order's coordinates (omitted from JSON when absent). Assembled by the trade service.
          */
-        Trade: {
+        TradeView: {
             /** Format: int64 */
             block_number?: number | null;
             /** Format: int64 */
@@ -1379,7 +1379,7 @@ export interface components {
             /** @description The maker slices the trade sourced — detail only. */
             legs?: components["schemas"]["MakerLeg"][] | null;
             /** @description The stage timeline — detail only. */
-            lifecycle?: components["schemas"]["Action"][] | null;
+            lifecycle?: components["schemas"]["TradeAction"][] | null;
             /** @description The signed order hash — detail only. */
             order_hash?: string | null;
             /** @description The output token and the amount delivered (or the signed floor, until it settles). */
@@ -1857,7 +1857,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Response_List_Trade"];
+                    "application/json": components["schemas"]["Response_List_TradeView"];
                 };
             };
         };
@@ -1879,7 +1879,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Response_Trade"];
+                    "application/json": components["schemas"]["Response_TradeView"];
                 };
             };
             /** @description Unknown trade */

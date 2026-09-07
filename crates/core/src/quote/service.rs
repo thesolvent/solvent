@@ -13,6 +13,7 @@ use time::OffsetDateTime;
 use crate::asset::AssetManager;
 use crate::deps::ledger::Clock;
 use crate::ledger::LedgerService;
+use crate::primitives::amount::share_pct;
 use crate::primitives::quote::{QuoteLeg, QuoteResponse};
 use crate::primitives::registry::{curve_label, CurveSpec, Snapshot, TokenPair};
 use crate::primitives::routing::{RouteLeg, RouteRequest, RoutingConfig};
@@ -158,15 +159,6 @@ fn quote_hash(token_in: Address, token_out: Address, amount_in: U256) -> B256 {
     bytes.extend_from_slice(token_out.as_slice());
     bytes.extend_from_slice(&amount_in.to_be_bytes::<32>());
     keccak256(bytes)
-}
-
-/// A leg's share of the blended output, in percent, via integer bps (no `U256`→`f64` precision loss).
-fn share_pct(leg_out: U256, total_out: U256) -> f64 {
-    if total_out.is_zero() {
-        return 0.0;
-    }
-    let bps = leg_out.saturating_mul(U256::from(10_000u64)) / total_out;
-    u64::try_from(bps).unwrap_or(0) as f64 / 100.0
 }
 
 /// Curve label per strategy on the pair, from the same snapshot the route was solved over.

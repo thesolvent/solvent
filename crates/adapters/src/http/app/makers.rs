@@ -2,17 +2,16 @@
 //! `GET /v1/makers/{maker}/positions` — a maker's positions (list projection). `GET
 //! /v1/positions/{hash}` — one position's full detail.
 
-use alloy::primitives::{Address, B256, U256};
+use alloy::primitives::{Address, B256};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use solvent_core::deps::trade::Page as StorePage;
 use solvent_core::primitives::maker::{InventoryRow, MakerDashboard, MakerSummary, Position};
-use solvent_core::primitives::trade::{Trade as CoreTrade, TradeId, TradeLeg};
+use solvent_core::primitives::trade::{MakerTrade, TradeId};
 use solvent_core::primitives::{MakerId, StrategyHash};
 use solvent_core::SolventError;
 
-use crate::http::app::trades::{summary, Trade as TradeDto};
 use crate::http::dto::{Cursor, List, Page};
 use crate::http::primitives::{ApiResult, Response};
 use crate::http::state::AppState;
@@ -56,19 +55,6 @@ pub async fn maker_inventory(
     )))
 }
 
-/// One of a maker's settlements: the trade header plus this maker's share and captured fee.
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct MakerTrade {
-    #[serde(flatten)]
-    pub trade: TradeDto,
-    /// The maker's slice of the trade (delivered ÷ total) — settled trades only.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub share_pct: Option<f64>,
-    /// The maker's captured fee, valued at the trade-time prices — settled trades only.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fee_usd: Option<f64>,
-}
-
 /// Pagination for the maker settlements feed.
 #[derive(Debug, Deserialize)]
 pub struct MakerTradesQuery {
@@ -105,60 +91,11 @@ pub async fn maker_trades(
         limit: page.limit(),
         cursor,
     };
-    let fills = state
-        .trades
-        .list_for_maker(maker, &store_page)
-        .await
-        .map_err(SolventError::from)?;
-    let next_cursor = (fills.len() as u32 == store_page.limit)
-        .then(|| {
-            fills
-                .last()
-                .map(|f| Cursor::encode(&f.trade.id.to_string()))
-        })
+    let items = state.trades.maker_trades(maker, &store_page).await?;
+    let next_cursor = (items.len() as u32 == store_page.limit)
+        .then(|| items.last().map(|t| Cursor::encode(&t.trade.id)))
         .flatten();
-    let mut items = Vec::with_capacity(fills.len());
-    for fill in &fills {
-        let header = summary(&state.assets, &state.valuation, &fill.trade).await;
-        let dec_in = state.assets.token_or_default(fill.trade.token_in).decimals;
-        let dec_out = state.assets.token_or_default(fill.trade.token_out).decimals;
-        items.push(MakerTrade {
-            share_pct: maker_share_pct(&fill.trade, &fill.leg),
-            fee_usd: maker_fee_usd(&fill.trade, &fill.leg, dec_in, dec_out),
-            trade: header,
-        });
-    }
     Ok(Response::ok(List::page(items, next_cursor, None)))
-}
-
-/// The maker's slice of the trade — its delivered amount over the trade's total. Settled trades only.
-fn maker_share_pct(trade: &CoreTrade, leg: &TradeLeg) -> Option<f64> {
-    let total = trade.amount_out?;
-    (!total.is_zero()).then(|| to_f64(leg.amount_out) / to_f64(total) * 100.0)
-}
-
-/// The maker's captured fee: value received minus value delivered, at the trade-time prices stored on
-/// the trade. Settled trades only (an unsettled or unpriced trade has no fee to show).
-fn maker_fee_usd(trade: &CoreTrade, leg: &TradeLeg, dec_in: u8, dec_out: u8) -> Option<f64> {
-    trade.amount_out?;
-    let price_in = trade.token_in_price_usd?;
-    let price_out = trade.token_out_price_usd?;
-    let received_usd = human(leg.amount_in, dec_in) * price_in;
-    let delivered_usd = human(leg.amount_out, dec_out) * price_out;
-    Some(received_usd - delivered_usd)
-}
-
-/// A same-token ratio numerator/denominator — decimals cancel, so the raw integer converts directly.
-fn to_f64(amount: U256) -> f64 {
-    amount.to_string().parse().unwrap_or(0.0)
-}
-
-/// Base units as a human decimal (for USD math), `0.0` if the decimals are nonsensical.
-fn human(amount: U256, decimals: u8) -> f64 {
-    alloy::primitives::utils::format_units(amount, decimals)
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0.0)
 }
 
 /// A maker's active positions (list projection). `{maker}` is an address (`me` needs a wallet).
@@ -213,69 +150,4 @@ fn parse_maker(s: &str) -> Result<Address, SolventError> {
         id_type: "maker",
         reason: e.to_string(),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use solvent_core::primitives::trade::TradeStatus;
-    use solvent_core::primitives::IntentId;
-    use ulid::Ulid;
-
-    fn leg(amount_in: u128, amount_out: u128) -> TradeLeg {
-        TradeLeg {
-            maker: MakerId(Address::from([3; 20])),
-            strategy_hash: StrategyHash(B256::from([3; 32])),
-            amount_in: U256::from(amount_in),
-            amount_out: U256::from(amount_out),
-        }
-    }
-
-    fn trade(amount_out: Option<u128>, price_in: Option<f64>, price_out: Option<f64>) -> CoreTrade {
-        CoreTrade {
-            id: TradeId(Ulid::from_parts(1, 1)),
-            order_hash: IntentId(B256::from([1; 32])),
-            taker: Address::ZERO,
-            token_in: Address::from([2; 20]),
-            token_out: Address::from([3; 20]),
-            amount_in: U256::from(2_010_000_000u64),
-            min_amount_out: U256::ZERO,
-            amount_out: amount_out.map(U256::from),
-            status: TradeStatus::Confirmed,
-            deadline_block: 0,
-            signature: None,
-            price_impact_pct: None,
-            surplus: None,
-            tx_hash: None,
-            block_number: None,
-            created_at: 0,
-            settled_at: Some(1),
-            token_in_price_usd: price_in,
-            token_out_price_usd: price_out,
-        }
-    }
-
-    #[test]
-    fn fee_and_share_use_trade_time_prices() {
-        // Maker received 2010 USDC (6dp), delivered 1 WETH (18dp) of a 2-WETH trade.
-        let leg = leg(2_010_000_000, 1_000_000_000_000_000_000);
-        let t = trade(Some(2_000_000_000_000_000_000), Some(1.0), Some(2000.0));
-        // fee = 2010·$1 − 1·$2000 = $10 at the stored prices.
-        assert_eq!(maker_fee_usd(&t, &leg, 6, 18), Some(10.0));
-        // share = 1 WETH of the 2-WETH trade = 50%.
-        assert_eq!(maker_share_pct(&t, &leg), Some(50.0));
-    }
-
-    #[test]
-    fn unsettled_or_unpriced_has_no_fee() {
-        let leg = leg(2_010_000_000, 1_000_000_000_000_000_000);
-        // Unsettled (no delivered total): no share, no fee.
-        let pending = trade(None, Some(1.0), Some(2000.0));
-        assert_eq!(maker_fee_usd(&pending, &leg, 6, 18), None);
-        assert_eq!(maker_share_pct(&pending, &leg), None);
-        // Settled but unpriced: share available, fee not.
-        let unpriced = trade(Some(2_000_000_000_000_000_000), None, None);
-        assert_eq!(maker_fee_usd(&unpriced, &leg, 6, 18), None);
-        assert_eq!(maker_share_pct(&unpriced, &leg), Some(50.0));
-    }
 }

@@ -4,7 +4,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use alloy::primitives::{Address, U256};
+use alloy::primitives::U256;
 use axum::extract::{Json, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ use solvent_core::SolventError;
 use std::time::Instant;
 use ulid::Ulid;
 
-use crate::http::primitives::{ApiResult, Response};
+use crate::http::primitives::{parse_addr, ApiResult, Response};
 use crate::http::state::AppState;
 use crate::ingest::uniswapx::UniswapXV2Normalizer;
 
@@ -48,8 +48,8 @@ pub async fn quote(
     State(state): State<AppState>,
     Json(body): Json<QuoteRequest>,
 ) -> ApiResult<QuoteResponse> {
-    let token_in = parse_addr(&body.token_in)?;
-    let token_out = parse_addr(&body.token_out)?;
+    let token_in = parse_addr("token", &body.token_in)?;
+    let token_out = parse_addr("token", &body.token_out)?;
     let amount_in = parse_amount(&body.amount_in)?;
 
     let started = Instant::now();
@@ -82,13 +82,6 @@ fn participant(leg: &QuoteLeg) -> Option<QuoteParticipant> {
     Some(QuoteParticipant {
         maker: MakerId(leg.maker),
         strategy_hash: StrategyHash(leg.strategy_hash.parse().ok()?),
-    })
-}
-
-fn parse_addr(s: &str) -> Result<Address, SolventError> {
-    s.parse::<Address>().map_err(|e| SolventError::InvalidId {
-        id_type: "token",
-        reason: e.to_string(),
     })
 }
 
