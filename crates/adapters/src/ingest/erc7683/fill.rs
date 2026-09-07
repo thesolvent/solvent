@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn calldata_targets_the_settler_with_the_escrowed_order_data() {
         let intent = intent();
-        let plan = RoutePlan::new(intent.id, vec![leg()], U256::ZERO);
+        let plan = RoutePlan::new(intent.id, vec![leg()], U256::ZERO, 0.0);
         let calldata = Erc7683FillBuilder::new(router())
             .build(&intent, &plan, &snapshot_with(program()))
             .expect("builds");
@@ -221,6 +221,7 @@ mod tests {
             intent().id,
             vec![leg(), leg(), leg(), leg(), leg()],
             U256::ZERO,
+            0.0,
         );
         assert!(matches!(
             Erc7683FillBuilder::new(router()).build(&intent(), &plan, &snapshot_with(program())),
@@ -230,7 +231,7 @@ mod tests {
 
     #[test]
     fn no_legs_errors() {
-        let plan = RoutePlan::new(intent().id, Vec::new(), U256::ZERO);
+        let plan = RoutePlan::new(intent().id, Vec::new(), U256::ZERO, 0.0);
         assert!(matches!(
             Erc7683FillBuilder::new(router()).build(&intent(), &plan, &Snapshot::default()),
             Err(FillBuilderError::NoLegs)
@@ -239,7 +240,7 @@ mod tests {
 
     #[test]
     fn missing_strategy_errors() {
-        let plan = RoutePlan::new(intent().id, vec![leg()], U256::ZERO);
+        let plan = RoutePlan::new(intent().id, vec![leg()], U256::ZERO, 0.0);
         assert!(matches!(
             Erc7683FillBuilder::new(router()).build(&intent(), &plan, &Snapshot::default()),
             Err(FillBuilderError::MissingStrategy)
@@ -250,7 +251,7 @@ mod tests {
     fn undecodable_order_errors() {
         let mut intent = intent();
         intent.raw = Bytes::from_static(&[1, 2, 3]);
-        let plan = RoutePlan::new(intent.id, vec![leg()], U256::ZERO);
+        let plan = RoutePlan::new(intent.id, vec![leg()], U256::ZERO, 0.0);
         assert!(matches!(
             Erc7683FillBuilder::new(router()).build(&intent, &plan, &snapshot_with(program())),
             Err(FillBuilderError::UndecodableOrder)

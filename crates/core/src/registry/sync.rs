@@ -7,7 +7,7 @@ use std::sync::Arc;
 use moka::sync::Cache;
 
 use super::SharedSnapshot;
-use crate::deps::registry::{ChainSource, Store};
+use crate::deps::registry::{ChainSource, EventStore};
 use crate::primitives::registry::{EventCursor, Snapshot};
 use crate::primitives::{ChainConfig, ChainId};
 use crate::SolventError;
@@ -17,7 +17,7 @@ pub struct RegistrySync {
     start_block: u64,
     overlap_blocks: u64,
     source: Arc<dyn ChainSource>,
-    store: Arc<dyn Store>,
+    store: Arc<dyn EventStore>,
     snapshot: Arc<SharedSnapshot>,
     seen: Cache<EventCursor, ()>,
 }
@@ -26,7 +26,7 @@ impl RegistrySync {
     pub fn new(
         config: &ChainConfig,
         source: Arc<dyn ChainSource>,
-        store: Arc<dyn Store>,
+        store: Arc<dyn EventStore>,
         snapshot: Arc<SharedSnapshot>,
     ) -> Self {
         let seen = Cache::builder().time_to_live(config.dedup_ttl()).build();
@@ -103,7 +103,7 @@ impl RegistrySync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deps::registry::{ChainSourceError, StoreError};
+    use crate::deps::registry::{ChainSourceError, RecordedEvent, StoreError};
     use crate::primitives::registry::{AquaEvent, EventExt, StrategyKey};
     use crate::primitives::{MakerId, StrategyHash};
     use alloy_primitives::{Address, B256, U256};
@@ -188,7 +188,7 @@ mod tests {
         cursor: Mutex<Option<EventCursor>>,
     }
     #[async_trait]
-    impl Store for FakeStore {
+    impl EventStore for FakeStore {
         async fn cursor(&self, _chain: ChainId) -> Result<Option<EventCursor>, StoreError> {
             Ok(*self.cursor.lock().unwrap())
         }
@@ -220,6 +220,31 @@ mod tests {
         }
         async fn events(&self, _chain: ChainId) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
             Ok(self.events.lock().unwrap().values().cloned().collect())
+        }
+        async fn history(
+            &self,
+            _chain: ChainId,
+            hash: StrategyHash,
+        ) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
+            Ok(self
+                .events
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|e| e.event.key().strategy_hash == hash)
+                .cloned()
+                .collect())
+        }
+        async fn recent(
+            &self,
+            _chain: ChainId,
+            _before: Option<EventCursor>,
+            _limit: u32,
+        ) -> Result<Vec<RecordedEvent>, StoreError> {
+            Ok(Vec::new())
+        }
+        async fn count_since(&self, _chain: ChainId, _since: u64) -> Result<u64, StoreError> {
+            Ok(0)
         }
     }
 

@@ -43,20 +43,28 @@ pub struct RouteLeg {
 
 /// A sourcing plan for an intent — the legs to pull, and the resolver's spread. Execution
 /// maps it to the filler's `SourceSwap[]`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct RoutePlan {
     pub intent: IntentId,
     pub legs: Vec<RouteLeg>,
     pub expected_profit: U256,
+    /// Price impact of the routed split, in percent.
+    pub price_impact_pct: f64,
 }
 
 impl RoutePlan {
-    pub fn new(intent: IntentId, legs: Vec<RouteLeg>, expected_profit: U256) -> RoutePlan {
+    pub fn new(
+        intent: IntentId,
+        legs: Vec<RouteLeg>,
+        expected_profit: U256,
+        price_impact_pct: f64,
+    ) -> RoutePlan {
         RoutePlan {
             intent,
             legs,
             expected_profit,
+            price_impact_pct,
         }
     }
 }
