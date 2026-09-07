@@ -50,6 +50,8 @@ fn trade(id: TradeId, order: u8, taker: u8, status: TradeStatus) -> Trade {
         block_number: None,
         created_at: 1_700_000_000,
         settled_at: None,
+        token_in_price_usd: Some(1.0),
+        token_out_price_usd: Some(2000.0),
     }
 }
 
@@ -356,4 +358,50 @@ async fn stats_counts_settled_confirmed_and_median_impact() {
     assert_eq!(stats.confirmed, 2, "two of them confirmed");
     assert_eq!(stats.failed, 1, "one of them failed");
     assert_eq!(stats.median_impact_pct, Some(0.42));
+}
+
+#[tokio::test]
+async fn list_for_maker_returns_only_legged_trades_with_leg() {
+    let store = setup().await;
+    // Trade A (older): makers 3 and 4. Trade B (newer): maker 5 only.
+    let a = trade(tid(1), 1, 7, TradeStatus::Confirmed);
+    store
+        .create(&a, &[leg(3, 600), leg(4, 400)], &created(1_700_000_000))
+        .await
+        .unwrap();
+    let b = trade(tid(2), 2, 7, TradeStatus::Confirmed);
+    store
+        .create(&b, &[leg(5, 1000)], &created(1_700_000_000))
+        .await
+        .unwrap();
+
+    let page = Page {
+        limit: 50,
+        cursor: None,
+    };
+
+    // Maker 3 sees only trade A, carrying its own leg and the persisted trade-time prices.
+    let fills = store
+        .list_for_maker(Address::from([3; 20]), &page)
+        .await
+        .unwrap();
+    assert_eq!(fills.len(), 1);
+    assert_eq!(fills[0].trade.id, a.id);
+    assert_eq!(fills[0].leg.maker, MakerId(Address::from([3; 20])));
+    assert_eq!(fills[0].leg.amount_out, U256::from(600u64));
+    assert_eq!(fills[0].trade.token_in_price_usd, Some(1.0));
+    assert_eq!(fills[0].trade.token_out_price_usd, Some(2000.0));
+
+    // Maker 5 sees only trade B; maker 9 (never legged) sees nothing.
+    let fills5 = store
+        .list_for_maker(Address::from([5; 20]), &page)
+        .await
+        .unwrap();
+    assert_eq!(fills5.len(), 1);
+    assert_eq!(fills5[0].trade.id, b.id);
+    assert!(store
+        .list_for_maker(Address::from([9; 20]), &page)
+        .await
+        .unwrap()
+        .is_empty());
 }

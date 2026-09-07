@@ -125,7 +125,9 @@ mod tests {
         Execution, ExecutionError, SettlementError, SettlementReader, SimError, SimGate,
     };
     use crate::deps::ledger::{BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError};
-    use crate::deps::trade::{CreateResult, Page, TradeFilter, TradeStats, TradeStoreError};
+    use crate::deps::trade::{
+        CreateResult, MakerFill, Page, TradeFilter, TradeStats, TradeStoreError,
+    };
     use crate::primitives::execution::{ExecHandle, ExecStatus, FillTx, SimVerdict, TrackedFill};
     use crate::primitives::ledger::{AccountKey, Reservation, ReservationSource};
     use crate::primitives::trade::{TradeAttempt, TradeId, TradeInfo, TradeLeg};
@@ -333,6 +335,13 @@ mod tests {
         async fn list(&self, _: &TradeFilter, _: &Page) -> Result<Vec<Trade>, TradeStoreError> {
             Ok(Vec::new())
         }
+        async fn list_for_maker(
+            &self,
+            _: Address,
+            _: &Page,
+        ) -> Result<Vec<MakerFill>, TradeStoreError> {
+            Ok(Vec::new())
+        }
         async fn stats(&self) -> Result<TradeStats, TradeStoreError> {
             Ok(TradeStats {
                 settled: 0,
@@ -362,6 +371,8 @@ mod tests {
             block_number: None,
             created_at: 0,
             settled_at: None,
+            token_in_price_usd: None,
+            token_out_price_usd: None,
         }
     }
 
