@@ -15,6 +15,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./construction": {
+      "types": "./dist/construction.d.ts",
+      "import": "./dist/construction.js",
+      "require": "./dist/construction.cjs"
     }
   },
   "scripts": {
@@ -23,9 +28,11 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@1inch/swap-vm-sdk": "0.4.1",
     "viem": "^2"
   },
   "devDependencies": {
+    "@types/node": "^24",
     "typescript": "^5",
     "tsup": "^8",
     "vitest": "^3"
