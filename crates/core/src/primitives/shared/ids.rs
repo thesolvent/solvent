@@ -34,7 +34,7 @@ macro_rules! define_id {
 }
 
 define_id!(
-    /// UniswapX order hash.
+    /// The source protocol's order hash.
     IntentId(B256)
 );
 define_id!(
