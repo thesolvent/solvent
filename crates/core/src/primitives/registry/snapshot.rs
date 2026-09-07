@@ -10,6 +10,7 @@ use itertools::Itertools;
 use super::curve::{Curve, CurveSpec};
 use super::event::{AquaEvent, StrategyKey};
 use super::strategy::{MakerStrategy, TokenPair};
+use crate::primitives::{MakerId, StrategyHash};
 
 /// Per-asset activity derived from the snapshot: how many active strategies quote a token and in
 /// which pairs. The source for the supported-asset list.
@@ -97,6 +98,19 @@ impl Snapshot {
     /// Every active strategy — the budget cache enumerates these to refresh each maker's caps.
     pub fn active_strategies(&self) -> impl Iterator<Item = &MakerStrategy> {
         self.strategies.values().filter(|s| s.active)
+    }
+
+    /// A maker's active strategies — the maker dashboard's positions and liquidity.
+    pub fn strategies_for_maker(&self, maker: MakerId) -> impl Iterator<Item = &MakerStrategy> {
+        self.active_strategies()
+            .filter(move |s| s.key.maker == maker)
+    }
+
+    /// A strategy by its hash (active or docked) — the `/positions/{hash}` lookup.
+    pub fn strategy_by_hash(&self, hash: StrategyHash) -> Option<&MakerStrategy> {
+        self.strategies
+            .values()
+            .find(|s| s.key.strategy_hash == hash)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -364,6 +378,35 @@ mod tests {
         for ev in events {
             snap.apply(ev);
         }
+    }
+
+    #[test]
+    fn strategies_for_maker_returns_only_that_makers_active_strategies() {
+        let mut snap = Snapshot::default();
+        // maker 1 ships two strategies (hashes 10, 11); maker 2 ships one (hash 20).
+        for (m, h) in [(1u8, 10u8), (1, 11), (2, 20)] {
+            snap.apply(AquaEvent::Shipped {
+                maker: maker(m),
+                app: app(),
+                strategy_hash: hash(h),
+                strategy: Bytes::from(vec![h]),
+            });
+        }
+        // one of maker 1's is docked → no longer active.
+        snap.apply(AquaEvent::Docked {
+            maker: maker(1),
+            app: app(),
+            strategy_hash: hash(11),
+        });
+
+        let mut owned: Vec<_> = snap
+            .strategies_for_maker(maker(1))
+            .map(|s| s.key.strategy_hash)
+            .collect();
+        owned.sort();
+        assert_eq!(owned, vec![hash(10)]);
+        assert_eq!(snap.strategies_for_maker(maker(2)).count(), 1);
+        assert_eq!(snap.strategies_for_maker(maker(3)).count(), 0);
     }
 
     #[test]

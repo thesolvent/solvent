@@ -46,6 +46,10 @@ pub struct Config {
     /// Binance symbol → the tokens it prices (e.g. `ETHUSDT` → `[WETH]`). Drives the price feed.
     #[serde(default)]
     pub price_symbols: Vec<PriceSymbol>,
+    /// USD stablecoins pegged to $1 with no Binance pair (USDT — the quote unit). Seeded into the
+    /// price cache at boot so every supported asset values.
+    #[serde(default)]
+    pub usd_stable_pegs: Vec<Address>,
     /// The resolver's Aqua filler contract the swap path fills through.
     #[serde(default)]
     pub filler: Address,

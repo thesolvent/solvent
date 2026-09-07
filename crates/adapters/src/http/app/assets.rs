@@ -26,6 +26,9 @@ pub async fn assets(
     Query(query): Query<AssetsQuery>,
 ) -> Response<List<Asset>> {
     Response::ok(List::all(
-        state.assets.list(query.supported.unwrap_or(false)),
+        state
+            .assets
+            .list(query.supported.unwrap_or(false), &state.valuation)
+            .await,
     ))
 }

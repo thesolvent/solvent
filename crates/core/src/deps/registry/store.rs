@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::primitives::registry::{AquaEvent, EventCursor, EventExt};
-use crate::primitives::ChainId;
+use crate::primitives::{ChainId, StrategyHash};
 
 /// A stored event with the wall-clock time it was recorded — the activity feed's row (the raw event
 /// log has no on-chain timestamp, so the store stamps observation time at insert).
@@ -39,6 +39,15 @@ pub trait EventStore: Send + Sync {
     /// The full event log for `chain` in fold order — replayed to rebuild the
     /// snapshot on startup.
     async fn events(&self, chain: ChainId) -> Result<Vec<EventExt<AquaEvent>>, StoreError>;
+
+    /// One strategy's events for `chain` in fold order — the maker position's on-chain history
+    /// (ship legs, swaps, dock). Off the hot path (position detail only); a full-log scan filtered
+    /// by strategy is fine at MVP scale.
+    async fn history(
+        &self,
+        chain: ChainId,
+        strategy_hash: StrategyHash,
+    ) -> Result<Vec<EventExt<AquaEvent>>, StoreError>;
 
     /// A page of the most recent events, newest first, for the activity feed. `before` continues
     /// after a prior page's last position (exclusive); `None` starts at the head.

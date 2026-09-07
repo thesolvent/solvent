@@ -221,6 +221,20 @@ mod tests {
         async fn events(&self, _chain: ChainId) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
             Ok(self.events.lock().unwrap().values().cloned().collect())
         }
+        async fn history(
+            &self,
+            _chain: ChainId,
+            hash: StrategyHash,
+        ) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
+            Ok(self
+                .events
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|e| e.event.key().strategy_hash == hash)
+                .cloned()
+                .collect())
+        }
         async fn recent(
             &self,
             _chain: ChainId,

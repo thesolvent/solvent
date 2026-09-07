@@ -51,6 +51,10 @@ tokens = ["0x6b175474e89094c44da98b954eedeac495271d0f"]  # DAI
 symbol = "LINKUSDT"
 tokens = ["0x514910771af9ca656af840dff83e8264ecf986ca"]  # LINK
 
+# USD stablecoins with no Binance pair — the quote unit itself. Pegged to $1 at boot so every
+# supported asset values (USDC/DAI drift and keep their live *USDT feed above; only USDT is pegged).
+usd_stable_pegs = ["0xdac17f958d2ee523a2206206994597c13d831ec7"]  # USDT
+
 # Swap (submit) path. The resolver's Aqua filler contract and the account authorized to call it;
 # the filler-owner and cosigner signing keys are read from the environment, never this file:
 #   SOLVENT_SIGNER_KEY    — the filler-owner key that signs and pays for fills

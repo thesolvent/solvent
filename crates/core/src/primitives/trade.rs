@@ -6,8 +6,10 @@ use core::fmt;
 use core::str::FromStr;
 
 use alloy_primitives::{Address, Bytes, B256, U256};
+use serde::Serialize;
 use ulid::Ulid;
 
+use super::amount::{Amount, TokenAmount};
 use crate::primitives::{IntentId, MakerId, StrategyHash};
 use crate::SolventError;
 
@@ -129,6 +131,10 @@ pub struct Trade {
     /// Unix seconds.
     pub created_at: u64,
     pub settled_at: Option<u64>,
+    /// USD price of `token_in`/`token_out` captured when the trade was submitted, so fee and value
+    /// figures stay fixed at trade-time economics rather than drifting with the current market.
+    pub token_in_price_usd: Option<f64>,
+    pub token_out_price_usd: Option<f64>,
 }
 
 /// One maker's slice of the routed split. The tokens and the settlement tx are the trade's — one
@@ -158,6 +164,70 @@ pub struct TradeInfo {
     pub trade: Trade,
     pub attempts: Vec<TradeAttempt>,
     pub legs: Vec<TradeLeg>,
+}
+
+/// One trade on the wire, header-only in a list; a detail also carries `lifecycle`, `legs`, and the
+/// order's coordinates (omitted from JSON when absent). Assembled by the trade service.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct TradeView {
+    pub id: String,
+    pub status: String,
+    #[schema(value_type = String)]
+    pub taker: Address,
+    /// The swapper's input token and the maximum it authorized.
+    pub input: TokenAmount,
+    /// The output token and the amount delivered (or the signed floor, until it settles).
+    pub output: TokenAmount,
+    /// The resolver's surplus over the signed floor, net of gas, in output-token units.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surplus: Option<Amount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tx_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_number: Option<u64>,
+    pub created_at: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settled_at: Option<u64>,
+    /// The stage timeline — detail only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<Vec<TradeAction>>,
+    /// The maker slices the trade sourced — detail only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legs: Option<Vec<MakerLeg>>,
+    /// The signed order hash — detail only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deadline_block: Option<u64>,
+}
+
+/// One lifecycle stage a trade reached, and when (unix seconds).
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct TradeAction {
+    pub status: String,
+    pub at: u64,
+}
+
+/// One maker's slice of the routed split, on the wire.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct MakerLeg {
+    pub maker: String,
+    pub strategy_hash: String,
+    pub amount_in: Amount,
+    pub amount_out: Amount,
+}
+
+/// A settlement in a maker's feed: the trade header plus the maker's share and captured fee.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct MakerTrade {
+    #[serde(flatten)]
+    pub trade: TradeView,
+    /// The maker's slice of the trade (delivered ÷ total) — settled trades only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub share_pct: Option<f64>,
+    /// The maker's captured fee, valued at the trade-time prices — settled trades only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fee_usd: Option<f64>,
 }
 
 #[cfg(test)]

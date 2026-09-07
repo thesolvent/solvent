@@ -6,6 +6,7 @@ pub mod asset;
 pub mod execution;
 pub mod ingest;
 pub mod ledger;
+pub mod maker;
 pub mod pool;
 pub mod pricing;
 pub mod quote;

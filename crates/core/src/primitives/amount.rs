@@ -53,9 +53,20 @@ pub struct TokenBalance {
 /// The raw on-chain figures for one token, as the
 /// [`BalancesOracle`](crate::deps::balances::BalancesOracle) returns them — before decimals turn
 /// them into a display [`Amount`].
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Holdings {
     pub balance: U256,
     pub pullable: U256,
+}
+
+/// A part's share of a total, in percent, via integer bps — no `U256`→`f64` precision loss. `0.0`
+/// when the total is zero.
+pub fn share_pct(part: U256, total: U256) -> f64 {
+    if total.is_zero() {
+        return 0.0;
+    }
+    let bps = part.saturating_mul(U256::from(10_000u64)) / total;
+    u64::try_from(bps).unwrap_or(0) as f64 / 100.0
 }
 
 /// Format `raw` base units as a human decimal string, trailing zeros trimmed (`"1.5"`, `"4"`). Wraps

@@ -9,7 +9,7 @@ use solvent_core::{
     deps::registry::{EventStore, RecordedEvent, StoreError},
     primitives::{
         registry::{AquaEvent, EventCursor, EventExt},
-        ChainId,
+        ChainId, StrategyHash,
     },
 };
 use sqlx::sqlite::SqliteRow;
@@ -135,6 +135,25 @@ impl EventStore for SqliteStore {
         .await
         .map_err(db)?;
         Ok(rows.into_iter().map(|Json(event)| event).collect())
+    }
+
+    async fn history(
+        &self,
+        chain: ChainId,
+        strategy_hash: StrategyHash,
+    ) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
+        let rows: Vec<Json<EventExt<AquaEvent>>> = sqlx::query_scalar(
+            "SELECT event FROM aqua_event WHERE chain = ? ORDER BY block_number, log_index",
+        )
+        .bind(i64_of(chain.0)?)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(rows
+            .into_iter()
+            .map(|Json(event)| event)
+            .filter(|e| e.event.key().strategy_hash == strategy_hash)
+            .collect())
     }
 
     async fn recent(

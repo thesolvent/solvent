@@ -6,12 +6,15 @@ use std::sync::Arc;
 use serde::Serialize;
 use solvent_core::asset::AssetManager;
 use solvent_core::balances::BalancesService;
+use solvent_core::deps::quote_log::QuoteLog;
 use solvent_core::deps::registry::EventStore;
-use solvent_core::deps::trade::TradeStore;
+use solvent_core::maker::MakerService;
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::quote::QuoteService;
 use solvent_core::registry::SharedSnapshot;
 use solvent_core::swap::SwapService;
+use solvent_core::trade::TradeService;
+use solvent_core::valuation::Valuation;
 
 use crate::chain::ChainHead;
 use crate::ingest::uniswapx::ServerCosigner;
@@ -44,14 +47,20 @@ pub struct AppState {
     pub pools: Arc<PoolService>,
     pub depth: Arc<DepthService>,
     pub balances: Arc<BalancesService>,
+    /// The maker read-surface: positions, the positions list, and the roster.
+    pub makers: Arc<MakerService>,
     pub quote: Arc<QuoteService>,
     pub swap: Arc<SwapService>,
     /// Cosigns taker-signed orders on the swap path (holds only the resolver's cosigner key).
     pub cosigner: Arc<ServerCosigner>,
-    /// The trade lifecycle store, read by the `/trades` endpoints.
-    pub trades: Arc<dyn TradeStore>,
+    /// The trade read-surface, backing the `/trades` and maker-settlements endpoints.
+    pub trades: Arc<TradeService>,
     /// The live registry snapshot — the stat tiles read active-maker counts lock-free.
     pub registry: Arc<SharedSnapshot>,
     /// The durable Aqua event log, read by the `/activity` feed.
     pub registry_store: Arc<dyn EventStore>,
+    /// USD valuation + market data (price, 24h change) — the read DTOs are valued through this.
+    pub valuation: Arc<Valuation>,
+    /// Records each served quote, for maker uptime / latency / fill-share analytics.
+    pub quote_log: Arc<dyn QuoteLog>,
 }

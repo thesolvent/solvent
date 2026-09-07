@@ -17,6 +17,7 @@ use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
 use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
+use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
 use solvent_adapters::registry::{AlloyChainSource, SqliteStore};
 use solvent_adapters::routing::{BinanceFeed, GasPoller, MarketCache};
 use solvent_adapters::trade::SqliteTradeStore;
@@ -25,19 +26,24 @@ use solvent_core::balances::BalancesService;
 use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ledger::BudgetSource;
+use solvent_core::deps::maker_metrics::MakerMetricsStore;
+use solvent_core::deps::quote_log::QuoteLog;
 use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::routing::{GasPrice, PriceOracle};
 use solvent_core::deps::trade::TradeStore;
 use solvent_core::execution::ExecutionService;
 use solvent_core::ledger::LedgerService;
+use solvent_core::maker::MakerService;
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::primitives::routing::RoutingConfig;
-use solvent_core::primitives::{ChainConfig, ChainId};
+use solvent_core::primitives::{ChainConfig, ChainId, UsdPrice};
 use solvent_core::quote::QuoteService;
 use solvent_core::reconcile::ReconcileService;
 use solvent_core::registry::{RegistrySync, SharedSnapshot};
 use solvent_core::routing::LegCostResolver;
 use solvent_core::swap::{SwapConfig, SwapService};
+use solvent_core::trade::TradeService;
+use solvent_core::valuation::Valuation;
 use solvent_core::SolventError;
 use sqlx::SqlitePool;
 use walletkit::adapters::policy::{AllowAll, DefaultPolicyEngine};
@@ -131,6 +137,8 @@ async fn main() -> Result<(), StartupError> {
         Arc::new(SystemClock),
     ));
     let trade_store: Arc<dyn TradeStore> = Arc::new(SqliteTradeStore::new(pool.clone()));
+    let quote_log: Arc<dyn QuoteLog> =
+        Arc::new(SqliteQuoteLog::new(pool.clone(), Arc::new(SystemClock)));
     ledger.recover().await?;
     if let Err(e) = ledger.sync_budgets(&registry.load()).await {
         tracing::warn!(error = %e, "initial budget sync failed; caps are empty until the next tick");
@@ -140,22 +148,12 @@ async fn main() -> Result<(), StartupError> {
         load_token_list(&config.token_list)?,
         Arc::clone(&registry),
     ));
-    let pools = Arc::new(PoolService::new(Arc::clone(&registry), Arc::clone(&assets)));
-    // An arbitrary wallet's holdings can't be pre-synced, so the balances endpoint reads them on
-    // demand, batched into one round-trip per request.
-    let balances_oracle: Arc<dyn BalancesOracle> = Arc::new(AlloyBalancesOracle::new(
-        provider.clone(),
-        config.aqua_address,
-    ));
-    let balances = Arc::new(BalancesService::new(balances_oracle, Arc::clone(&assets)));
-    let depth = Arc::new(DepthService::new(
-        Arc::clone(&registry),
-        Arc::clone(&ledger),
-        Arc::clone(&assets),
-    ));
-    // Market data for the per-leg gas cost: a cache the quote path reads lock-free (no RPC), kept
-    // fresh by a gas poller (RPC) and the Binance price feed (WS). Both self-heal.
+    // Market data: a cache the quote path reads lock-free (no RPC), kept fresh by a gas poller (RPC)
+    // and the Binance price feed (WS). Both self-heal. It also backs USD valuation across the reads.
     let market = MarketCache::new();
+    for token in &config.usd_stable_pegs {
+        market.seed_price(*token, UsdPrice::PAR);
+    }
     tokio::spawn(GasPoller::new(provider.clone(), Arc::clone(&market), GAS_POLL_INTERVAL).run());
     tokio::spawn(
         BinanceFeed::new(
@@ -167,6 +165,7 @@ async fn main() -> Result<(), StartupError> {
     );
     let gas: Arc<dyn GasPrice> = market.clone();
     let oracle: Arc<dyn PriceOracle> = market;
+    let valuation = Arc::new(Valuation::new(Arc::clone(&oracle)));
     // One per-leg gas resolver shared by both routing paths — quote and swap price gas the same way.
     let leg_cost = Arc::new(LegCostResolver::new(
         gas,
@@ -175,6 +174,39 @@ async fn main() -> Result<(), StartupError> {
         config.native_token,
         config.gas_units_per_leg,
     ));
+
+    let pools = Arc::new(PoolService::new(
+        Arc::clone(&registry),
+        Arc::clone(&assets),
+        Arc::clone(&valuation),
+    ));
+    // An arbitrary wallet's holdings can't be pre-synced, so the balances endpoint reads them on
+    // demand, batched into one round-trip per request.
+    let balances_oracle: Arc<dyn BalancesOracle> = Arc::new(AlloyBalancesOracle::new(
+        provider.clone(),
+        config.aqua_address,
+    ));
+    let balances = Arc::new(BalancesService::new(
+        Arc::clone(&balances_oracle),
+        Arc::clone(&assets),
+        Arc::clone(&valuation),
+    ));
+    let maker_metrics: Arc<dyn MakerMetricsStore> = Arc::new(SqliteMakerMetrics::new(pool.clone()));
+    let makers = Arc::new(MakerService::new(
+        Arc::clone(&registry),
+        Arc::clone(&assets),
+        Arc::clone(&valuation),
+        maker_metrics,
+        Arc::clone(&balances_oracle),
+        Arc::clone(&registry_store),
+        Arc::new(SystemClock),
+        ChainId(config.chain_id),
+    ));
+    let depth = Arc::new(DepthService::new(
+        Arc::clone(&registry),
+        Arc::clone(&ledger),
+        Arc::clone(&assets),
+    ));
     let quote = Arc::new(QuoteService::new(
         Arc::clone(&registry),
         Arc::clone(&ledger),
@@ -182,6 +214,7 @@ async fn main() -> Result<(), StartupError> {
         RoutingConfig::new(MAX_CANDIDATES, MAX_LEGS, config.gas_units_per_leg),
         Arc::new(SystemClock),
         Arc::clone(&leg_cost),
+        Arc::clone(&valuation),
     ));
 
     // The swap write path. Signing keys are read from the environment — never the config file or a
@@ -291,6 +324,11 @@ async fn main() -> Result<(), StartupError> {
         run_reconcile(Arc::clone(&reconcile), RECONCILE_INTERVAL)
     }));
 
+    let trades = Arc::new(TradeService::new(
+        Arc::clone(&trade_store),
+        Arc::clone(&assets),
+        Arc::clone(&valuation),
+    ));
     let state = AppState {
         config: Arc::new(config.app_config()),
         head,
@@ -298,12 +336,15 @@ async fn main() -> Result<(), StartupError> {
         pools,
         depth,
         balances,
+        makers,
         quote,
         swap,
         cosigner,
-        trades: trade_store,
+        trades,
         registry: Arc::clone(&registry),
         registry_store,
+        valuation,
+        quote_log,
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;

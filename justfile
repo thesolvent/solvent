@@ -55,6 +55,17 @@ be-test:
 # The gate a backend phase must pass before it closes.
 be-gate: be-fmt-check be-clippy be-test
 
+# --- sdk (TypeScript, @solvent/sdk) ---
+sdk-setup:
+    cd sdk && pnpm install
+
+# The gate an sdk task must pass: generated types in sync + types + build + tests.
+sdk-gate:
+    cd sdk && pnpm run codegen:check
+    cd sdk && pnpm run typecheck
+    cd sdk && pnpm run build
+    cd sdk && pnpm run test
+
 # --- devnet (docker compose) ---
 COMPOSE := "docker compose -f devnet/docker-compose.yml"
 
