@@ -206,7 +206,51 @@ the project is pre-1.0 and evolving.
     crash-between-create-and-reserve wedge, decline-stat consistency, and activity pagination; a
     codebase-wide comment trim to the house standard.
 
-_Next: S3 — construction / SDK._
+- **S3 · M3 — USD valuation**: a core `Valuation` service over the existing `PriceOracle`
+  (`usd(amount, token)` / `tvl(iter)`, missing price → `None`, never a fabricated zero), the
+  `BinanceFeed` tracked symbols widened from the routing set to all Core-6 assets (+ 24h change from
+  the ticker stream), and the `$`/`change` fields wired across every M1/M2/M4 DTO (`Amount.usd`, pool
+  TVL, trade impact-$, stats volume/fees).
+- **S3 · M4 — maker dashboard & analytics** (routes 12–16): the maker read-surface.
+  - **Range decoder + metrics** — `sqrt_price→human` range labels beside the curve engine; a
+    `quote_events` capture on `POST /swap/quote` and a `MakerMetricsStore` (SQLite rollups: fills,
+    volume, fees, uptime, latency-p50, fill-share) grouped by maker/strategy/day.
+  - **`GET /v1/makers`** (active roster) + **`GET /v1/makers/{maker}`** — the dashboard: headline
+    KPIs with period-over-period `*_change_pct`, market-share fill-share over the maker's pairs, and a
+    "cheaper competitor" insight; `me` resolves to the caller's wallet.
+  - **`GET /v1/makers/{maker}/inventory`** — per-token rows (wallet / shared / fees / APY) with the
+    contributing legs, transposed from the position set.
+  - **`GET /v1/makers/{maker}/trades`** — the settlement feed, scoped to `trade_leg.maker`, with
+    per-fill `share_pct` and `fee_usd` computed from **trade-time** token prices (persisted on the
+    trade, so a settled fee never drifts with the market).
+  - **`GET /v1/positions/{hash}`** + **`GET /v1/makers/{maker}/positions`** — the canonical `Position`
+    (human `range`, `balances{virtual, actual, backed, coverage, opening, split}`, `economics`,
+    detail-only `active_stats`), the list projection omitting detail fields; opening balances read from
+    the event log.
+- **S3 · M5 — write path: `@solvent/sdk` + thin backend** (polyglot; routes 17–18): a **client-side,
+  non-custodial** TypeScript SDK plus the two endpoints it needs.
+  - **`@solvent/sdk`** (new in-repo pnpm package: tsup dual ESM/CJS, vitest, `sideEffects:false`,
+    per-module subpath exports) — hexagonal-lite: a pure core + one HTTP seam.
+    - **`construction`** — a fluent `Strategy` builder (`fullRange`/`concentrated`/`inRange`/`pegged`
+      `.fee(bps).build(maker)` → `{program, strategyHash, order}`) that reuses the `@1inch/swap-vm-sdk`
+      price/band primitives (decimals-aware `Price`, `linearWidthFromSymmetricRangePercent`); encoding
+      round-tripped against the shared decoder corpora the Rust side also validates.
+    - **`positions`** — `positions({aqua, app})` → `approve`/`ship`/`dock`/`push`, each an unsigned
+      `{to, data, value}` for the maker's own wallet (the SDK holds no key, sends nothing); `ship`/
+      `dock` via `@1inch/aqua-sdk`, `push`/`approve` via viem + the shipped ABIs.
+    - **`client`** — `createSolventClient({baseUrl, transport?, headers?})`, one typed method per
+      route over an injectable `Transport` (defaults to `fetch`), throwing `SolventApiError` /
+      `SolventNetworkError`; wire types generated from the OpenAPI snapshot.
+  - **`GET /v1/pairs`** — Create-wizard candidate pairs (every asset quoted against a stable, plus
+    stable/stable) with kind, mid, defaults, and optional per-side wallet balances; `?search=` filter.
+  - **`POST /v1/positions/preview`** — server-authoritative pre-flight for an SDK-encoded ship:
+    `{exists, requires_approval, warnings}`, where `requires_approval` is the allowance-capped
+    `pullable < amount`.
+  - **OpenAPI single-source-of-truth** — a committed `sdk/openapi.json` snapshot with a drift guard on
+    each side (a backend test vs `ApiDoc::openapi()`, and the SDK's `codegen:check` vs the generated
+    types), so a renamed Rust field surfaces as a compile/gate failure, never a runtime one.
+
+_Next: S4 — the maker/taker frontend._
 
 ## [0.1.0] — 2026-08-28
 
