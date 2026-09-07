@@ -20,6 +20,11 @@
       "types": "./dist/construction.d.ts",
       "import": "./dist/construction.js",
       "require": "./dist/construction.cjs"
+    },
+    "./positions": {
+      "types": "./dist/positions.d.ts",
+      "import": "./dist/positions.js",
+      "require": "./dist/positions.cjs"
     }
   },
   "scripts": {
@@ -28,6 +33,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@1inch/aqua-sdk": "0.3.1",
     "@1inch/swap-vm-sdk": "0.4.1",
     "viem": "^2"
   },
