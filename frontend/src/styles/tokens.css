@@ -1,0 +1,43 @@
+/* Design tokens lifted from the locked Solvent mock: a lime accent on a warm-grey/white ground,
+   Anton (display) / Manrope (text) / IBM Plex Mono (labels & data). Every component reads these
+   variables instead of hardcoding values. */
+:root {
+  /* accent */
+  --lime: #c8f24e;
+  --lime-2: #c6f04e;
+  --green-600: #63c31c;
+  --green-700: #4e9a12;
+  --green-800: #3d6414;
+
+  /* ink & ground */
+  --ink: #0b0b0b;
+  --white: #ffffff;
+  --paper: #fbfbfa;
+
+  /* warm-grey ramp */
+  --grey-50: #f4f4f2;
+  --grey-100: #f0f0ec;
+  --grey-200: #e7e7e4;
+  --grey-300: #d2d2ce;
+  --grey-400: #a8a8a3;
+  --grey-500: #8a8a85;
+  --grey-600: #6c6c68;
+  --grey-700: #55574d;
+  --grey-800: #4a4a46;
+
+  /* tints */
+  --lime-tint: #f1f7e0;
+  --lime-tint-2: #eef7d9;
+  --lime-wash: #fbfdf4;
+  --warn-tint: #fdf0d8;
+
+  /* type */
+  --font-display: "Anton", "Impact", sans-serif;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* radii */
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+}
