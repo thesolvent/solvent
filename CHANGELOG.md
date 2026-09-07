@@ -21,6 +21,34 @@ the project is pre-1.0 and evolving.
 - **`DeployDevnet` script** — one-shot deploy of Aqua + the SwapVM router + the reactor + filler +
   the Core-6 tokens, writing an address manifest (`solvent-devnet.json`).
 
+- **ERC-7683 same-chain settlement (P2, tasks 2–3)** — the on-chain half of the second protocol.
+  - **`SameChainSettler`** — a generic ERC-7683 v1 settler implementing both `IOriginSettler` and
+    `IDestinationSettler` (on one chain they are the same contract). `openFor` verifies the swapper's
+    signature, enforces `openDeadline`, consumes a replay nonce and escrows the input in a single
+    Permit2 `permitWitnessTransferFrom`; `fill` takes the filler's output, pays the user, and releases
+    the escrow in the same call, because on one chain proof-of-fill *is* the fill. `resolve`/`resolveFor`
+    return the standard's `ResolvedCrossChainOrder`, so a third-party solver can price an order without
+    a decoder. `originData` is bound to the escrow by hash, so a filler cannot substitute a cheaper order.
+  - **`Erc7683AquaFiller`** — zero-inventory sourcing for a protocol that gives the filler no callback.
+    The flash comes from SwapVM instead: with `isFirstTransferFromTaker` false the router pays the taker
+    before taking payment, and `preTransferInCallback` fires *before* our input is pulled — so inside it
+    we hold the maker's output having paid nothing, and call the settler there. Multi-leg sourcing nests
+    (leg *i*'s callback launches leg *i+1*, the innermost settles, the stack unwinds paying makers
+    outward), bounded at `MAX_LEGS = 4`, with the remaining plan carried in `preTransferInCallbackData`
+    so no contract state spans the levels. Input allowances are granted at the plan's cumulative maximum
+    up front rather than per leg, because a nested leg's revoke would strip the outer leg's allowance.
+  - **`Erc7683FillBuilder`** — `RoutePlan` → `Erc7683AquaFiller.fill(...)` calldata, rejecting plans
+    wider than `MAX_LEGS` off-chain rather than reverting on-chain (`FillBuilderError::TooManyLegs`).
+  - **Cross-language pin closed** — `GenSolventOrderFixture.s.sol` emits a fixture from the real settler;
+    the Rust codec's `orderId` and Permit2 witness digest are asserted against it, so the id the
+    normalizer produces is the id the settler records.
+  - **`RoutePlan::new`** — every other primitive had a constructor; `#[non_exhaustive]` otherwise left
+    the type unconstructable outside `core`, which the fill builders need.
+  - **23 Foundry tests** (14 settler, 9 filler) against source-deployed Permit2 + Aqua/SwapVM, including
+    single-, two- and four-leg nested fills, the `MAX_LEGS` bound, callback authentication, and an
+    under-sourcing case proving the settler cannot reach the filler's accrued spread. Every settler guard
+    was mutation-checked: neutering it turns its test red.
+
 ### Added — devnet (`devnet/`, Docker Compose)
 - **Self-contained local devnet** — one `docker compose up` (`just devnet-up`) boots anvil (fast
   finality via `--slots-in-an-epoch 1`, oversized code allowed, `--state` persistence), Otterscan, a
@@ -115,6 +143,23 @@ the project is pre-1.0 and evolving.
   - **Full-loop live E2E** over anvil — a self-hosted order → normalize → route → reserve → **on-chain
     fill** through the deployed reactor + filler + etched Permit2, sourcing the output from a shipped
     Aqua maker; both signatures verify on-chain.
+- **ERC-7683 ingest (P2, task 1)** — a second protocol on the inbound edge, proving the adapter seam:
+  the pipeline now consumes ERC-7683 v1 gasless orders alongside UniswapX ones with **no change to
+  `IngestPipeline`, `Intent`, or any downstream slice**.
+  - **Codec** — the standard's `GaslessCrossChainOrder` envelope plus the `SolventOrder` order type
+    (fixed price + exclusivity window) it carries in `orderData`. Both are plain EIP-712 structs, so
+    alloy derives the type strings and the `orderId` struct hash; nothing is hand-composed (unlike
+    UniswapX, whose type string flattens `baseInput`). The two type strings are pinned by test — they
+    are the cross-language contract with the settler that will record the same id.
+  - **Normalizer** — envelope → canonical `Intent`, with fixed amounts on `AmountCurve::scalar` (no
+    new curve code). Rejects a malformed payload, an `orderDataType` that is not ours, `orderData`
+    that does not decode, and an `originChainId` disagreeing with the feed's chain.
+  - **Order builder + `self_hosted` feed** — mints orders signed with a Permit2 EIP-712 witness over
+    the envelope, composing the witness type string from alloy's derived type rather than a literal.
+  - **`sign65` extracted** to `ingest/mod.rs` on its second use; the UniswapX builder now shares it.
+  - Fill path and settler contract are deliberately **not** here — the `FillBuilder`'s first real
+    consumer is the filler contract (plan task 3), and the `orderId` stays unpinned against Solidity
+    until the settler exists (plan task 2). See `docs/plans/backend/erc7683-plan.md`.
 - **B5 — execution**: closes the intent lifecycle — a reserved `RoutePlan` becomes an included fill,
   and the outcome is coupled back to the ledger. A thin wrapper over `walletkit`: it owns fill
   semantics, walletkit owns the tx lifecycle (sign / private-submit / track / bump / reorg / nonce).
