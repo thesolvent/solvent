@@ -15,7 +15,8 @@ const BY_PATH = new Map(
   Object.entries(PATHS).map(([page, path]) => [path, page as Page]),
 );
 
+/** Matches on the leading segment, so a page's own sub-routes still resolve to it. */
 export function pageFromPath(pathname: string): Page | null {
-  const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
-  return BY_PATH.get(path) ?? null;
+  const [, segment = ""] = pathname.split("/");
+  return BY_PATH.get(`/${segment}`) ?? null;
 }

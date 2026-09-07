@@ -1,0 +1,68 @@
+{
+  "pair": "DAI/USDC",
+  "base": {
+    "address": "0x68b1d87f95878fe05b998f19b66f4baba5de1aed",
+    "chain_id": 31337,
+    "symbol": "DAI",
+    "decimals": 18
+  },
+  "quote": {
+    "address": "0x959922be3caee4b8cd9a407cc3ac1c251c2007b1",
+    "chain_id": 31337,
+    "symbol": "USDC",
+    "decimals": 6
+  },
+  "type": "Stable",
+  "maker_count": 1,
+  "min_spread_bps": 1,
+  "max_spread_bps": 1,
+  "popular_fee_tier": "0.01%",
+  "curve_mix": {
+    "xyc": 0,
+    "concentrated": 0,
+    "pegged": 1
+  },
+  "tvl_usd": 500013.75,
+  "volume_24h_usd": 0.0,
+  "fills_24h": 0,
+  "apr_pct": 0.0,
+  "makers": [
+    {
+      "maker": "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc",
+      "strategy_hash": "0xdf5e829a35df245710c4b5147fa243e52190f892ef196c216ecc168858cdf2f9",
+      "curve": "Pegged",
+      "fee_bps": 1,
+      "virtual": {
+        "entries": [
+          {
+            "token": {
+              "address": "0x68b1d87f95878fe05b998f19b66f4baba5de1aed",
+              "chain_id": 31337,
+              "symbol": "DAI",
+              "decimals": 18
+            },
+            "amount": {
+              "raw": "250000000000000000000000",
+              "display": "250000",
+              "usd": 250000.0
+            }
+          },
+          {
+            "token": {
+              "address": "0x959922be3caee4b8cd9a407cc3ac1c251c2007b1",
+              "chain_id": 31337,
+              "symbol": "USDC",
+              "decimals": 6
+            },
+            "amount": {
+              "raw": "250000000000",
+              "display": "250000",
+              "usd": 250013.75
+            }
+          }
+        ],
+        "total_usd": 500013.75
+      }
+    }
+  ]
+}

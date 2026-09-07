@@ -1,4 +1,4 @@
-import { POOLS, STABLES, TOKENS, type Pool } from "@/data";
+import { POOLS, TOKENS, type Pool } from "@/data";
 
 export function price(sym: string): number {
   return TOKENS.find((t) => t.symbol === sym)?.price ?? 1;
@@ -35,12 +35,6 @@ export function clean(v: string): string {
     out = out.slice(0, first + 1) + out.slice(first + 1).replace(/\./g, "");
   }
   return out.slice(0, 16);
-}
-
-export function poolType(p: Pool): string {
-  if (p.venue.toLowerCase().indexOf("incentive") > -1) return "Incentivised";
-  const legs = p.pair.split(" / ");
-  return legs.every((l) => STABLES.indexOf(l) > -1) ? "Stable" : "Volatile";
 }
 
 export function poolByPair(pair: string): Pool | undefined {

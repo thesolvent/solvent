@@ -1,8 +1,6 @@
 import type { Pool as ApiPool } from "@solvent/sdk/client";
 import { describe, expect, it } from "vitest";
 
-import { poolType } from "@/lib/format";
-
 import fixture from "@/data/fixtures/pools.json";
 import { toPool } from "./pool";
 
@@ -42,11 +40,11 @@ describe("toPool", () => {
     expect(mapped.apr).toBe("—");
   });
 
-  it("emits a pair the pool-type filter can classify", () => {
+  it("spaces the pair label, which the slug and the symbol split both rely on", () => {
     const stable = pools.find((p) => p.type === "Stable");
     expect(stable).toBeDefined();
 
-    // poolType() splits on " / "; an unspaced pair would silently classify everything as Volatile.
-    expect(poolType(toPool(stable!))).toBe("Stable");
+    // `slug()` and the detail view both split on " / "; an unspaced label breaks both silently.
+    expect(toPool(stable!).pair).toMatch(/^\S+ \/ \S+$/);
   });
 });

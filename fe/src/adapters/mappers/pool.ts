@@ -31,6 +31,12 @@ function curves(mix: CurveMix): string[] {
   );
 }
 
+/** A signed move, arrowed the way it went. */
+function change(pct?: number | null): string | undefined {
+  if (pct == null) return undefined;
+  return `${pct < 0 ? "↘" : "↗"} ${Math.abs(pct).toFixed(1)}%`;
+}
+
 function usd(value?: number | null): string {
   return value == null ? DASH : USD.format(value);
 }
@@ -60,7 +66,14 @@ export function toPool(api: ApiPool): Pool {
     apr: api.apr_pct == null ? DASH : `${api.apr_pct.toFixed(1)}%`,
     feeTier: api.popular_fee_tier,
     curves: curves(api.curve_mix),
+    ref: {
+      base: api.base.address,
+      quote: api.quote.address,
+      baseDecimals: api.base.decimals,
+      quoteDecimals: api.quote.decimals,
+    },
     tvlUsd: api.tvl_usd,
+    tvlChange: change(api.tvl_change_24h_pct),
     aprPct: api.apr_pct,
   };
 }

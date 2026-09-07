@@ -42,7 +42,6 @@ export type AppState = {
   poolPage: number;
 
   detail: number | null;
-  detailRange: string;
 
   create: boolean;
   createFee: string;
@@ -125,7 +124,6 @@ export const INITIAL_STATE: AppState = {
   poolPage: 0,
 
   detail: null,
-  detailRange: "7d",
 
   create: false,
   createFee: "Auto 0.01%",

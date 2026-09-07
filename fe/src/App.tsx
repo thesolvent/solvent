@@ -17,14 +17,7 @@ import { TradeDetailPage } from "@/views/TradeDetailPage";
 
 import styles from "./App.module.css";
 
-/** Sub-views of a page are still stack-driven, so each route resolves its own. */
-function PoolsRoute() {
-  const { state } = useApp();
-
-  if (state.detail === null) return <PoolsPage />;
-  return state.create ? <CreatePoolPage /> : <PoolDetailPage />;
-}
-
+/** Explorer's sub-views are still stack-driven, so its route resolves which one to show. */
 function ExplorerRoute() {
   const { state } = useApp();
 
@@ -46,7 +39,9 @@ function Shell() {
         <Route path="/" element={<HomePage />} />
         <Route path="/swap" element={<SwapPage />} />
         <Route path="/docs" element={<SwapPage />} />
-        <Route path="/pools" element={<PoolsRoute />} />
+        <Route path="/pools" element={<PoolsPage />} />
+        <Route path="/pools/:pair" element={<PoolDetailPage />} />
+        <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
         <Route path="/makers" element={<MakersPage />} />
         <Route path="/explorer" element={<ExplorerRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />

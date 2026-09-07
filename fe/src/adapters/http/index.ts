@@ -4,11 +4,23 @@ import type { SystemPort } from "@/ports/system";
 import type { Services } from "@/services/context";
 
 import { toPool } from "../mappers/pool";
+import { toDepthCurve, toPoolRoster } from "../mappers/pool-detail";
 import { solventApi } from "./client";
 
 const pools: PoolsPort = {
   async list() {
     return (await solventApi.pools()).items.map(toPool);
+  },
+  async detail(pair) {
+    return toPoolRoster(
+      await solventApi.poolDetail({ base: pair.base, quote: pair.quote }),
+    );
+  },
+  async depth(pair) {
+    return toDepthCurve(
+      await solventApi.poolDepth({ base: pair.base, quote: pair.quote }),
+      pair,
+    );
   },
 };
 

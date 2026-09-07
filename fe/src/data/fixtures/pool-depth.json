@@ -1,0 +1,27 @@
+{
+  "axis_title": "Cumulative USDC out vs price impact",
+  "best_price": "0.999899",
+  "points": [
+    {
+      "trade_size": "49447088014334069377051",
+      "output": "49392700195",
+      "effective_price": "0.9989",
+      "impact_pct": 0.1,
+      "makers_used": 1
+    },
+    {
+      "trade_size": "195255392062520169840244",
+      "output": "194259643554",
+      "effective_price": "0.9949",
+      "impact_pct": 0.5,
+      "makers_used": 1
+    },
+    {
+      "trade_size": "250563201054291608634044",
+      "output": "248031616210",
+      "effective_price": "0.989896",
+      "impact_pct": 1.0,
+      "makers_used": 1
+    }
+  ]
+}

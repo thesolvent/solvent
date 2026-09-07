@@ -436,8 +436,6 @@ export const DEFAULT_BAND: Record<string, number> = {
   Incentivised: 0.9,
 };
 
-export const STABLES = ["USDC", "USDT", "DAI"];
-
 export type Pool = {
   pair: string;
   type: string;
@@ -451,11 +449,62 @@ export type Pool = {
   /** Sort and threshold keys. Served pools carry them; the sample rows below do not, since
    *  their magnitudes only ever needed to be read, never compared. */
   tvlUsd?: number | null;
+  /** Signed 24h move of the pool's value, already formatted with its arrow. */
+  tvlChange?: string;
   aprPct?: number | null;
   /** The bare fee tier. `fee` carries a version suffix for display, so it cannot be compared. */
   feeTier?: string;
   /** Curve shapes this pool's makers price on; a pool commonly mixes several. */
   curves?: string[];
+  /** Identifies the pair to the server. Absent on the sample rows below. */
+  ref?: PairRef;
+};
+
+/** Everything needed to ask the server about one pair, including the units its amounts use. */
+export type PairRef = {
+  base: string;
+  quote: string;
+  baseDecimals: number;
+  quoteDecimals: number;
+};
+
+/** One maker's committed position in a pool. */
+export type RosterMaker = {
+  address: string;
+  strategyHash: string;
+  curve: string;
+  feeBps: number;
+  /** Committed balances, valued; `null` where a token has no price. */
+  virtualUsd: number | null;
+  /** What the maker could deliver now — committed capped by what Aqua may pull. `null` when the
+   *  chain read failed, which is not the same as nothing being deliverable. */
+  actualUsd: number | null;
+  balances: { symbol: string; display: string; usd: number | null }[];
+};
+
+/** A pool row together with the makers quoting it. */
+export type PoolRoster = {
+  pool: Pool;
+  makers: RosterMaker[];
+};
+
+/** One sampled point on the depth curve, in whole tokens. */
+export type DepthLevel = {
+  /** Input size the quote was taken for. */
+  sizeIn: number;
+  /** What that size delivers. */
+  output: number;
+  /** Effective price across the whole fill. */
+  price: number;
+  impactPct: number;
+  makersUsed: number;
+};
+
+export type DepthCurve = {
+  axisTitle: string;
+  /** Best available price at the tip, or `null` when nothing quotes. */
+  bestPrice: number | null;
+  levels: DepthLevel[];
 };
 
 export const POOLS: Pool[] = [

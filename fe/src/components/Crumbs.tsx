@@ -1,15 +1,39 @@
 import { Fragment } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { useApp } from "@/state";
 
 import styles from "./Crumbs.module.css";
 
-export function Crumbs({ current }: { current: string }) {
+/** A step a routed page names itself, rather than one recorded on the view stack. */
+export type CrumbLink = { label: string; to: string };
+
+export function Crumbs({
+  current,
+  trail,
+}: {
+  current: string;
+  trail?: CrumbLink[];
+}) {
   const { crumbs } = useApp();
+  const navigate = useNavigate();
+
+  // A page that lives at its own address knows its ancestry; only stack-driven views need the trail.
+  const items = trail
+    ? [
+        ...trail.map((crumb) => ({
+          label: crumb.label,
+          sep: "›",
+          fg: "var(--text-muted)",
+          go: () => navigate(crumb.to),
+        })),
+        { label: current, sep: "", fg: "var(--ink)", go: () => {} },
+      ]
+    : crumbs(current);
 
   return (
     <div className={styles.crumbs}>
-      {crumbs(current).map((c, i) => (
+      {items.map((c, i) => (
         <Fragment key={`${c.label}-${i}`}>
           <button
             type="button"

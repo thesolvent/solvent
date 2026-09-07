@@ -1,22 +1,27 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 
 import { Crumbs } from "@/components/Crumbs";
 import { poolDetail } from "@/lib/pool-detail";
+import { usePool, usePoolDepth, usePoolRoster } from "@/services/pools";
 import { useApp } from "@/state";
 
 import styles from "./PoolDetailPage.module.css";
 
-const RANGES = ["24h", "7d", "30d", "All"];
 const MAKER_SORTS = ["Virtual", "Actual"];
 
 export function PoolDetailPage() {
-  const { state, set, push, pop } = useApp();
-  const d = poolDetail(
-    state.detail,
-    state.detailRange,
-    state.makerSort,
-    state.hoverFrac,
-  );
+  const { state, set } = useApp();
+  const navigate = useNavigate();
+  const { pair } = useParams();
+  const pool = usePool(pair);
+  const d = poolDetail({
+    pool,
+    roster: usePoolRoster(pool),
+    depth: usePoolDepth(pool),
+    hoverFrac: state.hoverFrac,
+    makerSort: state.makerSort,
+  });
 
   const onHover = (e: ReactMouseEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -28,22 +33,25 @@ export function PoolDetailPage() {
   return (
     <div className={styles.root}>
       <div className={styles.head}>
-        <button type="button" className={styles.back} onClick={pop}>
+        <button
+          type="button"
+          className={styles.back}
+          onClick={() => navigate("/pools")}
+        >
           ←
         </button>
         <div className={styles.headTitle}>
-          <Crumbs current={d.pair} />
+          <Crumbs current={d.pair} trail={[{ label: "Pools", to: "/pools" }]} />
           <div className={styles.pair}>{d.pair}</div>
         </div>
         <span className={styles.limeSquare} />
         <span className={styles.spacer} />
         <div className={styles.headActions}>
-          <span className={styles.tag}>{d.venue}</span>
           <span className={styles.tag}>fee {d.fee}</span>
           <button
             type="button"
             className={styles.create}
-            onClick={() => push({ create: true }, d.pair)}
+            onClick={() => navigate(`/pools/${pair}/new`)}
           >
             <span>Create position</span>
             <span className={styles.createArrow}>→</span>
@@ -61,7 +69,9 @@ export function PoolDetailPage() {
             <div>
               <div className={styles.kpiRow}>
                 <span className={styles.kpiValue}>{d.tvl}</span>
-                <span className={styles.kpiDelta}>↗ 4.2%</span>
+                {d.tvlChange && (
+                  <span className={styles.kpiDelta}>{d.tvlChange}</span>
+                )}
               </div>
               <div className={styles.kpiSub}>Total value locked</div>
             </div>
@@ -107,23 +117,24 @@ export function PoolDetailPage() {
             <div className={styles.depthLegend}>
               <span className={styles.depthLegendMark} />
               <span className={styles.depthLegendText}>
-                {d.makerTotal} makers
+                {d.makerTotal} {d.makerTotal === 1 ? "maker" : "makers"}
               </span>
             </div>
-            <div className={styles.segmented}>
-              {RANGES.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  className={
-                    r === state.detailRange ? styles.segmentOn : styles.segment
-                  }
-                  onClick={() => set({ detailRange: r })}
-                >
-                  {r}
-                </button>
-              ))}
-            </div>
+            {d.impacts.length > 0 && (
+              <div className={styles.segmented}>
+                {d.impacts.map((stop) => (
+                  <button
+                    key={stop.label}
+                    type="button"
+                    className={styles.segment}
+                    onMouseEnter={() => set({ hoverFrac: stop.frac })}
+                    onMouseLeave={() => set({ hoverFrac: null })}
+                  >
+                    {stop.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className={styles.plot}>
@@ -170,7 +181,12 @@ export function PoolDetailPage() {
                   vectorEffect="non-scaling-stroke"
                 />
                 <path
+                  // Remounting on a new curve restarts the draw, so switching pool redraws.
+                  key={d.aggPath}
+                  className={styles.curve}
                   d={d.aggPath}
+                  // Normalises the dash units, so the draw needs no measured length.
+                  pathLength={1}
                   fill="none"
                   stroke="var(--green)"
                   strokeWidth="2.4"
@@ -257,14 +273,14 @@ export function PoolDetailPage() {
               <div className={styles.impactValue}>{d.bestPrice}</div>
             </div>
             <div className={styles.impact}>
-              <div className={styles.impactLabel}>{d.imp1Label}</div>
-              <div className={styles.impactValue}>{d.imp1}</div>
-              <div className={styles.impactSize}>{d.imp1Size}</div>
+              <div className={styles.impactLabel}>{d.near.label}</div>
+              <div className={styles.impactValue}>{d.near.price}</div>
+              <div className={styles.impactSize}>{d.near.size}</div>
             </div>
             <div className={styles.impact}>
-              <div className={styles.impactLabel}>{d.imp5Label}</div>
-              <div className={styles.impactValue}>{d.imp5}</div>
-              <div className={styles.impactSize}>{d.imp5Size}</div>
+              <div className={styles.impactLabel}>{d.far.label}</div>
+              <div className={styles.impactValue}>{d.far.price}</div>
+              <div className={styles.impactSize}>{d.far.size}</div>
             </div>
             <div className={styles.impactLast}>
               <div className={styles.impactLabel}>Total liquidity</div>
@@ -304,20 +320,17 @@ export function PoolDetailPage() {
                 key={m.addr}
                 type="button"
                 className={styles.makerRow}
-                onClick={() =>
-                  push(
-                    {
-                      page: "Explorer",
-                      xpTrade: null,
-                      xpStrat: {
-                        maker: m.addr,
-                        curve: m.curve,
-                        pair: d.pair,
-                      },
+                onClick={() => {
+                  set({
+                    xpTrade: null,
+                    xpStrat: {
+                      maker: m.addr,
+                      curve: m.curve,
+                      pair: d.pair,
                     },
-                    d.pair,
-                  )
-                }
+                  });
+                  navigate("/explorer");
+                }}
               >
                 <span
                   className={styles.makerDot}
@@ -352,16 +365,10 @@ export function PoolDetailPage() {
                 key={x.from + x.ago}
                 type="button"
                 className={styles.settleRow}
-                onClick={() =>
-                  push(
-                    {
-                      page: "Explorer",
-                      xpTrade: 0,
-                      xpStrat: null,
-                    },
-                    d.pair,
-                  )
-                }
+                onClick={() => {
+                  set({ xpTrade: 0, xpStrat: null });
+                  navigate("/explorer");
+                }}
               >
                 <span className={styles.settleFrom}>{x.from}</span>
                 <span className={styles.settleArrow}>→</span>
