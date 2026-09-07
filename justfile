@@ -24,6 +24,8 @@ test-fork:
 # Export ABIs for the (future) backend to consume — stable artifacts, not out/.
 abi:
     cd contracts && forge inspect src/UniswapXAquaFiller.sol:UniswapXAquaFiller abi --json > abi/UniswapXAquaFiller.json
+    cd contracts && forge inspect src/Erc7683AquaFiller.sol:Erc7683AquaFiller abi --json > abi/Erc7683AquaFiller.json
+    cd contracts && forge inspect src/SameChainSettler.sol:SameChainSettler abi --json > abi/SameChainSettler.json
     cd contracts && forge inspect src/DevToken.sol:DevToken abi --json > abi/DevToken.json
 
 fmt:
