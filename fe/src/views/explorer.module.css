@@ -1,0 +1,1253 @@
+/* Shared chrome for the Explorer family: list, trade detail and strategy. */
+
+.root {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  padding: 0 20px;
+}
+
+.rootFramed {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-alt);
+  padding: 12px 20px 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.frame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  composes: slideIn220 from "../styles/animations.module.css";
+}
+
+.headWide {
+  composes: head;
+  gap: 16px;
+}
+
+.back {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  flex: none;
+  transition:
+    background 130ms ease,
+    color 130ms ease;
+}
+
+.back:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.headTitle {
+  line-height: 1.05;
+  flex: none;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.title {
+  font-size: clamp(19px, 2vw, 26px);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+}
+
+.titleLg {
+  composes: title;
+  font-size: clamp(20px, 2.1vw, 28px);
+}
+
+.titleSm {
+  composes: title;
+  font-size: clamp(18px, 1.9vw, 25px);
+}
+
+.statusPill {
+  padding: 4px 11px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex: none;
+}
+
+.statePill {
+  composes: statusPill;
+  border-radius: 0;
+}
+
+.headMeta {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.limeSquare {
+  width: 20px;
+  height: 20px;
+  background: var(--lime);
+  flex: none;
+}
+
+.pageDesc {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+
+.txLink {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-strong);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line-mid);
+  cursor: pointer;
+}
+
+.crossLink {
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text-strong);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line-mid);
+  transition: color 130ms ease;
+}
+
+.crossLink:hover {
+  color: var(--green-deep);
+}
+
+.crossLinkMono {
+  composes: crossLink;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+/* ---------- KPI strips ---------- */
+
+.stats5 {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  flex: none;
+}
+
+.stats4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+
+.stats4Soft {
+  composes: stats4;
+  background: var(--paper-soft);
+}
+
+.stat {
+  padding: 13px 18px;
+  min-width: 0;
+  background-size: 1px 56%;
+  background-position: left center;
+  background-repeat: no-repeat;
+}
+
+.statTight {
+  composes: stat;
+  padding: 12px 18px;
+  background-size: 1px 60%;
+}
+
+.statTighter {
+  composes: stat;
+  padding: 11px 18px;
+  background-size: 1px 60%;
+}
+
+.statLabel {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.11em;
+  line-height: 1.35;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.statRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.statValue {
+  font-size: clamp(17px, 1.5vw, 23px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+}
+
+.statValueSm {
+  font-size: clamp(15px, 1.35vw, 20px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statValueXs {
+  composes: statValueSm;
+  font-size: clamp(14px, 1.25vw, 18px);
+}
+
+.statSub {
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statSubPlain {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statTagRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  min-width: 0;
+}
+
+.statTag {
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 2px 7px;
+}
+
+/* ---------- Filter bar ---------- */
+
+.filterBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+  position: relative;
+  z-index: 5;
+}
+
+.tabGroup {
+  display: flex;
+  border: 1px solid var(--line);
+}
+
+.tab {
+  border: 0;
+  padding: 8px 20px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+  background: var(--paper);
+  color: var(--text-strong);
+}
+
+.tabOn {
+  composes: tab;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.drops {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.dropWrap {
+  position: relative;
+}
+
+.dropButton {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--paper);
+  padding: 8px 14px;
+  font-size: 12.5px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: border-color 140ms ease;
+  border: 1px solid var(--line);
+}
+
+.dropButtonOpen {
+  composes: dropButton;
+  border-color: var(--ink);
+}
+
+.dropCaret {
+  font-size: 9px;
+  color: var(--text-dim);
+  transition: transform 180ms ease;
+}
+
+.dropCaretOpen {
+  composes: dropCaret;
+  transform: rotate(180deg);
+}
+
+.dropMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 150px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: 0 16px 36px rgba(11, 11, 11, 0.12);
+  z-index: 20;
+  composes: pop140 from "../styles/animations.module.css";
+}
+
+.dropItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 14px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  transition: background 110ms ease;
+  font-weight: 400;
+}
+
+.dropItem:hover {
+  background: var(--lime-wash);
+}
+
+.dropItemOn {
+  composes: dropItem;
+  font-weight: 600;
+}
+
+.dropMark {
+  font-size: 11px;
+  color: var(--green-deep);
+}
+
+/* ---------- Lists ---------- */
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+}
+
+.activityRow {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--surface);
+  background: var(--paper);
+  padding: 11px 18px;
+  font-family: inherit;
+  cursor: pointer;
+  min-width: 0;
+  flex: none;
+  transition: background 140ms ease;
+  composes: row200 from "../styles/animations.module.css";
+}
+
+.activityRow:hover {
+  background: var(--lime-wash-faint);
+}
+
+.activityTop {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 4px;
+  min-width: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.kindTag {
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.who {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.when {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.activityBottom {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.flow {
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tradeLinkWrap {
+  flex: 0 0 auto;
+  align-self: flex-end;
+}
+
+.tradeLink {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--text-strong);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line-mid);
+}
+
+.activityText {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tradeRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) 72px 82px 108px 30px;
+  align-items: center;
+  background: var(--paper);
+  border: 0;
+  border-bottom: 1px solid var(--surface);
+  padding: 11px 18px;
+  min-width: 0;
+  flex: none;
+  cursor: pointer;
+  transition: background 140ms ease;
+  composes: row200 from "../styles/animations.module.css";
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+
+.tradeRow:hover {
+  background: var(--lime-wash-faint);
+}
+
+.tradePair {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 14px;
+}
+
+.tradePairName {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tradeBlk {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tradeFlow {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 0 14px;
+  background-image: linear-gradient(var(--surface), var(--surface));
+  background-size: 1px 68%;
+  background-position: left center;
+  background-repeat: no-repeat;
+}
+
+.tradeIn {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.tradeArrow {
+  font-size: 11px;
+  color: var(--line-strong);
+}
+
+.tradeOut {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tradeCell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 14px;
+  background-image: linear-gradient(var(--surface), var(--surface));
+  background-size: 1px 68%;
+  background-position: left center;
+  background-repeat: no-repeat;
+}
+
+.tradeCellValue {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.tradeCellLabel {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tradeStatusCell {
+  composes: tradeCell;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.tradeTx {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.chevron {
+  font-size: 13px;
+  color: var(--line-strong);
+  text-align: right;
+}
+
+.footBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--paper-soft);
+  flex: none;
+}
+
+.liveTag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-mid);
+}
+
+.livePulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  composes: pulse from "../styles/animations.module.css";
+}
+
+.footButton {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 7px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.footButton:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.footNote {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ---------- Trade detail ---------- */
+
+.split {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.75fr) minmax(300px, 1fr);
+}
+
+.mainCol {
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.lifecycle {
+  flex: none;
+  padding: 14px 22px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.lifecycleHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+
+.lifecycleTitleRow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.sectionTitle {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.lifecycleCount {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.lifecycleCountStrong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.lifecycleTotal {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.phases {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-top: 8px;
+  flex: none;
+}
+
+.phaseTag {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.phaseName {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.phaseRule {
+  height: 3px;
+  margin-top: 7px;
+}
+
+.timeline {
+  position: relative;
+  height: 128px;
+  min-width: 0;
+  margin-top: 10px;
+}
+
+.timelineMeta {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  height: 22px;
+}
+
+.timelineMetaCell {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--line-warm);
+  padding-left: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  background-image: linear-gradient(var(--surface), var(--surface));
+  background-size: 1px 100%;
+  background-position: left top;
+  background-repeat: no-repeat;
+}
+
+.step {
+  position: absolute;
+  top: 22px;
+  width: calc(16.666% - 6px);
+}
+
+.stepBar {
+  position: relative;
+  overflow: hidden;
+  height: 34px;
+  cursor: pointer;
+  transition:
+    box-shadow 160ms ease,
+    transform 160ms cubic-bezier(0.22, 0.8, 0.3, 1);
+  border-width: 1px;
+  background: var(--paper);
+}
+
+.stepFill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  composes: fill520 from "../styles/animations.module.css";
+}
+
+.stepLead {
+  width: 1px;
+  margin-left: 11px;
+  background-image: linear-gradient(var(--line-mid) 55%, transparent 0);
+  background-size: 1px 6px;
+  background-repeat: repeat-y;
+}
+
+.stepText {
+  padding-left: 10px;
+  margin-top: 3px;
+}
+
+.stepLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.stepState {
+  font-size: 10.5px;
+  color: var(--line-warm);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+.sourcedHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 22px 8px;
+  flex: none;
+}
+
+.sourcedTitle {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.sourcedHint {
+  font-size: 11px;
+  color: var(--line-warm);
+}
+
+.legList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-top: 1px solid var(--surface);
+}
+
+.legRow {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr) 74px 22px;
+  gap: 14px;
+  align-items: center;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--surface);
+  background: var(--paper);
+  padding: 12px 22px;
+  font-family: inherit;
+  cursor: pointer;
+  min-width: 0;
+  transition: background 130ms ease;
+  composes: row200 from "../styles/animations.module.css";
+}
+
+.legRow:hover {
+  background: var(--lime-wash-faint);
+}
+
+.legMaker {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.legChip {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #f4f7ea;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.legStack {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.legName {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.legHash {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.legAmountCol {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.legAmountRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.legAmount {
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.legCurve {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.legTrack {
+  height: 5px;
+  background: var(--surface);
+  min-width: 0;
+}
+
+.legFill {
+  display: block;
+  height: 5px;
+  background: var(--lime);
+  transition: width 320ms cubic-bezier(0.22, 0.8, 0.3, 1);
+}
+
+.legShare {
+  font-size: 14px;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.legChevron {
+  font-size: 12px;
+  color: var(--line-strong);
+  text-align: right;
+}
+
+.emptyNote {
+  padding: 28px 18px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.sideCol {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--paper-soft);
+}
+
+.profit {
+  flex: none;
+  background: var(--dark-bg);
+  color: var(--paper);
+  padding: 18px 20px 20px;
+}
+
+.profitHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.profitSwatch {
+  width: 13px;
+  height: 13px;
+  background: var(--lime);
+  flex: none;
+}
+
+.profitLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--on-dark-dim);
+}
+
+.profitValue {
+  font-size: clamp(28px, 3vw, 40px);
+  font-weight: 400;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--lime);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.profitTag {
+  font-size: 12.5px;
+  color: var(--on-dark-dim);
+  line-height: 1.45;
+  margin-top: 10px;
+}
+
+.facts {
+  flex: none;
+  padding: 16px 18px 20px;
+}
+
+.factsTitle {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+}
+
+.factRow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--surface);
+  min-width: 0;
+}
+
+.factLabel {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex: none;
+  width: 80px;
+}
+
+.factValue {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+/* ---------- Strategy ---------- */
+
+.curvePane {
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px 18px 14px;
+}
+
+.curveHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex: none;
+  margin-bottom: 6px;
+}
+
+.curveTag {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.curveNote {
+  font-size: 11px;
+  color: var(--line-warm);
+}
+
+.curveMid {
+  font-size: 11.5px;
+  color: var(--text-mid);
+  white-space: nowrap;
+}
+
+.curveSvg {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: block;
+}
+
+.spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 42px;
+  flex: none;
+  margin-top: 8px;
+}
+
+.sparkBar {
+  flex: 1;
+  min-width: 0;
+  transition: background 140ms ease;
+}
+
+.curveAxis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  flex: none;
+  margin-top: 5px;
+}
+
+.curveAxisMid {
+  color: var(--text-muted);
+}
+
+.fillsPane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.fillsHead {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 12px 18px 6px;
+  flex: none;
+}
+
+.fillRow {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--surface);
+  background: var(--paper);
+  padding: 10px 18px;
+  font-family: inherit;
+  cursor: pointer;
+  min-width: 0;
+  transition: background 130ms ease;
+  composes: row200 from "../styles/animations.module.css";
+}
+
+.fillRow:hover {
+  background: var(--lime-wash-faint);
+}
+
+.fillTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  min-width: 0;
+}
+
+.fillKind {
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--line-faint);
+  color: var(--text-strong);
+}
+
+.fillBlk {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.fillBottom {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fillFlow {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

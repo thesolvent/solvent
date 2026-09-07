@@ -1,0 +1,84 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--green-deep);
+}
+
+input,
+select,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input:focus,
+select:focus,
+button:focus {
+  outline: none;
+}
+
+::selection {
+  background: var(--lime);
+  color: var(--ink);
+}
+
+[data-scroll] {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-track) transparent;
+}
+
+[data-scroll]::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+[data-scroll]::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+[data-scroll]::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+  transition: background 140ms ease;
+}
+
+[data-scroll]:hover::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb-hover);
+  background-clip: content-box;
+}
+
+[data-scroll]::-webkit-scrollbar-thumb:hover {
+  background: var(--ink);
+  background-clip: content-box;
+}
+
+[data-scroll]::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

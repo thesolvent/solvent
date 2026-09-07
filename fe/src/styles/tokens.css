@@ -1,0 +1,72 @@
+:root {
+  /* Ground */
+  --paper: #ffffff;
+  --paper-soft: #fbfbfa;
+  --ink: #0b0b0b;
+  --ink-soft: #2a2a2a;
+
+  /* Accent — lime is the brand. Two shades: header/chrome vs. hero ground. */
+  --lime: #c8f24e;
+  --lime-hero: #c6f04e;
+  --lime-bright: #d6f96f;
+  --lime-wash: #f1f7e0;
+  --lime-wash-soft: #eef7d9;
+  --lime-wash-faint: #fbfdf4;
+  --lime-wash-mid: #f6faec;
+
+  /* Greens — links, positive deltas, fill progress */
+  --green: #63c31c;
+  --green-mid: #55ad14;
+  --green-deep: #4e9a12;
+  --green-darkest: #3d6414;
+
+  /* Neutrals on light ground */
+  --line: #e7e7e4;
+  --line-strong: #c0c0bb;
+  --line-faint: #f1f1ee;
+  --surface: #f0f0ec;
+  --surface-alt: #f4f4f2;
+  --surface-page: #f2f2ef;
+  --text-muted: #8a8a85;
+  --text-dim: #a8a8a3;
+  --text-mid: #6c6c68;
+  --text-strong: #4a4a46;
+  --line-mid: #d2d2ce;
+  --line-soft: #c8c8c3;
+  --line-warm: #b4b4af;
+
+  /* On dark ground (header, home dark sections) */
+  --dark-bg: #0b0b0b;
+  --dark-field: #1c1c1c;
+  --dark-line: #2d2d2d;
+  --dark-rule: #33352c;
+  --dark-border: #55574d;
+  --on-dark-muted: #b9bdb0;
+  --on-dark-dim: #9b9b95;
+  --on-dark-faint: #8f9287;
+  --on-lime-faint: #4a5a1e;
+  --on-lime-deep: #3d4a22;
+
+  /* Status tints */
+  --warn-bg: #fdf0d8;
+  --warn-ink: #8a5a12;
+  --ok-bg: #d8ebe4;
+  --ok-ink: #125c4a;
+  --ok-ink-deep: #0d4438;
+  --err-bg: #fbeae8;
+  --err-ink: #a33b2f;
+  --info-bg: #e9eefb;
+  --info-ink: #2d4c96;
+  --neg: #c0392b;
+
+  /* Scrollbar */
+  --scroll-thumb: #d9e0c8;
+  --scroll-thumb-hover: #b6c78c;
+  --scroll-track: #cdd8b4;
+
+  /* Type */
+  --font-body:
+    "Manrope Variable", "Manrope", "Helvetica Neue", Helvetica, sans-serif;
+  --font-display: "Anton", "Manrope Variable", "Manrope", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}

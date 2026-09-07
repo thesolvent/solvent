@@ -1,0 +1,550 @@
+.root {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: linear-gradient(180deg, #f6fbeb 0%, var(--paper) 55%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: clamp(24px, 5vh, 64px) 24px clamp(24px, 4vh, 56px);
+}
+
+.card {
+  width: 100%;
+  max-width: 660px;
+  margin-block: auto;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.tab {
+  border: 0;
+  padding: 12px 26px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  background: var(--line-faint);
+  color: var(--ink);
+}
+
+.tabActive {
+  composes: tab;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.headActions {
+  display: flex;
+  gap: 8px;
+}
+
+.iconBox {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.iconButton {
+  composes: iconBox;
+}
+
+.iconButton:hover {
+  border-color: var(--ink);
+}
+
+.iconGlyph {
+  width: 14px;
+  height: 14px;
+  border: 1.6px solid var(--ink);
+  border-radius: 50%;
+}
+
+.moreButton {
+  composes: iconBox;
+  font-size: 17px;
+  letter-spacing: 0.14em;
+  line-height: 1;
+}
+
+.leg {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: clamp(20px, 3vh, 32px) 26px clamp(16px, 2.5vh, 26px);
+}
+
+.legTo {
+  composes: leg;
+  padding: clamp(26px, 4vh, 42px) 26px clamp(18px, 2.5vh, 28px);
+}
+
+.assetButton {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 14px 7px 7px;
+  background: var(--paper);
+  flex: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.assetButton:hover {
+  border-color: var(--ink);
+  box-shadow: 0 2px 10px rgba(11, 11, 11, 0.07);
+}
+
+.assetChip {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--line-faint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.assetSymbol {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.assetCaret {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.amountCol {
+  text-align: right;
+  flex: 1;
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.amountLabel {
+  font-size: 14px;
+  color: var(--text-mid);
+}
+
+.amountBox {
+  height: clamp(58px, 9vh, 92px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.amountInput {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: right;
+  font-weight: 200;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.amountOut {
+  font-weight: 200;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.amountFraction {
+  color: var(--text-dim);
+}
+
+.amountUsd {
+  font-size: 17px;
+  color: var(--text-muted);
+  font-weight: 300;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.flipRail {
+  position: relative;
+  border-top: 1px solid var(--line);
+}
+
+.flip {
+  position: absolute;
+  left: 50%;
+  top: -24px;
+  transform: translateX(-50%);
+  width: 48px;
+  height: 48px;
+  background: var(--ink);
+  color: var(--paper);
+  border: 0;
+  cursor: pointer;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.flip:hover {
+  background: var(--green);
+}
+
+.route {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--line);
+}
+
+.routeCell {
+  padding: 13px 16px;
+  border-right: 1px solid var(--line);
+}
+
+.routeLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+
+.routeValue {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cta {
+  background: var(--green);
+  color: var(--paper);
+  border: 0;
+  padding: clamp(16px, 2.4vh, 24px);
+  font-size: 20px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cta:hover {
+  background: var(--green-mid);
+}
+
+.footnote {
+  margin: 16px 0 0;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+/* ---------- Token picker ---------- */
+
+.veil {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: rgba(252, 253, 249, 0.72);
+  backdrop-filter: blur(6px);
+  composes: veil130 from "../styles/animations.module.css";
+  display: flex;
+}
+
+.sheet {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border-right: 1px solid var(--line);
+  composes: sheet190 from "../styles/animations.module.css";
+}
+
+.sheetHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+}
+
+.sheetTitle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.close {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 50%;
+}
+
+.close:hover {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+
+.searchField {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 18px;
+  border: 1px solid var(--line);
+  padding: 11px 14px;
+  background: var(--paper-soft);
+}
+
+.searchField:focus-within {
+  border-color: var(--ink);
+}
+
+.searchGlyph {
+  width: 15px;
+  height: 15px;
+  border: 1.6px solid var(--text-muted);
+  border-radius: 50%;
+  flex: none;
+}
+
+.searchInput {
+  border: 0;
+  background: none;
+  font-size: 14.5px;
+  width: 100%;
+  min-width: 0;
+}
+
+.tagRow {
+  display: flex;
+  gap: 7px;
+  padding: 12px 18px 14px;
+  flex-wrap: wrap;
+}
+
+.tagChip {
+  border-radius: 999px;
+  padding: 7px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background 130ms ease,
+    color 130ms ease;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: #3d3d3a;
+}
+
+.tagChipActive {
+  composes: tagChip;
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.tokenList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-top: 1px solid var(--surface);
+}
+
+.tokenRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--surface-alt);
+  border-left: 2px solid var(--surface);
+  background: var(--paper);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  composes: row180 from "../styles/animations.module.css";
+  transition: background 120ms ease;
+}
+
+.tokenRow:hover {
+  background: #f7f9f0;
+}
+
+.tokenRowActive {
+  composes: tokenRow;
+  border-left-color: var(--lime);
+  background: var(--lime-wash);
+}
+
+.tokenChip {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--line-faint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex: none;
+}
+
+.tokenMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.tokenName {
+  display: block;
+  font-size: 15.5px;
+  font-weight: 600;
+}
+
+.tokenMeta {
+  display: block;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.tokenPrices {
+  text-align: right;
+  flex: none;
+}
+
+.tokenUsd {
+  display: block;
+  font-size: 14.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.tokenChange {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--green-deep);
+}
+
+.tokenChangeDown {
+  composes: tokenChange;
+  color: var(--neg);
+}
+
+.tokenMark {
+  width: 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--green-deep);
+  flex: none;
+}
+
+.empty {
+  padding: 34px 18px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.netCol {
+  width: 178px;
+  flex: none;
+  background: var(--paper-soft);
+  display: flex;
+  flex-direction: column;
+  composes: sheet220 from "../styles/animations.module.css";
+}
+
+.netHead {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 20px 16px 10px;
+}
+
+.netRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 16px;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  font-size: 14px;
+  transition: background 120ms ease;
+  background: transparent;
+  color: #5c5c58;
+  font-weight: 400;
+}
+
+.netRow:hover {
+  background: var(--line-faint);
+}
+
+.netRowActive {
+  composes: netRow;
+  background: var(--lime-wash);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.netDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--lime);
+  flex: none;
+}
+
+.netLabel {
+  flex: 1;
+}
+
+.netMark {
+  font-size: 12px;
+  color: var(--green-deep);
+}

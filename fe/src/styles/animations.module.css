@@ -1,0 +1,180 @@
+/*
+ * Keyframes must live in the same module as the rules that name them: CSS
+ * Modules hashes animation-name per file, so a rule here referencing a keyframe
+ * declared in a global stylesheet would resolve to a name that does not exist.
+ * Components reach these through `composes: … from "…/animations.module.css"`.
+ */
+
+@keyframes om-veil {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes om-wipe {
+  0% {
+    transform: translateY(100%);
+  }
+  42% {
+    transform: translateY(0);
+  }
+  58% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes om-sheet {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes om-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes om-row {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes om-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scaleY(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes om-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes om-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.45;
+  }
+}
+
+@keyframes om-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.wipe520 {
+  animation: om-wipe 520ms cubic-bezier(0.7, 0, 0.3, 1) both;
+}
+
+.veil130 {
+  animation: om-veil 130ms ease-out both;
+}
+
+.sheet190 {
+  animation: om-sheet 190ms cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+.sheet220 {
+  animation: om-sheet 220ms cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+.fill520 {
+  animation: om-fill 520ms cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+.row160 {
+  animation: om-row 160ms ease both;
+}
+
+.row180 {
+  animation: om-row 180ms ease-out both;
+}
+
+.row200 {
+  animation: om-row 200ms ease both;
+}
+
+.row220 {
+  animation: om-row 220ms ease both;
+}
+
+.pop120 {
+  animation: om-pop 120ms ease both;
+}
+
+.pop130 {
+  animation: om-pop 130ms ease both;
+}
+
+.pop140 {
+  animation: om-pop 140ms cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+.pop160 {
+  animation: om-pop 160ms cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+.fade110 {
+  animation: om-fade 110ms ease both;
+}
+
+.fade120 {
+  animation: om-fade 120ms ease both;
+}
+
+.fade130 {
+  animation: om-fade 130ms ease both;
+}
+
+.pulse {
+  animation: om-pulse 1.8s ease-in-out infinite;
+}
+
+.slideIn220 {
+  animation: om-slide-in 220ms cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+.slideIn260 {
+  animation: om-slide-in 260ms cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}

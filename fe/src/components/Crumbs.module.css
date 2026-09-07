@@ -1,0 +1,29 @@
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-bottom: 2px;
+}
+
+.crumb {
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: color 130ms ease;
+}
+
+.crumb:hover {
+  color: var(--green-deep);
+}
+
+.sep {
+  font-size: 10px;
+  color: var(--line-soft);
+}

@@ -1,0 +1,689 @@
+.root {
+  position: relative;
+  scroll-snap-type: y mandatory;
+  overscroll-behavior-y: contain;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--surface-page);
+}
+
+/* ---------- Hero ---------- */
+
+.hero {
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  background: var(--lime-hero);
+  color: var(--ink);
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: clamp(20px, 4vh, 56px);
+  padding: clamp(24px, 5.5vh, 72px) clamp(22px, 5vw, 76px)
+    clamp(22px, 4.5vh, 56px);
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition:
+    opacity 720ms cubic-bezier(0.22, 0.8, 0.3, 1),
+    transform 720ms cubic-bezier(0.22, 0.8, 0.3, 1);
+}
+
+.revealShown {
+  opacity: 1;
+  transform: none;
+}
+
+.heroTitle {
+  margin: 0;
+  font-size: clamp(38px, 8.4vw, 128px);
+  line-height: 0.92;
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  text-transform: uppercase;
+  max-width: 16ch;
+  text-wrap: balance;
+}
+
+.lang {
+  display: inline-block;
+  line-height: 1;
+  white-space: nowrap;
+  background: var(--ink);
+  color: var(--lime-hero);
+  font-style: italic;
+  padding: 4px 10px 8px;
+}
+
+.heroGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: clamp(26px, 5vw, 80px);
+  align-items: end;
+}
+
+.heroLeft {
+  /* The design staggers this column 120ms behind the headline. */
+  transition-delay: 120ms;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(22px, 4vh, 46px);
+}
+
+.eyebrowStack {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1.9;
+}
+
+.eyebrowDim {
+  opacity: 0.62;
+}
+
+.provide {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  font-family: var(--font-display);
+  font-size: clamp(19px, 2.5vw, 38px);
+  line-height: 0.96;
+  letter-spacing: -0.005em;
+  text-transform: uppercase;
+  color: var(--ink);
+  max-width: 26ch;
+  white-space: nowrap;
+}
+
+.provideLine {
+  display: block;
+}
+
+/* Underlined phrases that invert to a lime-on-black knockout on hover. */
+.mark {
+  display: inline-block;
+  line-height: 1;
+  border-bottom: 1px solid rgba(11, 11, 11, 0.35);
+  padding: 0 0 1px;
+  transition:
+    background 200ms ease,
+    color 200ms ease,
+    border-color 200ms ease,
+    font-style 200ms ease;
+}
+
+.markThick {
+  border-bottom-width: 2px;
+  padding-bottom: 2px;
+}
+
+.mark:hover,
+.provide:hover .mark {
+  background: var(--ink);
+  color: var(--lime-hero);
+  border-color: var(--ink);
+  font-style: italic;
+}
+
+.heroRight {
+  min-width: 0;
+  text-align: right;
+}
+
+.heroLede {
+  margin: 0;
+  font-size: clamp(17px, 2.3vw, 34px);
+  line-height: 1.28;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  text-wrap: pretty;
+}
+
+.knockout {
+  background: var(--ink);
+  color: var(--lime-hero);
+  font-weight: 700;
+  font-style: italic;
+  padding: 0 6px 2px;
+}
+
+.heroLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: clamp(14px, 2.4vw, 34px);
+  justify-content: flex-end;
+  margin-top: clamp(20px, 4vh, 40px);
+}
+
+.heroLink {
+  background: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 500;
+  padding: 4px 8px 3px;
+  border: 0;
+  border-bottom: 1px solid var(--ink);
+  transition:
+    background 180ms ease,
+    color 180ms ease;
+}
+
+.heroLink:hover {
+  background: var(--ink);
+  color: var(--lime-hero);
+  font-style: italic;
+}
+
+/* ---------- Aqua explainer ---------- */
+
+.av {
+  position: relative;
+  background: var(--dark-bg);
+  color: var(--paper);
+}
+
+.avGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: clamp(24px, 4vw, 64px);
+  padding: 0 clamp(22px, 5vw, 76px);
+}
+
+.stage {
+  position: sticky;
+  top: 0;
+  height: var(--av-vh, 100vh);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(140px, 1fr) minmax(0, 0.9fr);
+  gap: clamp(10px, 2vh, 20px);
+  padding: clamp(14px, 3vh, 28px) 0;
+  min-width: 0;
+  align-self: start;
+}
+
+.ledger {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 30px;
+  border-bottom: 1px solid var(--dark-rule);
+  padding-bottom: 12px;
+}
+
+.ledgerCell {
+  min-width: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ledgerLabel {
+  composes: mono;
+  font-size: 10.5px;
+  color: var(--on-dark-muted);
+}
+
+.ledgerValue {
+  composes: mono;
+  font-size: 13px;
+  color: var(--paper);
+  margin-top: 3px;
+}
+
+.ledgerValueLime {
+  composes: ledgerValue;
+  color: var(--lime-hero);
+}
+
+.scenes {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.scene {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 220ms ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sceneOn {
+  opacity: 1;
+}
+
+.sceneInner {
+  width: 100%;
+  min-width: 0;
+}
+
+.card {
+  border: 1px solid var(--dark-border);
+  padding: 14px 16px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cardLime {
+  composes: card;
+  border-color: var(--lime-hero);
+}
+
+.cardLabel {
+  composes: mono;
+  font-size: 11px;
+  color: var(--on-dark-muted);
+  margin-bottom: 7px;
+}
+
+.cardLabelLime {
+  composes: cardLabel;
+  color: var(--lime-hero);
+}
+
+.cardValue {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--paper);
+  letter-spacing: -0.015em;
+}
+
+.cardValueLime {
+  composes: cardValue;
+  color: var(--lime-hero);
+}
+
+.cardFoot {
+  composes: mono;
+  font-size: 10.5px;
+  color: var(--on-dark-muted);
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.cardNote {
+  composes: mono;
+  font-size: 10.5px;
+  color: var(--on-dark-muted);
+  margin-top: 8px;
+}
+
+.row3 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 14px;
+}
+
+.row3Center {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 0.9fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.grid3Tight {
+  composes: grid3;
+  gap: 8px;
+}
+
+.connector {
+  text-align: center;
+  min-width: 96px;
+  align-self: center;
+}
+
+.connectorNarrow {
+  text-align: center;
+  min-width: 72px;
+}
+
+.connectorLabel {
+  composes: mono;
+  font-size: 10.5px;
+  color: var(--lime-hero);
+}
+
+.connectorSub {
+  composes: mono;
+  font-size: 10.5px;
+  color: var(--on-dark-muted);
+}
+
+.dashRule {
+  height: 1px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--lime-hero) 0 6px,
+    transparent 6px 12px
+  );
+  margin: 8px 0;
+}
+
+.solidRule {
+  height: 1px;
+  background: #6f7268;
+}
+
+.ruleSub {
+  composes: mono;
+  font-size: 10.5px;
+  color: var(--on-dark-muted);
+  margin-top: 8px;
+}
+
+.legs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.legList {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.leg {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.legName {
+  composes: mono;
+  font-size: 10.5px;
+  color: #e4e6de;
+  width: 78px;
+  flex: none;
+}
+
+.legTrack {
+  flex: 1;
+  min-width: 0;
+  height: 10px;
+  background: #2a2c24;
+}
+
+.legFill {
+  display: block;
+  height: 10px;
+  width: 0;
+  background: var(--lime-hero);
+}
+
+.legPct {
+  composes: mono;
+  font-size: 10.5px;
+  color: var(--paper);
+  width: 40px;
+  text-align: right;
+  flex: none;
+}
+
+.heldRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--dark-rule);
+  padding-top: 12px;
+}
+
+.heldLabel {
+  composes: mono;
+  font-size: 10.5px;
+  color: var(--on-dark-muted);
+}
+
+.heldChip {
+  background: var(--lime-hero);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 12px;
+}
+
+.bigNum {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: -0.03em;
+  line-height: 0.92;
+  font-size: clamp(24px, 2.6vw, 36px);
+  font-weight: 400;
+  color: var(--lime-hero);
+}
+
+.bigNumWhite {
+  composes: bigNum;
+  color: var(--paper);
+}
+
+.bigNumUnit {
+  composes: mono;
+  font-size: 11px;
+  color: var(--on-dark-muted);
+  margin-top: 6px;
+}
+
+.sceneFoot {
+  composes: mono;
+  font-size: 11px;
+  color: var(--on-dark-muted);
+  margin-top: 12px;
+  border-top: 1px solid var(--dark-rule);
+  padding-top: 12px;
+}
+
+.chartWrap {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: block;
+}
+
+.chartCaption {
+  flex: none;
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  color: var(--on-dark-muted);
+  padding-top: 8px;
+}
+
+.copyCol {
+  min-width: 0;
+}
+
+.copy {
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  height: var(--av-vh, 100vh);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(28px, 5vh, 72px) 0;
+  transition: none;
+}
+
+.copyLime {
+  composes: copy;
+  background: var(--lime-hero);
+  padding-left: clamp(18px, 2.5vw, 34px);
+  padding-right: clamp(18px, 2.5vw, 34px);
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: var(--on-dark-faint);
+  margin-bottom: clamp(14px, 3vh, 26px);
+}
+
+.eyebrowActive {
+  color: var(--lime-hero);
+}
+
+.eyebrowLime {
+  composes: eyebrow;
+  color: var(--on-lime-faint);
+}
+
+.eyebrowLimeActive {
+  color: var(--ink);
+}
+
+.copyTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: -0.03em;
+  line-height: 0.92;
+  font-size: clamp(38px, 5.4vw, 84px);
+  font-weight: 400;
+  color: var(--paper);
+}
+
+.copyTitleInk {
+  composes: copyTitle;
+  color: var(--ink);
+}
+
+.copyMark {
+  display: inline-block;
+  background: var(--lime-hero);
+  color: var(--ink);
+  font-style: italic;
+  padding: 2px 12px 6px;
+  line-height: 0.92;
+}
+
+.copyMarkInvert {
+  composes: copyMark;
+  background: var(--ink);
+  color: var(--lime-hero);
+}
+
+.copyBody {
+  margin: clamp(20px, 3.4vh, 34px) 0 0;
+  max-width: 40ch;
+  font-size: clamp(15.5px, 1.35vw, 19px);
+  font-weight: 500;
+  line-height: 1.5;
+  color: #f2f3ee;
+  text-wrap: pretty;
+}
+
+.copyBodyInk {
+  composes: copyBody;
+  color: var(--ink);
+}
+
+.payoff {
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  height: var(--av-vh, 100vh);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: clamp(18px, 3vh, 34px);
+  padding: clamp(28px, 5vh, 72px) 0;
+  align-content: center;
+}
+
+.payoffTop {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+}
+
+.payoffTitle {
+  composes: copyTitle;
+  font-size: clamp(34px, 4.8vw, 74px);
+}
+
+.payoffBody {
+  margin: clamp(18px, 3vh, 30px) 0 0;
+  max-width: 42ch;
+  font-size: clamp(15px, 1.3vw, 18px);
+  font-weight: 500;
+  line-height: 1.5;
+  color: #f2f3ee;
+  text-wrap: pretty;
+}
+
+.payoffLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 26px;
+  border-top: 1px solid var(--dark-rule);
+  padding-top: clamp(16px, 3vh, 28px);
+}
+
+.payoffLink {
+  border: 0;
+  border-bottom: 2px solid var(--lime-hero);
+  background: none;
+  color: var(--paper);
+  cursor: pointer;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: -0.03em;
+  line-height: 0.92;
+  font-size: clamp(19px, 1.9vw, 27px);
+  font-weight: 400;
+  padding: 2px 8px 5px;
+  transition:
+    background 170ms ease,
+    color 170ms ease;
+}
+
+.payoffLink:hover {
+  background: var(--lime-hero);
+  color: var(--ink);
+}

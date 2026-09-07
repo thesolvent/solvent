@@ -1,0 +1,21 @@
+{
+  "name": "@solvent/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Devnet harness: bootstrap config from the deploy manifest, seed maker liquidity, smoke the API.",
+  "scripts": {
+    "bootstrap": "node src/devnet/bootstrap.ts",
+    "smoke": "node src/smoke/endpoints.ts",
+    "seed": "node src/seed/strategies.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@solvent/sdk": "workspace:*",
+    "viem": "^2"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "typescript": "^5.6"
+  }
+}

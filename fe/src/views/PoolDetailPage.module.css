@@ -1,0 +1,775 @@
+.root {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-alt);
+  padding: 16px 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex: none;
+  composes: slideIn220 from "../styles/animations.module.css";
+}
+
+.back {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  cursor: pointer;
+  font-size: 15px;
+  font-family: inherit;
+  flex: none;
+  transition:
+    background 130ms ease,
+    color 130ms ease;
+}
+
+.back:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.headTitle {
+  line-height: 1.02;
+  flex: none;
+}
+
+.pair {
+  font-size: clamp(22px, 2.3vw, 30px);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+}
+
+.limeSquare {
+  width: 22px;
+  height: 22px;
+  background: var(--lime);
+  flex: none;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.tag {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  padding: 9px 16px;
+  font-size: 12.5px;
+  color: var(--text-strong);
+  white-space: nowrap;
+}
+
+.create {
+  border: 0;
+  background: var(--green);
+  color: var(--paper);
+  padding: 12px 14px 12px 22px;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+  transition: background 140ms ease;
+}
+
+.create:hover {
+  background: var(--green-mid);
+}
+
+.createArrow {
+  width: 24px;
+  height: 24px;
+  background: var(--paper);
+  color: var(--green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+
+.grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(300px, 1.05fr) minmax(340px, 1.9fr) minmax(
+      230px,
+      0.9fr
+    );
+  gap: 0;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+/* ---------- KPI column ---------- */
+
+.kpis {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: minmax(0, 1.15fr) minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 0;
+  min-height: 0;
+  background: var(--paper);
+}
+
+.kpiWide {
+  grid-column: 1 / span 2;
+  background: var(--paper);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.kpiDark {
+  composes: kpiWide;
+  background: var(--dark-bg);
+  color: var(--paper);
+  border-top: 1px solid var(--line);
+}
+
+.kpiTag {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.kpiSwatch {
+  width: 13px;
+  height: 13px;
+  background: var(--lime);
+  flex: none;
+}
+
+.kpiLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.kpiLabelDark {
+  composes: kpiLabel;
+  color: var(--on-dark-dim);
+}
+
+.kpiRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.kpiValue {
+  font-size: clamp(26px, 2.5vw, 38px);
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.kpiValueLime {
+  composes: kpiValue;
+  color: var(--lime);
+}
+
+.kpiDelta {
+  background: #dff59a;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.kpiSub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+
+.kpiSubDark {
+  composes: kpiSub;
+  color: var(--on-dark-dim);
+  line-height: 1.45;
+}
+
+.kpiFoot {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-mid);
+  flex: none;
+}
+
+.kpiFootMark {
+  border-bottom: 1px solid var(--text-dim);
+}
+
+.kpiSmall {
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.kpiSmallRight {
+  composes: kpiSmall;
+  border-left: 1px solid var(--line);
+}
+
+.kpiSmallValue {
+  font-size: clamp(20px, 1.9vw, 27px);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* ---------- Depth chart ---------- */
+
+.depth {
+  background: var(--paper);
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  padding: 18px 22px 14px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.depthHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-width: 0;
+}
+
+.depthTitle {
+  font-size: 14.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.depthSub {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.depthMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex: none;
+  margin-top: 10px;
+  min-width: 0;
+}
+
+.depthLegend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.depthLegendMark {
+  width: 18px;
+  height: 3px;
+  background: var(--green);
+  flex: none;
+}
+
+.depthLegendText {
+  font-size: 11.5px;
+  color: var(--text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.segmented {
+  display: flex;
+  gap: 2px;
+  flex: none;
+  border: 1px solid var(--line);
+}
+
+.segment {
+  border: 0;
+  padding: 5px 11px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+  background: var(--paper);
+  color: var(--text-strong);
+}
+
+.segmentOn {
+  composes: segment;
+  background: var(--lime);
+  color: var(--ink);
+}
+
+.plot {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  margin-top: 8px;
+}
+
+.yAxis {
+  position: relative;
+}
+
+.yTick {
+  position: absolute;
+  right: 10px;
+  transform: translateY(-50%);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.canvas {
+  position: relative;
+  min-width: 0;
+  cursor: crosshair;
+}
+
+.svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hoverLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hoverLine {
+  position: absolute;
+  top: 0;
+  bottom: 10%;
+  width: 1px;
+  background: var(--ink);
+  opacity: 0.35;
+}
+
+.hoverDot {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 3px solid var(--green);
+  transform: translate(-50%, -50%);
+}
+
+.tooltip {
+  position: absolute;
+  top: 14%;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 13px 15px;
+  min-width: 218px;
+  composes: fade130 from "../styles/animations.module.css";
+}
+
+.tipTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--ink-soft);
+}
+
+.tipMid {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 7px 0;
+}
+
+.tipOut {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 7px;
+}
+
+.tipFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-top: 8px;
+  border-top: 1px solid var(--ink-soft);
+}
+
+.tipLabel {
+  font-size: 11px;
+  color: var(--on-dark-dim);
+  white-space: nowrap;
+}
+
+.tipValue {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tipValueLime {
+  composes: tipValue;
+  color: var(--lime);
+}
+
+.tipDots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tipDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.tipCount {
+  font-size: 13.5px;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.xAxis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 14px;
+}
+
+.xTick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.axisTitle {
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  flex: none;
+  padding: 16px 0 12px;
+}
+
+.impacts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--surface);
+  flex: none;
+}
+
+.impact {
+  padding: 12px 14px 2px;
+  border-left: 1px solid var(--surface);
+}
+
+.impactFirst {
+  composes: impact;
+  padding: 12px 14px 2px 0;
+  border-left: 0;
+}
+
+.impactLast {
+  composes: impact;
+  padding: 12px 0 2px 14px;
+}
+
+.impactLabel {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.impactValue {
+  font-size: clamp(14px, 1.3vw, 18px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.impactValueGreen {
+  composes: impactValue;
+  color: var(--green-deep);
+}
+
+.impactSize {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ---------- Makers column ---------- */
+
+.side {
+  background: var(--paper);
+  padding: 20px 20px 14px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sideHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: none;
+}
+
+.sideTitleGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sideTitle {
+  font-size: 14.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sideCount {
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.segmentSmall {
+  composes: segment;
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--text-mid);
+}
+
+.segmentSmallOn {
+  composes: segmentSmall;
+  background: var(--lime);
+  color: var(--ink);
+}
+
+.makerList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  margin-top: 6px;
+  padding-right: 6px;
+}
+
+.makerRow {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--surface-alt);
+  min-width: 0;
+  transition: background 130ms ease;
+  composes: row220 from "../styles/animations.module.css";
+}
+
+.makerRow:hover {
+  background: var(--lime-wash-faint);
+}
+
+.makerDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.makerAddr {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-strong);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.makerAct {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex: none;
+}
+
+.makerState {
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex: none;
+}
+
+.settleHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--surface);
+  padding-top: 12px;
+  margin-top: 4px;
+  flex: none;
+}
+
+.settleTag {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.settlePulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  flex: none;
+  composes: pulse from "../styles/animations.module.css";
+}
+
+.settleTitle {
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.settleLive {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.settleList {
+  flex: none;
+  max-height: 34%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+}
+
+.settleRow {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--surface-alt);
+  min-width: 0;
+  transition: background 130ms ease;
+  composes: row220 from "../styles/animations.module.css";
+}
+
+.settleRow:hover {
+  background: var(--lime-wash-faint);
+}
+
+.settleFrom {
+  font-size: 12.5px;
+  white-space: nowrap;
+  flex: none;
+}
+
+.settleArrow {
+  font-size: 11px;
+  color: var(--line-strong);
+  flex: none;
+}
+
+.settleTo {
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.settleAgo {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex: none;
+}

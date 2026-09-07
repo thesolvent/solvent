@@ -39,3 +39,6 @@ proptest-regressions/
 
 # local server config (copy from solvent.example.toml)
 /solvent.toml
+
+# --- devnet: generated per-deploy from the manifest (untracked) ---
+/devnet/generated/
