@@ -3,6 +3,7 @@
 use alloy::primitives::{Bytes, B256};
 use alloy::signers::{local::PrivateKeySigner, SignerSync};
 
+pub mod erc7683;
 pub mod uniswapx;
 
 /// A 65-byte `r ‖ s ‖ v` signature with `v ∈ {27, 28}`, as on-chain `ecrecover` expects (alloy's
