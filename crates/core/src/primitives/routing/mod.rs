@@ -51,6 +51,16 @@ pub struct RoutePlan {
     pub expected_profit: U256,
 }
 
+impl RoutePlan {
+    pub fn new(intent: IntentId, legs: Vec<RouteLeg>, expected_profit: U256) -> RoutePlan {
+        RoutePlan {
+            intent,
+            legs,
+            expected_profit,
+        }
+    }
+}
+
 /// Routing configuration. The gas **units** for one fill leg are a per-chain constant (one
 /// Aqua `swap` — transferFrom + pull/push + the SwapVM program; measure with `forge test
 /// --gas-report` on the filler). The per-leg *cost in the spread token's units* is derived

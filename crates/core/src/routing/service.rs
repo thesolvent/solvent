@@ -73,11 +73,7 @@ pub fn route(
         true => split.net_output(per_leg_cost).checked_sub(bound)?, // net output clears `min_out`
         false => bound.checked_sub(split.gross_input(per_leg_cost))?, // input + gas stays under `max_in`
     };
-    Some(RoutePlan {
-        intent: request.intent,
-        legs: split.legs,
-        expected_profit,
-    })
+    Some(RoutePlan::new(request.intent, split.legs, expected_profit))
 }
 
 #[cfg(test)]
