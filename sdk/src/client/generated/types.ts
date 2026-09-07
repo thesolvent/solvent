@@ -437,6 +437,21 @@ export interface components {
             tags: string[];
         };
         /**
+         * @description How many of a pool's active makers price on each curve shape. A pool commonly mixes shapes,
+         *     so this is a census rather than a single label.
+         */
+        CurveMix: {
+            /** Format: int64 */
+            concentrated: number;
+            /** Format: int64 */
+            pegged: number;
+            /**
+             * Format: int64
+             * @description Constant-product.
+             */
+            xyc: number;
+        };
+        /**
          * @description One point on the depth curve, anchored to a price-impact bucket. Amounts are base-unit strings;
          *     `impact_pct` is how far `effective_price` sits below `best_price`, in percent.
          */
@@ -632,6 +647,7 @@ export interface components {
             /** Format: double */
             apr_pct?: number | null;
             base: components["schemas"]["Token"];
+            curve_mix: components["schemas"]["CurveMix"];
             /** Format: int64 */
             fills_24h: number;
             /** Format: int64 */
@@ -989,6 +1005,7 @@ export interface components {
                     /** Format: double */
                     apr_pct?: number | null;
                     base: components["schemas"]["Token"];
+                    curve_mix: components["schemas"]["CurveMix"];
                     /** Format: int64 */
                     fills_24h: number;
                     /** Format: int64 */

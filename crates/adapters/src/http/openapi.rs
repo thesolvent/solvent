@@ -37,6 +37,7 @@ use utoipa::OpenApi;
         crate::http::app::stats::Stats,
         solvent_core::asset::Asset,
         solvent_core::asset::Token,
+        solvent_core::pool::CurveMix,
         solvent_core::pool::Pool,
         solvent_core::pool::PoolType,
         solvent_core::pool::PoolMaker,

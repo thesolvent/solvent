@@ -171,6 +171,7 @@ fn type_name(pool_type: PoolType) -> &'static str {
 mod tests {
     use super::*;
     use solvent_core::asset::Token;
+    use solvent_core::pool::CurveMix;
 
     fn addr(n: u8) -> Address {
         Address::from([n; 20])
@@ -195,6 +196,7 @@ mod tests {
             min_spread_bps: 1,
             max_spread_bps: 5,
             popular_fee_tier: fee.to_string(),
+            curve_mix: CurveMix::default(),
             tvl_usd: None,
             volume_24h_usd: None,
             fills_24h: 0,

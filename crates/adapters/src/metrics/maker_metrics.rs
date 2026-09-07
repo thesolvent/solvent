@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use alloy::primitives::{Address, U256};
 use async_trait::async_trait;
 use solvent_core::deps::maker_metrics::{
-    MakerMetrics, MakerMetricsError, MakerMetricsStore, PositionMetrics, TokenVolume,
+    MakerMetrics, MakerMetricsError, MakerMetricsStore, PairMetrics, PositionMetrics, TokenVolume,
 };
 use solvent_core::primitives::registry::TokenPair;
 use solvent_core::primitives::{MakerId, StrategyHash};
@@ -230,6 +230,51 @@ impl MakerMetricsStore for SqliteMakerMetrics {
         }
         let count: i64 = q.fetch_one(&self.pool).await.map_err(db)?;
         Ok(count as u64)
+    }
+
+    async fn pair_activity(
+        &self,
+        pair: TokenPair,
+        since: u64,
+    ) -> Result<PairMetrics, MakerMetricsError> {
+        // A trade's pair is unordered, so match either orientation.
+        const ORIENTATION: &str =
+            "((token_in = ? AND token_out = ?) OR (token_in = ? AND token_out = ?))";
+        let (lo, hi) = (pair.lo.as_slice().to_vec(), pair.hi.as_slice().to_vec());
+        let since = since as i64;
+
+        let fills: i64 = sqlx::query_scalar(&format!(
+            "SELECT COUNT(*) FROM trade \
+             WHERE status = 'confirmed' AND settled_at >= ? AND {ORIENTATION}"
+        ))
+        .bind(since)
+        .bind(&lo)
+        .bind(&hi)
+        .bind(&hi)
+        .bind(&lo)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db)?;
+
+        // Joining the legs multiplies rows per trade, which is what the volume sum wants; the fill
+        // count above deliberately counts trades instead.
+        let rows: Vec<(Vec<u8>, String)> = sqlx::query_as(&format!(
+            "SELECT t.token_out, l.amount_out FROM trade t JOIN trade_leg l ON l.trade_id = t.id \
+             WHERE t.status = 'confirmed' AND t.settled_at >= ? AND {ORIENTATION}"
+        ))
+        .bind(since)
+        .bind(&lo)
+        .bind(&hi)
+        .bind(&hi)
+        .bind(&lo)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+
+        Ok(PairMetrics {
+            fills: fills as u64,
+            volume: sum_by_token(rows),
+        })
     }
 }
 

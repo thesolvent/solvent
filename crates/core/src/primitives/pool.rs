@@ -29,6 +29,16 @@ pub fn classify_pair(
     }
 }
 
+/// How many of a pool's active makers price on each curve shape. A pool commonly mixes shapes,
+/// so this is a census rather than a single label.
+#[derive(Debug, Clone, Copy, Default, Serialize, utoipa::ToSchema)]
+pub struct CurveMix {
+    /// Constant-product.
+    pub xyc: u64,
+    pub concentrated: u64,
+    pub pegged: u64,
+}
+
 /// A pool: the aggregation of all active, priceable strategies over one canonical pair. USD and
 /// volume/fills fields are absent/zero until their data sources (pricing, the trade store) exist.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -42,6 +52,7 @@ pub struct Pool {
     pub min_spread_bps: u32,
     pub max_spread_bps: u32,
     pub popular_fee_tier: String,
+    pub curve_mix: CurveMix,
     pub tvl_usd: Option<f64>,
     pub volume_24h_usd: Option<f64>,
     pub fills_24h: u64,

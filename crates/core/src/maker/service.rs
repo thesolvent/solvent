@@ -844,7 +844,7 @@ mod tests {
 
     use super::*;
     use crate::deps::balances::BalancesOracleError;
-    use crate::deps::maker_metrics::{MakerMetrics, MakerMetricsError, TokenVolume};
+    use crate::deps::maker_metrics::{MakerMetrics, MakerMetricsError, PairMetrics, TokenVolume};
     use crate::deps::registry::{RecordedEvent, StoreError};
     use crate::deps::routing::{PriceOracle, PriceOracleError};
     use crate::primitives::amount::Holdings;
@@ -948,6 +948,17 @@ mod tests {
                 quote_uptime_pct: Some(75.0),
             })
         }
+        async fn pair_activity(
+            &self,
+            _: TokenPair,
+            _: u64,
+        ) -> Result<PairMetrics, MakerMetricsError> {
+            Ok(PairMetrics {
+                fills: 0,
+                volume: vec![],
+            })
+        }
+
         async fn pair_fills(&self, _: &[TokenPair], _: u64) -> Result<u64, MakerMetricsError> {
             Ok(50)
         }

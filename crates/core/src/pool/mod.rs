@@ -5,7 +5,7 @@ mod depth;
 mod service;
 
 pub use crate::primitives::pool::{
-    DepthPoint, Pool, PoolDepth, PoolDetail, PoolMaker, PoolType, Side,
+    CurveMix, DepthPoint, Pool, PoolDepth, PoolDetail, PoolMaker, PoolType, Side,
 };
 pub use depth::DepthService;
 pub use service::PoolService;

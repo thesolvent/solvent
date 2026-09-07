@@ -39,6 +39,14 @@ pub struct PositionMetrics {
     pub quote_uptime_pct: Option<f64>,
 }
 
+/// A pair's trading activity over a window — the pool row's volume, fills and yield.
+pub struct PairMetrics {
+    /// Confirmed trades settled on the pair, in the window.
+    pub fills: u64,
+    /// Per-token delivered volume (outflow) across those trades.
+    pub volume: Vec<TokenVolume>,
+}
+
 #[async_trait]
 pub trait MakerMetricsStore: Send + Sync {
     /// Maker-scoped metrics over `[since, now]` (`now` sizes the 7-day fills sparkline).
@@ -60,6 +68,13 @@ pub trait MakerMetricsStore: Send + Sync {
     /// How many confirmed trades settled on any of `pairs` since `since` — the fill-share
     /// denominator (the maker's share of the fills on the pairs it quotes).
     async fn pair_fills(&self, pairs: &[TokenPair], since: u64) -> Result<u64, MakerMetricsError>;
+
+    /// Fills and delivered volume on one pair since `since`, whichever maker served them.
+    async fn pair_activity(
+        &self,
+        pair: TokenPair,
+        since: u64,
+    ) -> Result<PairMetrics, MakerMetricsError>;
 }
 
 /// A maker-metrics failure.

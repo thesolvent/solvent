@@ -6,18 +6,27 @@ use std::sync::Arc;
 use alloy_primitives::U256;
 
 use crate::asset::AssetManager;
+use crate::deps::ledger::clock::Clock;
+use crate::deps::maker_metrics::{MakerMetricsStore, TokenVolume};
 use crate::primitives::asset::Token;
-use crate::primitives::pool::{classify_pair, Pool, PoolDetail, PoolMaker, PoolType};
+use crate::primitives::pool::{classify_pair, CurveMix, Pool, PoolDetail, PoolMaker, PoolType};
 use crate::primitives::registry::{
     curve_label, fee_in_bps, CurveSpec, MakerStrategy, PoolStats, Snapshot, TokenPair,
 };
 use crate::registry::SharedSnapshot;
 use crate::valuation::Valuation;
 
+/// Trailing window the pool KPIs describe; the yield annualises from it.
+const WINDOW_SECS: u64 = 24 * 60 * 60;
+const YEAR_SECS: f64 = 365.0 * 24.0 * 60.0 * 60.0;
+const BPS_PER_UNIT: f64 = 10_000.0;
+
 pub struct PoolService {
     registry: Arc<SharedSnapshot>,
     assets: Arc<AssetManager>,
     valuation: Arc<Valuation>,
+    metrics: Arc<dyn MakerMetricsStore>,
+    clock: Arc<dyn Clock>,
 }
 
 impl PoolService {
@@ -25,11 +34,15 @@ impl PoolService {
         registry: Arc<SharedSnapshot>,
         assets: Arc<AssetManager>,
         valuation: Arc<Valuation>,
+        metrics: Arc<dyn MakerMetricsStore>,
+        clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
             registry,
             assets,
             valuation,
+            metrics,
+            clock,
         }
     }
 
@@ -53,6 +66,13 @@ impl PoolService {
         stats: &PoolStats,
     ) -> Option<Pool> {
         let (base_addr, quote_addr) = self.assets.base_quote(pair);
+        // A metrics outage leaves the pool listed with no activity rather than hiding it.
+        let activity = self.metrics.pair_activity(*pair, self.since()).await.ok();
+        let volume_24h_usd = match &activity {
+            Some(a) => self.usd_of(&a.volume).await,
+            None => None,
+        };
+        let tvl_usd = self.pair_tvl(snapshot, pair).await;
         Some(Pool {
             pair: self.assets.pair_label(pair),
             base: self.assets.token(&base_addr)?,
@@ -62,11 +82,29 @@ impl PoolService {
             min_spread_bps: stats.min_fee_bps,
             max_spread_bps: stats.max_fee_bps,
             popular_fee_tier: fee_tier(stats.popular_fee_bps),
-            tvl_usd: self.pair_tvl(snapshot, pair).await,
-            volume_24h_usd: None,
-            fills_24h: 0,
-            apr_pct: None,
+            curve_mix: CurveMix {
+                xyc: stats.curve_mix.xyc as u64,
+                concentrated: stats.curve_mix.concentrated as u64,
+                pegged: stats.curve_mix.pegged as u64,
+            },
+            tvl_usd,
+            volume_24h_usd,
+            fills_24h: activity.as_ref().map_or(0, |a| a.fills),
+            apr_pct: yield_pct(volume_24h_usd, tvl_usd, stats.popular_fee_bps),
         })
+    }
+
+    /// The USD value of a per-token flow (all-or-nothing — `None` if any token is unpriced).
+    async fn usd_of(&self, volume: &[TokenVolume]) -> Option<f64> {
+        let priced: Vec<_> = volume
+            .iter()
+            .map(|v| (self.assets.token_or_default(v.token), v.base_units))
+            .collect();
+        self.valuation.tvl_usd(&priced).await
+    }
+
+    fn since(&self) -> u64 {
+        self.clock.now_unix().saturating_sub(WINDOW_SECS)
     }
 
     /// The pair's total value locked: every active strategy's committed balances, valued. `None` if
@@ -131,9 +169,25 @@ fn fee_tier(bps: u32) -> String {
     format!("{:.2}%", bps as f64 / 100.0)
 }
 
+/// Fees the window earned over the capital backing them, annualised.
+///
+/// Volume is measured on the delivered side, which stands in for the notional the maker fee was
+/// charged on. `None` unless both sides are known and the pool holds value.
+fn yield_pct(volume_usd: Option<f64>, tvl_usd: Option<f64>, fee_bps: u32) -> Option<f64> {
+    let (volume, tvl) = (volume_usd?, tvl_usd?);
+    if tvl <= 0.0 {
+        return None;
+    }
+    let fees = volume * (f64::from(fee_bps) / BPS_PER_UNIT);
+    Some(fees / tvl * (YEAR_SECS / WINDOW_SECS as f64) * 100.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deps::maker_metrics::{
+        MakerMetrics, MakerMetricsError, PairMetrics, PositionMetrics,
+    };
     use crate::deps::routing::{PriceOracle, PriceOracleError};
     use crate::primitives::asset::{TokenList, TokenMeta};
     use crate::primitives::registry::{
@@ -144,6 +198,57 @@ mod tests {
     use async_trait::async_trait;
     use rust_decimal::Decimal;
     use std::collections::BTreeMap;
+
+    /// Pools list without regard to trading history, so the metrics port stays silent here; the
+    /// yield itself is covered by `yield_pct`'s own tests.
+    struct NoActivity;
+    #[async_trait]
+    impl MakerMetricsStore for NoActivity {
+        async fn maker(
+            &self,
+            _: MakerId,
+            _: u64,
+            _: u64,
+        ) -> Result<MakerMetrics, MakerMetricsError> {
+            Err(MakerMetricsError::Db("unused".into()))
+        }
+        async fn position(
+            &self,
+            _: StrategyHash,
+            _: TokenPair,
+            _: u64,
+        ) -> Result<PositionMetrics, MakerMetricsError> {
+            Err(MakerMetricsError::Db("unused".into()))
+        }
+        async fn pair_fills(&self, _: &[TokenPair], _: u64) -> Result<u64, MakerMetricsError> {
+            Ok(0)
+        }
+        async fn pair_activity(
+            &self,
+            _: TokenPair,
+            _: u64,
+        ) -> Result<PairMetrics, MakerMetricsError> {
+            Ok(PairMetrics {
+                fills: 0,
+                volume: vec![],
+            })
+        }
+    }
+
+    struct FixedClock;
+    impl Clock for FixedClock {
+        fn now_unix(&self) -> u64 {
+            1_000_000
+        }
+    }
+
+    fn metrics() -> Arc<dyn MakerMetricsStore> {
+        Arc::new(NoActivity)
+    }
+
+    fn clock() -> Arc<dyn Clock> {
+        Arc::new(FixedClock)
+    }
 
     fn addr(n: u8) -> Address {
         Address::from([n; 20])
@@ -228,7 +333,7 @@ mod tests {
         ]);
         let registry = Arc::new(SharedSnapshot::new(snap));
         let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
-        let pools = PoolService::new(registry, assets, valuation(&[]))
+        let pools = PoolService::new(registry, assets, valuation(&[]), metrics(), clock())
             .pools()
             .await;
 
@@ -263,7 +368,7 @@ mod tests {
             .insert(addr(1), U256::from(12_000_000_000u64)); // 12000 USDC (6 dec)
         let registry = Arc::new(SharedSnapshot::new(Snapshot::from_strategies([strategy])));
         let assets = Arc::new(AssetManager::new(list, Arc::clone(&registry)));
-        let svc = PoolService::new(registry, assets, valuation(&[]));
+        let svc = PoolService::new(registry, assets, valuation(&[]), metrics(), clock());
 
         let detail = svc
             .pool_detail(&TokenPair::new(addr(3), addr(1)))
@@ -314,6 +419,8 @@ mod tests {
             registry,
             assets,
             valuation(&[(addr(3), 2000), (addr(1), 1)]),
+            metrics(),
+            clock(),
         );
 
         let pools = svc.pools().await;
@@ -325,5 +432,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(detail.makers[0].virtual_balances.total_usd, Some(20000.0));
+    }
+
+    #[test]
+    fn yield_annualises_the_window_fee_over_backing() {
+        // $10k traded through a 30bps pool earns $30 a day on $100k of depth: 0.03% daily, x365.
+        let apr = yield_pct(Some(10_000.0), Some(100_000.0), 30).unwrap();
+        assert!((apr - 10.95).abs() < 1e-9, "{apr}");
+    }
+
+    #[test]
+    fn yield_is_unknown_without_both_sides_or_backing() {
+        assert_eq!(yield_pct(None, Some(100_000.0), 30), None);
+        assert_eq!(yield_pct(Some(10_000.0), None, 30), None);
+        // No backing would divide by zero and report an infinite return.
+        assert_eq!(yield_pct(Some(10_000.0), Some(0.0), 30), None);
     }
 }

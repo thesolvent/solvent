@@ -102,7 +102,7 @@ mod tests {
         BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError,
     };
     use solvent_core::deps::maker_metrics::{
-        MakerMetrics, MakerMetricsError, MakerMetricsStore, PositionMetrics,
+        MakerMetrics, MakerMetricsError, MakerMetricsStore, PairMetrics, PositionMetrics,
     };
     use solvent_core::deps::quote_log::{QuoteLog, QuoteLogError, QuoteServed};
     use solvent_core::deps::registry::{EventStore, RecordedEvent, StoreError};
@@ -327,6 +327,17 @@ mod tests {
                 quote_uptime_pct: None,
             })
         }
+        async fn pair_activity(
+            &self,
+            _: TokenPair,
+            _: u64,
+        ) -> Result<PairMetrics, MakerMetricsError> {
+            Ok(PairMetrics {
+                fills: 0,
+                volume: vec![],
+            })
+        }
+
         async fn pair_fills(&self, _: &[TokenPair], _: u64) -> Result<u64, MakerMetricsError> {
             Ok(0)
         }
@@ -420,6 +431,8 @@ mod tests {
             Arc::clone(&registry),
             Arc::clone(&assets),
             Arc::clone(&valuation),
+            Arc::new(NoopMakerMetrics),
+            Arc::new(SystemClock),
         ));
         let depth = Arc::new(DepthService::new(
             Arc::clone(&registry),

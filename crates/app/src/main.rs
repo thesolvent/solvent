@@ -175,10 +175,14 @@ async fn main() -> Result<(), StartupError> {
         config.gas_units_per_leg,
     ));
 
+    let maker_metrics: Arc<dyn MakerMetricsStore> = Arc::new(SqliteMakerMetrics::new(pool.clone()));
+
     let pools = Arc::new(PoolService::new(
         Arc::clone(&registry),
         Arc::clone(&assets),
         Arc::clone(&valuation),
+        Arc::clone(&maker_metrics),
+        Arc::new(SystemClock),
     ));
     // An arbitrary wallet's holdings can't be pre-synced, so the balances endpoint reads them on
     // demand, batched into one round-trip per request.
@@ -191,7 +195,6 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&assets),
         Arc::clone(&valuation),
     ));
-    let maker_metrics: Arc<dyn MakerMetricsStore> = Arc::new(SqliteMakerMetrics::new(pool.clone()));
     let makers = Arc::new(MakerService::new(
         Arc::clone(&registry),
         Arc::clone(&assets),

@@ -1044,6 +1044,33 @@
           }
         }
       },
+      "CurveMix": {
+        "type": "object",
+        "description": "How many of a pool's active makers price on each curve shape. A pool commonly mixes shapes,\nso this is a census rather than a single label.",
+        "required": [
+          "xyc",
+          "concentrated",
+          "pegged"
+        ],
+        "properties": {
+          "concentrated": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "pegged": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "xyc": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Constant-product.",
+            "minimum": 0
+          }
+        }
+      },
       "DepthPoint": {
         "type": "object",
         "description": "One point on the depth curve, anchored to a price-impact bucket. Amounts are base-unit strings;\n`impact_pct` is how far `effective_price` sits below `best_price`, in percent.",
@@ -1540,6 +1567,7 @@
           "min_spread_bps",
           "max_spread_bps",
           "popular_fee_tier",
+          "curve_mix",
           "fills_24h"
         ],
         "properties": {
@@ -1552,6 +1580,9 @@
           },
           "base": {
             "$ref": "#/components/schemas/Token"
+          },
+          "curve_mix": {
+            "$ref": "#/components/schemas/CurveMix"
           },
           "fills_24h": {
             "type": "integer",
@@ -2646,6 +2677,7 @@
                     "min_spread_bps",
                     "max_spread_bps",
                     "popular_fee_tier",
+                    "curve_mix",
                     "fills_24h"
                   ],
                   "properties": {
@@ -2658,6 +2690,9 @@
                     },
                     "base": {
                       "$ref": "#/components/schemas/Token"
+                    },
+                    "curve_mix": {
+                      "$ref": "#/components/schemas/CurveMix"
                     },
                     "fills_24h": {
                       "type": "integer",
