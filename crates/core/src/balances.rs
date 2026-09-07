@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 
 use crate::asset::AssetManager;
 use crate::deps::balances::BalancesOracle;
@@ -40,18 +40,15 @@ impl BalancesService {
         let holdings = self.oracle.holdings(owner, &addresses).await?;
         let mut out = Vec::with_capacity(tokens.len());
         for token in tokens {
-            let (balance, pullable) = holdings
-                .get(&token.address)
-                .map(|h| (h.balance, h.pullable))
-                .unwrap_or((U256::ZERO, U256::ZERO));
+            let holding = holdings.get(&token.address).copied().unwrap_or_default();
             out.push(TokenBalance {
                 balance: self
                     .valuation
-                    .amount(balance, token.address, token.decimals)
+                    .amount(holding.balance, token.address, token.decimals)
                     .await,
                 pullable: self
                     .valuation
-                    .amount(pullable, token.address, token.decimals)
+                    .amount(holding.pullable, token.address, token.decimals)
                     .await,
                 token,
             });
@@ -68,6 +65,7 @@ mod tests {
     use crate::primitives::asset::{TokenList, TokenMeta};
     use crate::primitives::UsdPrice;
     use crate::registry::SharedSnapshot;
+    use alloy_primitives::U256;
     use async_trait::async_trait;
     use rust_decimal::Decimal;
     use std::collections::BTreeMap;

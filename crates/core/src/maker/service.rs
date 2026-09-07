@@ -14,7 +14,8 @@ use crate::deps::balances::BalancesOracle;
 use crate::deps::ledger::Clock;
 use crate::deps::maker_metrics::{MakerMetrics, MakerMetricsStore, PositionMetrics, TokenVolume};
 use crate::deps::registry::EventStore;
-use crate::primitives::amount::{Amount, TokenAmount, TokenAmounts};
+use crate::primitives::amount::{Amount, Holdings, TokenAmounts};
+use crate::primitives::asset::Token;
 use crate::primitives::maker::{
     ActiveStats, Economics, FillShare, InventoryLeg, InventoryRow, MakerDashboard, MakerKpis,
     MakerSummary, Position, PositionBalances, PreviewResponse, PriceRange, Split,
@@ -24,7 +25,7 @@ use crate::primitives::registry::{
     curve_label, fee_in_bps, price_range, AquaEvent, Curve, CurveKind, CurveSpec, MakerStrategy,
     PositionRange, RangeKind, TokenPair,
 };
-use crate::primitives::{ChainId, MakerId, StrategyHash, Usd};
+use crate::primitives::{ChainId, MakerId, StrategyHash};
 use crate::registry::SharedSnapshot;
 use crate::valuation::Valuation;
 use crate::SolventError;
@@ -32,6 +33,8 @@ use crate::SolventError;
 const DAY: u64 = 86_400;
 /// The activity window for economics and active-stats.
 const WINDOW_DAYS: u64 = 7;
+/// Basis points in one whole unit (100%); a fee in bps over this is the fraction taken.
+const BPS_PER_UNIT: f64 = 10_000.0;
 
 pub struct MakerService {
     registry: Arc<SharedSnapshot>,
@@ -147,15 +150,15 @@ impl MakerService {
             });
 
         let mut roster = Vec::with_capacity(grouped.len());
-        for (maker, (holdings_count, holdings)) in grouped {
-            let priced: Vec<(crate::primitives::asset::Token, U256)> = holdings
+        for (maker, (active_position_count, balances)) in grouped {
+            let priced: Vec<(Token, U256)> = balances
                 .into_iter()
                 .map(|(addr, amt)| (self.assets.token_or_default(addr), amt))
                 .collect();
             roster.push(MakerSummary {
                 maker: maker.0,
-                active_positions: holdings_count,
-                shared_liquidity_usd: self.valuation.tvl(&priced).await.map(Usd::to_f64),
+                active_positions: active_position_count,
+                shared_liquidity_usd: self.valuation.tvl_usd(&priced).await,
             });
         }
         roster.sort_by_key(|entry| entry.maker);
@@ -168,41 +171,71 @@ impl MakerService {
         let now = self.clock.now_unix();
         let window = WINDOW_DAYS * DAY;
 
-        // Precise headline totals reuse the position builder, so the dashboard can never drift from
-        // the positions list.
+        // Headline totals reuse the position builder, so the dashboard can't drift from the list.
         let positions = self.positions(maker).await?;
-        let active_positions = positions.len() as u64;
-        let shared_liquidity_usd = sum_usd(
-            positions
-                .iter()
-                .map(|p| p.balances.virtual_balances.total_usd),
-        );
-        let pullable_usd = sum_usd(positions.iter().map(|p| p.balances.actual.total_usd));
-        let volume_usd = sum_usd(positions.iter().map(|p| p.economics.volume_usd));
-        let fees_usd = sum_usd(positions.iter().map(|p| p.economics.fees_usd));
+        let kpis = position_kpis(&positions);
 
-        // Wallet balance (raw, uncapped) across every token the maker commits.
-        let snapshot = self.registry.load();
-        let strategies: Vec<MakerStrategy> = snapshot
+        let strategies = self.active_priceable_strategies(maker);
+        let wallet_balance_usd = self
+            .wallet_usd(maker.0, &strategy_tokens(&strategies))
+            .await?;
+
+        let metrics = self.window_metrics(maker, now, window).await?;
+        let deltas = self
+            .window_deltas(&metrics, kpis.volume_usd, kpis.shared_liquidity_usd)
+            .await;
+        let fill_share = self
+            .fill_share(
+                &strategies,
+                metrics.current.fills,
+                now.saturating_sub(window),
+            )
+            .await?;
+
+        Ok(MakerDashboard {
+            maker: maker.0,
+            window_days: WINDOW_DAYS as u32,
+            active_positions: positions.len() as u64,
+            kpis: MakerKpis {
+                shared_liquidity_usd: kpis.shared_liquidity_usd,
+                volume_usd: kpis.volume_usd,
+                wallet_balance_usd,
+                pullable_usd: kpis.pullable_usd,
+                shared_liq_ratio: ratio(kpis.pullable_usd, kpis.shared_liquidity_usd),
+                fees_usd: kpis.fees_usd,
+                shared_liquidity_change_pct: deltas.shared_liquidity_change_pct,
+                volume_change_pct: deltas.volume_change_pct,
+                fees_change_pct: deltas.fees_change_pct,
+            },
+            fill_share,
+            latency_p50_ms: metrics.current.latency_p50_ms,
+            insight: self.undercut_insight(maker, &strategies),
+        })
+    }
+
+    /// The maker's active, priceable strategies — the set the wallet, fill-share, and insight derive
+    /// from.
+    fn active_priceable_strategies(&self, maker: MakerId) -> Vec<MakerStrategy> {
+        self.registry
+            .load()
             .strategies_for_maker(maker)
             .filter(|s| s.active && matches!(s.curve, CurveSpec::Priceable { .. }))
             .cloned()
-            .collect();
-        let tokens: Vec<Address> = strategies
-            .iter()
-            .flat_map(|s| s.balances.keys().copied())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let wallet_balance_usd = self.wallet_usd(maker.0, &tokens).await?;
-        let shared_liq_ratio = ratio(pullable_usd, shared_liquidity_usd);
+            .collect()
+    }
 
-        // Trade-derived deltas need the previous equal window.
-        let cur = self
+    /// The current window's metrics and the previous equal window's, for period-over-period deltas.
+    async fn window_metrics(
+        &self,
+        maker: MakerId,
+        now: u64,
+        window: u64,
+    ) -> Result<WindowMetrics, SolventError> {
+        let current = self
             .metrics
             .maker(maker, now.saturating_sub(window), now)
             .await?;
-        let prev = self
+        let previous = self
             .metrics
             .maker(
                 maker,
@@ -210,45 +243,46 @@ impl MakerService {
                 now.saturating_sub(window),
             )
             .await?;
-        let volume_change_pct = change_pct(volume_usd, self.usd_of(&prev.volume).await);
-        // Fees track volume at a stable fee mix, so the fee delta mirrors the volume delta.
-        let fees_change_pct = volume_change_pct;
-        let shared_liquidity_change_pct = self.liquidity_change(&cur, shared_liquidity_usd).await;
+        Ok(WindowMetrics { current, previous })
+    }
 
-        // Fill share: the maker's fills over all fills on the pairs it quotes.
+    /// Period-over-period KPI deltas: volume vs the previous window, fees tracking volume, and the
+    /// shared-liquidity change from net trading flow.
+    async fn window_deltas(
+        &self,
+        metrics: &WindowMetrics,
+        volume_usd: Option<f64>,
+        shared_liquidity_usd: Option<f64>,
+    ) -> WindowDeltas {
+        let volume_change_pct = change_pct(volume_usd, self.usd_of(&metrics.previous.volume).await);
+        WindowDeltas {
+            volume_change_pct,
+            // Fees track volume at a stable fee mix, so the fee delta mirrors the volume delta.
+            fees_change_pct: volume_change_pct,
+            shared_liquidity_change_pct: self
+                .liquidity_change(&metrics.current, shared_liquidity_usd)
+                .await,
+        }
+    }
+
+    /// The maker's fills as a share of all fills on the pairs it quotes.
+    async fn fill_share(
+        &self,
+        strategies: &[MakerStrategy],
+        filled: u64,
+        since: u64,
+    ) -> Result<FillShare, SolventError> {
         let pairs: Vec<TokenPair> = strategies
             .iter()
             .filter_map(|s| s.pair())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
-        let pair_fills = self
-            .metrics
-            .pair_fills(&pairs, now.saturating_sub(window))
-            .await?;
-
-        Ok(MakerDashboard {
-            maker: maker.0,
-            window_days: WINDOW_DAYS as u32,
-            active_positions,
-            kpis: MakerKpis {
-                shared_liquidity_usd,
-                volume_usd,
-                wallet_balance_usd,
-                pullable_usd,
-                shared_liq_ratio,
-                fees_usd,
-                shared_liquidity_change_pct,
-                volume_change_pct,
-                fees_change_pct,
-            },
-            fill_share: FillShare {
-                filled: cur.fills,
-                pair_fills,
-                share_pct: pct_of(cur.fills, pair_fills),
-            },
-            latency_p50_ms: cur.latency_p50_ms,
-            insight: self.undercut_insight(maker, &strategies),
+        let pair_fills = self.metrics.pair_fills(&pairs, since).await?;
+        Ok(FillShare {
+            filled,
+            pair_fills,
+            share_pct: pct_of(filled, pair_fills),
         })
     }
 
@@ -263,7 +297,7 @@ impl MakerService {
             .iter()
             .map(|(addr, h)| (self.assets.token_or_default(*addr), h.balance))
             .collect();
-        Ok(self.valuation.tvl(&priced).await.map(Usd::to_f64))
+        Ok(self.valuation.tvl_usd(&priced).await)
     }
 
     /// Change in shared liquidity attributable to trading: net USD flow (`inflow − outflow`) over the
@@ -279,35 +313,37 @@ impl MakerService {
     /// or `None` if nobody undercuts it.
     fn undercut_insight(&self, maker: MakerId, strategies: &[MakerStrategy]) -> Option<String> {
         let snapshot = self.registry.load();
-        let mut best: Option<(u32, TokenPair, Address, u32, u32)> = None;
-        for mine in strategies {
-            let CurveSpec::Priceable { fees_in_bps, .. } = &mine.curve else {
-                continue;
-            };
-            let (Some(pair), my_fee) = (mine.pair(), fee_in_bps(fees_in_bps)) else {
-                continue;
-            };
+        let mut best: Option<Undercut> = None;
+        for mine in strategies.iter().filter_map(priceable_fee) {
             for other in snapshot.active_strategies() {
-                if other.key.maker == maker || other.pair() != Some(pair) {
+                if other.key.maker == maker {
                     continue;
                 }
-                let CurveSpec::Priceable { fees_in_bps, .. } = &other.curve else {
+                let Some(theirs) = priceable_fee(other) else {
                     continue;
                 };
-                let their_fee = fee_in_bps(fees_in_bps);
-                let gap = my_fee.saturating_sub(their_fee);
-                if gap > 0 && best.is_none_or(|(g, ..)| gap > g) {
-                    best = Some((gap, pair, other.key.maker.0, their_fee, my_fee));
+                if theirs.pair != mine.pair {
+                    continue;
+                }
+                let gap_bps = mine.fee_bps.saturating_sub(theirs.fee_bps);
+                if gap_bps > 0 && best.as_ref().is_none_or(|b| gap_bps > b.gap_bps) {
+                    best = Some(Undercut {
+                        gap_bps,
+                        pair: mine.pair,
+                        competitor: other.key.maker.0,
+                        their_fee_bps: theirs.fee_bps,
+                        my_fee_bps: mine.fee_bps,
+                    });
                 }
             }
         }
-        best.map(|(_, pair, competitor, their_fee, my_fee)| {
+        best.map(|u| {
             format!(
                 "{} quotes {} at {} bps vs your {} bps",
-                short_addr(competitor),
-                self.assets.pair_label(&pair),
-                their_fee,
-                my_fee
+                short_addr(u.competitor),
+                self.assets.pair_label(&u.pair),
+                u.their_fee_bps,
+                u.my_fee_bps
             )
         })
     }
@@ -315,33 +351,45 @@ impl MakerService {
     /// The maker's positions re-grouped by token — the Assets tab. Each token row aggregates the
     /// positions holding it (its `legs`), with wallet vs committed balances and economics.
     pub async fn inventory(&self, maker: MakerId) -> Result<Vec<InventoryRow>, SolventError> {
-        // Detail positions carry per-token opening and economics; transpose them into per-token rows.
+        let groups = self.group_legs_by_token(maker).await?;
+        let tokens: Vec<Address> = groups.keys().copied().collect();
+        let holdings = self.balances.holdings(maker.0, &tokens).await?;
+        let mut rows = Vec::with_capacity(groups.len());
+        for (addr, group) in groups {
+            rows.push(self.inventory_row(addr, group, &holdings).await);
+        }
+        Ok(rows)
+    }
+
+    /// Rebuild the maker's detail positions and transpose their per-token legs into one group per
+    /// token (a token can appear in several positions).
+    async fn group_legs_by_token(
+        &self,
+        maker: MakerId,
+    ) -> Result<BTreeMap<Address, TokenGroup>, SolventError> {
         let strategies: Vec<MakerStrategy> = self
             .registry
             .load()
             .strategies_for_maker(maker)
             .cloned()
             .collect();
-        let mut grouped: BTreeMap<Address, (crate::primitives::asset::Token, Vec<InventoryLeg>)> =
-            BTreeMap::new();
+        let mut groups: BTreeMap<Address, TokenGroup> = BTreeMap::new();
         for strategy in &strategies {
             let Some(position) = self.build(strategy, true).await? else {
                 continue;
             };
             for entry in &position.balances.virtual_balances.entries {
                 let addr = entry.token.address;
-                let opening = position
-                    .balances
-                    .opening
-                    .entries
-                    .iter()
-                    .find(|e| e.token.address == addr)
-                    .map(|e| e.amount.clone())
+                let opening = find_amount(&position.balances.opening, addr)
+                    .cloned()
                     .unwrap_or_else(|| Amount::from_base_units(U256::ZERO, entry.token.decimals));
-                grouped
+                groups
                     .entry(addr)
-                    .or_insert_with(|| (entry.token.clone(), Vec::new()))
-                    .1
+                    .or_insert_with(|| TokenGroup {
+                        token: entry.token.clone(),
+                        legs: Vec::new(),
+                    })
+                    .legs
                     .push(InventoryLeg {
                         pair: position.pair.clone(),
                         curve: position.curve.clone(),
@@ -355,35 +403,41 @@ impl MakerService {
                     });
             }
         }
+        Ok(groups)
+    }
 
-        let tokens: Vec<Address> = grouped.keys().copied().collect();
-        let holdings = self.balances.holdings(maker.0, &tokens).await?;
-        let mut rows = Vec::with_capacity(grouped.len());
-        for (addr, (token, legs)) in grouped {
-            let wallet_raw = holdings.get(&addr).map_or(U256::ZERO, |h| h.balance);
-            let wallet = self
-                .valuation
-                .amount(wallet_raw, addr, token.decimals)
-                .await;
-            let shared_raw = legs.iter().fold(U256::ZERO, |acc, leg| {
-                acc.saturating_add(leg.current.raw.parse::<U256>().unwrap_or(U256::ZERO))
-            });
-            let shared = self
-                .valuation
-                .amount(shared_raw, addr, token.decimals)
-                .await;
-            let fees_usd = sum_usd(legs.iter().map(|leg| leg.fees_usd));
-            let apy_pct = annualized_apy(fees_usd, shared.usd);
-            rows.push(InventoryRow {
-                token,
-                wallet,
-                shared,
-                fees_usd,
-                apy_pct,
-                legs,
-            });
+    /// One inventory row: the token's wallet holding, its committed (shared) total across legs, and
+    /// the fees/APY those legs earned.
+    async fn inventory_row(
+        &self,
+        addr: Address,
+        group: TokenGroup,
+        holdings: &BTreeMap<Address, Holdings>,
+    ) -> InventoryRow {
+        let TokenGroup { token, legs } = group;
+        let wallet_raw = holdings.get(&addr).map_or(U256::ZERO, |h| h.balance);
+        let wallet = self
+            .valuation
+            .amount(wallet_raw, addr, token.decimals)
+            .await;
+        let shared_raw = legs
+            .iter()
+            .filter_map(|leg| leg.current.raw.parse::<U256>().ok())
+            .fold(U256::ZERO, U256::saturating_add);
+        let shared = self
+            .valuation
+            .amount(shared_raw, addr, token.decimals)
+            .await;
+        let fees_usd = sum_usd(legs.iter().map(|leg| leg.fees_usd));
+        let apy_pct = annualized_apy(fees_usd, shared.usd);
+        InventoryRow {
+            token,
+            wallet,
+            shared,
+            fees_usd,
+            apy_pct,
+            legs,
         }
-        Ok(rows)
     }
 
     async fn build(
@@ -465,23 +519,11 @@ impl MakerService {
 
     /// A `TokenAmounts` from committed balances, valued (all-or-nothing total).
     async fn valued(&self, balances: &BTreeMap<Address, U256>) -> TokenAmounts {
-        let mut entries = Vec::with_capacity(balances.len());
-        let mut priced = Vec::with_capacity(balances.len());
-        for (addr, amount) in balances {
-            let token = self.assets.token_or_default(*addr);
-            entries.push(TokenAmount {
-                amount: self
-                    .valuation
-                    .amount(*amount, token.address, token.decimals)
-                    .await,
-                token: token.clone(),
-            });
-            priced.push((token, *amount));
-        }
-        TokenAmounts {
-            entries,
-            total_usd: self.valuation.tvl(&priced).await.map(Usd::to_f64),
-        }
+        let holdings: Vec<(Token, U256)> = balances
+            .iter()
+            .map(|(addr, amount)| (self.assets.token_or_default(*addr), *amount))
+            .collect();
+        self.valuation.priced_amounts(&holdings).await
     }
 
     /// The pullable (`min(committed, on-chain pullable)`) balances for a strategy, valued.
@@ -566,7 +608,7 @@ impl MakerService {
             .iter()
             .map(|v| (self.assets.token_or_default(v.token), v.base_units))
             .collect();
-        self.valuation.tvl(&priced).await.map(Usd::to_f64)
+        self.valuation.tvl_usd(&priced).await
     }
 
     fn range(
@@ -589,10 +631,96 @@ impl MakerService {
     }
 }
 
+/// The dashboard's headline totals, folded from the position list.
+struct PositionKpis {
+    shared_liquidity_usd: Option<f64>,
+    pullable_usd: Option<f64>,
+    volume_usd: Option<f64>,
+    fees_usd: Option<f64>,
+}
+
+/// A metrics window and the equal window before it, for period-over-period deltas.
+struct WindowMetrics {
+    current: MakerMetrics,
+    previous: MakerMetrics,
+}
+
+/// The dashboard's period-over-period KPI deltas.
+struct WindowDeltas {
+    volume_change_pct: Option<f64>,
+    fees_change_pct: Option<f64>,
+    shared_liquidity_change_pct: Option<f64>,
+}
+
+/// A token's legs across the maker's positions — the Assets-tab transpose of one token.
+struct TokenGroup {
+    token: Token,
+    legs: Vec<InventoryLeg>,
+}
+
+/// A priceable strategy's pair and fee, in real bps.
+struct PairFee {
+    pair: TokenPair,
+    fee_bps: u32,
+}
+
+/// The largest fee undercut of a maker on one of its pairs by a competitor.
+struct Undercut {
+    gap_bps: u32,
+    pair: TokenPair,
+    competitor: Address,
+    their_fee_bps: u32,
+    my_fee_bps: u32,
+}
+
+/// The dashboard's headline totals from the position list (each all-or-nothing).
+fn position_kpis(positions: &[Position]) -> PositionKpis {
+    PositionKpis {
+        shared_liquidity_usd: sum_usd(
+            positions
+                .iter()
+                .map(|p| p.balances.virtual_balances.total_usd),
+        ),
+        pullable_usd: sum_usd(positions.iter().map(|p| p.balances.actual.total_usd)),
+        volume_usd: sum_usd(positions.iter().map(|p| p.economics.volume_usd)),
+        fees_usd: sum_usd(positions.iter().map(|p| p.economics.fees_usd)),
+    }
+}
+
+/// The distinct tokens a set of strategies commits balances to.
+fn strategy_tokens(strategies: &[MakerStrategy]) -> Vec<Address> {
+    strategies
+        .iter()
+        .flat_map(|s| s.balances.keys().copied())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// A priceable strategy's pair and fee in real bps, or `None` if it is unpriceable or has no pair.
+fn priceable_fee(strategy: &MakerStrategy) -> Option<PairFee> {
+    let CurveSpec::Priceable { fees_in_bps, .. } = &strategy.curve else {
+        return None;
+    };
+    Some(PairFee {
+        pair: strategy.pair()?,
+        fee_bps: fee_in_bps(fees_in_bps),
+    })
+}
+
+/// The `Amount` held for `token` among `amounts`, if present.
+fn find_amount(amounts: &TokenAmounts, token: Address) -> Option<&Amount> {
+    amounts
+        .entries
+        .iter()
+        .find(|e| e.token.address == token)
+        .map(|e| &e.amount)
+}
+
 /// USD economics from window volume, the strategy's fee, and committed liquidity. APY annualizes the
 /// window's fees over the committed liquidity: `fees/liquidity · 365/window`.
 fn economics(volume_usd: Option<f64>, fee_bps: u32, liquidity_usd: Option<f64>) -> Economics {
-    let fees_usd = volume_usd.map(|v| v * f64::from(fee_bps) / 10_000.0);
+    let fees_usd = volume_usd.map(|v| v * f64::from(fee_bps) / BPS_PER_UNIT);
     Economics {
         apy_pct: annualized_apy(fees_usd, liquidity_usd),
         fees_usd,
@@ -611,12 +739,9 @@ fn annualized_apy(fees_usd: Option<f64>, liquidity_usd: Option<f64>) -> Option<f
 }
 
 /// Backing coverage: pullable USD as a fraction of committed USD (`1.0` = fully backed). `None` when
-/// either side is unpriced.
+/// either side is unpriced or committed is not positive.
 fn coverage(actual: &TokenAmounts, virtual_balances: &TokenAmounts) -> Option<f64> {
-    match (actual.total_usd, virtual_balances.total_usd) {
-        (Some(a), Some(v)) if v > 0.0 => Some(a / v),
-        _ => None,
-    }
+    ratio(actual.total_usd, virtual_balances.total_usd)
 }
 
 /// Sum USD figures all-or-nothing: `None` if any is `None` (an unpriced part makes the total a guess).
