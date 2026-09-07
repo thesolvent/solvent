@@ -141,11 +141,34 @@ pub(crate) fn witness_digest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::primitives::{address, Signature};
+    use alloy::primitives::{address, b256, Signature};
     use solvent_core::deps::ingest::Normalizer;
     use solvent_core::primitives::ingest::AmountCurve;
 
     use super::super::Erc7683Normalizer;
+
+    // The fixture and its digest come from contracts/script/GenSolventOrderFixture.s.sol. If this
+    // drifts, Permit2 recovers a different signer and every `openFor` reverts.
+    #[test]
+    fn witness_digest_matches_the_contract() {
+        use std::str::FromStr;
+        let payload =
+            Bytes::from_str(include_str!("../../../tests/fixtures/erc7683_order.hex").trim())
+                .expect("fixture hex");
+        let order = GaslessCrossChainOrder::abi_decode(&payload).expect("round-trips");
+        let inner = SolventOrder::abi_decode(&order.orderData).expect("round-trips");
+
+        assert_eq!(
+            witness_digest(
+                &order,
+                inner.inputToken,
+                inner.inputAmount,
+                address!("000000000022D473030F116dDEE9F6B43aC78BA3"),
+                1
+            ),
+            b256!("82a930d85e3233b8cc3866234b5c61cd0943b1565c5d6a1acce63c40e4539fdc")
+        );
+    }
 
     fn signer(byte: u8) -> PrivateKeySigner {
         PrivateKeySigner::from_bytes(&B256::from([byte; 32])).expect("valid test key")

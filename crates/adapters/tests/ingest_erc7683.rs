@@ -3,10 +3,11 @@
 //! itself. That is the whole claim of the protocol-agnostic seam.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use alloy::primitives::{address, Address, B256, U256};
+use alloy::primitives::{address, b256, Address, Bytes, B256, U256};
 use alloy::signers::local::PrivateKeySigner;
 use tokio::sync::mpsc;
 
@@ -14,8 +15,8 @@ use solvent_adapters::ingest::{erc7683, uniswapx};
 use solvent_core::deps::ingest::{Normalizer, OrderFeed};
 use solvent_core::deps::ledger::Clock;
 use solvent_core::ingest::IngestPipeline;
-use solvent_core::primitives::ingest::{Intent, ProtocolId};
-use solvent_core::primitives::ChainId;
+use solvent_core::primitives::ingest::{AmountCurve, Exclusivity, Intent, ProtocolId, RawOrder};
+use solvent_core::primitives::{ChainId, IntentId};
 
 const PERMIT2: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
 const CHAIN: u64 = 1;
@@ -117,3 +118,55 @@ async fn a_seven_six_eight_three_order_survives_on_its_own() {
     assert_eq!(got[0].origin_chain, ChainId(CHAIN));
 }
 
+// The fixture and its id come from the real `SameChainSettler` via
+// contracts/script/GenSolventOrderFixture.s.sol. This is the cross-language pin: the Rust codec's
+// EIP-712 struct hash must equal the id the settler records, or a filler would look up the wrong
+// escrow and every signature would verify against the wrong witness.
+#[test]
+fn normalizes_the_contract_fixture_and_matches_its_order_id() {
+    let payload =
+        Bytes::from_str(include_str!("fixtures/erc7683_order.hex").trim()).expect("fixture hex");
+    let raw = RawOrder::new(
+        ProtocolId::Erc7683,
+        ChainId(1),
+        payload.clone(),
+        Bytes::from(vec![0xABu8; 65]),
+        1234,
+    );
+
+    let intent = erc7683::Erc7683Normalizer
+        .normalize(&raw)
+        .expect("the contract's own encoding normalizes");
+
+    assert_eq!(
+        intent.id,
+        IntentId(b256!(
+            "7dc259cd62be049d930f14f7ec199f025996e09a846a0a7ae43d73db96e36d14"
+        )),
+        "orderId must match SameChainSettler.orderIdFor"
+    );
+    assert_eq!(
+        intent.input.token,
+        address!("6666666666666666666666666666666666666666")
+    );
+    assert_eq!(
+        intent.input.curve,
+        AmountCurve::scalar(U256::from(500u64) * U256::from(10u64).pow(U256::from(18u64)))
+    );
+    assert_eq!(
+        intent.outputs[0].curve,
+        AmountCurve::scalar(U256::from(1000u64) * U256::from(10u64).pow(U256::from(18u64)))
+    );
+    assert_eq!(intent.deadline, 2000);
+    assert_eq!(
+        intent.exclusivity,
+        Some(Exclusivity::new(
+            address!("5555555555555555555555555555555555555555"),
+            1000
+        ))
+    );
+    assert_eq!(
+        intent.settler,
+        address!("2222222222222222222222222222222222222222")
+    );
+}
