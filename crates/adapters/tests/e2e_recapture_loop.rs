@@ -22,7 +22,7 @@ use common::{
     balance_of, budget_source, first_supported, ledger, quote_caps, rid, setup, setup_attached,
     synced, Harness, MockERC20, Stack, PERMIT2,
 };
-use solvent_adapters::execution::{AquaSettlementReader, WalletkitExecutor};
+use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
 use solvent_adapters::ingest::uniswapx::{
     OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXFillBuilder, UniswapXV2Normalizer,
 };
@@ -32,7 +32,9 @@ use solvent_core::deps::recapture::RecaptureStore;
 use solvent_core::deps::routing::{PriceOracle, PriceOracleError};
 use solvent_core::execution::ExecutionService;
 use solvent_core::ledger::{AvailableSnapshot, LedgerService};
-use solvent_core::primitives::execution::{ConfirmedFill, FillOutcome, FillTx, PendingFill};
+use solvent_core::primitives::execution::{
+    FillOutcome, FillTx, PendingFill, Settled, SettledOutcome,
+};
 use solvent_core::primitives::ingest::{Intent, RawOrder};
 use solvent_core::primitives::ledger::ReservationSource;
 use solvent_core::primitives::recapture::RecapturePolicy;
@@ -167,7 +169,7 @@ async fn reserve_order(
     (intent, plan, calldata, caps)
 }
 
-fn execution_service(h: &Harness, led: Arc<LedgerService>) -> ExecutionService {
+async fn execution_service(h: &Harness, led: Arc<LedgerService>) -> ExecutionService {
     let key_hex = format!("0x{}", alloy::hex::encode(h.maker_signer.to_bytes()));
     let signer = LocalSigner::from_private_key(&key_hex).expect("local signer");
     let policy = DefaultPolicyEngine::new(vec![Box::new(AllowAll)], Arc::new(SystemClock));
@@ -176,7 +178,18 @@ fn execution_service(h: &Harness, led: Arc<LedgerService>) -> ExecutionService {
         .confirmations(1)
         .bump_timeout(0)
         .build();
-    let exec = Arc::new(WalletkitExecutor::new(wallet, SubmissionOpts::public()));
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("fill store sqlite");
+    let fills = SqliteFillStore::new(pool);
+    fills.migrate().await.expect("migrate the fill store");
+    let exec = Arc::new(WalletkitExecutor::new(
+        wallet,
+        SubmissionOpts::public(),
+        Arc::new(fills),
+    ));
     let settlement = Arc::new(AquaSettlementReader::new(
         Arc::new(h.maker_provider.clone()),
         *h.aqua.address(),
@@ -184,10 +197,10 @@ fn execution_service(h: &Harness, led: Arc<LedgerService>) -> ExecutionService {
     ExecutionService::new(exec.clone(), exec, settlement, led)
 }
 
-async fn drive(svc: &ExecutionService, h: &Harness) -> Vec<ConfirmedFill> {
+async fn drive(svc: &ExecutionService, h: &Harness) -> Vec<Settled> {
     let mut confirmed = Vec::new();
     for _ in 0..10 {
-        if svc.pending().await == 0 {
+        if svc.pending().await.expect("pending") == 0 {
             break;
         }
         let _: () = h
@@ -255,7 +268,7 @@ async fn run_full_arc(stack: &Stack, otterscan: Option<&str>) {
         "the reverse buy sourced from the imbalanced maker"
     );
 
-    let svc = execution_service(h, led.clone());
+    let svc = execution_service(h, led.clone()).await;
     let fill = PendingFill::new(
         FillTx::new(intent.id, stack.chain_id, h.maker, stack.filler, calldata),
         rid(1),
@@ -267,9 +280,16 @@ async fn run_full_arc(stack: &Stack, otterscan: Option<&str>) {
     let fill_tx = drive(&svc, h)
         .await
         .into_iter()
-        .find(|c| c.intent == intent.id)
-        .map(|c| c.tx);
-    assert_eq!(svc.pending().await, 0, "the reverse fill settled");
+        .find(|s| s.intent == intent.id)
+        .and_then(|s| match s.outcome {
+            SettledOutcome::Confirmed { tx, .. } => Some(tx),
+            _ => None,
+        });
+    assert_eq!(
+        svc.pending().await.expect("pending"),
+        0,
+        "the reverse fill settled"
+    );
     assert!(
         plan.expected_profit > U256::ZERO,
         "resolver spread is positive"

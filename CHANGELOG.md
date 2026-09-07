@@ -164,8 +164,123 @@ the project is pre-1.0 and evolving.
     best-effort recapture is the disclosed limit, §12). The in-binary payout worker + config (§6.2/§8)
     and the oracle-staleness gate (§8/§9) are deferred as blocked on the app composition root / a caching
     price oracle. Cross-chain remains future work.
+- **S2 · M0 — HTTP API scaffold**: the app becomes a running axum server (was `fn main(){}`),
+  exposing the read foundation of the product API.
+  - Inbound HTTP adapter (`crates/adapters/http`): the garden-rs `Response<T>` envelope, `SolventError`
+    → HTTP mapping (redacted 5xx, real cause logged), `List<T>` + opaque cursor pagination, and a
+    tower-http middleware stack (request-id, trace, timeout, CORS).
+  - Composition root (`crates/app`): TOML config (`config` crate), registry snapshot hydrated once
+    from the durable log, a background chain-head poller (block number cached — no RPC per request),
+    graceful shutdown.
+  - **`AssetManager`** — one authority answering everything about an asset by composing a
+    Uniswap-shape token list with the live snapshot (`supported` / count / pairs); one rich `Asset`,
+    serialized directly. `Snapshot::active_assets()` defines "supported".
+  - Endpoints: `GET /healthz`, `/v1/config`, `/v1/stats`, `/v1/assets` (`?supported`), and a
+    code-generated `/v1/openapi.json` (utoipa).
 
-_Next: B6 — reconcile._
+- **S2 · M1 — discovery read paths**: the Pools list, Pool-detail, and Swap/Create balance screens
+  render against a live server.
+  - Endpoints: `GET /v1/pools` (list; symmetric `token_a`/`token_b` + `type`/`fee` filters, most-liquid
+    first), `/v1/pools/detail?base&quote` (KPIs + maker roster), `/v1/pools/depth?base&quote&side`
+    (executable-liquidity curve), `/v1/wallets/{addr}/balances` (per-token balance + pullable across
+    the whole catalog).
+  - **Pool read-surface** — `Snapshot::pool_stats()` folds active strategies per pair (maker count,
+    spread band, popular fee tier, curve mix) with `itertools` grouping; `PoolService` composes it
+    with the `AssetManager` for labels + Stable/Correlated/Volatile classification. Detail composes
+    the list row (`#[serde(flatten)]`) plus the roster.
+  - **Depth = the router, plotted** — reuses candidate `select` + the water-fill `solve`, swept by
+    target output across an impact-anchored ladder (0.1–10%, bisected per bucket). No new curve math;
+    impact is exact via `Ratio::rel_diff_bps`.
+  - **Shared budget cache** — one synced `ArcSwap<AvailableSnapshot>` of every active maker's
+    executable cap (`min(pullable wallet, registry virtual)`), refreshed off the request path by a
+    supervised poller (batched — two Multicall3 aggregates for the whole book); depth reads it
+    lock-free, no per-request RPC. (The router's quote path converges on one net-of-reservations
+    snapshot in M2.)
+  - **Wallet balances** — a `BalancesOracle` returning *both* balance and pullable (unlike
+    `BudgetSource`'s `min`), read on demand for an arbitrary wallet in two Multicall3 aggregates; a
+    shared `erc20` read helper backs both the budget source and the oracle.
+  - Money crosses the wire as `Amount { raw, display, usd }` — exact base-unit strings, never floats.
+  - **Live-run dependency:** Multicall3 predeployed on the devnet (the S1 coordination item); the
+    depth/balances chain reads are otherwise unit- and (for the shared reader) anvil-E2E-tested.
+
+- **S2 · M2 — the core swap loop**: the write path and the lifecycle read surface — a signed order is
+  quoted, submitted, reserved, filled, confirmed on-chain, settled, and observable, restart-safe end
+  to end.
+  - **Trade store** — a durable, idempotent trade lifecycle: `TradeStore` port (create dedups on the
+    order hash, `advance` monotonic by status rank, `settle` terminal-guarded by `settled_at`, `info`,
+    filtered/paginated `list`, `find_by_order`, aggregate `stats`); `TradeId` (ULID, time-sortable);
+    a normalized `trade`/`trade_leg`/`trade_attempt` schema (SQLite).
+  - **`POST /v1/swap/quote`** — exact-in quote over one `select` + `solve_sparse` pass (no double
+    solve); best-price impact read straight off the routed candidates; per-leg gas priced from the
+    poller-backed cache (zero RPC on the path).
+  - **`POST /v1/swap`** — the submit path: a taker-signed UniswapX V2 order is verified and cosigned
+    (`ServerCosigner`, keys env-only, no `Debug` leak), normalized, routed **exact-out**, and driven
+    create → reserve → fill; idempotent on the order hash. Request shaped like the UniswapX Orders API.
+  - **Durable execution recovery** — the in-flight set is no longer in memory: each submitted fill's
+    `(order_hash → reservation, engine handle)` is persisted behind a `FillStore` port (SQLite), and
+    walletkit runs on a durable redb store, so a restart recovers and reconciles every in-flight fill
+    through the normal reconcile tick — no separate recovery path. Kill-and-restart E2E.
+  - **Reconcile worker** — a supervised loop that drives in-flight fills to terminal, settles the
+    matching trade (confirmed / failed), and TTL-sweeps orphaned holds *excluding* still-in-flight
+    reservations (so a hold is never released while its tx can land); a swept orphan fails its trade.
+  - **`GET /v1/trades` + `/v1/trades/{id}`** — one `Trade` wire DTO (list omits the heavy
+    lifecycle/legs/order fields, detail fills them); status/taker/pair filters, keyset cursor paging.
+  - **`GET /v1/activity`** — the Aqua event feed (ship/push/pull/dock) from the durable log, keyset
+    paged, with kind/actor/token filters; `aqua_event` gains a clock-stamped `created_at`, backing a
+    real `events_24h`.
+  - **`GET /v1/stats`** filled — `events_24h`, `trades_settled`, `confirmed_pct` (over confirmed +
+    failed), `median_impact_pct`, and `active_makers` / `quoting_now` from the live registry.
+  - **Phase-close refactor** (from a footprint + comment audit): token-decimals and per-leg gas cost
+    de-duplicated across the quote/swap paths (`AssetManager::decimals`, a shared `LegCostResolver`);
+    price impact now computed once in routing and produced onto settled trades; fixes for a
+    crash-between-create-and-reserve wedge, decline-stat consistency, and activity pagination; a
+    codebase-wide comment trim to the house standard.
+
+- **S3 · M3 — USD valuation**: a core `Valuation` service over the existing `PriceOracle`
+  (`usd(amount, token)` / `tvl(iter)`, missing price → `None`, never a fabricated zero), the
+  `BinanceFeed` tracked symbols widened from the routing set to all Core-6 assets (+ 24h change from
+  the ticker stream), and the `$`/`change` fields wired across every M1/M2/M4 DTO (`Amount.usd`, pool
+  TVL, trade impact-$, stats volume/fees).
+- **S3 · M4 — maker dashboard & analytics** (routes 12–16): the maker read-surface.
+  - **Range decoder + metrics** — `sqrt_price→human` range labels beside the curve engine; a
+    `quote_events` capture on `POST /swap/quote` and a `MakerMetricsStore` (SQLite rollups: fills,
+    volume, fees, uptime, latency-p50, fill-share) grouped by maker/strategy/day.
+  - **`GET /v1/makers`** (active roster) + **`GET /v1/makers/{maker}`** — the dashboard: headline
+    KPIs with period-over-period `*_change_pct`, market-share fill-share over the maker's pairs, and a
+    "cheaper competitor" insight; `me` resolves to the caller's wallet.
+  - **`GET /v1/makers/{maker}/inventory`** — per-token rows (wallet / shared / fees / APY) with the
+    contributing legs, transposed from the position set.
+  - **`GET /v1/makers/{maker}/trades`** — the settlement feed, scoped to `trade_leg.maker`, with
+    per-fill `share_pct` and `fee_usd` computed from **trade-time** token prices (persisted on the
+    trade, so a settled fee never drifts with the market).
+  - **`GET /v1/positions/{hash}`** + **`GET /v1/makers/{maker}/positions`** — the canonical `Position`
+    (human `range`, `balances{virtual, actual, backed, coverage, opening, split}`, `economics`,
+    detail-only `active_stats`), the list projection omitting detail fields; opening balances read from
+    the event log.
+- **S3 · M5 — write path: `@solvent/sdk` + thin backend** (polyglot; routes 17–18): a **client-side,
+  non-custodial** TypeScript SDK plus the two endpoints it needs.
+  - **`@solvent/sdk`** (new in-repo pnpm package: tsup dual ESM/CJS, vitest, `sideEffects:false`,
+    per-module subpath exports) — hexagonal-lite: a pure core + one HTTP seam.
+    - **`construction`** — a fluent `Strategy` builder (`fullRange`/`concentrated`/`inRange`/`pegged`
+      `.fee(bps).build(maker)` → `{program, strategyHash, order}`) that reuses the `@1inch/swap-vm-sdk`
+      price/band primitives (decimals-aware `Price`, `linearWidthFromSymmetricRangePercent`); encoding
+      round-tripped against the shared decoder corpora the Rust side also validates.
+    - **`positions`** — `positions({aqua, app})` → `approve`/`ship`/`dock`/`push`, each an unsigned
+      `{to, data, value}` for the maker's own wallet (the SDK holds no key, sends nothing); `ship`/
+      `dock` via `@1inch/aqua-sdk`, `push`/`approve` via viem + the shipped ABIs.
+    - **`client`** — `createSolventClient({baseUrl, transport?, headers?})`, one typed method per
+      route over an injectable `Transport` (defaults to `fetch`), throwing `SolventApiError` /
+      `SolventNetworkError`; wire types generated from the OpenAPI snapshot.
+  - **`GET /v1/pairs`** — Create-wizard candidate pairs (every asset quoted against a stable, plus
+    stable/stable) with kind, mid, defaults, and optional per-side wallet balances; `?search=` filter.
+  - **`POST /v1/positions/preview`** — server-authoritative pre-flight for an SDK-encoded ship:
+    `{exists, requires_approval, warnings}`, where `requires_approval` is the allowance-capped
+    `pullable < amount`.
+  - **OpenAPI single-source-of-truth** — a committed `sdk/openapi.json` snapshot with a drift guard on
+    each side (a backend test vs `ApiDoc::openapi()`, and the SDK's `codegen:check` vs the generated
+    types), so a renamed Rust field surfaces as a compile/gate failure, never a runtime one.
+
+_Next: S4 — the maker/taker frontend._
 
 ## [0.1.0] — 2026-08-28
 

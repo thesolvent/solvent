@@ -1,6 +1,5 @@
 //! The simulation-gate port: check the exact fill against live state and reject it before a nonce
-//! is spent. The live impl eth-calls the fill (a would-revert is a `Reject`); a richer revm
-//! fork-sim can slot in later behind the same port.
+//! is spent. The live impl eth-calls the fill (a would-revert is a `Reject`).
 
 use async_trait::async_trait;
 use thiserror::Error;

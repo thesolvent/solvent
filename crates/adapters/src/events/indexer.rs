@@ -45,15 +45,8 @@ where
     operation().await
 }
 
-/// This module contains the prelude for the events crate.
-/// It is essential to import this prelude for the `event_provider!` macro to work correctly,
-/// as it brings in all necessary types and traits required by the macro and event querying.
-///
-/// # Important
-/// You must import the `prelude` module from this crate before using the `event_provider!` macro:
-/// ```ignore
-/// use prelude::*;
-/// ```
+/// Import this before using the `event_provider!` macro — it re-exports the types and traits the
+/// macro's expansion needs.
 pub mod prelude {
 
     pub use crate::count_types;
@@ -68,19 +61,11 @@ pub mod prelude {
 
     pub use super::{retry_with_backoff, IndexerError};
 
-    /// Decodes logs for a specific event type, filtering by provided addresses.
-    ///
-    /// # Arguments
-    /// - `logs`: List of raw logs to process.
-    /// - `addresses`: List of contract addresses to filter logs.
-    ///
-    /// # Returns
-    /// A vector of decoded events wrapped in `EventExt`.
+    /// Decodes the logs from `addresses` into `EventExt<T>`, dropping any that don't parse as `T`.
     pub fn process_logs<T: SolEventInterface>(
         logs: &[alloy::rpc::types::Log],
         addresses: &[Address],
     ) -> Vec<EventExt<T>> {
-        // Group logs by address
         let mut addr_to_log_map = HashMap::new();
         logs.iter().for_each(|log| {
             if addresses.contains(&log.address()) {
@@ -91,7 +76,6 @@ pub mod prelude {
             }
         });
 
-        // Decode logs for each address
         addresses
             .iter()
             .flat_map(|addr| {
@@ -109,15 +93,7 @@ pub mod prelude {
             .collect()
     }
 
-    /// Generates block ranges for batched queries to limit the number of blocks per query.
-    ///
-    /// # Arguments
-    /// - `from_block`: Starting block number.
-    /// - `to_block`: Ending block number.
-    /// - `max_block_span`: Maximum number of blocks per range.
-    ///
-    /// # Returns
-    /// A vector of tuples representing block ranges `(start, end)`.
+    /// Split `[from_block, to_block]` into `(start, end)` chunks of at most `max_block_span` blocks.
     pub fn get_block_ranges(
         from_block: u64,
         to_block: u64,
@@ -134,42 +110,19 @@ pub mod prelude {
 }
 
 #[macro_export]
-/// Macro to generate a batched event provider for querying multiple Ethereum contract types events in parallel.
-///
-/// # Usage
-/// Before using the `event_provider!` macro, import the `prelude` module from this crate:
-/// ```ignore
-/// use crate::events::prelude::*;
-/// ```
-///
-/// This macro generates a provider struct and associated methods to efficiently query and decode logs for the specified event types
-/// from an Ethereum node. It supports batching queries over block ranges and limits concurrency to avoid overloading the node.
-///
-/// # Parameters
-/// - `$mod_name`: The module name for the generated provider.
-/// - `($alias, $event_type)`: One or more pairs specifying an alias and the event type to query. Each event type must implement the required traits.
-///
-/// # Generated Items
-/// - A module `$mod_name` containing:
-///   - A struct `EventProvider` over a shared `Arc<dyn Provider>`.
-///   - An `AddressFilter` struct for specifying addresses per event type.
-///   - A `new` constructor to initialize the provider with configuration options.
-///   - An async `query` method to fetch and decode events in batches for a block range and addresses.
-///
-/// # Errors
-/// - Returns an error if log queries fail after all retry attempts.
+/// Generates a batched, parallel event provider for the given contract event types. Import the
+/// `prelude` first; the generated `$mod_name::EventProvider::query` fetches and decodes logs over a
+/// block range, batching by block span and capping concurrency.
 macro_rules! event_provider {
     ($mod_name:ident, $(($alias:ident, $event_type:ty)),+ $(,)?) => {
         pub mod $mod_name {
             use super::*;
 
-            // Configuration constants for retry and concurrency
             const DEFAULT_RETRY_DELAY_MS: u64 = 500;
             const MAX_RETRY_ATTEMPTS: usize = 5;
             const DEFAULT_CONCURRENT_TASKS_LIMIT: usize = 5;
             const DEFAULT_MAX_BLOCK_SPAN: u64 = 10000;
 
-            /// Struct to hold address filters for each event type.
             #[derive(Clone, Debug, Default)]
             pub struct AddressFilter {
                 $(
@@ -178,7 +131,6 @@ macro_rules! event_provider {
             }
 
             impl AddressFilter {
-                /// Creates a new `AddressFilter` with empty address vectors.
                 pub fn new() -> Self {
                     Self {
                         $(
@@ -188,14 +140,12 @@ macro_rules! event_provider {
                 }
 
                 $(
-                    /// Sets addresses for the `$alias` event type.
                     pub fn $alias(mut self, addresses: Vec<Address>) -> Self {
                         self.$alias = addresses;
                         self
                     }
                 )+
 
-                /// Builds an array of address vectors for all event types.
                 pub fn build(&self) -> [Vec<Address>; count_types!($($event_type),+)] {
                     [
                         $(
@@ -214,12 +164,7 @@ macro_rules! event_provider {
 
             impl EventProvider
             {
-                /// Initializes a new event provider with the specified configuration.
-                ///
-                /// # Arguments
-                /// - `provider`: Ethereum provider for querying logs.
-                /// - `max_block_span`: Maximum block range per query (defaults to `DEFAULT_MAX_BLOCK_SPAN`).
-                /// - `concurrent_tasks_limit`: Maximum concurrent tasks (defaults to `DEFAULT_CONCURRENT_TASKS_LIMIT`).
+                /// Wraps `provider`, defaulting the block span and concurrency when unset.
                 pub fn new(
                     provider: Arc<dyn Provider>,
                     max_block_span: Option<u64>,
@@ -233,36 +178,25 @@ macro_rules! event_provider {
                 }
 
                 #[allow(unused_assignments)]
-                /// Queries events for the specified block range and address filter in batches.
-                ///
-                /// # Arguments
-                /// - `from_block`: Starting block number.
-                /// - `to_block`: Ending block number.
-                /// - `filter`: Address filter for each event type.
-                ///
-                /// # Returns
-                /// A `Result` containing a tuple of event vectors for each event type.
+                /// Fetches and decodes every event type over `[from_block, to_block]` for the
+                /// address filter, batched and concurrency-limited.
                 pub async fn query(
                     &self,
                     from_block: u64,
                     to_block: u64,
                     filter: &AddressFilter,
                 ) -> Result<($(Vec<EventExt<$event_type>>,)+), IndexerError> {
-                    // Validate block range
                     if to_block < from_block {
                         return Err(IndexerError::InvalidRange);
                     }
                     let addresses = filter.build();
-                    // Combine all addresses into a single vector for filtering
                     let all_addresses: Vec<Address> = addresses.iter().flatten().cloned().collect();
                     let block_ranges = get_block_ranges(from_block, to_block, self.max_block_span);
                     let mut logs = Vec::new();
 
-                    // Process block ranges in chunks to respect concurrency limit
                     for chunk in block_ranges.chunks(self.concurrent_tasks_limit) {
                         let mut tasks = FuturesUnordered::new();
 
-                        // Create tasks for each block range in the chunk
                         for &(chunk_from, chunk_to) in chunk {
                             let provider = self.provider.clone();
                             let all_addresses = all_addresses.clone();
@@ -291,13 +225,11 @@ macro_rules! event_provider {
                             });
                         }
 
-                        // Collect logs from all tasks in the chunk
                         while let Some(result) = tasks.next().await {
                             logs.extend(result?);
                         }
                     }
 
-                    // Decode logs for each event type
                     let mut index = 0;
                     Ok((
                         $(

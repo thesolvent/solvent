@@ -33,3 +33,6 @@ proptest-regressions/
 
 # --- local-only recapture scenario suite (Stager + Validator; kept out of git deliberately) ---
 crates/adapters/tests/scenarios_recapture.rs
+
+# local server config (copy from solvent.example.toml)
+/solvent.toml

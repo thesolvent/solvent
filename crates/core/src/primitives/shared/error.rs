@@ -4,10 +4,14 @@
 
 use thiserror::Error;
 
+use crate::deps::balances::BalancesOracleError;
 use crate::deps::execution::{ExecutionError, SettlementError, SimError};
+use crate::deps::ingest::{FillBuilderError, NormalizeError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
+use crate::deps::maker_metrics::MakerMetricsError;
 use crate::deps::recapture::RecaptureStoreError;
 use crate::deps::registry::{ChainSourceError, StoreError};
+use crate::deps::trade::TradeStoreError;
 use crate::primitives::ledger::LedgerError;
 
 /// The error every fallible Solvent API returns.
@@ -35,6 +39,9 @@ pub enum SolventError {
     /// Reading a settleable budget failed.
     #[error("budget source: {0}")]
     BudgetSource(#[from] BudgetSourceError),
+    /// Reading a wallet's on-chain balances failed.
+    #[error("balances oracle: {0}")]
+    BalancesOracle(#[from] BalancesOracleError),
     /// The tx engine failed to submit or track a fill.
     #[error("execution: {0}")]
     Execution(#[from] ExecutionError),
@@ -44,6 +51,18 @@ pub enum SolventError {
     /// Reading a confirmed fill's on-chain settlement failed.
     #[error("settlement: {0}")]
     Settlement(#[from] SettlementError),
+    /// The trade store failed.
+    #[error("trade store: {0}")]
+    TradeStore(#[from] TradeStoreError),
+    /// Normalizing a protocol order into an intent failed — a malformed order (client input).
+    #[error("normalize: {0}")]
+    Normalize(#[from] NormalizeError),
+    /// Building a protocol fill's calldata failed.
+    #[error("fill builder: {0}")]
+    FillBuilder(#[from] FillBuilderError),
+    /// Reading maker metrics failed.
+    #[error("maker metrics: {0}")]
+    MakerMetrics(#[from] MakerMetricsError),
     /// The recapture store failed.
     #[error("recapture store: {0}")]
     RecaptureStore(#[from] RecaptureStoreError),
