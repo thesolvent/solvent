@@ -216,6 +216,19 @@ export type AppApi = {
 
 export const AppCtx = createContext<AppApi | null>(null);
 
+/** Everything on {@link AppApi} except the state itself. Chrome that only navigates reads this,
+ *  so a pointer-driven state change does not re-render it. */
+export type AppActions = Omit<AppApi, "state">;
+
+export const AppActionsCtx = createContext<AppActions | null>(null);
+
+export function useAppActions(): AppActions {
+  const actions = useContext(AppActionsCtx);
+  if (!actions)
+    throw new Error("useAppActions must be used inside <AppProvider>");
+  return actions;
+}
+
 export function useApp(): AppApi {
   const ctx = useContext(AppCtx);
   if (!ctx) throw new Error("useApp must be used inside <AppProvider>");

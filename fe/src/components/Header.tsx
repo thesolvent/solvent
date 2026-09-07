@@ -1,12 +1,12 @@
 import { useState } from "react";
 
 import { NAV } from "@/data";
-import { useApp } from "@/state";
+import { useAppActions } from "@/state";
 
 import styles from "./Header.module.css";
 
 export function Header() {
-  const { page, navTo } = useApp();
+  const { page, navTo } = useAppActions();
   // Inert in the design; kept local so the field still accepts input.
   const [query, setQuery] = useState("");
 

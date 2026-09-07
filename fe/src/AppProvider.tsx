@@ -1,16 +1,13 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 
+import { PATHS, pageFromPath } from "./routes";
+import { useAppStore } from "./store";
 import {
+  AppActionsCtx,
   AppCtx,
   DEFAULT_CONFIG,
-  INITIAL_STATE,
+  type AppActions,
   type AppApi,
   type AppConfig,
   type AppState,
@@ -25,7 +22,10 @@ export function AppProvider({
   children: ReactNode;
   config?: AppConfig;
 }) {
-  const [state, setState] = useState<AppState>(INITIAL_STATE);
+  const state = useAppStore();
+  const set = useAppStore((store) => store.set);
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
   const wipeTimers = useRef<number[]>([]);
 
   useEffect(
@@ -35,102 +35,105 @@ export function AppProvider({
     [],
   );
 
-  const set = useCallback((patch: Partial<AppState>) => {
-    setState((prev) => ({ ...prev, ...patch }));
-  }, []);
-
-  const page = state.page ?? config.landingPage;
+  const page = pageFromPath(pathname) ?? config.landingPage;
 
   // The lime veil sweeps up over 520ms; the page swaps behind it at 210ms.
-  const navTo = useCallback((next: Page) => {
-    wipeTimers.current.forEach(clearTimeout);
-    wipeTimers.current = [];
-    setState((prev) => ({ ...prev, wipe: true }));
-    wipeTimers.current.push(
-      window.setTimeout(() => {
-        setState((prev) => ({
-          ...prev,
-          page: next,
-          trail: [],
-          detail: null,
-          create: false,
-          xpTrade: null,
-          xpStrat: null,
-        }));
-        wipeTimers.current.push(
-          window.setTimeout(
-            () => setState((prev) => ({ ...prev, wipe: false })),
-            300,
-          ),
-        );
-      }, 210),
-    );
-  }, []);
+  const navTo = useCallback(
+    (next: Page) => {
+      wipeTimers.current.forEach(clearTimeout);
+      wipeTimers.current = [];
+      set({ wipe: true });
+      wipeTimers.current.push(
+        window.setTimeout(() => {
+          navigate(PATHS[next]);
+          set({
+            trail: [],
+            detail: null,
+            create: false,
+            xpTrade: null,
+            xpStrat: null,
+          });
+          wipeTimers.current.push(
+            window.setTimeout(() => set({ wipe: false }), 300),
+          );
+        }, 210),
+      );
+    },
+    [navigate, set],
+  );
 
   const go = useCallback((next: Page) => () => navTo(next), [navTo]);
 
+  /** Sub-views live on a stack rather than the URL: they are still keyed by position in static
+   *  data, and would deep-link to the wrong row once that data comes from the server. */
   const push = useCallback(
     (view: Partial<AppState>, label: string) => {
-      setState((prev) => {
-        const snap: Snap = {
-          page: prev.page ?? config.landingPage,
-          detail: prev.detail,
-          create: prev.create,
-          xpTrade: prev.xpTrade,
-          xpStrat: prev.xpStrat,
-          maker: prev.maker,
-        };
-        return {
-          ...prev,
-          ...view,
-          trail: [...prev.trail, { snap, label }],
-        };
-      });
+      const previous = useAppStore.getState();
+      const snap: Snap = {
+        page,
+        detail: previous.detail,
+        create: previous.create,
+        xpTrade: previous.xpTrade,
+        xpStrat: previous.xpStrat,
+        maker: previous.maker,
+      };
+      set({ ...view, trail: [...previous.trail, { snap, label }] });
     },
-    [config.landingPage],
+    [page, set],
+  );
+
+  const restore = useCallback(
+    (snap: Snap, trail: AppState["trail"]) => {
+      const { page: from, ...view } = snap;
+      set({ ...view, trail });
+      if (from !== page) navigate(PATHS[from]);
+    },
+    [navigate, page, set],
   );
 
   const pop = useCallback(() => {
-    setState((prev) => {
-      const trail = prev.trail.slice();
-      const last = trail.pop();
-      if (!last) {
-        return {
-          ...prev,
-          detail: null,
-          create: false,
-          xpTrade: null,
-          xpStrat: null,
-          maker: null,
-          trail: [],
-        };
-      }
-      return { ...prev, ...last.snap, trail };
-    });
-  }, []);
+    const trail = useAppStore.getState().trail.slice();
+    const last = trail.pop();
+    if (!last) {
+      set({
+        detail: null,
+        create: false,
+        xpTrade: null,
+        xpStrat: null,
+        maker: null,
+        trail: [],
+      });
+      return;
+    }
+    restore(last.snap, trail);
+  }, [restore, set]);
 
   const crumbs = useCallback(
     (current: string) =>
       state.trail
-        .map((c, i) => ({
-          label: c.label,
+        .map((crumb, i) => ({
+          label: crumb.label,
           sep: "›",
           fg: "var(--text-muted)",
-          go: () =>
-            setState((prev) => ({
-              ...prev,
-              ...c.snap,
-              trail: prev.trail.slice(0, i),
-            })),
+          go: () => restore(crumb.snap, state.trail.slice(0, i)),
         }))
         .concat([{ label: current, sep: "", fg: "var(--ink)", go: () => {} }]),
-    [state.trail],
+    [restore, state.trail],
+  );
+
+  const actions = useMemo<AppActions>(
+    () => ({ config, page, set, navTo, go, push, pop, crumbs }),
+    [config, page, set, navTo, go, push, pop, crumbs],
   );
 
   const value = useMemo<AppApi>(
-    () => ({ state, config, page, set, navTo, go, push, pop, crumbs }),
-    [state, config, page, set, navTo, go, push, pop, crumbs],
+    () => ({ ...actions, state }),
+    [actions, state],
   );
 
-  return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
+  return (
+    <AppActionsCtx.Provider value={actions}>
+      <AppCtx.Provider value={value}>{children}</AppCtx.Provider>
+    </AppActionsCtx.Provider>
+  );
 }

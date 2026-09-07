@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
 import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
 
 import { AppProvider } from "@/AppProvider";
 import type { AssetsPort } from "@/ports/assets";
@@ -45,7 +46,9 @@ export function renderWithServices(
   });
   return render(
     <ServicesProvider services={fakeServices(stubs)} queryClient={queryClient}>
-      <AppProvider>{ui}</AppProvider>
+      <MemoryRouter>
+        <AppProvider>{ui}</AppProvider>
+      </MemoryRouter>
     </ServicesProvider>,
   );
 }
