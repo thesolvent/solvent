@@ -18,11 +18,16 @@
     "@fontsource/anton": "^5",
     "@fontsource/ibm-plex-mono": "^5",
     "@fontsource/manrope": "^5",
+    "@rainbow-me/rainbowkit": "^2",
     "@solvent/sdk": "workspace:*",
+    "@tanstack/react-query": "^5",
+    "@tanstack/react-router": "^1",
     "clsx": "^2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tailwind-merge": "^3"
+    "tailwind-merge": "^3",
+    "viem": "^2",
+    "wagmi": "^2"
   },
   "devDependencies": {
     "@eslint/js": "^9",
