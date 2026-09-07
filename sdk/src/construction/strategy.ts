@@ -15,25 +15,6 @@ const { Price } = instructions.concentrate;
 export type TokenRef = { address: Address; decimals: number };
 export type PeggedTokenInfo = TokenRef & { reserve: bigint };
 
-/** The three on-chain curves the maker wizard produces. `In range` resolves to `concentrated`
- * via {@link bandToPrices}; `Pegged`'s band % resolves to `linearWidth` via the re-exported
- * `linearWidthFromSymmetricRangePercent`. `buildStrategy` only ever sees resolved on-chain params. */
-export type StrategyParams =
-    | { curve: "full-range" }
-    | {
-          curve: "concentrated";
-          base: TokenRef;
-          quote: TokenRef;
-          priceMin: string;
-          priceMax: string;
-      }
-    | {
-          curve: "pegged";
-          tokenA: PeggedTokenInfo;
-          tokenB: PeggedTokenInfo;
-          linearWidth: bigint;
-      };
-
 export interface BuiltStrategy {
     /** The SwapVM program bytes. */
     program: Hex;
@@ -43,61 +24,114 @@ export interface BuiltStrategy {
     order: Hex;
 }
 
-/** Build a maker strategy: a strategy program, its hash, and the ABI-encoded order to ship. */
-export function buildStrategy(input: {
-    maker: Address;
-    strategy: StrategyParams;
-    feeBps?: number;
-}): BuiltStrategy {
-    const base = curveBuilder(input.strategy);
-    const built =
-        input.feeBps === undefined ? base : base.withFeeTokenIn(input.feeBps);
-    const program = built.build();
-    const order = Order.new({
-        maker: new SdkAddress(input.maker),
-        traits: MakerTraits.default(),
-        program,
-    });
-    return {
-        program: program.toString() as Hex,
-        strategyHash: order.hash().toString() as Hex,
-        order: order.encode().toString() as Hex,
-    };
+type SdkBuilder = AquaXYCAmmStrategy | AquaPeggedAmmStrategy;
+
+/** A maker strategy, built fluently to mirror the underlying `@1inch/swap-vm-sdk` builders.
+ * Pick a curve, optionally add a fee, then `build(maker)`:
+ *
+ * ```ts
+ * Strategy.concentrated({ base, quote, priceMin: "0.5", priceMax: "2" }).fee(30).build(maker);
+ * Strategy.inRange({ base, quote, mid: "3000", halfWidthPct: 5 }).build(maker);
+ * Strategy.pegged({ tokenA, tokenB, linearWidth }).build(maker);
+ * ```
+ *
+ * Instances are immutable — `fee` returns a new `Strategy`. */
+export class Strategy {
+    private constructor(
+        private readonly resolve: () => SdkBuilder,
+        private readonly feeBps?: number,
+    ) {}
+
+    /** Full-range constant-product (XYC). */
+    static fullRange(): Strategy {
+        return new Strategy(() => AquaXYCAmmStrategy.new());
+    }
+
+    /** Concentrated liquidity between explicit human price bounds (quote per 1 base). */
+    static concentrated(p: {
+        base: TokenRef;
+        quote: TokenRef;
+        priceMin: string;
+        priceMax: string;
+    }): Strategy {
+        return new Strategy(() =>
+            concentrate(p.base, p.quote, p.priceMin, p.priceMax),
+        );
+    }
+
+    /** Concentrated liquidity in a symmetric band `± halfWidthPct` around `mid`. */
+    static inRange(p: {
+        base: TokenRef;
+        quote: TokenRef;
+        mid: string;
+        halfWidthPct: number;
+    }): Strategy {
+        const { priceMin, priceMax } = bandToPrices(p.mid, p.halfWidthPct);
+        return new Strategy(() =>
+            concentrate(p.base, p.quote, priceMin, priceMax),
+        );
+    }
+
+    /** Pegged (stable) curve; `linearWidth` sets the band (see `linearWidthFromSymmetricRangePercent`). */
+    static pegged(p: {
+        tokenA: PeggedTokenInfo;
+        tokenB: PeggedTokenInfo;
+        linearWidth: bigint;
+    }): Strategy {
+        return new Strategy(() =>
+            AquaPeggedAmmStrategy.new({
+                tokenA: peggedToken(p.tokenA),
+                tokenB: peggedToken(p.tokenB),
+                linearWidth: p.linearWidth,
+            }),
+        );
+    }
+
+    /** A maker fee, in bps, taken on the input token. */
+    fee(bps: number): Strategy {
+        return new Strategy(this.resolve, bps);
+    }
+
+    /** Encode for `maker`: the program, its hash, and the order to ship. */
+    build(maker: Address): BuiltStrategy {
+        const base = this.resolve();
+        const built =
+            this.feeBps === undefined ? base : base.withFeeTokenIn(this.feeBps);
+        const program = built.build();
+        const order = Order.new({
+            maker: new SdkAddress(maker),
+            traits: MakerTraits.default(),
+            program,
+        });
+        return {
+            program: program.toString() as Hex,
+            strategyHash: order.hash().toString() as Hex,
+            order: order.encode().toString() as Hex,
+        };
+    }
 }
 
-function curveBuilder(
-    s: StrategyParams,
-): AquaXYCAmmStrategy | AquaPeggedAmmStrategy {
-    switch (s.curve) {
-        case "full-range":
-            return AquaXYCAmmStrategy.new();
-        case "concentrated": {
-            const pair = {
-                baseToken: {
-                    address: new SdkAddress(s.base.address),
-                    decimals: BigInt(s.base.decimals),
-                },
-                quoteToken: {
-                    address: new SdkAddress(s.quote.address),
-                    decimals: BigInt(s.quote.decimals),
-                },
-            };
-            const a = Price.fromHuman(s.priceMin, pair).toSqrt();
-            const b = Price.fromHuman(s.priceMax, pair).toSqrt();
-            // Bounds must be ordered by the on-chain sqrt price, which base/quote orientation may invert.
-            const [sqrtPriceMin, sqrtPriceMax] = a < b ? [a, b] : [b, a];
-            return AquaXYCAmmStrategy.newConcentrate({
-                sqrtPriceMin,
-                sqrtPriceMax,
-            });
-        }
-        case "pegged":
-            return AquaPeggedAmmStrategy.new({
-                tokenA: peggedToken(s.tokenA),
-                tokenB: peggedToken(s.tokenB),
-                linearWidth: s.linearWidth,
-            });
-    }
+function concentrate(
+    base: TokenRef,
+    quote: TokenRef,
+    priceMin: string,
+    priceMax: string,
+): AquaXYCAmmStrategy {
+    const pair = {
+        baseToken: {
+            address: new SdkAddress(base.address),
+            decimals: BigInt(base.decimals),
+        },
+        quoteToken: {
+            address: new SdkAddress(quote.address),
+            decimals: BigInt(quote.decimals),
+        },
+    };
+    const a = Price.fromHuman(priceMin, pair).toSqrt();
+    const b = Price.fromHuman(priceMax, pair).toSqrt();
+    // Bounds must be ordered by the on-chain sqrt price, which base/quote orientation may invert.
+    const [sqrtPriceMin, sqrtPriceMax] = a < b ? [a, b] : [b, a];
+    return AquaXYCAmmStrategy.newConcentrate({ sqrtPriceMin, sqrtPriceMax });
 }
 
 function peggedToken(t: PeggedTokenInfo) {
@@ -108,8 +142,8 @@ function peggedToken(t: PeggedTokenInfo) {
     };
 }
 
-/** The `In range` preset: a symmetric band `± halfWidthPct` around `mid`, as the human price
- * bounds `concentrated` expects. Computed in 1e18 fixed-point to avoid float drift. */
+/** A symmetric band `± halfWidthPct` around `mid`, as the human price bounds `concentrated` expects.
+ * Computed in 1e18 fixed-point to avoid float drift. */
 export function bandToPrices(
     mid: string,
     halfWidthPct: number,

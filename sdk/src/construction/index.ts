@@ -1,7 +1,7 @@
 import { instructions } from "@1inch/swap-vm-sdk";
 
-export { buildStrategy, bandToPrices } from "./strategy";
-export type { TokenRef, PeggedTokenInfo, StrategyParams, BuiltStrategy } from "./strategy";
+export { Strategy, bandToPrices } from "./strategy";
+export type { TokenRef, PeggedTokenInfo, BuiltStrategy } from "./strategy";
 export { coverage } from "./coverage";
 export type { CoverageState, Coverage } from "./coverage";
 
