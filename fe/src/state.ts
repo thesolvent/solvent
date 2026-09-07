@@ -10,7 +10,6 @@ export type PoolQuery = {
   sell: string;
   buy: string;
   fee: string;
-  venue: string;
   apr: string;
 };
 
@@ -40,7 +39,6 @@ export type AppState = {
 
   poolQuery: PoolQuery;
   poolSort: string;
-  poolPicked: number;
   poolPage: number;
 
   detail: number | null;
@@ -118,14 +116,12 @@ export const INITIAL_STATE: AppState = {
 
   poolQuery: {
     ptype: "All pools",
-    sell: "ETH",
-    buy: "USDC",
+    sell: "Any",
+    buy: "Any",
     fee: "Any",
-    venue: "Any",
-    apr: "8%",
+    apr: "Any",
   },
   poolSort: "Best",
-  poolPicked: 1,
   poolPage: 0,
 
   detail: null,
@@ -159,8 +155,8 @@ export const INITIAL_STATE: AppState = {
   hoverFrac: null,
 
   makerSort: "Virtual",
-  filterPick: { 0: 0, 1: 0 },
-  tvlMin: 40,
+  filterPick: { 0: 0 },
+  tvlMin: 0,
 
   picker: null,
   pQuery: "",

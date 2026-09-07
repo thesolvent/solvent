@@ -448,6 +448,14 @@ export type Pool = {
   fills: string;
   fee: string;
   apr: string;
+  /** Sort and threshold keys. Served pools carry them; the sample rows below do not, since
+   *  their magnitudes only ever needed to be read, never compared. */
+  tvlUsd?: number | null;
+  aprPct?: number | null;
+  /** The bare fee tier. `fee` carries a version suffix for display, so it cannot be compared. */
+  feeTier?: string;
+  /** Curve shapes this pool's makers price on; a pool commonly mixes several. */
+  curves?: string[];
 };
 
 export const POOLS: Pool[] = [

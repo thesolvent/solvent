@@ -1,0 +1,120 @@
+{
+  "items": [
+    {
+      "pair": "DAI/USDC",
+      "base": {
+        "address": "0x68b1d87f95878fe05b998f19b66f4baba5de1aed",
+        "chain_id": 31337,
+        "symbol": "DAI",
+        "decimals": 18
+      },
+      "quote": {
+        "address": "0x959922be3caee4b8cd9a407cc3ac1c251c2007b1",
+        "chain_id": 31337,
+        "symbol": "USDC",
+        "decimals": 6
+      },
+      "type": "Stable",
+      "maker_count": 1,
+      "min_spread_bps": 1,
+      "max_spread_bps": 1,
+      "popular_fee_tier": "0.01%",
+      "curve_mix": {
+        "xyc": 0,
+        "concentrated": 0,
+        "pegged": 1
+      },
+      "tvl_usd": 500021.25,
+      "volume_24h_usd": 0.0,
+      "fills_24h": 0,
+      "apr_pct": 0.0
+    },
+    {
+      "pair": "LINK/USDC",
+      "base": {
+        "address": "0x59b670e9fa9d0a427751af201d676719a970857b",
+        "chain_id": 31337,
+        "symbol": "LINK",
+        "decimals": 18
+      },
+      "quote": {
+        "address": "0x959922be3caee4b8cd9a407cc3ac1c251c2007b1",
+        "chain_id": 31337,
+        "symbol": "USDC",
+        "decimals": 6
+      },
+      "type": "Volatile",
+      "maker_count": 1,
+      "min_spread_bps": 30,
+      "max_spread_bps": 30,
+      "popular_fee_tier": "0.30%",
+      "curve_mix": {
+        "xyc": 0,
+        "concentrated": 1,
+        "pegged": 0
+      },
+      "tvl_usd": 559235.5,
+      "volume_24h_usd": 0.0,
+      "fills_24h": 0,
+      "apr_pct": 0.0
+    },
+    {
+      "pair": "WBTC/USDC",
+      "base": {
+        "address": "0xc6e7df5e7b4f2a278906862b61205850344d4e7d",
+        "chain_id": 31337,
+        "symbol": "WBTC",
+        "decimals": 8
+      },
+      "quote": {
+        "address": "0x959922be3caee4b8cd9a407cc3ac1c251c2007b1",
+        "chain_id": 31337,
+        "symbol": "USDC",
+        "decimals": 6
+      },
+      "type": "Volatile",
+      "maker_count": 1,
+      "min_spread_bps": 30,
+      "max_spread_bps": 30,
+      "popular_fee_tier": "0.30%",
+      "curve_mix": {
+        "xyc": 0,
+        "concentrated": 1,
+        "pegged": 0
+      },
+      "tvl_usd": 278411.75,
+      "volume_24h_usd": 0.0,
+      "fills_24h": 0,
+      "apr_pct": 0.0
+    },
+    {
+      "pair": "WETH/USDC",
+      "base": {
+        "address": "0x3aa5ebb10dc797cac828524e59a333d0a371443c",
+        "chain_id": 31337,
+        "symbol": "WETH",
+        "decimals": 18
+      },
+      "quote": {
+        "address": "0x959922be3caee4b8cd9a407cc3ac1c251c2007b1",
+        "chain_id": 31337,
+        "symbol": "USDC",
+        "decimals": 6
+      },
+      "type": "Volatile",
+      "maker_count": 1,
+      "min_spread_bps": 5,
+      "max_spread_bps": 5,
+      "popular_fee_tier": "0.05%",
+      "curve_mix": {
+        "xyc": 0,
+        "concentrated": 1,
+        "pegged": 0
+      },
+      "tvl_usd": 164868.9,
+      "volume_24h_usd": 0.0,
+      "fills_24h": 0,
+      "apr_pct": 0.0
+    }
+  ]
+}

@@ -10,8 +10,7 @@
 /* ---------- Query bar ---------- */
 
 .queryBar {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr) 92px;
+  display: flex;
   border-bottom: 1px solid var(--line);
   background: var(--paper-soft);
   position: relative;
@@ -21,6 +20,9 @@
 .queryCell {
   position: relative;
   border-right: 1px solid var(--line);
+  /* Equal shares whatever the cell count is, rather than a hardcoded track list. */
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .queryButton {
@@ -131,6 +133,7 @@
 }
 
 .searchAction {
+  flex: 0 0 92px;
   background: var(--green);
   border: 0;
   cursor: pointer;
@@ -159,6 +162,9 @@
   align-items: center;
   gap: 16px;
   padding: 13px 28px;
+  /* Holds the populated row's height, so filtering to no pools empties the bar without
+     collapsing it and shifting everything below. */
+  min-height: 49px;
   background: var(--lime);
   border-bottom: 1px solid #b9e441;
   overflow: hidden;
@@ -414,15 +420,25 @@
   text-align: left;
   min-height: 150px;
   flex: none;
-  transition: box-shadow 140ms ease;
+  transition:
+    box-shadow 140ms ease,
+    background 140ms ease,
+    color 140ms ease;
   background: var(--paper);
   color: var(--ink);
 }
 
-.poolPicked {
-  composes: pool;
+/* The leading pool reads as the pick until the reader points at another one. */
+.pool:first-child,
+.pool:hover {
   background: var(--green);
   color: var(--paper);
+}
+
+/* Once the cursor is over the list, only the tile under it stays lit. */
+.poolList:hover .pool:first-child:not(:hover) {
+  background: var(--paper);
+  color: var(--ink);
 }
 
 .poolMain {

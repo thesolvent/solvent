@@ -2,35 +2,50 @@ import { QueryClient } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
 import type { ReactElement } from "react";
 
-import type { SolventApi } from "@/ports/solvent-api";
+import { AppProvider } from "@/AppProvider";
+import type { AssetsPort } from "@/ports/assets";
+import type { PoolsPort } from "@/ports/pools";
+import type { SystemPort } from "@/ports/system";
 import { ServicesProvider } from "@/services/ServicesProvider";
+import type { Services } from "@/services/context";
 
-/** Build a stand-in API implementing only the calls a test exercises; anything else is a mistake
- *  worth failing on rather than silently returning undefined. */
-export function fakeApi(methods: Partial<SolventApi>): SolventApi {
-  return new Proxy(methods as SolventApi, {
-    get(target, key: string) {
-      const method = target[key as keyof SolventApi];
-      if (method) return method;
-      throw new Error(`fakeApi: ${key}() was called but not stubbed`);
+/** A port implementing only the calls a test stubs; anything else is a mistake worth failing on
+ *  rather than silently returning undefined. */
+function port<T extends object>(name: string, stubs: Partial<T>): T {
+  return new Proxy({} as T, {
+    get(_target, key: string) {
+      const stub = (stubs as Record<string, unknown>)[key];
+      if (stub) return stub;
+      throw new Error(`${name}.${key}() was called but not stubbed`);
     },
   });
 }
 
-/** Render `ui` against a fake API — no network, and failures surface immediately (no retries). */
+export interface Stubs {
+  assets?: Partial<AssetsPort>;
+  pools?: Partial<PoolsPort>;
+  system?: Partial<SystemPort>;
+}
+
+export function fakeServices(stubs: Stubs): Services {
+  return {
+    assets: port("assets", stubs.assets ?? {}),
+    pools: port("pools", stubs.pools ?? {}),
+    system: port("system", stubs.system ?? {}),
+  };
+}
+
+/** Render `ui` against stubbed ports — no network, and failures surface at once (no retries). */
 export function renderWithServices(
   ui: ReactElement,
-  api: Partial<SolventApi>,
+  stubs: Stubs = {},
 ): RenderResult {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 } },
   });
   return render(
-    <ServicesProvider
-      services={{ api: fakeApi(api) }}
-      queryClient={queryClient}
-    >
-      {ui}
+    <ServicesProvider services={fakeServices(stubs)} queryClient={queryClient}>
+      <AppProvider>{ui}</AppProvider>
     </ServicesProvider>,
   );
 }

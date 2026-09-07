@@ -1,10 +1,14 @@
 import { createContext, useContext } from "react";
 
-import type { SolventApi } from "@/ports/solvent-api";
+import type { AssetsPort } from "@/ports/assets";
+import type { PoolsPort } from "@/ports/pools";
+import type { SystemPort } from "@/ports/system";
 
 /** Outbound dependencies, injected at the composition root so services never import adapters. */
 export interface Services {
-  api: SolventApi;
+  assets: AssetsPort;
+  pools: PoolsPort;
+  system: SystemPort;
 }
 
 export const ServicesCtx = createContext<Services | null>(null);
@@ -15,5 +19,3 @@ export function useServices(): Services {
     throw new Error("useServices must be used inside <ServicesProvider>");
   return services;
 }
-
-export const useApi = (): SolventApi => useServices().api;

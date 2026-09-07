@@ -1,90 +1,87 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 
-import { POOLS } from "@/data";
-import { poolType } from "@/lib/format";
+import type { Pool } from "@/data";
+
+import {
+  aprOptions,
+  bestByApr,
+  feeTierOptions,
+  filterPools,
+  poolTypeOptions,
+  sortPools,
+} from "@/lib/pools";
+import { useAssetSymbols } from "@/services/assets";
+import { usePools } from "@/services/pools";
 import { useApp, type PoolQuery } from "@/state";
 
 import styles from "./PoolsPage.module.css";
 
 const PAGE_SIZE = 4;
 
-const QUERY_CELLS: {
-  key: keyof PoolQuery;
-  label: string;
-  options: string[];
-}[] = [
-  {
-    key: "ptype",
-    label: "Pool type",
-    options: ["All pools", "Stable", "Volatile", "Incentivised"],
-  },
-  {
-    key: "sell",
-    label: "Sell asset",
-    options: ["Any", "ETH", "SOL", "USDC", "WBTC", "1INCH"],
-  },
-  {
-    key: "buy",
-    label: "Buy asset",
-    options: ["Any", "USDC", "USDT", "ETH", "WBTC"],
-  },
-  {
-    key: "fee",
-    label: "Fee tier",
-    options: ["Any", "0.01%", "0.05%", "0.30%", "1.00%"],
-  },
-  {
-    key: "venue",
-    label: "Venue",
-    options: ["Any", "Aqua core", "Aqua extended", "Aqua incentive"],
-  },
-  {
-    key: "apr",
-    label: "Min APR",
-    options: ["Any", "5%", "8%", "12%", "20%"],
-  },
-];
+type QueryCell = { key: keyof PoolQuery; label: string; options: string[] };
 
+/** Every choice is drawn from what the server actually serves, so no option filters to nothing. */
+function queryCells(symbols: string[], pools: Pool[]): QueryCell[] {
+  const assets = ["Any", ...symbols];
+  return [
+    {
+      key: "ptype",
+      label: "Pool type",
+      options: ["All pools", ...poolTypeOptions(pools)],
+    },
+    { key: "sell", label: "Sell asset", options: assets },
+    { key: "buy", label: "Buy asset", options: assets },
+    {
+      key: "fee",
+      label: "Fee tier",
+      options: ["Any", ...feeTierOptions(pools)],
+    },
+    { key: "apr", label: "Min APR", options: ["Any", ...aprOptions(pools)] },
+  ];
+}
+
+/** `filterPick` defaults to each group's first option, so "Any" must lead or the page loads filtered. */
 const FILTER_GROUPS = [
   {
     title: "Curve type",
     options: [
-      { label: "Single-sided", hint: "" },
-      { label: "Paired inventory", hint: "" },
-      { label: "Concentrated", hint: "" },
-    ],
-  },
-  {
-    title: "Maker uptime",
-    options: [
       { label: "Any", hint: "" },
-      { label: "Above 95%", hint: "24h" },
-      { label: "Above 99%", hint: "7d" },
+      { label: "Constant product", hint: "" },
+      { label: "Concentrated", hint: "" },
+      { label: "Pegged", hint: "" },
     ],
   },
 ];
+
+const CURVE_GROUP = 0;
 
 const SORTS = ["Best", "Highest APR", "Most TVL", "Newest"];
 
 export function PoolsPage() {
   const { state, set, push } = useApp();
+  const pools = usePools();
+  const cells = queryCells(useAssetSymbols(), pools);
+  const ptype = state.poolQuery.ptype;
 
-  const ptype = state.poolQuery.ptype || "All pools";
-  const inType = (p: (typeof POOLS)[number]) =>
-    ptype === "All pools" || poolType(p) === ptype;
-
-  const matching = POOLS.filter(inType);
+  const curve =
+    FILTER_GROUPS[CURVE_GROUP].options[state.filterPick[CURVE_GROUP] ?? 0]
+      ?.label;
+  const matching = sortPools(
+    filterPools(pools, {
+      query: state.poolQuery,
+      tvlSliderPct: state.tvlMin,
+      curve,
+    }),
+    state.poolSort,
+  );
   const page = matching.slice(
     state.poolPage * PAGE_SIZE,
     state.poolPage * PAGE_SIZE + PAGE_SIZE,
   );
-  const pageCount = Math.ceil(POOLS.length / PAGE_SIZE);
+  const pageCount = Math.ceil(matching.length / PAGE_SIZE);
 
-  // Matches the mock, which always surfaces the first pool: its recommender
-  // filters on a state key nothing ever sets, so the filter never matches and it
-  // falls through to POOLS[0]. Swap in the commented line to rank by APR instead.
-  // const recommendation = [...matching].sort((a, b) => parseFloat(b.apr) - parseFloat(a.apr))[0] ?? POOLS[0];
-  const recommendation = POOLS[0];
+  // The best yield among the pools the query admits; recommending an excluded pool would misdirect.
+  const recommendation = bestByApr(matching);
 
   const pageLabel =
     matching.length === 0
@@ -98,6 +95,7 @@ export function PoolsPage() {
     const r = e.currentTarget.getBoundingClientRect();
     const apply = (cx: number) =>
       set({
+        poolPage: 0,
         tvlMin: Math.round(
           Math.min(100, Math.max(0, ((cx - r.left) / r.width) * 100)),
         ),
@@ -115,7 +113,7 @@ export function PoolsPage() {
   return (
     <div data-scroll="1" className={styles.root}>
       <div className={styles.queryBar}>
-        {QUERY_CELLS.map((c) => {
+        {cells.map((c) => {
           const open = state.openCell === c.key;
           return (
             <div key={c.key} className={styles.queryCell}>
@@ -149,6 +147,7 @@ export function PoolsPage() {
                               ...state.poolQuery,
                               [c.key]: o,
                             },
+                            poolPage: 0,
                             openCell: null,
                           })
                         }
@@ -169,21 +168,27 @@ export function PoolsPage() {
       </div>
 
       <div className={styles.recommend}>
-        <span className={styles.recommendTag}>
-          <span className={styles.pulse} />
-          <span className={styles.recommendTagText}>Recommended</span>
-        </span>
-        <span
-          key={ptype + recommendation.pair}
-          className={styles.recommendBody}
-        >
-          <span className={styles.recommendPair}>{recommendation.pair}</span>
-          <span className={styles.recommendMeta}>
-            {recommendation.apr} net APR · {recommendation.tvl} depth ·{" "}
-            {recommendation.fee}
-          </span>
-        </span>
-        <span className={styles.recommendOpen}>Open pool ↗</span>
+        {recommendation ? (
+          <>
+            <span className={styles.recommendTag}>
+              <span className={styles.pulse} />
+              <span className={styles.recommendTagText}>Recommended</span>
+            </span>
+            <span
+              key={ptype + recommendation.pair}
+              className={styles.recommendBody}
+            >
+              <span className={styles.recommendPair}>
+                {recommendation.pair}
+              </span>
+              <span className={styles.recommendMeta}>
+                {recommendation.apr} net APR · {recommendation.tvl} depth ·{" "}
+                {recommendation.fee}
+              </span>
+            </span>
+            <span className={styles.recommendOpen}>Open pool ↗</span>
+          </>
+        ) : null}
       </div>
 
       <div className={styles.body}>
@@ -207,6 +212,7 @@ export function PoolsPage() {
                           ...state.filterPick,
                           [gi]: i,
                         },
+                        poolPage: 0,
                       })
                     }
                   >
@@ -264,17 +270,13 @@ export function PoolsPage() {
 
           <div className={styles.poolList}>
             {page.map((p) => {
-              const i = POOLS.indexOf(p);
-              const picked = state.poolPicked === i;
+              const i = pools.indexOf(p);
               return (
                 <button
                   key={p.pair}
                   type="button"
-                  className={picked ? styles.poolPicked : styles.pool}
-                  onClick={() => {
-                    set({ poolPicked: i });
-                    push({ detail: i }, "Pools");
-                  }}
+                  className={styles.pool}
+                  onClick={() => push({ detail: i }, "Pools")}
                 >
                   <div className={styles.poolMain}>
                     <div className={styles.poolRule}>

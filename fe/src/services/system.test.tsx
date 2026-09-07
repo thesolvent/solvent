@@ -23,9 +23,9 @@ function Probe() {
 }
 
 describe("useConfig", () => {
-  it("resolves the server config through the injected API port", async () => {
+  it("resolves the server config through the injected port", async () => {
     const config = vi.fn().mockResolvedValue(CONFIG);
-    renderWithServices(<Probe />, { config });
+    renderWithServices(<Probe />, { system: { config } });
 
     expect(await screen.findByText("chain 31337")).toBeInTheDocument();
     expect(config).toHaveBeenCalledOnce();
@@ -33,7 +33,7 @@ describe("useConfig", () => {
 
   it("reports a failed read rather than leaving the caller pending", async () => {
     const config = vi.fn().mockRejectedValue(new Error("api down"));
-    renderWithServices(<Probe />, { config });
+    renderWithServices(<Probe />, { system: { config } });
 
     expect(await screen.findByText("failed")).toBeInTheDocument();
   });
