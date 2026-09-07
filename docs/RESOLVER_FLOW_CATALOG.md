@@ -166,7 +166,13 @@ The resolver is a **liquidity backend + settlement adapter**. *Any* order flow w
 **Tier 1 — atomic same-chain (cheapest adapters, best fit):**
 - **CoW Protocol** — solvers settle batch auctions providing liquidity; adapter = CoW settlement solver interface. Large flow.
 - **0x RFQ / Bebop / Hashflow** — RFQ MM networks; we quote via Aqua SwapVM and sign RFQ responses. Natural (Aqua *is* an MM inventory).
-- **Any ERC-7683 same-chain settler** — once the 7683 adapter exists, every 7683-compatible protocol is reachable for free.
+- **Any ERC-7683 settler whose settlement is claimable in the fill's own transaction** — the adapter
+  makes the *fill entrypoint* (`IDestinationSettler.fill`) and the *resolved-order shape*
+  (`resolve` → `maxSpent`/`minReceived`) shared. What stays per-protocol: order **discovery** (7683
+  standardizes no feed), the `orderData` decoder, and the **repayment model**. That last one is the
+  binding constraint — every deployed 7683 settler today (Across, Eco, LI.FI, Symbiosis, UniswapX
+  cross-chain) repays the filler *after* a proof or optimistic window, which requires fronting
+  capital and so is incompatible with zero inventory. "Reachable for free" was an overstatement.
 
 **Tier 2 — cross-chain via a settlement primitive we already support:**
 - **1inch Fusion / Fusion+** — in-domain (hashlock escrow); high value but KYC-gated. Aqua-backed Fusion+ resolver.

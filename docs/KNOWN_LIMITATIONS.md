@@ -127,6 +127,35 @@ worker is deferred, blocked on the app composition root — see the recapture de
 gate: route the payer through `walletkit::Wallet` *before* that worker is ever enabled, so the
 double-pay window never opens in production.
 
+## L11 — `Erc7683AquaFiller` duplicates the Aqua-sourcing machinery
+**Component:** contracts — `contracts/src/Erc7683AquaFiller.sol` × `contracts/src/UniswapXAquaFiller.sol`
+
+`SourceSwap`, the balance snapshot, the profitability guard, `_takerTraits`, `_pushUnique`/`_addAmount`
+and `sweep` exist in both fillers (~150 duplicated lines). This **contradicts** the house rule to
+extract shared logic at the second use, and was chosen knowingly: extracting an `AquaSourcing` base
+would have touched a working, audited-once contract days before the ETHOnline deadline, and the
+UniswapX filler's 20 tests are the only thing standing behind it.
+
+- **Blast radius:** none functionally — the duplication is exact and both copies are covered by their
+  own suites. The cost is future: a guard fix must be made twice, and the two can silently diverge.
+- **Disposition:** **extract `AquaSourcing` after the deadline**, with both suites as the safety net.
+  The two fillers genuinely differ only in their entrypoint and which callback they implement
+  (`reactorCallback` vs `preTransferInCallback`), so the shared base is a clean cut.
+
+## L12 — ERC-7683 fills are bounded to four maker legs
+**Component:** contracts — `contracts/src/Erc7683AquaFiller.sol` (`MAX_LEGS`)
+
+The 7683 path sources multi-leg by **nesting**: leg *i*'s flash callback launches leg *i+1*, and the
+innermost settles. Recursion depth therefore equals leg count, so it is bounded at 4 and
+`Erc7683FillBuilder` rejects wider plans off-chain (`FillBuilderError::TooManyLegs`). UniswapX, whose
+legs are sequential rather than nested, is unaffected and keeps the router's `max_legs`.
+
+- **Blast radius:** a routed plan wider than four legs is not fillable on the 7683 path; the router's
+  sparsity heuristic rarely produces one at realistic gas, but it can.
+- **Disposition:** raising the bound is a constant plus a gas measurement of the deepest nest. If wide
+  plans ever matter more than gas, the alternative is a settler-side callback (design §5.1), which
+  removes the nesting entirely at the cost of asking the settler for a favour.
+
 ---
 
 # Performance — refactor before production
