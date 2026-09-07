@@ -6,6 +6,13 @@ docs/superpowers/
 # --- Node (1inch deps resolve via npm) ---
 node_modules/
 
+# --- Frontend (Vite/Vitest/Playwright build + test artifacts) ---
+/frontend/dist
+/frontend/.vite
+/frontend/coverage
+/frontend/test-results
+/frontend/playwright-report
+
 # --- Rust (backend, added later) ---
 /backend/target
 /target

@@ -1,0 +1,11 @@
+{
+  "name": "solvent-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.17.1",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "@tailwindcss/oxide"]
+  }
+}
