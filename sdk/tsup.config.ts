@@ -4,6 +4,7 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     construction: "src/construction/index.ts",
+    positions: "src/positions/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,
