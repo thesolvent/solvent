@@ -60,6 +60,15 @@ pub enum Curve {
     Pegged(PeggedParams),
 }
 
+/// The curve shape as a stable wire label (`XYC` / `Concentrated` / `Pegged`).
+pub fn curve_label(curve: &Curve) -> &'static str {
+    match curve {
+        Curve::Xyc => "XYC",
+        Curve::Concentrate { .. } => "Concentrated",
+        Curve::Pegged(_) => "Pegged",
+    }
+}
+
 /// What an Aqua strategy decodes to: a priceable curve plus its ordered flat
 /// fees (input-side, `bps` at `1e9`), or `Unsupported`.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -100,3 +100,40 @@ pub enum FillOutcome {
     Submitted { handle: ExecHandle },
     Rejected { reason: String },
 }
+
+/// A submitted fill the execution engine still tracks, as durably recorded: the intent it settles
+/// and the reservation whose holds it will post or void. Read on reconcile to drive every in-flight
+/// fill to a terminal state — after a restart, these are the fills to recover.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TrackedFill {
+    pub intent: IntentId,
+    pub reservation: ReservationId,
+}
+
+impl TrackedFill {
+    pub fn new(intent: IntentId, reservation: ReservationId) -> Self {
+        Self {
+            intent,
+            reservation,
+        }
+    }
+}
+
+/// A fill that reconcile drove to a terminal state, reported so the trade lifecycle can settle. The
+/// pre-submit sim-reject never reaches here — it settles the trade as declined on the submit path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Settled {
+    pub intent: IntentId,
+    pub outcome: SettledOutcome,
+}
+
+/// How a reconciled fill ended: confirmed on-chain (the ledger was posted the actual pulled amounts),
+/// or failed/dropped (the hold was released).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SettledOutcome {
+    Confirmed { tx: B256, block: u64 },
+    Failed,
+}

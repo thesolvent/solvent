@@ -1,33 +1,26 @@
-//! The execution service: the last leg of the intent lifecycle. `fill` simulates a reserved plan
-//! and, if it passes, submits it (voiding the reservation on a reject, before any nonce is spent).
-//! `reconcile`, driven on a cadence, advances the tx engine and settles each fill that reached a
-//! terminal state — posting the *actual* per-source amounts read from the confirmed fill (the
-//! ledger returns any unfilled remainder), or voiding on failure.
+//! The execution service: the last leg of the intent lifecycle. `fill` simulates a reserved plan and
+//! submits it if it passes (voiding the reservation on a reject, before a nonce is spent);
+//! `reconcile` advances the tx engine and settles each terminal fill with the *actual* per-source
+//! amounts, or voids on failure. The in-flight set lives in the durable engine, not memory (via
+//! [`Execution::tracked`]), so a restart recovers every submitted fill through the same path.
 
-use std::collections::HashMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
-
-use tokio::sync::Mutex;
 
 use crate::deps::execution::{Execution, SettlementReader, SimGate};
 use crate::ledger::LedgerService;
 use crate::obs::{info, warn};
-use crate::primitives::execution::{ExecHandle, ExecStatus, FillOutcome, PendingFill, SimVerdict};
+use crate::primitives::execution::{
+    ExecHandle, ExecStatus, FillOutcome, PendingFill, Settled, SettledOutcome, SimVerdict,
+};
 use crate::primitives::ledger::LedgerError;
-use crate::primitives::{IntentId, ReservationId, SolventError};
+use crate::primitives::{ReservationId, SolventError};
 
 pub struct ExecutionService {
     sim: Arc<dyn SimGate>,
     execution: Arc<dyn Execution>,
     settlement: Arc<dyn SettlementReader>,
     ledger: Arc<LedgerService>,
-    in_flight: Mutex<HashMap<IntentId, InFlight>>,
-}
-
-#[derive(Clone)]
-struct InFlight {
-    handle: ExecHandle,
-    reservation: ReservationId,
 }
 
 impl ExecutionService {
@@ -42,87 +35,73 @@ impl ExecutionService {
             execution,
             settlement,
             ledger,
-            in_flight: Mutex::new(HashMap::new()),
         }
     }
 
     /// Simulate then privately submit a reserved plan. A simulation `Reject` voids the reservation
-    /// and returns without spending a nonce; an intent already in flight returns its existing
-    /// handle (idempotent — one order never fills twice).
+    /// and returns without spending a nonce; submission is idempotent on the intent — resubmitting
+    /// a tracked fill returns its handle, so one order never fills twice.
     #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, fields(intent = %pending.fill_tx.intent)))]
     pub async fn fill(&self, pending: PendingFill) -> Result<FillOutcome, SolventError> {
-        let intent = pending.fill_tx.intent;
-        if let Some(f) = self.in_flight.lock().await.get(&intent) {
-            return Ok(FillOutcome::Submitted { handle: f.handle });
-        }
         match self.sim.simulate(&pending.fill_tx).await? {
             SimVerdict::Reject { reason } => {
-                warn!(intent = %intent, "fill dropped by sim gate; voiding reservation");
+                warn!("fill dropped by sim gate; voiding reservation");
                 self.ledger.void(pending.reservation).await?;
                 Ok(FillOutcome::Rejected { reason })
             }
             SimVerdict::Ok => {
-                let handle = self.execution.submit(&pending.fill_tx).await?;
-                self.in_flight.lock().await.insert(
-                    intent,
-                    InFlight {
-                        handle,
-                        reservation: pending.reservation,
-                    },
-                );
-                info!(intent = %intent, "fill submitted");
+                let handle = self
+                    .execution
+                    .submit(&pending.fill_tx, pending.reservation)
+                    .await?;
+                info!("fill submitted");
                 Ok(FillOutcome::Submitted { handle })
             }
         }
     }
 
-    /// Advance the tx engine, then settle every in-flight fill that reached a terminal state: on
-    /// `Confirmed`, post the actual amounts the fill pulled (read from its own settlement); on
-    /// failure, void. A reservation a redelivery already settled is a no-op, so this is safe to
-    /// call repeatedly.
-    pub async fn reconcile(&self) -> Result<(), SolventError> {
+    /// Advance the tx engine, then settle every tracked fill that reached a terminal state: on
+    /// `Confirmed`, post the actual amounts the fill pulled (read from its own settlement) and drop
+    /// the tracking; on failure, void and drop. Returns the fills that reached a terminal state so
+    /// the caller can settle the trade lifecycle. A reservation a redelivery already settled is a
+    /// no-op, so this is safe to call repeatedly — and after a restart it recovers the durably
+    /// tracked fills through this same path.
+    pub async fn reconcile(&self) -> Result<Vec<Settled>, SolventError> {
         self.execution.tick().await?;
 
-        let snapshot: Vec<(IntentId, InFlight)> = {
-            let in_flight = self.in_flight.lock().await;
-            in_flight.iter().map(|(id, f)| (*id, f.clone())).collect()
-        };
-
         let mut settled = Vec::new();
-        for (intent, f) in snapshot {
-            let Some(status) = self.execution.status(f.handle).await? else {
+        for f in self.execution.tracked().await? {
+            let Some(status) = self.execution.status(ExecHandle(f.intent.0)).await? else {
                 continue;
             };
-            match status {
-                ExecStatus::Confirmed { tx, .. } => {
+            let outcome = match status {
+                ExecStatus::Confirmed { tx, block } => {
                     match self.ledger.reservation_sources(f.reservation).await {
                         Some(sources) => {
                             let filled = self.settlement.settled(tx, &sources).await?;
                             settle(self.ledger.post(f.reservation, &filled).await)?;
-                            info!(intent = %intent, "fill confirmed; reservation posted");
+                            info!(intent = %f.intent, "fill confirmed; reservation posted");
                         }
                         None => {
-                            warn!(intent = %intent, "fill confirmed but reservation is gone; skipping post");
+                            warn!(intent = %f.intent, "fill confirmed but reservation is gone; skipping post");
                         }
                     }
-                    settled.push(intent);
+                    SettledOutcome::Confirmed { tx, block }
                 }
                 ExecStatus::Failed { .. } | ExecStatus::Dropped => {
                     settle(self.ledger.void(f.reservation).await)?;
-                    warn!(intent = %intent, "fill did not land; reservation voided");
-                    settled.push(intent);
+                    warn!(intent = %f.intent, "fill did not land; reservation voided");
+                    SettledOutcome::Failed
                 }
-                ExecStatus::Pending => {}
-            }
+                ExecStatus::Pending => continue,
+            };
+            self.execution.forget(f.intent).await?;
+            settled.push(Settled {
+                intent: f.intent,
+                outcome,
+            });
         }
-
-        if !settled.is_empty() {
-            let mut in_flight = self.in_flight.lock().await;
-            for intent in settled {
-                in_flight.remove(&intent);
-            }
-        }
-        Ok(())
+        Ok(settled)
     }
 
     /// Reverse a posted fill a chain reorg rolled back — the compensating ledger transition. The
@@ -133,8 +112,20 @@ impl ExecutionService {
     }
 
     /// How many fills are still in flight — zero once every submitted fill has settled.
-    pub async fn pending(&self) -> usize {
-        self.in_flight.lock().await.len()
+    pub async fn pending(&self) -> Result<usize, SolventError> {
+        Ok(self.execution.tracked().await?.len())
+    }
+
+    /// The reservations of every fill still in flight — the set a TTL sweep must not touch, since
+    /// their transactions can still land.
+    pub async fn tracked_reservations(&self) -> Result<BTreeSet<ReservationId>, SolventError> {
+        Ok(self
+            .execution
+            .tracked()
+            .await?
+            .iter()
+            .map(|f| f.reservation)
+            .collect())
     }
 }
 
@@ -150,7 +141,9 @@ fn settle(result: Result<(), SolventError>) -> Result<(), SolventError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex as StdMutex;
 
     use alloy_primitives::{Address, Bytes, B256, U256};
     use async_trait::async_trait;
@@ -159,9 +152,9 @@ mod tests {
     use crate::deps::ledger::{
         BudgetSource, BudgetSourceError, Clock, LedgerStore, LedgerStoreError,
     };
-    use crate::primitives::execution::FillTx;
+    use crate::primitives::execution::{FillTx, TrackedFill};
     use crate::primitives::ledger::{AccountKey, Reservation, ReservationSource};
-    use crate::primitives::{MakerId, StrategyHash};
+    use crate::primitives::{IntentId, MakerId, StrategyHash};
 
     struct FakeSim(SimVerdict);
     #[async_trait]
@@ -174,23 +167,52 @@ mod tests {
     struct FakeExec {
         status: ExecStatus,
         submits: AtomicUsize,
+        tracked: StdMutex<HashMap<IntentId, ReservationId>>,
     }
     impl FakeExec {
         fn new(status: ExecStatus) -> Self {
             Self {
                 status,
                 submits: AtomicUsize::new(0),
+                tracked: StdMutex::new(HashMap::new()),
             }
         }
     }
     #[async_trait]
     impl Execution for FakeExec {
-        async fn submit(&self, fill: &FillTx) -> Result<ExecHandle, ExecutionError> {
-            self.submits.fetch_add(1, Ordering::Relaxed);
+        async fn submit(
+            &self,
+            fill: &FillTx,
+            reservation: ReservationId,
+        ) -> Result<ExecHandle, ExecutionError> {
+            self.tracked
+                .lock()
+                .unwrap()
+                .entry(fill.intent)
+                .or_insert_with(|| {
+                    self.submits.fetch_add(1, Ordering::Relaxed);
+                    reservation
+                });
             Ok(ExecHandle(fill.intent.0))
         }
-        async fn status(&self, _: ExecHandle) -> Result<Option<ExecStatus>, ExecutionError> {
-            Ok(Some(self.status.clone()))
+        async fn status(&self, handle: ExecHandle) -> Result<Option<ExecStatus>, ExecutionError> {
+            let tracked = self.tracked.lock().unwrap();
+            Ok(tracked
+                .contains_key(&IntentId(handle.0))
+                .then(|| self.status.clone()))
+        }
+        async fn forget(&self, intent: IntentId) -> Result<(), ExecutionError> {
+            self.tracked.lock().unwrap().remove(&intent);
+            Ok(())
+        }
+        async fn tracked(&self) -> Result<Vec<TrackedFill>, ExecutionError> {
+            Ok(self
+                .tracked
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(intent, reservation)| TrackedFill::new(*intent, *reservation))
+                .collect())
         }
         async fn tick(&self) -> Result<(), ExecutionError> {
             Ok(())
@@ -367,9 +389,16 @@ mod tests {
             led.clone(),
         );
         svc.fill(pending(intent, rid)).await.unwrap();
-        svc.reconcile().await.unwrap();
+        let settled = svc.reconcile().await.unwrap();
 
-        assert_eq!(svc.pending().await, 0);
+        assert!(matches!(
+            settled.as_slice(),
+            [Settled {
+                outcome: SettledOutcome::Confirmed { .. },
+                ..
+            }]
+        ));
+        assert_eq!(svc.pending().await.unwrap(), 0);
         // 60 consumed, the 40 remainder returned to available.
         assert_eq!(led.available(&wallet_account()), U256::from(940u64));
     }
@@ -391,9 +420,16 @@ mod tests {
             led.clone(),
         );
         svc.fill(pending(intent, rid)).await.unwrap();
-        svc.reconcile().await.unwrap();
+        let settled = svc.reconcile().await.unwrap();
 
-        assert_eq!(svc.pending().await, 0);
+        assert!(matches!(
+            settled.as_slice(),
+            [Settled {
+                outcome: SettledOutcome::Failed,
+                ..
+            }]
+        ));
+        assert_eq!(svc.pending().await.unwrap(), 0);
         assert_eq!(
             led.available(&wallet_account()),
             U256::from(1000u64),
@@ -470,6 +506,40 @@ mod tests {
 
         // reconcile sees Confirmed and tries to post again -> WrongState -> swallowed, not an error.
         svc.reconcile().await.unwrap();
-        assert_eq!(svc.pending().await, 0);
+        assert_eq!(svc.pending().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn reconcile_recovers_a_durably_tracked_fill_without_a_prior_fill() {
+        // A restart: the reservation is open (the ledger recovered it) and the fill is durably
+        // tracked (the engine recovered it), but this service instance never called `fill`.
+        // Reconcile alone must still drive it to settlement.
+        let (intent, rid) = ids(7);
+        let led = ledger(1000);
+        led.reserve(rid, intent, vec![source(100)], 60)
+            .await
+            .unwrap();
+
+        let (svc, exec) = service(
+            SimVerdict::Ok,
+            confirmed(),
+            vec![U256::from(100u64)],
+            led.clone(),
+        );
+        // As restored from the durable tracking table on boot — no `fill`, no nonce spent.
+        exec.tracked.lock().unwrap().insert(intent, rid);
+
+        svc.reconcile().await.unwrap();
+        assert_eq!(svc.pending().await.unwrap(), 0);
+        assert_eq!(
+            exec.submits.load(Ordering::Relaxed),
+            0,
+            "recovery never submits"
+        );
+        assert_eq!(
+            led.available(&wallet_account()),
+            U256::from(900u64),
+            "recovered fill posted"
+        );
     }
 }

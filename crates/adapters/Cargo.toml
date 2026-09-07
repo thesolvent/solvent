@@ -15,6 +15,8 @@ alloy = { version = "1", features = [
     "sol-types",
 ] }
 async-trait = "0.1"
+axum = "0.8"
+base64 = "0.22"
 futures = "0.3"
 sqlx = { version = "0.8", features = [
     "runtime-tokio",
@@ -29,7 +31,11 @@ rust_decimal = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["time"] }
 tokio-tungstenite = { version = "0.24", features = ["connect", "rustls-tls-webpki-roots"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace", "request-id", "timeout", "cors"] }
 tracing = "0.1"
+ulid = "1"
+utoipa = "5"
 walletkit = { package = "walletkit-rs", git = "https://github.com/21r21a33333/walletkit.git", rev = "3e75a5d2385da13d6ab813104f1e2473860e32cb", default-features = false }
 
 [dev-dependencies]
@@ -37,4 +43,7 @@ walletkit = { package = "walletkit-rs", git = "https://github.com/21r21a33333/wa
 alloy = { version = "1", features = ["full", "node-bindings"] }
 serde = { version = "1", features = ["derive"] }
 tempfile = "3"
+# E2E only: the durable tx-engine store, to prove in-flight fills recover across a restart. Kept off
+# the library build (which never references it) and enabled only for tests via feature unification.
+walletkit = { package = "walletkit-rs", git = "https://github.com/21r21a33333/walletkit.git", rev = "3e75a5d2385da13d6ab813104f1e2473860e32cb", default-features = false, features = ["redb"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

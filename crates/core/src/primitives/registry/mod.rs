@@ -2,10 +2,12 @@
 
 pub mod curve;
 pub mod event;
+pub mod range;
 pub mod snapshot;
 pub mod strategy;
 
-pub use curve::{decode_strategy, Curve, CurveSpec, PeggedParams};
+pub use curve::{curve_label, decode_strategy, Curve, CurveSpec, PeggedParams};
 pub use event::{AquaEvent, EventCursor, EventExt, StrategyKey};
-pub use snapshot::Snapshot;
+pub use range::{price_range, PositionRange, RangeKind};
+pub use snapshot::{fee_in_bps, ActiveAsset, CurveKind, PoolStats, Snapshot, StrategyCount};
 pub use strategy::{MakerStrategy, TokenPair};

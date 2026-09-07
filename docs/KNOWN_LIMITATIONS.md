@@ -143,6 +143,15 @@ therefore makes N round-trips. → batch the whole reserve's confirm into a sing
 calls for "1 batched JIT confirm"). Also: the event-sourced zero-RPC budget cache replaces this on the
 quote path entirely (a later phase).
 
+## P6 — Depth ladder solves cold, without warm-starting
+
+`DepthService` plots its impact ladder by calling `routing::solve` once per bucket and per bisection
+step (~80+ solves), each passing `warm = None` — so every solve bisects λ from cold, though the
+engine explicitly supports a warm-start seed and the ladder is monotone in size (each rung's λ is a
+tight seed for the next). Correct, just slower than necessary on a heavy endpoint. → thread the tip's
+λ (then each rung's) as the warm seed through the ladder solves. Deferred to keep the M2 quote-path
+change focused; depth's method is otherwise correct (`select` once, one solve per *distinct* point).
+
 ---
 
 # Deferred routing test coverage
@@ -166,6 +175,12 @@ re-confirms a known finding, or needs calibrated market data. Pick up if a speci
 
 # Deferred ingest work (B4)
 
+- **Autonomous feed-driven ingestion is dormant in M2** — `IngestPipeline` (fan-in `OrderFeed`s →
+  normalize → dedup → a channel for a decision worker) and `SelfHostedFeed` are built and tested, but
+  the S2 `POST /swap` is *request-driven*: the taker submits the signed order in the HTTP body, so the
+  swap path calls the `Normalizer` + `FillBuilder` (+ `SignedOrderBuilder`) directly, not
+  `IngestPipeline`. The feed-driven pipeline + `OrderFeed` adapters stay unwired until an autonomous
+  decision loop (hosted/replay/RFQ below) is built.
 - **`replay` order feed** — deferred to **B7 (backtest)**, its only real consumer. Building it in B4
   would only support a self-referential "replay ≡ self_hosted" test and would fix a serde archive
   format before the backtest defines what it needs. The design's "self_hosted ≡ replay identical
@@ -191,9 +206,15 @@ re-confirms a known finding, or needs calibrated market data. Pick up if a speci
   is wired and tested, but the *trigger* (detecting that an already-confirmed fill un-mined deeper than
   the confirmation depth) is deferred to **B6 (reconcile)**, watching the canonical chain. walletkit
   absorbs sub-confirmation reorgs itself, so the normal path never calls it.
-- **In-flight crash recovery** — the service's in-flight map (intent → handle + reservation) is
-  in-memory, so a crash mid-fill loses the tracking. walletkit's durable store still holds the tx and
-  the ledger still holds the open reservation; rebuilding the map from those on restart is **B6**.
+- **In-flight crash recovery** — RESOLVED (S2·M2·T4b). The in-flight set is no longer in memory: each
+  submitted fill's `(order_hash → reservation, handle_id)` is persisted in `inflight_fill`, and
+  walletkit runs on a durable redb store, so a restart recovers and reconciles every in-flight fill
+  through the normal reconcile tick (no separate recovery step). One narrow residual window remains: a
+  crash in the moment between `wallet.send_with` broadcasting and the `inflight_fill` row committing
+  leaves a submitted tx our reconcile can't correlate to its reservation. This is backstopped by the
+  core thesis — on-chain `transferFrom` atomicity plus the sim gate reject any over-committed later
+  fill — so the worst case degrades to a later fill sim-declining, never a loss. Closing it fully
+  (persist-before-broadcast + calldata-decode correlation) is not worth the cost for the window size.
 - **Batch fills** — `fillBatch` + fate-compatible grouping + all-post-or-all-void reservation sets are
   deferred: the router emits one `RoutePlan` per intent, so batching across intents has no consumer
   yet. The single-fill loop is the full production path.
