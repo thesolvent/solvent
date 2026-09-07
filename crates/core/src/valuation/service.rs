@@ -8,7 +8,7 @@ use alloy_primitives::{Address, U256};
 use rust_decimal::Decimal;
 
 use crate::deps::routing::PriceOracle;
-use crate::primitives::amount::{format_units, Amount};
+use crate::primitives::amount::{format_units, Amount, TokenAmount, TokenAmounts};
 use crate::primitives::asset::Token;
 use crate::primitives::{Usd, UsdPrice};
 
@@ -59,6 +59,28 @@ impl Valuation {
             total += self.usd(*base_units, token).await?.0;
         }
         Some(Usd(total))
+    }
+
+    /// [`tvl`](Self::tvl) as a wire `f64`, or `None` if any component is unpriced.
+    pub async fn tvl_usd(&self, holdings: &[(Token, U256)]) -> Option<f64> {
+        self.tvl(holdings).await.map(Usd::to_f64)
+    }
+
+    /// A priced [`TokenAmounts`] from `(token, base_units)` holdings: each entry valued at its
+    /// current price, with an all-or-nothing `total_usd` (`None` if any component is unpriced). The
+    /// one place that turns raw holdings into a wire balance breakdown.
+    pub async fn priced_amounts(&self, holdings: &[(Token, U256)]) -> TokenAmounts {
+        let total_usd = self.tvl_usd(holdings).await;
+        let mut entries = Vec::with_capacity(holdings.len());
+        for (token, base_units) in holdings {
+            entries.push(TokenAmount {
+                amount: self
+                    .amount(*base_units, token.address, token.decimals)
+                    .await,
+                token: token.clone(),
+            });
+        }
+        TokenAmounts { entries, total_usd }
     }
 }
 
@@ -123,6 +145,30 @@ mod tests {
         let unlisted = token(3, 18);
         let v = valuation(&[(&usdc, 1)]);
         assert_eq!(v.usd(U256::from(1_000_000u64), &unlisted).await, None);
+    }
+
+    #[tokio::test]
+    async fn priced_amounts_values_entries_and_totals_all_or_nothing() {
+        let usdc = token(1, 6);
+        let weth = token(2, 18);
+        let unlisted = token(3, 18);
+        let v = valuation(&[(&usdc, 1), (&weth, 2000)]);
+
+        let priced = v
+            .priced_amounts(&[
+                (usdc.clone(), U256::from(2_500_000u64)),
+                (weth, U256::from(1_000_000_000_000_000_000u64)),
+            ])
+            .await;
+        assert_eq!(priced.entries.len(), 2);
+        assert_eq!(priced.entries[0].amount.usd, Some(2.5));
+        assert_eq!(priced.entries[1].amount.usd, Some(2000.0));
+        assert_eq!(priced.total_usd, Some(2002.5));
+
+        // an unpriced component collapses the total but still lists the entry
+        let partial = v.priced_amounts(&[(unlisted, U256::from(1u64))]).await;
+        assert_eq!(partial.entries.len(), 1);
+        assert_eq!(partial.total_usd, None);
     }
 
     #[tokio::test]

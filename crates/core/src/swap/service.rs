@@ -16,6 +16,7 @@ use crate::obs::warn;
 use crate::primitives::execution::{FillOutcome, FillTx, PendingFill};
 use crate::primitives::ingest::Intent;
 use crate::primitives::ledger::{LedgerError, ReservationSource};
+use crate::primitives::registry::Snapshot;
 use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 use crate::primitives::trade::{Trade, TradeAttempt, TradeId, TradeLeg, TradeStatus};
 use crate::primitives::{IntentId, ReservationId};
@@ -88,21 +89,17 @@ impl SwapService {
         prices: TradePrices,
     ) -> Result<SwapOutcome, SolventError> {
         let now = self.clock.now_unix();
-        let token_in = intent.input.token;
-        let Some(output) = intent.outputs.first() else {
+        let Some(amounts) = swap_amounts(&intent, now) else {
             return self.declined(trade_id, &intent, taker, now, prices).await;
         };
-        let token_out = output.token;
-        let amount_in = intent.input.curve.amount_at(now);
-        let min_out = output.curve.amount_at(now);
 
         let snapshot = self.registry.load();
         let caps = self.ledger.snapshot();
         let request = RouteRequest {
             intent: intent.id,
-            token_in,
-            token_out,
-            amount: min_out,
+            token_in: amounts.token_in,
+            token_out: amounts.token_out,
+            amount: amounts.min_out,
             exact_in: false,
         };
         // Exact-out charges gas in the spread token = `token_in`. Cache-read, gas-free if unpriced.
@@ -113,7 +110,7 @@ impl SwapService {
             &snapshot,
             &caps,
             &request,
-            amount_in,
+            amounts.amount_in,
             &self.config.routing,
             per_leg_cost,
             None,
@@ -126,33 +123,28 @@ impl SwapService {
             trade_id,
             &intent,
             taker,
-            token_in,
-            token_out,
-            amount_in,
-            min_out,
+            &amounts,
             Some(&plan),
             now,
             TradeStatus::Quoted,
             &prices,
         );
-        let legs = trade_legs(&plan);
         let created = self
             .trades
             .create(
                 &trade,
-                &legs,
+                &trade_legs(&plan),
                 &reached(now, &[TradeStatus::Created, TradeStatus::Quoted]),
             )
             .await?;
+        // A resubmit already past Quoted is in flight (or terminal): echo it untouched. One still at
+        // Created/Quoted crashed before reserving, so fall through and re-drive it.
         if !created.created {
             let status = self
                 .trades
                 .info(&created.id)
                 .await?
                 .map_or(TradeStatus::Quoted, |info| info.trade.status);
-            // A crash between create and reserve strands a trade at Created/Quoted; a resubmit
-            // re-drives the reserve→fill path below. Reserved-or-later is already in flight (or
-            // terminal), so echo its status without touching it.
             if !matches!(status, TradeStatus::Created | TradeStatus::Quoted) {
                 return Ok(SwapOutcome {
                     trade_id: created.id,
@@ -162,34 +154,65 @@ impl SwapService {
         }
 
         let reservation = reservation_id(intent.id, &plan);
-        match self
-            .ledger
-            .reserve(
-                reservation,
-                intent.id,
-                sources_of(&plan),
-                self.config.reservation_ttl_secs,
-            )
-            .await
+        if let Some(declined) = self
+            .reserve_or_decline(&created.id, intent.id, reservation, &plan, now)
+            .await?
         {
-            Ok(()) => {}
-            // Capacity taken between quote and reserve is a decline, not a failure; anything else
-            // (store/infra) propagates.
-            Err(SolventError::Ledger(LedgerError::Insufficient(_))) => {
-                warn!(intent = %intent.id, "reserve declined: insufficient capacity");
-                self.settle(&created.id, TradeStatus::Declined, now).await?;
-                return Ok(SwapOutcome {
-                    trade_id: created.id,
-                    status: TradeStatus::Declined,
-                });
-            }
-            Err(e) => return Err(e),
+            return Ok(declined);
         }
         self.trades
             .advance(&created.id, TradeStatus::Reserved, now)
             .await?;
 
-        let calldata = self.fill_builder.build(&intent, &plan, &snapshot)?;
+        self.submit_fill(&created.id, &intent, &plan, &snapshot, reservation, now)
+            .await
+    }
+
+    /// Reserve the plan's payouts. `Ok(None)` continues to the fill; `Ok(Some(..))` is a decline
+    /// (capacity taken since the quote — settled, not an error); infra errors propagate.
+    async fn reserve_or_decline(
+        &self,
+        id: &TradeId,
+        intent_id: IntentId,
+        reservation: ReservationId,
+        plan: &RoutePlan,
+        now: u64,
+    ) -> Result<Option<SwapOutcome>, SolventError> {
+        match self
+            .ledger
+            .reserve(
+                reservation,
+                intent_id,
+                sources_of(plan),
+                self.config.reservation_ttl_secs,
+            )
+            .await
+        {
+            Ok(()) => Ok(None),
+            Err(SolventError::Ledger(LedgerError::Insufficient(_))) => {
+                warn!(intent = %intent_id, "reserve declined: insufficient capacity");
+                self.settle(id, TradeStatus::Declined, now).await?;
+                Ok(Some(SwapOutcome {
+                    trade_id: *id,
+                    status: TradeStatus::Declined,
+                }))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Build and submit the fill: `Submitted` on success, or settle `Declined` when the sim gate
+    /// rejects (it has already voided the reservation).
+    async fn submit_fill(
+        &self,
+        id: &TradeId,
+        intent: &Intent,
+        plan: &RoutePlan,
+        snapshot: &Snapshot,
+        reservation: ReservationId,
+        now: u64,
+    ) -> Result<SwapOutcome, SolventError> {
+        let calldata = self.fill_builder.build(intent, plan, snapshot)?;
         let pending = PendingFill::new(
             FillTx::new(
                 intent.id,
@@ -202,22 +225,17 @@ impl SwapService {
         );
         match self.execution.fill(pending).await? {
             FillOutcome::Submitted { .. } => {
-                self.trades
-                    .advance(&created.id, TradeStatus::Simulated, now)
-                    .await?;
-                self.trades
-                    .advance(&created.id, TradeStatus::Submitted, now)
-                    .await?;
+                self.trades.advance(id, TradeStatus::Simulated, now).await?;
+                self.trades.advance(id, TradeStatus::Submitted, now).await?;
                 Ok(SwapOutcome {
-                    trade_id: created.id,
+                    trade_id: *id,
                     status: TradeStatus::Submitted,
                 })
             }
-            // The sim gate already voided the reservation; just mark the trade declined.
             FillOutcome::Rejected { .. } => {
-                self.settle(&created.id, TradeStatus::Declined, now).await?;
+                self.settle(id, TradeStatus::Declined, now).await?;
                 Ok(SwapOutcome {
-                    trade_id: created.id,
+                    trade_id: *id,
                     status: TradeStatus::Declined,
                 })
             }
@@ -233,19 +251,18 @@ impl SwapService {
         now: u64,
         prices: TradePrices,
     ) -> Result<SwapOutcome, SolventError> {
-        let token_out = intent.outputs.first().map_or(Address::ZERO, |o| o.token);
-        let min_out = intent
-            .outputs
-            .first()
-            .map_or(U256::ZERO, |o| o.curve.amount_at(now));
+        let output = primary_output(intent, now);
+        let amounts = SwapAmounts {
+            token_in: intent.input.token,
+            token_out: output.map_or(Address::ZERO, |o| o.token),
+            amount_in: intent.input.curve.amount_at(now),
+            min_out: output.map_or(U256::ZERO, |o| o.amount),
+        };
         let trade = self.trade(
             trade_id,
             intent,
             taker,
-            intent.input.token,
-            token_out,
-            intent.input.curve.amount_at(now),
-            min_out,
+            &amounts,
             None,
             now,
             TradeStatus::Declined,
@@ -289,10 +306,7 @@ impl SwapService {
         id: TradeId,
         intent: &Intent,
         taker: Address,
-        token_in: Address,
-        token_out: Address,
-        amount_in: U256,
-        min_amount_out: U256,
+        amounts: &SwapAmounts,
         plan: Option<&RoutePlan>,
         now: u64,
         status: TradeStatus,
@@ -302,10 +316,10 @@ impl SwapService {
             id,
             order_hash: intent.id,
             taker,
-            token_in,
-            token_out,
-            amount_in,
-            min_amount_out,
+            token_in: amounts.token_in,
+            token_out: amounts.token_out,
+            amount_in: amounts.amount_in,
+            min_amount_out: amounts.min_out,
             amount_out: None,
             status,
             deadline_block: intent.deadline,
@@ -330,10 +344,50 @@ pub struct TradePrices {
     pub token_out_usd: Option<f64>,
 }
 
+/// The swap's tokens and exact-out bounds at quote time.
+struct SwapAmounts {
+    token_in: Address,
+    token_out: Address,
+    /// The taker's max input (the exact-out spend ceiling).
+    amount_in: U256,
+    /// The order's minimum delivered output.
+    min_out: U256,
+}
+
+/// An order output's delivered token and its amount at a given time.
+#[derive(Clone, Copy)]
+struct SwapOutput {
+    token: Address,
+    amount: U256,
+}
+
+/// The order's first output (delivered token + amount at `now`), or `None` for an output-less order.
+fn primary_output(intent: &Intent, now: u64) -> Option<SwapOutput> {
+    intent.outputs.first().map(|o| SwapOutput {
+        token: o.token,
+        amount: o.curve.amount_at(now),
+    })
+}
+
+/// The swap's tokens and exact-out bounds, or `None` when the order has no output to deliver.
+fn swap_amounts(intent: &Intent, now: u64) -> Option<SwapAmounts> {
+    let output = primary_output(intent, now)?;
+    Some(SwapAmounts {
+        token_in: intent.input.token,
+        token_out: output.token,
+        amount_in: intent.input.curve.amount_at(now),
+        min_out: output.amount,
+    })
+}
+
+/// Bytes per plan leg in the reservation-id preimage: maker · strategy_hash · token · amount.
+const RESERVATION_LEG_BYTES: usize = 20 + 32 + 20 + 32;
+
 /// The reservation id: `keccak(intentId ‖ routePlanHash)`, so it is stable for one intent+plan and a
 /// duplicate reserve is a no-op.
 fn reservation_id(intent: IntentId, plan: &RoutePlan) -> ReservationId {
-    let mut bytes = Vec::with_capacity(32 + plan.legs.len() * 104);
+    // Preimage = the 32-byte intent id followed by each leg's fields.
+    let mut bytes = Vec::with_capacity(32 + plan.legs.len() * RESERVATION_LEG_BYTES);
     bytes.extend_from_slice(intent.0.as_slice());
     for leg in &plan.legs {
         bytes.extend_from_slice(leg.maker.0.as_slice());

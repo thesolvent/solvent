@@ -6,13 +6,11 @@ use std::sync::Arc;
 use alloy_primitives::U256;
 
 use crate::asset::AssetManager;
-use crate::primitives::amount::{TokenAmount, TokenAmounts};
 use crate::primitives::asset::Token;
 use crate::primitives::pool::{classify_pair, Pool, PoolDetail, PoolMaker, PoolType};
 use crate::primitives::registry::{
     curve_label, fee_in_bps, CurveSpec, MakerStrategy, PoolStats, Snapshot, TokenPair,
 };
-use crate::primitives::Usd;
 use crate::registry::SharedSnapshot;
 use crate::valuation::Valuation;
 
@@ -80,7 +78,7 @@ impl PoolService {
                 holdings.push((self.assets.token(address)?, *balance));
             }
         }
-        self.valuation.tvl(&holdings).await.map(Usd::to_f64)
+        self.valuation.tvl_usd(&holdings).await
     }
 
     /// Both tokens stable → `Stable`; else pegged-dominant → `Correlated`; else `Volatile`.
@@ -118,23 +116,12 @@ impl PoolService {
             .iter()
             .filter_map(|(address, balance)| Some((self.assets.token(address)?, *balance)))
             .collect();
-        let total_usd = self.valuation.tvl(&holdings).await.map(Usd::to_f64);
-        let mut entries = Vec::with_capacity(holdings.len());
-        for (token, balance) in holdings {
-            entries.push(TokenAmount {
-                amount: self
-                    .valuation
-                    .amount(balance, token.address, token.decimals)
-                    .await,
-                token,
-            });
-        }
         Some(PoolMaker {
             maker: strategy.key.maker.0,
             strategy_hash: format!("{:#x}", strategy.key.strategy_hash.0),
             curve: curve_label(curve).to_string(),
             fee_bps: fee_in_bps(fees_in_bps),
-            virtual_balances: TokenAmounts { entries, total_usd },
+            virtual_balances: self.valuation.priced_amounts(&holdings).await,
         })
     }
 }

@@ -143,7 +143,9 @@ fn maker_fee_usd(trade: &CoreTrade, leg: &TradeLeg, dec_in: u8, dec_out: u8) -> 
     trade.amount_out?;
     let price_in = trade.token_in_price_usd?;
     let price_out = trade.token_out_price_usd?;
-    Some(human(leg.amount_in, dec_in) * price_in - human(leg.amount_out, dec_out) * price_out)
+    let received_usd = human(leg.amount_in, dec_in) * price_in;
+    let delivered_usd = human(leg.amount_out, dec_out) * price_out;
+    Some(received_usd - delivered_usd)
 }
 
 /// A same-token ratio numerator/denominator — decimals cancel, so the raw integer converts directly.

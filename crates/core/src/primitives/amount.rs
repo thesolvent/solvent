@@ -53,6 +53,7 @@ pub struct TokenBalance {
 /// The raw on-chain figures for one token, as the
 /// [`BalancesOracle`](crate::deps::balances::BalancesOracle) returns them — before decimals turn
 /// them into a display [`Amount`].
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Holdings {
     pub balance: U256,
     pub pullable: U256,

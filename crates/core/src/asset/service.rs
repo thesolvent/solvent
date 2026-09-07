@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use alloy_primitives::Address;
+use itertools::Itertools;
 
 use crate::primitives::amount::TokenBalance;
 use crate::primitives::asset::{
@@ -15,6 +16,9 @@ use crate::primitives::registry::{ActiveAsset, TokenPair};
 use crate::primitives::UsdPrice;
 use crate::registry::SharedSnapshot;
 use crate::valuation::Valuation;
+
+/// Decimals assumed for a token that isn't in the catalog.
+const DEFAULT_DECIMALS: u8 = 18;
 
 /// Answers asset queries from one place: the static token list joined with the live registry
 /// snapshot (supported / count / pairs), with market fields valued on `list`.
@@ -86,41 +90,41 @@ impl AssetManager {
     ) -> Vec<PairInfo> {
         let tokens = self.catalog_tokens();
         let mut out = Vec::new();
-        for i in 0..tokens.len() {
-            for j in (i + 1)..tokens.len() {
-                let (a, b) = (&tokens[i], &tokens[j]);
-                let (a_stable, b_stable) = (self.is_stable(&a.address), self.is_stable(&b.address));
-                // A pair is offered only when at least one side is a stablecoin (preset + stable).
-                if !a_stable && !b_stable {
-                    continue;
-                }
-                // Quote is the stablecoin side; base the other (catalog order when both are stable).
-                let (base, quote) = if b_stable {
-                    (a.clone(), b.clone())
+        for (a, b) in tokens
+            .iter()
+            .cloned()
+            .tuple_combinations::<(Token, Token)>()
+        {
+            let (a_stable, b_stable) = (self.is_stable(&a.address), self.is_stable(&b.address));
+            // A pair is offered only when at least one side is a stablecoin (preset + stable).
+            if !a_stable && !b_stable {
+                continue;
+            }
+            // Reuse the one base/quote ordering rule (stablecoin is the quote).
+            let (base_addr, quote_addr) = self.base_quote(&TokenPair::new(a.address, b.address));
+            let (Some(base), Some(quote)) = (self.token(&base_addr), self.token(&quote_addr))
+            else {
+                continue;
+            };
+            if search.is_some_and(|q| !matches_search(&base, &quote, q)) {
+                continue;
+            }
+            out.push(PairInfo {
+                kind: if a_stable && b_stable {
+                    PairKind::Stable
                 } else {
-                    (b.clone(), a.clone())
-                };
-                if search.is_some_and(|q| !matches_search(&base, &quote, q)) {
-                    continue;
-                }
-                let wallet = wallet.map(|bals| PairWallet {
+                    PairKind::Volatile
+                },
+                mid: mid_price(valuation, base.address, quote.address).await,
+                default_fee_bps,
+                default_band_pct,
+                wallet: wallet.map(|bals| PairWallet {
                     base: wallet_balance(bals, &base.address),
                     quote: wallet_balance(bals, &quote.address),
-                });
-                out.push(PairInfo {
-                    kind: if a_stable && b_stable {
-                        PairKind::Stable
-                    } else {
-                        PairKind::Volatile
-                    },
-                    mid: mid_price(valuation, base.address, quote.address).await,
-                    default_fee_bps,
-                    default_band_pct,
-                    wallet,
-                    base,
-                    quote,
-                });
-            }
+                }),
+                base,
+                quote,
+            });
         }
         out
     }
@@ -146,18 +150,20 @@ impl AssetManager {
         self.catalog.get(address).map(Self::token_of)
     }
 
-    /// A token's decimals, defaulting to 18 for one not in the catalog.
+    /// A token's decimals, defaulting to [`DEFAULT_DECIMALS`] for one not in the catalog.
     pub fn decimals(&self, address: &Address) -> u8 {
-        self.catalog.get(address).map_or(18, |meta| meta.decimals)
+        self.catalog
+            .get(address)
+            .map_or(DEFAULT_DECIMALS, |meta| meta.decimals)
     }
 
-    /// The catalog token for `address`, or a bare 18-decimal fallback for one not listed.
+    /// The catalog token for `address`, or a bare fallback for one not listed.
     pub fn token_or_default(&self, address: Address) -> Token {
         self.token(&address).unwrap_or(Token {
             address,
             chain_id: 0,
             symbol: String::new(),
-            decimals: 18,
+            decimals: DEFAULT_DECIMALS,
         })
     }
 
@@ -199,9 +205,9 @@ fn short(address: &Address) -> String {
 
 /// Mid price as quote per 1 base, from the two USD prices; `None` if either is missing.
 async fn mid_price(valuation: &Valuation, base: Address, quote: Address) -> Option<f64> {
-    let base = valuation.price(base).await?.to_f64();
-    let quote = valuation.price(quote).await?.to_f64();
-    (quote != 0.0).then_some(base / quote)
+    let base_price_usd = valuation.price(base).await?.to_f64();
+    let quote_price_usd = valuation.price(quote).await?.to_f64();
+    (quote_price_usd != 0.0).then_some(base_price_usd / quote_price_usd)
 }
 
 /// The maker's whole-token balance of `addr`, or `0` when the wallet doesn't hold it.
