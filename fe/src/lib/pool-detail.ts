@@ -7,6 +7,7 @@ import type {
 } from "@/data";
 
 export type DetailMaker = {
+  strategyHash: string;
   addr: string;
   curve: string;
   up: string;
@@ -193,6 +194,7 @@ function rosterBy(
         maker.virtualUsd != null &&
         maker.actualUsd < maker.virtualUsd;
       return {
+        strategyHash: maker.strategyHash,
         addr: maker.address,
         curve: maker.curve,
         // Quote uptime has no server source.

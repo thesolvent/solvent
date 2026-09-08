@@ -87,7 +87,6 @@ describe("Explorer live lists", () => {
       expect(screen.getByRole("alert")).toHaveTextContent(
         "Couldn’t refresh trades.",
       );
-      expect(screen.getByText(/Refresh delayed/)).toBeInTheDocument();
 
       unavailable = false;
       generation = 2;
@@ -217,7 +216,7 @@ describe("Explorer live lists", () => {
     expect(links).toHaveLength(2);
     expect(links[0]).toHaveAttribute(
       "href",
-      `https://scan.example/tx/${activity.items[0].tx_hash}`,
+      `/explorer/strategies/${activity.items[0].strategy_hash}`,
     );
     expect(readActivity).toHaveBeenLastCalledWith({}, "older-events");
     expect(screen.getByRole("button", { name: "Load more" })).toBeDisabled();

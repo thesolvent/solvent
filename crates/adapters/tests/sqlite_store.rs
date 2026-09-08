@@ -152,33 +152,58 @@ async fn recent_pages_newest_first_and_count_since_windows() {
 async fn history_returns_one_strategys_events_in_fold_order() {
     let store = setup().await;
     let chain = ChainId(1);
+    let strategy_hash = StrategyHash(B256::from([1; 32]));
+    let pulled = ext(
+        12,
+        1,
+        AquaEvent::Pulled {
+            maker: MakerId(Address::from([1; 20])),
+            app: Address::from([0xAA; 20]),
+            strategy_hash,
+            token: Address::from([2; 20]),
+            amount: U256::from(100),
+        },
+    );
+    let docked = ext(
+        13,
+        0,
+        AquaEvent::Docked {
+            maker: MakerId(Address::from([1; 20])),
+            app: Address::from([0xAA; 20]),
+            strategy_hash,
+        },
+    );
 
-    // Two strategies, events interleaved across blocks.
+    // Replay order must not depend on insertion order or include another chain.
     store
         .insert(
             chain,
             &[
-                ext(10, 0, shipped(1)),
+                docked.clone(),
+                pulled.clone(),
                 ext(10, 1, pushed(1, 2, 1000)),
-                ext(11, 0, shipped(2)), // a different strategy
+                ext(10, 0, shipped(1)),
+                ext(11, 0, shipped(2)),
                 ext(11, 1, pushed(2, 3, 500)),
-                ext(12, 0, pushed(1, 3, 250)), // strategy 1, a later block
+                ext(12, 0, pushed(1, 3, 250)),
             ],
         )
         .await
         .unwrap();
-
-    // Only strategy 1's events, in fold order (block/log ascending).
-    let history = store
-        .history(chain, StrategyHash(B256::from([1; 32])))
+    store
+        .insert(ChainId(2), &[ext(11, 0, pushed(1, 2, 9999))])
         .await
         .unwrap();
+
+    let history = store.history(chain, strategy_hash).await.unwrap();
     assert_eq!(
         history,
         vec![
             ext(10, 0, shipped(1)),
             ext(10, 1, pushed(1, 2, 1000)),
             ext(12, 0, pushed(1, 3, 250)),
+            pulled,
+            docked,
         ]
     );
 

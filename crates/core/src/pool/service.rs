@@ -281,8 +281,7 @@ mod tests {
         async fn maker(
             &self,
             _: MakerId,
-            _: u64,
-            _: u64,
+            _: std::ops::Range<u64>,
         ) -> Result<MakerMetrics, MakerMetricsError> {
             Err(MakerMetricsError::Db("unused".into()))
         }
@@ -290,11 +289,15 @@ mod tests {
             &self,
             _: StrategyHash,
             _: TokenPair,
-            _: u64,
+            _: std::ops::Range<u64>,
         ) -> Result<PositionMetrics, MakerMetricsError> {
             Err(MakerMetricsError::Db("unused".into()))
         }
-        async fn pair_fills(&self, _: &[TokenPair], _: u64) -> Result<u64, MakerMetricsError> {
+        async fn pair_fills(
+            &self,
+            _: &[TokenPair],
+            _: std::ops::Range<u64>,
+        ) -> Result<u64, MakerMetricsError> {
             Ok(0)
         }
         async fn pair_activity(

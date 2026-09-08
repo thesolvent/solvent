@@ -18,7 +18,7 @@ use solvent_adapters::http::{self};
 use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
-use solvent_adapters::registry::{AlloyChainSource, SqliteStore};
+use solvent_adapters::registry::{AlloyBlockTimes, AlloyChainSource, SqliteStore};
 use solvent_adapters::routing::{BinanceFeed, GasPoller, MarketCache};
 use solvent_adapters::trade::SqliteTradeStore;
 use solvent_core::asset::AssetManager;
@@ -204,6 +204,7 @@ async fn main() -> Result<(), StartupError> {
         maker_metrics,
         Arc::clone(&balances_oracle),
         Arc::clone(&registry_store),
+        Arc::new(AlloyBlockTimes::new(Arc::new(provider.clone()))),
         Arc::new(SystemClock),
         ChainId(config.chain_id),
     ));
@@ -333,6 +334,7 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&trade_store),
         Arc::clone(&assets),
         Arc::clone(&valuation),
+        Arc::clone(&registry),
     ));
     let state = AppState {
         config: Arc::new(config.app_config(cosigner.address())),

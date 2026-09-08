@@ -453,6 +453,12 @@ impl TradeStore for SqliteTradeStore {
                 .push_bind(a)
                 .push("))");
         }
+        if let Some(strategy_hash) = filter.strategy_hash {
+            query
+                .push(" AND EXISTS (SELECT 1 FROM trade_leg WHERE trade_leg.trade_id = trade.id AND strategy_hash = ")
+                .push_bind(bytes_of(strategy_hash.0))
+                .push(")");
+        }
         if let Some(cursor) = &page.cursor {
             query.push(" AND id < ").push_bind(cursor.to_string());
         }
@@ -474,42 +480,56 @@ impl TradeStore for SqliteTradeStore {
         &self,
         maker: Address,
         page: &Page,
+        window: Option<std::ops::Range<u64>>,
     ) -> Result<Vec<MakerFill>, TradeStoreError> {
-        // `trade.*` supplies the header (the leg amounts are aliased so they don't shadow the
-        // trade's own `amount_in`/`amount_out`).
+        // Select trade headers before joining their legs so the page limit cannot split a fill.
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT trade.*, \
-                    leg.maker AS leg_maker, leg.strategy_hash AS leg_strategy_hash, \
-                    leg.amount_in AS leg_amount_in, leg.amount_out AS leg_amount_out \
-             FROM trade JOIN trade_leg leg ON leg.trade_id = trade.id WHERE leg.maker = ",
+            "WITH page AS (SELECT * FROM trade WHERE EXISTS \
+             (SELECT 1 FROM trade_leg WHERE trade_leg.trade_id = trade.id AND maker = ",
         );
-        query.push_bind(bytes_of(maker));
+        query.push_bind(bytes_of(maker)).push(")");
+        if let Some(window) = window {
+            query
+                .push(" AND status = 'confirmed' AND settled_at >= ")
+                .push_bind(i64::try_from(window.start).map_err(db)?)
+                .push(" AND settled_at < ")
+                .push_bind(i64::try_from(window.end).map_err(db)?);
+        }
         if let Some(cursor) = &page.cursor {
             query.push(" AND trade.id < ").push_bind(cursor.to_string());
         }
         query
             .push(" ORDER BY trade.id DESC LIMIT ")
-            .push_bind(i64::from(page.limit));
+            .push_bind(i64::from(page.limit))
+            .push(
+                ") SELECT page.*, \
+                leg.amount_in AS leg_amount_in, leg.amount_out AS leg_amount_out \
+                FROM page JOIN trade_leg leg ON leg.trade_id = page.id WHERE leg.maker = ",
+            )
+            .push_bind(bytes_of(maker))
+            .push(" ORDER BY page.id DESC, leg.idx");
 
-        query
-            .build()
-            .fetch_all(&self.pool)
-            .await
-            .map_err(db)?
-            .iter()
-            .map(row_to_maker_fill)
-            .collect()
+        let rows = query.build().fetch_all(&self.pool).await.map_err(db)?;
+        let mut fills: Vec<MakerFill> = Vec::new();
+        for row in &rows {
+            let id: String = row.try_get("id").map_err(db)?;
+            let amount_in = amount(row, "leg_amount_in")?;
+            let amount_out = amount(row, "leg_amount_out")?;
+            match fills.last_mut() {
+                Some(fill) if fill.trade.id.to_string() == id => {
+                    // SQLite numeric casts lose precision for U256 token amounts.
+                    fill.amount_in = fill
+                        .amount_in
+                        .checked_add(amount_in)
+                        .ok_or_else(|| db("maker input amount exceeds U256"))?;
+                    fill.amount_out = fill
+                        .amount_out
+                        .checked_add(amount_out)
+                        .ok_or_else(|| db("maker output amount exceeds U256"))?;
+                }
+                _ => fills.push(MakerFill::new(row_to_trade(row)?, amount_in, amount_out)),
+            }
+        }
+        Ok(fills)
     }
-}
-
-fn row_to_maker_fill(row: &SqliteRow) -> Result<MakerFill, TradeStoreError> {
-    Ok(MakerFill {
-        trade: row_to_trade(row)?,
-        leg: TradeLeg {
-            maker: MakerId(address(row, "leg_maker")?),
-            strategy_hash: StrategyHash(hash(row, "leg_strategy_hash")?),
-            amount_in: amount(row, "leg_amount_in")?,
-            amount_out: amount(row, "leg_amount_out")?,
-        },
-    })
 }

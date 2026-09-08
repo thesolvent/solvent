@@ -302,6 +302,13 @@ impl XycPool {
 }
 
 impl XycPool {
+    fn marginal_price(&self) -> Result<Ratio, CurveError> {
+        if self.is_empty() {
+            return Err(CurveError::EmptyReserves);
+        }
+        Ratio::new(self.balance_out, self.balance_in).ok_or(CurveError::DivByZero)
+    }
+
     fn is_empty(&self) -> bool {
         self.balance_in.is_zero() || self.balance_out.is_zero()
     }
@@ -345,7 +352,7 @@ impl Pricing for XycPool {
                 limited: false,
             });
         }
-        let spot = Ratio::new(self.balance_out, self.balance_in).ok_or(CurveError::DivByZero)?;
+        let spot = self.marginal_price()?;
         if spot.le(limit) {
             return Ok(LimitedQuote {
                 amount_in: U256::ZERO,
@@ -566,6 +573,26 @@ impl PeggedPool {
         }
     }
 
+    /// SwapVM SDK's `peggedSwapMarginalGtPerLtE18`, retaining the rational until display conversion.
+    fn marginal_price(&self) -> Result<Ratio, CurveError> {
+        let normalized = self.normalized()?;
+        let weight = |balance, initial| {
+            let coordinate = mul_div(balance, one27(), initial)?;
+            let root = sqrt_floor(cmul(coordinate, one27())?);
+            cadd(
+                mul_div(one27(), one27(), cmul(U256::from(2), root)?)?,
+                self.linear_width,
+            )
+        };
+        let input_weight = weight(normalized.x0, self.x0_init)?;
+        let output_weight = weight(normalized.y0, self.y0_init)?;
+        Ok(
+            Ratio::new(self.y0_init, self.x0_init).ok_or(CurveError::DivByZero)?
+                * Ratio::new(input_weight, output_weight).ok_or(CurveError::DivByZero)?
+                * Ratio::new(self.rate_in, self.rate_out).ok_or(CurveError::DivByZero)?,
+        )
+    }
+
     /// Normalized current reserves + the target invariant they pin.
     fn normalized(&self) -> Result<Normalized, CurveError> {
         if self.balance_in.is_zero() && self.balance_out.is_zero() {
@@ -616,6 +643,15 @@ pub enum CurvePool {
 }
 
 impl CurvePool {
+    /// Fee-free marginal output per input from the strategy's committed reserves.
+    pub(crate) fn marginal_price(&self) -> Result<Ratio, CurveError> {
+        match self {
+            Self::Xyc(pool) => pool.marginal_price(),
+            Self::Concentrate(pool) => pool.virtual_pool()?.marginal_price(),
+            Self::Pegged(pool) => pool.marginal_price(),
+        }
+    }
+
     /// Build the oriented pool for a `token_in -> token_out` swap from a decoded
     /// curve and the maker's reserves. Shared by registry pricing and the router.
     pub fn from_curve(

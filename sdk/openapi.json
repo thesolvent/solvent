@@ -167,6 +167,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MakerPeriod"
+            }
           }
         ],
         "responses": {
@@ -199,6 +207,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MakerPeriod"
+            }
           }
         ],
         "responses": {
@@ -230,6 +246,14 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MakerPeriod"
             }
           }
         ],
@@ -282,6 +306,15 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "description": "Confirmed settlements in a rolling period",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MakerPeriod"
             }
           }
         ],
@@ -560,6 +593,41 @@
         }
       }
     },
+    "/v1/positions/{hash}/history": {
+      "get": {
+        "tags": [
+          "crate::http::app::makers"
+        ],
+        "summary": "The strategy's committed-reserve price over the last seven days.",
+        "operationId": "position_history",
+        "parameters": [
+          {
+            "name": "hash",
+            "in": "path",
+            "description": "Strategy hash",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_PositionHistory"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown position"
+          }
+        }
+      }
+    },
     "/v1/stats": {
       "get": {
         "tags": [
@@ -711,6 +779,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "strategy_hash",
+            "in": "query",
+            "description": "Strategy hash (position id)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -801,9 +878,19 @@
         "type": "object",
         "description": "Recent-activity stats for the position detail.",
         "required": [
-          "fills_7d"
+          "fills_7d",
+          "daily_fills"
         ],
         "properties": {
+          "daily_fills": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Seven daily confirmed-order counts, oldest first."
+          },
           "fills_7d": {
             "type": "integer",
             "format": "int64",
@@ -1197,6 +1284,7 @@
         "type": "object",
         "description": "One position's slice of a token: this token's committed vs opening balance in that position, plus\nthe position's economics (repeated per leg).",
         "required": [
+          "strategy_hash",
           "pair",
           "curve",
           "fee_bps",
@@ -1242,6 +1330,9 @@
             "description": "This token's ship-time balance in the position."
           },
           "pair": {
+            "type": "string"
+          },
+          "strategy_hash": {
             "type": "string"
           },
           "volume_usd": {
@@ -1297,6 +1388,41 @@
           }
         }
       },
+      "MakerActivityBucket": {
+        "type": "object",
+        "description": "A time bucket of confirmed orders. Latency runs from order creation to confirmation.",
+        "required": [
+          "from",
+          "to",
+          "fills"
+        ],
+        "properties": {
+          "fills": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "from": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "latency_p50_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Milliseconds, with the source timestamps' one-second precision; null for an empty bucket.",
+            "minimum": 0
+          },
+          "to": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "MakerDashboard": {
         "type": "object",
         "description": "A maker's dashboard: headline KPIs (with period-over-period deltas), fill-share on the pairs it\nquotes, fill latency, and a competitive insight. USD values are `None` when unpriced.",
@@ -1305,7 +1431,8 @@
           "window_days",
           "active_positions",
           "kpis",
-          "fill_share"
+          "fill_share",
+          "activity"
         ],
         "properties": {
           "active_positions": {
@@ -1313,8 +1440,21 @@
             "format": "int64",
             "minimum": 0
           },
+          "activity": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MakerActivityBucket"
+            }
+          },
           "fill_share": {
             "$ref": "#/components/schemas/FillShare"
+          },
+          "fills_change_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
           },
           "insight": {
             "type": [
@@ -1336,6 +1476,14 @@
           },
           "maker": {
             "type": "string"
+          },
+          "previous_latency_p50_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           },
           "window_days": {
             "type": "integer",
@@ -1431,6 +1579,12 @@
           "amount_out": {
             "$ref": "#/components/schemas/Amount"
           },
+          "curve": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "maker": {
             "type": "string"
           },
@@ -1438,6 +1592,16 @@
             "type": "string"
           }
         }
+      },
+      "MakerPeriod": {
+        "type": "string",
+        "description": "Rolling analytics windows used by the maker dashboard's period controls.",
+        "enum": [
+          "7d",
+          "1m",
+          "3m",
+          "6m"
+        ]
       },
       "MakerSummary": {
         "type": "object",
@@ -1775,7 +1939,7 @@
               },
               {
                 "$ref": "#/components/schemas/ActiveStats",
-                "description": "Detail-only (route 16): omitted from the list projection."
+                "description": "Omitted from the list projection."
               }
             ]
           },
@@ -1804,7 +1968,7 @@
               "string",
               "null"
             ],
-            "description": "Current curve spot in `quote per base` — filled by the marginal-price task."
+            "description": "Fee-free marginal price in human quote units per base unit."
           },
           "pair": {
             "type": "string"
@@ -1828,7 +1992,7 @@
       },
       "PositionBalances": {
         "type": "object",
-        "description": "A position's committed vs. pullable balances. `opening` (the ship-time deposit) is detail-only, so\nit is empty in the list projection.",
+        "description": "Committed, pullable and initial ship balances for a position.",
         "required": [
           "virtual",
           "actual",
@@ -1869,6 +2033,41 @@
           },
           "virtual": {
             "$ref": "#/components/schemas/TokenAmounts"
+          }
+        }
+      },
+      "PositionHistory": {
+        "type": "object",
+        "description": "Committed-reserve price history over the last seven days, with transaction-final samples.",
+        "required": [
+          "from",
+          "to",
+          "prices"
+        ],
+        "properties": {
+          "created_block": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "from": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "prices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StrategyPrice"
+            }
+          },
+          "to": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -2868,7 +3067,7 @@
                         },
                         {
                           "$ref": "#/components/schemas/ActiveStats",
-                          "description": "Detail-only (route 16): omitted from the list projection."
+                          "description": "Omitted from the list projection."
                         }
                       ]
                     },
@@ -2897,7 +3096,7 @@
                         "string",
                         "null"
                       ],
-                      "description": "Current curve spot in `quote per base` — filled by the marginal-price task."
+                      "description": "Fee-free marginal price in human quote units per base unit."
                     },
                     "pair": {
                       "type": "string"
@@ -3115,6 +3314,12 @@
                       "format": "int64",
                       "minimum": 0
                     },
+                    "signature_present": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
                     "status": {
                       "type": "string"
                     },
@@ -3183,7 +3388,8 @@
               "window_days",
               "active_positions",
               "kpis",
-              "fill_share"
+              "fill_share",
+              "activity"
             ],
             "properties": {
               "active_positions": {
@@ -3191,8 +3397,21 @@
                 "format": "int64",
                 "minimum": 0
               },
+              "activity": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MakerActivityBucket"
+                }
+              },
               "fill_share": {
                 "$ref": "#/components/schemas/FillShare"
+              },
+              "fills_change_pct": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "double"
               },
               "insight": {
                 "type": [
@@ -3214,6 +3433,14 @@
               },
               "maker": {
                 "type": "string"
+              },
+              "previous_latency_p50_ms": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
               },
               "window_days": {
                 "type": "integer",
@@ -3347,7 +3574,7 @@
                   },
                   {
                     "$ref": "#/components/schemas/ActiveStats",
-                    "description": "Detail-only (route 16): omitted from the list projection."
+                    "description": "Omitted from the list projection."
                   }
                 ]
               },
@@ -3376,7 +3603,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Current curve spot in `quote per base` — filled by the marginal-price task."
+                "description": "Fee-free marginal price in human quote units per base unit."
               },
               "pair": {
                 "type": "string"
@@ -3395,6 +3622,59 @@
               },
               "strategy_hash": {
                 "type": "string"
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_PositionHistory": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "Committed-reserve price history over the last seven days, with transaction-final samples.",
+            "required": [
+              "from",
+              "to",
+              "prices"
+            ],
+            "properties": {
+              "created_block": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "from": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "prices": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/StrategyPrice"
+                }
+              },
+              "to": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
               }
             }
           },
@@ -3718,6 +3998,12 @@
                 "format": "int64",
                 "minimum": 0
               },
+              "signature_present": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
               "status": {
                 "type": "string"
               },
@@ -3831,6 +4117,26 @@
           "Ok",
           "Error"
         ]
+      },
+      "StrategyPrice": {
+        "type": "object",
+        "description": "The strategy price after a transaction, or an unavailable price after docking/emptying.",
+        "required": [
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "price": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "SwapRequest": {
         "type": "object",
@@ -4067,6 +4373,12 @@
             ],
             "format": "int64",
             "minimum": 0
+          },
+          "signature_present": {
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "status": {
             "type": "string"

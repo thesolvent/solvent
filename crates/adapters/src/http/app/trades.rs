@@ -7,13 +7,14 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 use solvent_core::deps::trade::{Page as StorePage, TradeFilter};
 use solvent_core::primitives::trade::{TradeId, TradeView};
+use solvent_core::primitives::StrategyHash;
 
 use crate::http::dto::{Cursor, List, Page};
 use crate::http::primitives::{parse_addr, ApiResult, Response};
 use crate::http::state::AppState;
 
 /// List + filter query: pagination (`limit`/`cursor`) and the header filters (`status`, `taker`,
-/// and a `base`+`quote` pair, order-independent).
+/// `strategy_hash`, and a `base`+`quote` pair, order-independent).
 #[derive(Debug, Deserialize)]
 pub struct TradesQuery {
     limit: Option<u32>,
@@ -22,6 +23,7 @@ pub struct TradesQuery {
     taker: Option<String>,
     base: Option<String>,
     quote: Option<String>,
+    strategy_hash: Option<String>,
 }
 
 /// List trades, newest first, filtered and cursor-paginated.
@@ -35,6 +37,7 @@ pub struct TradesQuery {
         ("taker" = Option<String>, Query, description = "Swapper address filter"),
         ("base" = Option<String>, Query, description = "Pair token (with quote)"),
         ("quote" = Option<String>, Query, description = "Pair token (with base)"),
+        ("strategy_hash" = Option<String>, Query, description = "Strategy hash (position id)"),
     ),
     responses((status = 200, body = Response<List<TradeView>>))
 )]
@@ -67,6 +70,11 @@ pub async fn trades(
             }
             _ => None,
         },
+        strategy_hash: query
+            .strategy_hash
+            .as_deref()
+            .map(str::parse::<StrategyHash>)
+            .transpose()?,
     };
 
     let items = state.trades.list(&filter, &store_page).await?;

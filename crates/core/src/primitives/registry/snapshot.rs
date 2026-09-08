@@ -95,6 +95,11 @@ impl Snapshot {
         self.strategies.len()
     }
 
+    /// All tracked strategies, including closed positions needed for historical analytics.
+    pub fn strategies(&self) -> impl Iterator<Item = &MakerStrategy> {
+        self.strategies.values()
+    }
+
     /// Every active strategy — the budget cache enumerates these to refresh each maker's caps.
     pub fn active_strategies(&self) -> impl Iterator<Item = &MakerStrategy> {
         self.strategies.values().filter(|s| s.active)

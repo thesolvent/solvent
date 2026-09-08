@@ -2,18 +2,17 @@
 //! in Rust (SQLite `SUM` on a decimal-string column goes through `REAL` and loses precision), and the
 //! p50 / day buckets are computed in Rust too. All figures are raw — USD/fees/APY are the DTO's job.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Range};
 
 use alloy::primitives::{Address, U256};
 use async_trait::async_trait;
 use solvent_core::deps::maker_metrics::{
     MakerMetrics, MakerMetricsError, MakerMetricsStore, PairMetrics, PositionMetrics, TokenVolume,
 };
+use solvent_core::primitives::maker::MakerActivityBucket;
 use solvent_core::primitives::registry::TokenPair;
 use solvent_core::primitives::{MakerId, StrategyHash};
 use sqlx::SqlitePool;
-
-const DAY: u64 = 86_400;
 
 pub struct SqliteMakerMetrics {
     pool: SqlitePool,
@@ -40,34 +39,37 @@ impl SqliteMakerMetrics {
         amount_col: &str,
         owner_col: &str,
         key: &[u8],
-        since: i64,
+        window: Range<u64>,
     ) -> Result<Vec<TokenVolume>, MakerMetricsError> {
         let rows: Vec<(Vec<u8>, String)> = sqlx::query_as(&format!(
             "SELECT t.{token_col}, l.{amount_col} FROM trade t JOIN trade_leg l ON l.trade_id = t.id \
-             WHERE t.status = 'confirmed' AND t.settled_at >= ? AND l.{owner_col} = ?"
+             WHERE t.status = 'confirmed' AND t.settled_at >= ? AND t.settled_at < ? AND l.{owner_col} = ?"
         ))
-        .bind(since)
+        .bind(i64::try_from(window.start).map_err(db)?)
+        .bind(i64::try_from(window.end).map_err(db)?)
         .bind(key)
         .fetch_all(&self.pool)
         .await
         .map_err(db)?;
-        Ok(sum_by_token(rows))
+        sum_by_token(rows)
     }
 }
 
 /// Sum `(token_bytes, amount_str)` rows per token, keeping U256 precision.
-fn sum_by_token(rows: Vec<(Vec<u8>, String)>) -> Vec<TokenVolume> {
+fn sum_by_token(rows: Vec<(Vec<u8>, String)>) -> Result<Vec<TokenVolume>, MakerMetricsError> {
     let mut by_token: BTreeMap<Address, U256> = BTreeMap::new();
     for (token, amount) in rows {
-        let token = Address::from_slice(&token);
-        let amount = U256::from_str_radix(&amount, 10).unwrap_or(U256::ZERO);
+        let token = Address::try_from(token.as_slice()).map_err(db)?;
+        let amount = U256::from_str_radix(&amount, 10).map_err(db)?;
         let entry = by_token.entry(token).or_default();
-        *entry = entry.saturating_add(amount);
+        *entry = entry
+            .checked_add(amount)
+            .ok_or_else(|| db("token volume overflow"))?;
     }
-    by_token
+    Ok(by_token
         .into_iter()
         .map(|(token, base_units)| TokenVolume { token, base_units })
-        .collect()
+        .collect())
 }
 
 #[async_trait]
@@ -75,77 +77,53 @@ impl MakerMetricsStore for SqliteMakerMetrics {
     async fn maker(
         &self,
         maker: MakerId,
-        since: u64,
-        now: u64,
+        window: Range<u64>,
     ) -> Result<MakerMetrics, MakerMetricsError> {
         let key = maker.0;
-        let (fills, last_fill_at): (i64, Option<i64>) = sqlx::query_as(
-            "SELECT COUNT(*), MAX(settled_at) FROM trade t \
-             WHERE t.status = 'confirmed' AND t.settled_at >= ? \
+        let fills: Vec<FillTime> = sqlx::query_as(
+            "SELECT t.created_at, t.settled_at FROM trade t \
+             WHERE t.status = 'confirmed' AND t.settled_at >= ? AND t.settled_at < ? \
                AND EXISTS (SELECT 1 FROM trade_leg l WHERE l.trade_id = t.id AND l.maker = ?)",
         )
-        .bind(since as i64)
-        .bind(key.as_slice())
-        .fetch_one(&self.pool)
-        .await
-        .map_err(db)?;
-
-        let seven_days_ago = now.saturating_sub(7 * DAY) as i64;
-        let fill_times: Vec<i64> = sqlx::query_scalar(
-            "SELECT settled_at FROM trade t \
-             WHERE t.status = 'confirmed' AND t.settled_at >= ? \
-               AND EXISTS (SELECT 1 FROM trade_leg l WHERE l.trade_id = t.id AND l.maker = ?)",
-        )
-        .bind(seven_days_ago)
+        .bind(i64::try_from(window.start).map_err(db)?)
+        .bind(i64::try_from(window.end).map_err(db)?)
         .bind(key.as_slice())
         .fetch_all(&self.pool)
         .await
         .map_err(db)?;
 
         let quotes: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM quote_participant p JOIN quote_event e ON e.id = p.quote_id \
-             WHERE p.maker = ? AND e.served_at >= ?",
+            "SELECT COUNT(*) FROM quote_event e WHERE e.served_at >= ? AND e.served_at < ? \
+             AND EXISTS (SELECT 1 FROM quote_participant p WHERE p.quote_id = e.id AND p.maker = ?)",
         )
+        .bind(i64::try_from(window.start).map_err(db)?)
+        .bind(i64::try_from(window.end).map_err(db)?)
         .bind(key.as_slice())
-        .bind(since as i64)
         .fetch_one(&self.pool)
         .await
         .map_err(db)?;
 
-        let latencies: Vec<i64> = sqlx::query_scalar(
-            "SELECT e.latency_ms FROM quote_participant p JOIN quote_event e ON e.id = p.quote_id \
-             WHERE p.maker = ? AND e.served_at >= ?",
-        )
-        .bind(key.as_slice())
-        .bind(since as i64)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(db)?;
-
         Ok(MakerMetrics {
-            fills: fills as u64,
-            fills_by_day: day_buckets(&fill_times, now),
-            last_fill_at: last_fill_at.map(|t| t as u64),
+            fills: fills.len() as u64,
+            activity: activity_buckets(&fills, window.clone()),
+            last_fill_at: fills
+                .iter()
+                .filter_map(|f| u64::try_from(f.settled_at).ok())
+                .max(),
             volume: self
                 .flow(
                     "token_out",
                     "amount_out",
                     "maker",
                     key.as_slice(),
-                    since as i64,
+                    window.clone(),
                 )
                 .await?,
             inflow: self
-                .flow(
-                    "token_in",
-                    "amount_in",
-                    "maker",
-                    key.as_slice(),
-                    since as i64,
-                )
+                .flow("token_in", "amount_in", "maker", key.as_slice(), window)
                 .await?,
             quotes: quotes as u64,
-            latency_p50_ms: p50(latencies),
+            latency_p50_ms: p50(fills.iter().filter_map(FillTime::latency_ms).collect()),
         })
     }
 
@@ -153,37 +131,40 @@ impl MakerMetricsStore for SqliteMakerMetrics {
         &self,
         strategy: StrategyHash,
         pair: TokenPair,
-        since: u64,
+        window: Range<u64>,
     ) -> Result<PositionMetrics, MakerMetricsError> {
         let key = strategy.0;
-        let (fills, last_fill_at): (i64, Option<i64>) = sqlx::query_as(
-            "SELECT COUNT(*), MAX(settled_at) FROM trade t \
-             WHERE t.status = 'confirmed' AND t.settled_at >= ? \
+        let fills: Vec<FillTime> = sqlx::query_as(
+            "SELECT created_at, settled_at FROM trade t \
+             WHERE t.status = 'confirmed' AND t.settled_at >= ? AND t.settled_at < ? \
                AND EXISTS (SELECT 1 FROM trade_leg l WHERE l.trade_id = t.id AND l.strategy_hash = ?)",
         )
-        .bind(since as i64)
+        .bind(i64::try_from(window.start).map_err(db)?)
+        .bind(i64::try_from(window.end).map_err(db)?)
         .bind(key.as_slice())
-        .fetch_one(&self.pool)
+        .fetch_all(&self.pool)
         .await
         .map_err(db)?;
 
         let participated: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM quote_participant p JOIN quote_event e ON e.id = p.quote_id \
-             WHERE p.strategy_hash = ? AND e.served_at >= ?",
+             WHERE p.strategy_hash = ? AND e.served_at >= ? AND e.served_at < ?",
         )
         .bind(key.as_slice())
-        .bind(since as i64)
+        .bind(i64::try_from(window.start).map_err(db)?)
+        .bind(i64::try_from(window.end).map_err(db)?)
         .fetch_one(&self.pool)
         .await
         .map_err(db)?;
 
         let pair_quotes: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM quote_event e \
-             WHERE e.pair_lo = ? AND e.pair_hi = ? AND e.served_at >= ?",
+             WHERE e.pair_lo = ? AND e.pair_hi = ? AND e.served_at >= ? AND e.served_at < ?",
         )
         .bind(pair.lo.as_slice())
         .bind(pair.hi.as_slice())
-        .bind(since as i64)
+        .bind(i64::try_from(window.start).map_err(db)?)
+        .bind(i64::try_from(window.end).map_err(db)?)
         .fetch_one(&self.pool)
         .await
         .map_err(db)?;
@@ -192,22 +173,33 @@ impl MakerMetricsStore for SqliteMakerMetrics {
             (pair_quotes > 0).then(|| participated as f64 / pair_quotes as f64 * 100.0);
 
         Ok(PositionMetrics {
-            fills: fills as u64,
+            fills: fills.len() as u64,
+            daily_fills: activity_buckets(&fills, window.clone())
+                .into_iter()
+                .map(|b| b.fills)
+                .collect(),
             volume: self
                 .flow(
                     "token_out",
                     "amount_out",
                     "strategy_hash",
                     key.as_slice(),
-                    since as i64,
+                    window,
                 )
                 .await?,
-            last_fill_at: last_fill_at.map(|t| t as u64),
+            last_fill_at: fills
+                .iter()
+                .filter_map(|f| u64::try_from(f.settled_at).ok())
+                .max(),
             quote_uptime_pct,
         })
     }
 
-    async fn pair_fills(&self, pairs: &[TokenPair], since: u64) -> Result<u64, MakerMetricsError> {
+    async fn pair_fills(
+        &self,
+        pairs: &[TokenPair],
+        window: Range<u64>,
+    ) -> Result<u64, MakerMetricsError> {
         if pairs.is_empty() {
             return Ok(0);
         }
@@ -218,9 +210,11 @@ impl MakerMetricsStore for SqliteMakerMetrics {
             .collect::<Vec<_>>()
             .join(" OR ");
         let sql = format!(
-            "SELECT COUNT(*) FROM trade WHERE status = 'confirmed' AND settled_at >= ? AND ({clause})"
+            "SELECT COUNT(*) FROM trade WHERE status = 'confirmed' AND settled_at >= ? AND settled_at < ? AND ({clause})"
         );
-        let mut q = sqlx::query_scalar(&sql).bind(since as i64);
+        let mut q = sqlx::query_scalar(&sql)
+            .bind(i64::try_from(window.start).map_err(db)?)
+            .bind(i64::try_from(window.end).map_err(db)?);
         for pair in pairs {
             q = q
                 .bind(pair.lo.as_slice().to_vec())
@@ -273,32 +267,52 @@ impl MakerMetricsStore for SqliteMakerMetrics {
 
         Ok(PairMetrics {
             fills: fills as u64,
-            volume: sum_by_token(rows),
+            volume: sum_by_token(rows)?,
         })
     }
 }
 
-/// Fills into 7 daily buckets ending at `now`, oldest first (`[0]` = 6 days ago, `[6]` = today).
-fn day_buckets(times: &[i64], now: u64) -> [u64; 7] {
-    let mut buckets = [0u64; 7];
-    for &t in times {
-        let Ok(t) = u64::try_from(t) else { continue };
-        // A future timestamp saturates to day_ago 0 → today's bucket.
-        let day_ago = (now.saturating_sub(t) / DAY) as usize;
-        if day_ago < 7 {
-            buckets[6 - day_ago] += 1;
-        }
-    }
-    buckets
+#[derive(sqlx::FromRow)]
+struct FillTime {
+    created_at: i64,
+    settled_at: i64,
 }
 
-/// Lower-median (p50). `None` for an empty sample.
-fn p50(mut values: Vec<i64>) -> Option<u64> {
-    if values.is_empty() {
-        return None;
+impl FillTime {
+    fn latency_ms(&self) -> Option<u64> {
+        u64::try_from(self.settled_at.checked_sub(self.created_at)?)
+            .ok()?
+            .checked_mul(1000)
     }
-    values.sort_unstable();
-    u64::try_from(values[values.len() / 2]).ok()
+}
+
+fn activity_buckets(fills: &[FillTime], window: Range<u64>) -> Vec<MakerActivityBucket> {
+    let duration = window.end.saturating_sub(window.start);
+    (0..7)
+        .map(|i| {
+            let from = window.start + duration * i / 7;
+            let to = window.start + duration * (i + 1) / 7;
+            let mut bucket = MakerActivityBucket::empty(from, to);
+            let mut latencies = Vec::new();
+            for fill in fills.iter().filter(|fill| {
+                u64::try_from(fill.settled_at).is_ok_and(|at| (from..to).contains(&at))
+            }) {
+                bucket.fills += 1;
+                if let Some(latency) = fill.latency_ms() {
+                    latencies.push(latency);
+                }
+            }
+            bucket.latency_p50_ms = p50(latencies);
+            bucket
+        })
+        .collect()
+}
+
+/// Lower median; an empty sample has no latency, rather than zero latency.
+fn p50(mut values: Vec<u64>) -> Option<u64> {
+    let middle = values.len().checked_sub(1)? / 2;
+    let (_, median, _) = values.select_nth_unstable(middle);
+    Some(*median)
 }
 
 fn db(e: impl std::fmt::Display) -> MakerMetricsError {

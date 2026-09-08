@@ -9,7 +9,7 @@ use crate::deps::execution::{ExecutionError, SettlementError, SimError};
 use crate::deps::ingest::{FillBuilderError, NormalizeError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
 use crate::deps::maker_metrics::MakerMetricsError;
-use crate::deps::registry::{ChainSourceError, StoreError};
+use crate::deps::registry::{BlockTimesError, ChainSourceError, StoreError};
 use crate::deps::trade::TradeStoreError;
 use crate::primitives::ledger::LedgerError;
 
@@ -17,6 +17,8 @@ use crate::primitives::ledger::LedgerError;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum SolventError {
+    #[error("block times: {0}")]
+    BlockTimes(#[from] BlockTimesError),
     /// A typed identifier could not be parsed from its input.
     #[error("invalid {id_type} id: {reason}")]
     InvalidId {

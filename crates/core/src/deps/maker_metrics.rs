@@ -1,8 +1,10 @@
 //! The maker-metrics port: read-side analytics aggregated from the quote log and the trade store.
 //! Returns raw, USD-free numbers — the DTO layer applies `Valuation` for USD, fees, and APY.
 
+use crate::primitives::maker::MakerActivityBucket;
 use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
+use std::ops::Range;
 use thiserror::Error;
 
 use crate::primitives::registry::TokenPair;
@@ -18,8 +20,8 @@ pub struct TokenVolume {
 pub struct MakerMetrics {
     /// Confirmed trades that sourced this maker, in the window.
     pub fills: u64,
-    /// Fills per day for the last 7 days, oldest bucket first.
-    pub fills_by_day: [u64; 7],
+    /// Seven equal time buckets covering the requested window, oldest first.
+    pub activity: Vec<MakerActivityBucket>,
     pub last_fill_at: Option<u64>,
     /// Per-token delivered volume (outflow) — the base for USD volume and fee figures.
     pub volume: Vec<TokenVolume>,
@@ -33,6 +35,7 @@ pub struct MakerMetrics {
 /// One position's activity over a window — the `active_stats` block.
 pub struct PositionMetrics {
     pub fills: u64,
+    pub daily_fills: Vec<u64>,
     pub volume: Vec<TokenVolume>,
     pub last_fill_at: Option<u64>,
     /// Quotes this strategy joined ÷ quotes on its pair, in the window.
@@ -49,25 +52,28 @@ pub struct PairMetrics {
 
 #[async_trait]
 pub trait MakerMetricsStore: Send + Sync {
-    /// Maker-scoped metrics over `[since, now]` (`now` sizes the 7-day fills sparkline).
+    /// Maker-scoped metrics over a half-open Unix-second window.
     async fn maker(
         &self,
         maker: MakerId,
-        since: u64,
-        now: u64,
+        window: Range<u64>,
     ) -> Result<MakerMetrics, MakerMetricsError>;
 
-    /// Position-scoped metrics for `strategy` on `pair`, since `since`.
+    /// Position-scoped metrics for `strategy` on `pair` within the window.
     async fn position(
         &self,
         strategy: StrategyHash,
         pair: TokenPair,
-        since: u64,
+        window: Range<u64>,
     ) -> Result<PositionMetrics, MakerMetricsError>;
 
     /// How many confirmed trades settled on any of `pairs` since `since` — the fill-share
     /// denominator (the maker's share of the fills on the pairs it quotes).
-    async fn pair_fills(&self, pairs: &[TokenPair], since: u64) -> Result<u64, MakerMetricsError>;
+    async fn pair_fills(
+        &self,
+        pairs: &[TokenPair],
+        window: Range<u64>,
+    ) -> Result<u64, MakerMetricsError>;
 
     /// Fills and delivered volume on one pair since `since`, whichever maker served them.
     async fn pair_activity(

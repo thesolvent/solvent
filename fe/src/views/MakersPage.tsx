@@ -1,16 +1,72 @@
-import { DEFAULT_MAKER, ROSTER, SPANS, makerView } from "@/lib/makers";
+import { useEffect, useRef } from "react";
+import { slug, usePools } from "@/services/pools";
+import { PERIODS, SPANS, makerView } from "@/lib/makers";
+import {
+  useMakers,
+  useMakerDashboard,
+  useMakerPositions,
+  useMakerInventory,
+  useMakerSettlements,
+} from "@/services/makers";
 import { useApp } from "@/state";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import styles from "./MakersPage.module.css";
 
 const POS_ACTIONS = ["Push", "Dock"];
-const LAT_DAYS = ["S", "M", "T", "W", "T", "F", "S"];
 
 export function MakersPage() {
   const navigate = useNavigate();
-  const { state, set, push } = useApp();
-  const mk = makerView(state);
+  const { state, set } = useApp();
+  const { maker } = useParams();
+  const roster = useMakers();
+  const address = maker ?? roster.data?.[0]?.address;
+  const period = PERIODS[state.mkSpan] ?? "7d";
+  const dashboard = useMakerDashboard(address, period);
+  const positions = useMakerPositions(address, period);
+  const pools = usePools();
+  const creationPair = positions.data?.[0]?.pair ?? pools[0]?.pair;
+  const inventory = useMakerInventory(address, period);
+  const settlements = useMakerSettlements(address, period);
+  const settlementList = useRef<HTMLDivElement>(null);
+  const {
+    hasNextPage,
+    isFetching,
+    isError,
+    fetchNextPage,
+    data: pages,
+  } = settlements;
+  useEffect(() => {
+    const list = settlementList.current;
+    if (!list || !hasNextPage || isFetching || isError) return;
+    const fillViewport = () => {
+      if (list.scrollHeight <= list.clientHeight + 100) void fetchNextPage();
+    };
+    const observer = new ResizeObserver(fillViewport);
+    observer.observe(list);
+    fillViewport();
+    return () => observer.disconnect();
+  }, [state.mkTab, hasNextPage, isFetching, isError, fetchNextPage, pages]);
+  const activeQuery =
+    state.mkTab === "Positions"
+      ? positions
+      : state.mkTab === "Assets"
+        ? inventory
+        : settlements;
+  const failed = roster.isError || dashboard.isError || activeQuery.isError;
+  const notice = failed
+    ? "Updates unavailable · retrying"
+    : dashboard.isPending
+      ? "Loading maker…"
+      : undefined;
+  const mk = makerView(state, {
+    address,
+    dashboard: dashboard.data,
+    positions: positions.data ?? [],
+    inventory: inventory.data ?? [],
+    settlements: settlements.data?.pages.flatMap((page) => page.items) ?? [],
+    notice,
+  });
 
   return (
     <div className={styles.root}>
@@ -20,18 +76,21 @@ export function MakersPage() {
           <div className={styles.addr}>{mk.addr}</div>
         </div>
         <div className={styles.segmented}>
-          {ROSTER.map((a) => (
+          {roster.data?.map(({ address: a }) => (
             <button
               key={a}
               type="button"
               className={
-                a === (state.mkSel ?? DEFAULT_MAKER)
+                a.toLowerCase() === address?.toLowerCase()
                   ? styles.rosterButtonOn
                   : styles.rosterButton
               }
-              onClick={() => set({ mkSel: a })}
+              onClick={() => {
+                set({ mkOpen: null, mkAsset: null, mkTip: null });
+                navigate(`/makers/${a}`);
+              }}
             >
-              {a.split("…")[1]}
+              {a.slice(-4)}
             </button>
           ))}
         </div>
@@ -53,15 +112,9 @@ export function MakersPage() {
         <button
           type="button"
           className={styles.newPos}
+          disabled={!creationPair}
           onClick={() =>
-            push(
-              {
-                page: "Pools",
-                detail: state.detail ?? 0,
-                create: true,
-              },
-              "Makers",
-            )
+            creationPair && navigate(`/pools/${slug(creationPair)}/new`)
           }
         >
           <span>Create position</span>
@@ -111,7 +164,7 @@ export function MakersPage() {
           {mk.tab === "Positions" && (
             <div data-scroll="1" className={styles.list}>
               {mk.positions.map((p, i) => (
-                <div key={p.pair} className={styles.posGroup}>
+                <div key={p.hash} className={styles.posGroup}>
                   <div
                     className={p.open ? styles.posRowOpen : styles.posRow}
                     onClick={() => set({ mkOpen: p.open ? -1 : i })}
@@ -203,7 +256,7 @@ export function MakersPage() {
               </div>
               <div data-scroll="1" className={styles.list}>
                 {mk.assets.map((t, i) => (
-                  <div key={t.sym} className={styles.assetGroup}>
+                  <div key={t.address} className={styles.assetGroup}>
                     <div
                       className={t.open ? styles.assetRowOpen : styles.assetRow}
                       onClick={() =>
@@ -258,7 +311,7 @@ export function MakersPage() {
                           <span className={styles.right}>Cov.</span>
                         </div>
                         {t.legs.map((l) => (
-                          <div key={l.pair} className={styles.legRow}>
+                          <div key={l.hash} className={styles.legRow}>
                             <span className={styles.stack}>
                               <span className={styles.legPair}>{l.pair}</span>
                               <span className={styles.cellSub}>{l.meta}</span>
@@ -284,14 +337,30 @@ export function MakersPage() {
           )}
 
           {mk.tab === "Settlements" && (
-            <div data-scroll="1" className={styles.list}>
-              {mk.settlements.map((t, i) => (
-                <div
-                  key={`${t.pair}-${i}`}
+            <div
+              ref={settlementList}
+              data-scroll="1"
+              className={styles.list}
+              onScroll={(event) => {
+                const list = event.currentTarget;
+                if (
+                  list.scrollHeight - list.scrollTop - list.clientHeight <
+                    100 &&
+                  settlements.hasNextPage &&
+                  !settlements.isFetching
+                ) {
+                  void settlements.fetchNextPage();
+                }
+              }}
+            >
+              {mk.settlements.map((t) => (
+                <button
+                  type="button"
+                  key={t.trade}
                   className={styles.settleRow}
                   onClick={() => {
                     set({ xpStrat: null });
-                    navigate("/explorer");
+                    navigate(`/explorer/trades/${encodeURIComponent(t.trade)}`);
                   }}
                 >
                   <span className={styles.settlePair}>
@@ -324,7 +393,7 @@ export function MakersPage() {
                     <span className={styles.settleTx}>{t.tx}</span>
                   </span>
                   <span className={styles.settleChevron}>›</span>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -470,9 +539,9 @@ export function MakersPage() {
             </div>
             <div className={styles.latWrap}>
               <div className={styles.latAxis}>
-                <span>1.2k</span>
-                <span>600</span>
-                <span>0</span>
+                {mk.latAxis.map((label) => (
+                  <span key={label}>{label}</span>
+                ))}
               </div>
               <div className={styles.latPlot}>
                 <svg
@@ -492,15 +561,18 @@ export function MakersPage() {
                       vectorEffect="non-scaling-stroke"
                     />
                   ))}
-                  <polyline
-                    points={mk.latLine}
-                    fill="none"
-                    stroke="var(--green)"
-                    strokeWidth="2"
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                    vectorEffect="non-scaling-stroke"
-                  />
+                  {mk.latLines.map((line, i) => (
+                    <polyline
+                      key={i}
+                      points={line}
+                      fill="none"
+                      stroke="var(--green)"
+                      strokeWidth="2"
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  ))}
                 </svg>
                 {mk.latPts.map((pt, i) => (
                   <span
@@ -531,7 +603,7 @@ export function MakersPage() {
                 ))}
               </div>
               <div className={styles.latDays}>
-                {LAT_DAYS.map((d, i) => (
+                {mk.latDays.map((d, i) => (
                   <span key={i}>{d}</span>
                 ))}
               </div>

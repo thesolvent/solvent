@@ -67,13 +67,15 @@ describe("Explorer presentation", () => {
     });
     const view = tradeDetail(trade);
     const lifecycle = tradeLifecycle(trade);
-    expect(view.summary[0].label).toBe("Input → minimum output");
+    expect(view.summary[0].label).toBe("In → out");
+    expect(view.summary[0].value).toContain("min. ");
     expect(lifecycle.steps[5].state).toBe("not reached");
     expect(lifecycle.recordedCount).toBe(1);
     expect(view.empty).toBe(true);
-    expect(
-      view.facts.find((fact) => fact.label === "Signature"),
-    ).toBeUndefined();
+    expect(view.facts.find((fact) => fact.label === "Signature")).toEqual({
+      label: "Signature",
+      value: "—",
+    });
   });
 
   it("keeps zero-valued metrics visible and unavailable metrics unknown", () => {

@@ -67,7 +67,12 @@ export function TradeLifecycle({ trade }: { trade: TradeRecord }) {
             aria-current={step.state === "awaiting" ? "step" : undefined}
             data-state={step.state}
             data-phase={index < 3 ? "quote" : "settle"}
-            style={{ "--stage-index": index } as CSSProperties}
+            style={
+              {
+                "--stage-index": index,
+                left: `calc(${(index * 16.666).toFixed(3)}% + 3px)`,
+              } as CSSProperties
+            }
           >
             <div className={styles.stepBar}>
               {step.state === "recorded" && (

@@ -717,6 +717,7 @@ mod tests {
             &self,
             _: Address,
             _: &Page,
+            _: Option<std::ops::Range<u64>>,
         ) -> Result<Vec<MakerFill>, TradeStoreError> {
             Ok(Vec::new())
         }

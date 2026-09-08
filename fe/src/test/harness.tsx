@@ -1,3 +1,4 @@
+import type { MakersPort } from "@/ports/makers";
 import { QueryClient } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
 import type { ReactElement } from "react";
@@ -37,6 +38,7 @@ const wagmiConfig = createConfig({
 });
 
 export interface Stubs {
+  makers?: Partial<MakersPort>;
   explorer?: Partial<ExplorerPort>;
   assets?: Partial<AssetsPort>;
   pools?: Partial<PoolsPort>;
@@ -46,6 +48,7 @@ export interface Stubs {
 
 export function fakeServices(stubs: Stubs): Services {
   return {
+    makers: port("makers", stubs.makers ?? {}),
     explorer: port("explorer", stubs.explorer ?? {}),
     assets: port("assets", stubs.assets ?? {}),
     pools: port("pools", stubs.pools ?? {}),

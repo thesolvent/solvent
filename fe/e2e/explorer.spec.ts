@@ -116,15 +116,13 @@ test("opens a settled trade directly, reloads, and returns to Explorer", async (
   await expect(
     page.getByRole("link", { name: "View transaction" }),
   ).toHaveAttribute("href", txUrl);
-  await expect(
-    page.getByText("Input → received", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("In → out", { exact: true })).toBeVisible();
   await expect(
     page.getByText(`${trade.lifecycle?.length ?? 0} of 6 stages complete`),
   ).toBeVisible();
   if (trade.legs?.[0]) {
     await expect(
-      page.locator(`a[href$="/address/${trade.legs[0].maker}"]`),
+      page.locator(`a[href$="/strategies/${trade.legs[0].strategy_hash}"]`),
     ).toBeVisible();
   }
   await page.screenshot({

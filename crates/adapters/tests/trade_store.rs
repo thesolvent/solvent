@@ -361,7 +361,175 @@ async fn stats_counts_settled_confirmed_and_median_impact() {
 }
 
 #[tokio::test]
-async fn list_for_maker_returns_only_legged_trades_with_leg() {
+async fn strategy_filter_precedes_cursor_and_limit_without_duplicate_trades() {
+    let store = setup().await;
+    for (i, legs, status) in [
+        (1, vec![leg(3, 100)], TradeStatus::Confirmed),
+        (2, vec![leg(4, 100)], TradeStatus::Confirmed),
+        (3, vec![leg(3, 100), leg(3, 200)], TradeStatus::Confirmed),
+        (4, vec![leg(4, 100)], TradeStatus::Confirmed),
+        (5, vec![leg(3, 100)], TradeStatus::Reserved),
+    ] {
+        store
+            .create(&trade(tid(i), i as u8, 7, status), &legs, &[])
+            .await
+            .unwrap();
+    }
+    let filter = TradeFilter {
+        strategy_hash: Some(StrategyHash(B256::from([3; 32]))),
+        status: Some(TradeStatus::Confirmed),
+        ..Default::default()
+    };
+    let first = store
+        .list(
+            &filter,
+            &Page {
+                limit: 1,
+                cursor: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        first.iter().map(|trade| trade.id).collect::<Vec<_>>(),
+        vec![tid(3)]
+    );
+    let second = store
+        .list(
+            &filter,
+            &Page {
+                limit: 1,
+                cursor: Some(tid(3)),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        second.iter().map(|trade| trade.id).collect::<Vec<_>>(),
+        vec![tid(1)]
+    );
+    assert!(store
+        .list(
+            &filter,
+            &Page {
+                limit: 1,
+                cursor: Some(tid(1))
+            }
+        )
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn maker_pages_count_trades_instead_of_strategy_legs() {
+    let store = setup().await;
+    let maker = Address::from([3; 20]);
+    for (i, legs) in [
+        (1, vec![leg(3, 100)]),
+        (2, vec![leg(3, 200), leg(3, 300), leg(4, 400)]),
+        (3, vec![leg(3, 500), leg(3, 600)]),
+        (4, vec![leg(4, 700)]),
+    ] {
+        store
+            .create(
+                &trade(tid(i), i as u8, 7, TradeStatus::Confirmed),
+                &legs,
+                &[],
+            )
+            .await
+            .unwrap();
+    }
+
+    let first = store
+        .list_for_maker(
+            maker,
+            &Page {
+                limit: 2,
+                cursor: None,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        first.iter().map(|fill| fill.trade.id).collect::<Vec<_>>(),
+        vec![tid(3), tid(2)]
+    );
+    assert_eq!(first[0].amount_in, U256::from(1_000));
+    assert_eq!(first[0].amount_out, U256::from(1_100));
+    assert_eq!(first[1].amount_out, U256::from(500));
+
+    let second = store
+        .list_for_maker(
+            maker,
+            &Page {
+                limit: 2,
+                cursor: Some(tid(2)),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        second.iter().map(|fill| fill.trade.id).collect::<Vec<_>>(),
+        vec![tid(1)]
+    );
+}
+
+#[tokio::test]
+async fn maker_amounts_preserve_u256_precision_and_reject_overflow() {
+    let store = setup().await;
+    let large = U256::from(1) << 128;
+    let amounts = [
+        TradeLeg {
+            amount_in: large,
+            amount_out: large,
+            ..leg(3, 0)
+        },
+        TradeLeg {
+            amount_in: U256::from(3),
+            amount_out: U256::from(7),
+            ..leg(3, 0)
+        },
+    ];
+    store
+        .create(&trade(tid(1), 1, 7, TradeStatus::Confirmed), &amounts, &[])
+        .await
+        .unwrap();
+    let page = Page {
+        limit: 1,
+        cursor: None,
+    };
+    let fills = store
+        .list_for_maker(Address::from([3; 20]), &page, None)
+        .await
+        .unwrap();
+    assert_eq!(fills[0].amount_in, large + U256::from(3));
+    assert_eq!(fills[0].amount_out, large + U256::from(7));
+
+    store
+        .create(
+            &trade(tid(2), 2, 7, TradeStatus::Confirmed),
+            &[
+                TradeLeg {
+                    amount_in: U256::MAX,
+                    ..leg(3, 0)
+                },
+                leg(3, 1),
+            ],
+            &[],
+        )
+        .await
+        .unwrap();
+    assert!(store
+        .list_for_maker(Address::from([3; 20]), &page, None)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn list_for_maker_returns_only_its_own_amounts() {
     let store = setup().await;
     // Trade A (older): makers 3 and 4. Trade B (newer): maker 5 only.
     let a = trade(tid(1), 1, 7, TradeStatus::Confirmed);
@@ -382,26 +550,48 @@ async fn list_for_maker_returns_only_legged_trades_with_leg() {
 
     // Maker 3 sees only trade A, carrying its own leg and the persisted trade-time prices.
     let fills = store
-        .list_for_maker(Address::from([3; 20]), &page)
+        .list_for_maker(Address::from([3; 20]), &page, None)
         .await
         .unwrap();
     assert_eq!(fills.len(), 1);
     assert_eq!(fills[0].trade.id, a.id);
-    assert_eq!(fills[0].leg.maker, MakerId(Address::from([3; 20])));
-    assert_eq!(fills[0].leg.amount_out, U256::from(600u64));
+    assert_eq!(fills[0].amount_out, U256::from(600u64));
     assert_eq!(fills[0].trade.token_in_price_usd, Some(1.0));
     assert_eq!(fills[0].trade.token_out_price_usd, Some(2000.0));
 
     // Maker 5 sees only trade B; maker 9 (never legged) sees nothing.
     let fills5 = store
-        .list_for_maker(Address::from([5; 20]), &page)
+        .list_for_maker(Address::from([5; 20]), &page, None)
         .await
         .unwrap();
     assert_eq!(fills5.len(), 1);
     assert_eq!(fills5[0].trade.id, b.id);
     assert!(store
-        .list_for_maker(Address::from([9; 20]), &page)
+        .list_for_maker(Address::from([9; 20]), &page, None)
         .await
         .unwrap()
         .is_empty());
+}
+
+#[tokio::test]
+async fn maker_period_filters_settlement_time_before_pagination() {
+    let store = setup().await;
+    for (i, settled_at) in [(1, 150), (2, 99), (3, 200)] {
+        let mut row = trade(tid(i), i as u8, 7, TradeStatus::Confirmed);
+        row.settled_at = Some(settled_at);
+        store.create(&row, &[leg(3, 600)], &[]).await.unwrap();
+    }
+    let fills = store
+        .list_for_maker(
+            Address::from([3; 20]),
+            &Page {
+                limit: 1,
+                cursor: None,
+            },
+            Some(100..200),
+        )
+        .await
+        .unwrap();
+    assert_eq!(fills.len(), 1);
+    assert_eq!(fills[0].trade.id, tid(1));
 }

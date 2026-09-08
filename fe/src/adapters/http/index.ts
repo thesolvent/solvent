@@ -1,3 +1,4 @@
+import { makersAdapter } from "./makers";
 import type { AssetsPort } from "@/ports/assets";
 import type { PoolsPort } from "@/ports/pools";
 import type { SystemPort } from "@/ports/system";
@@ -45,6 +46,7 @@ const system: SystemPort = {
 
 /** The live implementations the composition root injects. */
 export const httpServices: Services = {
+  makers: makersAdapter,
   explorer: explorerAdapter,
   assets,
   pools,

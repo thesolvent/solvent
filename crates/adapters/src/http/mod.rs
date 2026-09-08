@@ -55,6 +55,10 @@ pub fn router(state: AppState) -> Router {
         .route("/pairs", get(app::pairs::pairs))
         .route("/positions/preview", post(app::positions::preview))
         .route("/positions/{hash}", get(app::makers::position_detail))
+        .route(
+            "/positions/{hash}/history",
+            get(app::makers::position_history),
+        )
         .route("/wallets/{addr}/balances", get(app::balances::balances))
         .route("/openapi.json", get(openapi::openapi_json))
         .with_state(state);
@@ -234,6 +238,7 @@ mod tests {
             &self,
             _: Address,
             _: &Page,
+            _: Option<std::ops::Range<u64>>,
         ) -> Result<Vec<MakerFill>, TradeStoreError> {
             Ok(Vec::new())
         }
@@ -249,6 +254,18 @@ mod tests {
 
     /// An empty registry event store — the activity/stats endpoints read nothing in these tests.
     struct NoopEventStore;
+    #[async_trait::async_trait]
+    impl solvent_core::deps::registry::BlockTimes for NoopEventStore {
+        async fn timestamps(
+            &self,
+            _: &[B256],
+        ) -> Result<
+            std::collections::BTreeMap<B256, u64>,
+            solvent_core::deps::registry::BlockTimesError,
+        > {
+            Ok(Default::default())
+        }
+    }
     #[async_trait::async_trait]
     impl EventStore for NoopEventStore {
         async fn cursor(&self, _: ChainId) -> Result<Option<EventCursor>, StoreError> {
@@ -301,12 +318,11 @@ mod tests {
         async fn maker(
             &self,
             _: MakerId,
-            _: u64,
-            _: u64,
+            _: std::ops::Range<u64>,
         ) -> Result<MakerMetrics, MakerMetricsError> {
             Ok(MakerMetrics {
                 fills: 0,
-                fills_by_day: [0; 7],
+                activity: Vec::new(),
                 last_fill_at: None,
                 volume: Vec::new(),
                 inflow: Vec::new(),
@@ -318,9 +334,10 @@ mod tests {
             &self,
             _: StrategyHash,
             _: TokenPair,
-            _: u64,
+            _: std::ops::Range<u64>,
         ) -> Result<PositionMetrics, MakerMetricsError> {
             Ok(PositionMetrics {
+                daily_fills: vec![0; 7],
                 fills: 0,
                 volume: Vec::new(),
                 last_fill_at: None,
@@ -338,7 +355,11 @@ mod tests {
             })
         }
 
-        async fn pair_fills(&self, _: &[TokenPair], _: u64) -> Result<u64, MakerMetricsError> {
+        async fn pair_fills(
+            &self,
+            _: &[TokenPair],
+            _: std::ops::Range<u64>,
+        ) -> Result<u64, MakerMetricsError> {
             Ok(0)
         }
     }
@@ -491,6 +512,7 @@ mod tests {
             Arc::new(NoopMakerMetrics),
             Arc::new(ZeroOracle),
             Arc::new(NoopEventStore),
+            Arc::new(NoopEventStore),
             Arc::new(SystemClock),
             ChainId(31337),
         ));
@@ -498,6 +520,7 @@ mod tests {
             Arc::clone(&trades),
             Arc::clone(&assets),
             Arc::clone(&valuation),
+            Arc::clone(&registry),
         ));
         AppState {
             config: Arc::new(AppConfig {

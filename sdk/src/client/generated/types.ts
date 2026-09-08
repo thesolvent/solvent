@@ -244,6 +244,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/positions/{hash}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The strategy's committed-reserve price over the last seven days. */
+        get: operations["position_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/stats": {
         parameters: {
             query?: never;
@@ -358,6 +375,8 @@ export interface components {
     schemas: {
         /** @description Recent-activity stats for the position detail. */
         ActiveStats: {
+            /** @description Seven daily confirmed-order counts, oldest first. */
+            daily_fills: number[];
             /** Format: int64 */
             fills_7d: number;
             /** Format: int64 */
@@ -519,6 +538,7 @@ export interface components {
             /** @description This token's ship-time balance in the position. */
             opening: components["schemas"]["Amount"];
             pair: string;
+            strategy_hash: string;
             /** Format: double */
             volume_usd?: number | null;
         };
@@ -541,6 +561,20 @@ export interface components {
             /** @description The maker's wallet balance of this token (uncapped). */
             wallet: components["schemas"]["Amount"];
         };
+        /** @description A time bucket of confirmed orders. Latency runs from order creation to confirmation. */
+        MakerActivityBucket: {
+            /** Format: int64 */
+            fills: number;
+            /** Format: int64 */
+            from: number;
+            /**
+             * Format: int64
+             * @description Milliseconds, with the source timestamps' one-second precision; null for an empty bucket.
+             */
+            latency_p50_ms?: number | null;
+            /** Format: int64 */
+            to: number;
+        };
         /**
          * @description A maker's dashboard: headline KPIs (with period-over-period deltas), fill-share on the pairs it
          *     quotes, fill latency, and a competitive insight. USD values are `None` when unpriced.
@@ -548,13 +582,18 @@ export interface components {
         MakerDashboard: {
             /** Format: int64 */
             active_positions: number;
+            activity: components["schemas"]["MakerActivityBucket"][];
             fill_share: components["schemas"]["FillShare"];
+            /** Format: double */
+            fills_change_pct?: number | null;
             /** @description A cheaper competitor on one of the maker's pairs, if any undercuts it. */
             insight?: string | null;
             kpis: components["schemas"]["MakerKpis"];
             /** Format: int64 */
             latency_p50_ms?: number | null;
             maker: string;
+            /** Format: int64 */
+            previous_latency_p50_ms?: number | null;
             /**
              * Format: int32
              * @description The window (days) the KPIs and deltas cover.
@@ -589,9 +628,15 @@ export interface components {
         MakerLeg: {
             amount_in: components["schemas"]["Amount"];
             amount_out: components["schemas"]["Amount"];
+            curve?: string | null;
             maker: string;
             strategy_hash: string;
         };
+        /**
+         * @description Rolling analytics windows used by the maker dashboard's period controls.
+         * @enum {string}
+         */
+        MakerPeriod: "7d" | "1m" | "3m" | "6m";
         /** @description One maker in the roster. */
         MakerSummary: {
             /** Format: int64 */
@@ -723,7 +768,7 @@ export interface components {
             /** Format: int32 */
             fee_bps: number;
             maker: string;
-            /** @description Current curve spot in `quote per base` — filled by the marginal-price task. */
+            /** @description Fee-free marginal price in human quote units per base unit. */
             mid_price?: string | null;
             pair: string;
             pair_type: components["schemas"]["PoolType"];
@@ -732,10 +777,7 @@ export interface components {
             state: string;
             strategy_hash: string;
         };
-        /**
-         * @description A position's committed vs. pullable balances. `opening` (the ship-time deposit) is detail-only, so
-         *     it is empty in the list projection.
-         */
+        /** @description Committed, pullable and initial ship balances for a position. */
         PositionBalances: {
             actual: components["schemas"]["TokenAmounts"];
             /** @description Whether every committed token is fully pullable on-chain (no `shortfall`). */
@@ -749,6 +791,16 @@ export interface components {
             shortfall?: string | null;
             split: components["schemas"]["Split"][];
             virtual: components["schemas"]["TokenAmounts"];
+        };
+        /** @description Committed-reserve price history over the last seven days, with transaction-final samples. */
+        PositionHistory: {
+            /** Format: int64 */
+            created_block?: number | null;
+            /** Format: int64 */
+            from: number;
+            prices: components["schemas"]["StrategyPrice"][];
+            /** Format: int64 */
+            to: number;
         };
         /** @description The SDK-encoded strategy and the amounts the maker intends to ship, keyed to a wallet. */
         PreviewRequest: {
@@ -1071,7 +1123,7 @@ export interface components {
                     /** Format: int32 */
                     fee_bps: number;
                     maker: string;
-                    /** @description Current curve spot in `quote per base` — filled by the marginal-price task. */
+                    /** @description Fee-free marginal price in human quote units per base unit. */
                     mid_price?: string | null;
                     pair: string;
                     pair_type: components["schemas"]["PoolType"];
@@ -1141,6 +1193,7 @@ export interface components {
                     price_impact_pct?: number | null;
                     /** Format: int64 */
                     settled_at?: number | null;
+                    signature_present?: boolean | null;
                     status: string;
                     surplus?: null | components["schemas"]["Amount"];
                     taker: string;
@@ -1162,13 +1215,18 @@ export interface components {
             result?: {
                 /** Format: int64 */
                 active_positions: number;
+                activity: components["schemas"]["MakerActivityBucket"][];
                 fill_share: components["schemas"]["FillShare"];
+                /** Format: double */
+                fills_change_pct?: number | null;
                 /** @description A cheaper competitor on one of the maker's pairs, if any undercuts it. */
                 insight?: string | null;
                 kpis: components["schemas"]["MakerKpis"];
                 /** Format: int64 */
                 latency_p50_ms?: number | null;
                 maker: string;
+                /** Format: int64 */
+                previous_latency_p50_ms?: number | null;
                 /**
                  * Format: int32
                  * @description The window (days) the KPIs and deltas cover.
@@ -1218,7 +1276,7 @@ export interface components {
                 /** Format: int32 */
                 fee_bps: number;
                 maker: string;
-                /** @description Current curve spot in `quote per base` — filled by the marginal-price task. */
+                /** @description Fee-free marginal price in human quote units per base unit. */
                 mid_price?: string | null;
                 pair: string;
                 pair_type: components["schemas"]["PoolType"];
@@ -1226,6 +1284,21 @@ export interface components {
                 range: components["schemas"]["PriceRange"];
                 state: string;
                 strategy_hash: string;
+            };
+            status: components["schemas"]["Status"];
+        };
+        /** @description The envelope wrapping every response. `status_code` sets the HTTP status (never serialized). */
+        Response_PositionHistory: {
+            error?: string | null;
+            /** @description Committed-reserve price history over the last seven days, with transaction-final samples. */
+            result?: {
+                /** Format: int64 */
+                created_block?: number | null;
+                /** Format: int64 */
+                from: number;
+                prices: components["schemas"]["StrategyPrice"][];
+                /** Format: int64 */
+                to: number;
             };
             status: components["schemas"]["Status"];
         };
@@ -1332,6 +1405,7 @@ export interface components {
                 price_impact_pct?: number | null;
                 /** Format: int64 */
                 settled_at?: number | null;
+                signature_present?: boolean | null;
                 status: string;
                 surplus?: null | components["schemas"]["Amount"];
                 taker: string;
@@ -1366,6 +1440,12 @@ export interface components {
          * @enum {string}
          */
         Status: "Ok" | "Error";
+        /** @description The strategy price after a transaction, or an unavailable price after docking/emptying. */
+        StrategyPrice: {
+            /** Format: int64 */
+            at: number;
+            price?: string | null;
+        };
         /**
          * @description A taker-signed order submission, mirroring the UniswapX Orders API (`{ encodedOrder, signature,
          *     chainId, quoteId? }`). The taker's client builds + signs the base order; the server cosigns.
@@ -1452,6 +1532,7 @@ export interface components {
             price_impact_pct?: number | null;
             /** Format: int64 */
             settled_at?: number | null;
+            signature_present?: boolean | null;
             status: string;
             surplus?: null | components["schemas"]["Amount"];
             taker: string;
@@ -1558,7 +1639,9 @@ export interface operations {
     };
     maker_dashboard: {
         parameters: {
-            query?: never;
+            query?: {
+                period?: components["schemas"]["MakerPeriod"];
+            };
             header?: never;
             path: {
                 /** @description Maker address */
@@ -1580,7 +1663,9 @@ export interface operations {
     };
     maker_inventory: {
         parameters: {
-            query?: never;
+            query?: {
+                period?: components["schemas"]["MakerPeriod"];
+            };
             header?: never;
             path: {
                 /** @description Maker address */
@@ -1602,7 +1687,9 @@ export interface operations {
     };
     maker_positions: {
         parameters: {
-            query?: never;
+            query?: {
+                period?: components["schemas"]["MakerPeriod"];
+            };
             header?: never;
             path: {
                 /** @description Maker address */
@@ -1629,6 +1716,8 @@ export interface operations {
                 limit?: number;
                 /** @description Opaque next-page cursor */
                 cursor?: string;
+                /** @description Confirmed settlements in a rolling period */
+                period?: components["schemas"]["MakerPeriod"];
             };
             header?: never;
             path: {
@@ -1817,6 +1906,35 @@ export interface operations {
             };
         };
     };
+    position_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Strategy hash */
+                hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_PositionHistory"];
+                };
+            };
+            /** @description Unknown position */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     stats: {
         parameters: {
             query?: never;
@@ -1911,6 +2029,8 @@ export interface operations {
                 base?: string;
                 /** @description Pair token (with base) */
                 quote?: string;
+                /** @description Strategy hash (position id) */
+                strategy_hash?: string;
             };
             header?: never;
             path?: never;

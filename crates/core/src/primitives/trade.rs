@@ -170,6 +170,8 @@ pub struct TradeInfo {
 /// order's coordinates (omitted from JSON when absent). Assembled by the trade service.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct TradeView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_present: Option<bool>,
     pub id: String,
     pub status: String,
     #[schema(value_type = String)]
@@ -215,6 +217,7 @@ pub struct TradeAction {
 /// One maker's slice of the routed split, on the wire.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct MakerLeg {
+    pub curve: Option<String>,
     pub maker: String,
     pub strategy_hash: String,
     pub amount_in: Amount,

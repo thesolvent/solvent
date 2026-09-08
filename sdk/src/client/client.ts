@@ -22,6 +22,7 @@ export type MakerDashboard = Schemas["MakerDashboard"];
 export type MakerTrade = Schemas["MakerTrade"];
 export type InventoryRow = Schemas["InventoryRow"];
 export type Position = Schemas["Position"];
+export type PositionHistory = Schemas["PositionHistory"];
 export type TokenBalance = Schemas["TokenBalance"];
 export type PairInfo = Schemas["PairInfo"];
 export type PreviewRequest = Schemas["PreviewRequest"];
@@ -43,7 +44,9 @@ export interface SolventClientConfig {
   headers?: Record<string, string>;
 }
 
-type PageQuery = { cursor?: string; limit?: number };
+export type MakerQuery = NonNullable<operations["maker_dashboard"]["parameters"]["query"]>;
+
+export type MakerTradesQuery = NonNullable<operations["maker_trades"]["parameters"]["query"]>;
 export type TradesQuery = NonNullable<operations["trades"]["parameters"]["query"]>;
 export type ActivityQuery = NonNullable<operations["activity"]["parameters"]["query"]>;
 type Query = Record<string, string | number | boolean | undefined>;
@@ -63,11 +66,12 @@ export interface SolventClient {
   activity(query?: ActivityQuery): Promise<List<ActivityEvent>>;
   stats(): Promise<Stats>;
   makers(): Promise<List<MakerSummary>>;
-  maker(maker: string): Promise<MakerDashboard>;
-  makerInventory(maker: string): Promise<List<InventoryRow>>;
-  makerTrades(maker: string, query?: PageQuery): Promise<List<MakerTrade>>;
-  makerPositions(maker: string): Promise<List<Position>>;
+  maker(maker: string, query?: MakerQuery): Promise<MakerDashboard>;
+  makerInventory(maker: string, query?: MakerQuery): Promise<List<InventoryRow>>;
+  makerTrades(maker: string, query?: MakerTradesQuery): Promise<List<MakerTrade>>;
+  makerPositions(maker: string, query?: MakerQuery): Promise<List<Position>>;
   position(hash: string): Promise<Position>;
+  positionHistory(hash: string): Promise<PositionHistory>;
   balances(wallet: string): Promise<List<TokenBalance>>;
   pairs(query?: { search?: string; wallet?: string }): Promise<List<PairInfo>>;
   positionsPreview(body: PreviewRequest): Promise<PreviewResponse>;
@@ -130,11 +134,12 @@ export function createSolventClient(config: SolventClientConfig): SolventClient 
     activity: (query) => get<List<ActivityEvent>>("/v1/activity", query),
     stats: () => get<Stats>("/v1/stats"),
     makers: () => get<List<MakerSummary>>("/v1/makers"),
-    maker: (maker) => get<MakerDashboard>(`/v1/makers/${maker}`),
-    makerInventory: (maker) => get<List<InventoryRow>>(`/v1/makers/${maker}/inventory`),
+    maker: (maker, query) => get<MakerDashboard>(`/v1/makers/${maker}`, query),
+    makerInventory: (maker, query) => get<List<InventoryRow>>(`/v1/makers/${maker}/inventory`, query),
     makerTrades: (maker, query) => get<List<MakerTrade>>(`/v1/makers/${maker}/trades`, query),
-    makerPositions: (maker) => get<List<Position>>(`/v1/makers/${maker}/positions`),
+    makerPositions: (maker, query) => get<List<Position>>(`/v1/makers/${maker}/positions`, query),
     position: (hash) => get<Position>(`/v1/positions/${hash}`),
+    positionHistory: (hash) => get<PositionHistory>(`/v1/positions/${hash}/history`),
     balances: (wallet) => get<List<TokenBalance>>(`/v1/wallets/${wallet}/balances`),
     pairs: (query) => get<List<PairInfo>>("/v1/pairs", query),
     positionsPreview: (body) => post<PreviewResponse>("/v1/positions/preview", body),

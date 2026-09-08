@@ -1,17 +1,10 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  activityRow,
-  explorerStats,
-  explorerUrl,
-  tradeRow,
-} from "@/lib/explorer";
+import { activityRow, explorerStats, tradeRow } from "@/lib/explorer";
 import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
 import { useActivity, useExplorerStats, useTrades } from "@/services/explorer";
 import { usePools } from "@/services/pools";
-import { useConfig } from "@/services/system";
 import { useApp } from "@/state";
-import { QueryFreshness } from "./QueryFreshness";
 import styles from "./explorer.module.css";
 
 const TABS = ["Trades", "Activity"];
@@ -145,7 +138,6 @@ function TradeList({ filter }: { filter: TradeFilter }) {
         </button>
         <span className={styles.footNote}>
           Page {cursors.length} · {rows.length} shown
-          <QueryFreshness query={query} />
         </span>
         <button
           type="button"
@@ -165,13 +157,7 @@ function TradeList({ filter }: { filter: TradeFilter }) {
   );
 }
 
-function ActivityList({
-  filter,
-  explorerBase,
-}: {
-  filter: ActivityFilter;
-  explorerBase: string | undefined;
-}) {
+function ActivityList({ filter }: { filter: ActivityFilter }) {
   const query = useActivity(filter);
   const rows =
     query.data?.pages.flatMap((page) => page.items).map(activityRow) ?? [];
@@ -201,12 +187,10 @@ function ActivityList({
           </p>
         )}
         {rows.map((row) => (
-          <a
+          <Link
             key={row.id}
             className={styles.activityRow}
-            href={explorerUrl(explorerBase, "tx", row.txHash)}
-            target="_blank"
-            rel="noopener noreferrer"
+            to={`/explorer/strategies/${row.strategyHash}`}
             aria-label={`View ${row.kind} transaction ${row.tx}`}
           >
             <div className={styles.activityTop}>
@@ -230,13 +214,13 @@ function ActivityList({
                 {row.text}
               </span>
             </div>
-          </a>
+          </Link>
         ))}
       </div>
       <div className={styles.footBar}>
         <span className={styles.liveTag}>
-          <span>{rows.length} events loaded</span>
-          <QueryFreshness query={query} />
+          <span className={styles.livePulse} />
+          <span>live · {rows.length} events loaded</span>
         </span>
         <button
           type="button"
@@ -254,7 +238,6 @@ function ActivityList({
 export function ExplorerPage() {
   const { state, set } = useApp();
   const pools = usePools();
-  const config = useConfig();
   const stats = useExplorerStats();
   const isTrades = state.xpTab === "Trades";
   const pairs = [...new Set(pools.map((pool) => pool.pair.replace(/\s/g, "")))];
@@ -298,19 +281,17 @@ export function ExplorerPage() {
             <div className={styles.statRow}>
               <span className={styles.statValue}>{stat.value}</span>
               <span className={styles.statSub} style={{ color: stat.accent }}>
-                {stat.sub}
+                {stats.isError && stat.label === "Block height"
+                  ? "updates delayed"
+                  : stat.sub}
               </span>
             </div>
-            {stat.label === "Block height" && <QueryFreshness query={stats} />}
           </div>
         ))}
       </div>
       {stats.isError && (
-        <p role="alert" className={styles.emptyNote}>
-          Couldn’t refresh stats.{" "}
-          <button type="button" onClick={() => void stats.refetch()}>
-            Try again
-          </button>
+        <p role="alert" className={styles.srOnly}>
+          Couldn’t refresh stats. Retrying automatically.
         </p>
       )}
       <div className={styles.filterBar}>
@@ -347,10 +328,7 @@ export function ExplorerPage() {
           <p className={styles.emptyNote}>Selected pair is unavailable.</p>
         )
       ) : (
-        <ActivityList
-          filter={activityFilter}
-          explorerBase={config.data?.block_explorer_url}
-        />
+        <ActivityList filter={activityFilter} />
       )}
     </div>
   );

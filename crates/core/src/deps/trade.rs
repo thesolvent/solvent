@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::primitives::trade::{Trade, TradeAttempt, TradeId, TradeInfo, TradeLeg, TradeStatus};
-use crate::primitives::IntentId;
+use crate::primitives::{IntentId, StrategyHash};
 
 /// The outcome of a [`create`](TradeStore::create): the trade id now representing this order, and
 /// whether it was newly inserted (vs. an existing trade for the same order hash).
@@ -32,6 +32,7 @@ pub struct TradeFilter {
     pub status: Option<TradeStatus>,
     pub taker: Option<Address>,
     pub pair: Option<(Address, Address)>,
+    pub strategy_hash: Option<StrategyHash>,
 }
 
 /// One page of a trade listing: newest first, `cursor` the last id of the previous page.
@@ -40,11 +41,22 @@ pub struct Page {
     pub cursor: Option<TradeId>,
 }
 
-/// A trade paired with one maker's leg in it — the maker settlements feed (a maker sees each trade it
-/// sourced, with its own slice for the share and fee).
+/// A trade paired with the amounts supplied by all of one maker's strategies.
+#[non_exhaustive]
 pub struct MakerFill {
     pub trade: Trade,
-    pub leg: TradeLeg,
+    pub amount_in: U256,
+    pub amount_out: U256,
+}
+
+impl MakerFill {
+    pub fn new(trade: Trade, amount_in: U256, amount_out: U256) -> Self {
+        Self {
+            trade,
+            amount_in,
+            amount_out,
+        }
+    }
 }
 
 /// Aggregate counts over the trade table, for the stat tiles. `median_impact_pct` is `None` until
@@ -93,11 +105,12 @@ pub trait TradeStore: Send + Sync {
     /// A page of trade headers (newest first) matching `filter`.
     async fn list(&self, filter: &TradeFilter, page: &Page) -> Result<Vec<Trade>, TradeStoreError>;
 
-    /// A page of a maker's trades (newest first), each with that maker's leg — the settlements feed.
+    /// A page of a maker's trades (newest first), with its combined amounts across strategies.
     async fn list_for_maker(
         &self,
         maker: Address,
         page: &Page,
+        window: Option<std::ops::Range<u64>>,
     ) -> Result<Vec<MakerFill>, TradeStoreError>;
 
     /// Aggregate lifecycle counts for the stat tiles.

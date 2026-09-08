@@ -47,7 +47,7 @@ describe("Trade detail navigation", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1);
       });
-      expect(screen.getByText("Input → minimum output")).toBeInTheDocument();
+      expect(screen.getByText(/ → min\. /)).toBeInTheDocument();
       expect(
         screen.getByRole("listitem", { name: "Confirmed: awaiting" }),
       ).toHaveAttribute("aria-current", "step");
@@ -57,7 +57,7 @@ describe("Trade detail navigation", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2_001);
       });
-      expect(screen.getByText("Input → received")).toBeInTheDocument();
+      expect(screen.getByText("In → out")).toBeInTheDocument();
       expect(screen.getByRole("status")).toHaveTextContent(
         "Trade confirmed. 6 of 6 stages recorded.",
       );
@@ -149,7 +149,7 @@ describe("Trade detail navigation", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3_002);
       });
-      expect(screen.getByText("Input → minimum output")).toBeInTheDocument();
+      expect(screen.getByText(/ → min\. /)).toBeInTheDocument();
       expect(screen.getByRole("alert")).toHaveTextContent(
         "Couldn’t refresh this trade.",
       );
@@ -158,7 +158,7 @@ describe("Trade detail navigation", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2_002);
       });
-      expect(screen.getByText("Input → received")).toBeInTheDocument();
+      expect(screen.getByText("In → out")).toBeInTheDocument();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     } finally {
       view.unmount();

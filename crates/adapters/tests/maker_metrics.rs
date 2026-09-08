@@ -47,7 +47,7 @@ async fn insert_trade(
     .bind(addr(10).as_slice())
     .bind(token_out.as_slice())
     .bind(status)
-    .bind(settled_at)
+    .bind(settled_at - 6)
     .bind(settled_at)
     .execute(pool)
     .await
@@ -121,24 +121,64 @@ async fn maker_rollup() {
     seed(&pool).await;
 
     let m = metrics
-        .maker(MakerId(addr(1)), (NOW - 7 * DAY) as u64, NOW as u64)
+        .maker(MakerId(addr(1)), (NOW - 7 * DAY) as u64..NOW as u64)
         .await
         .expect("maker");
 
     assert_eq!(m.fills, 2, "only the two confirmed fills");
     assert_eq!(m.last_fill_at, Some((NOW - 100) as u64));
     assert_eq!(m.quotes, 3, "quotes strategy 1 was sourced into");
-    assert_eq!(m.latency_p50_ms, Some(200)); // median of 100/200/300
-                                             // volume = 1_000_000 + 2_000_000 of token 11 (delivered, token_out)
+    assert_eq!(m.latency_p50_ms, Some(6_000)); // order creation to confirmation, not quote latency
+                                               // volume = 1_000_000 + 2_000_000 of token 11 (delivered, token_out)
     let vol = m.volume.iter().find(|v| v.token == addr(11)).unwrap();
     assert_eq!(vol.base_units, U256::from(3_000_000u64));
     // inflow = 3_000_000 + 6_000_000 of token 10 (received, token_in); the failed trade is excluded
     let inflow = m.inflow.iter().find(|v| v.token == addr(10)).unwrap();
     assert_eq!(inflow.base_units, U256::from(9_000_000u64));
     // fills land today and 2 days ago
-    assert_eq!(m.fills_by_day[6], 1);
-    assert_eq!(m.fills_by_day[4], 1);
-    assert_eq!(m.fills_by_day.iter().sum::<u64>(), 2);
+    assert_eq!(m.activity[6].fills, 1);
+    assert_eq!(m.activity[5].fills, 1);
+    assert_eq!(m.activity.iter().map(|b| b.fills).sum::<u64>(), 2);
+}
+
+#[tokio::test]
+async fn maker_windows_exclude_later_fills_and_count_each_quote_once() {
+    let (pool, metrics) = setup().await;
+    seed(&pool).await;
+    let boundary = NOW - DAY;
+    insert_trade(&pool, "boundary", 4, "confirmed", boundary, addr(11)).await;
+    insert_leg(&pool, "boundary", 1, 1, "12", "4").await;
+    insert_trade(&pool, "future", 5, "confirmed", NOW + 1, addr(11)).await;
+    insert_leg(&pool, "future", 1, 1, "30", "10").await;
+    sqlx::query(
+        "INSERT INTO quote_participant (quote_id, maker, strategy_hash) VALUES ('q1', ?, ?)",
+    )
+    .bind(addr(1).as_slice())
+    .bind(B256::from([2; 32]).as_slice())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let previous = metrics
+        .maker(MakerId(addr(1)), (NOW - 7 * DAY) as u64..boundary as u64)
+        .await
+        .unwrap();
+    assert_eq!(previous.fills, 1);
+    assert_eq!(previous.quotes, 0);
+    assert_eq!(previous.latency_p50_ms, Some(6_000));
+    assert_eq!(previous.volume[0].base_units, U256::from(2_000_000));
+    assert_eq!(previous.inflow[0].base_units, U256::from(6_000_000));
+    assert_eq!(previous.activity.iter().map(|b| b.fills).sum::<u64>(), 1);
+
+    let current = metrics
+        .maker(MakerId(addr(1)), boundary as u64..NOW as u64)
+        .await
+        .unwrap();
+    assert_eq!(current.fills, 2);
+    assert_eq!(current.quotes, 3);
+    assert_eq!(current.volume[0].base_units, U256::from(1_000_004));
+    assert_eq!(current.inflow[0].base_units, U256::from(3_000_012));
+    assert_eq!(current.activity.iter().map(|b| b.fills).sum::<u64>(), 2);
 }
 
 #[tokio::test]
@@ -149,7 +189,7 @@ async fn pair_fills_counts_confirmed_on_the_pair() {
     // The pair {10, 11} carries two confirmed fills (t1, t2); the failed t3 is excluded.
     let pair = TokenPair::new(addr(10), addr(11));
     let on_pair = metrics
-        .pair_fills(&[pair], (NOW - 7 * DAY) as u64)
+        .pair_fills(&[pair], (NOW - 7 * DAY) as u64..NOW as u64)
         .await
         .expect("pair_fills");
     assert_eq!(on_pair, 2);
@@ -158,14 +198,14 @@ async fn pair_fills_counts_confirmed_on_the_pair() {
     let other = TokenPair::new(addr(20), addr(21));
     assert_eq!(
         metrics
-            .pair_fills(&[other], (NOW - 7 * DAY) as u64)
+            .pair_fills(&[other], (NOW - 7 * DAY) as u64..NOW as u64)
             .await
             .unwrap(),
         0
     );
     assert_eq!(
         metrics
-            .pair_fills(&[], (NOW - 7 * DAY) as u64)
+            .pair_fills(&[], (NOW - 7 * DAY) as u64..NOW as u64)
             .await
             .unwrap(),
         0
@@ -181,7 +221,7 @@ async fn position_rollup_with_uptime() {
         .position(
             StrategyHash(B256::from([1; 32])),
             TokenPair::new(addr(10), addr(11)),
-            (NOW - 7 * DAY) as u64,
+            (NOW - 7 * DAY) as u64..NOW as u64,
         )
         .await
         .expect("position");

@@ -1,366 +1,352 @@
-import {
-  ASSET_ROWS,
-  DAY_LABELS,
-  LAT_SERIES,
-  MAKER_BARS,
-  SHARE_SEGS,
-  TRADES,
-} from "@/data";
 import type { AppState } from "@/state";
+import type {
+  ActivityBucket,
+  InventoryAsset,
+  MakerDashboard,
+  MakerPeriod,
+  MakerSettlement,
+  Position,
+  PositionBalance,
+} from "@/data/makers";
+import { tradeRow } from "./explorer";
 
-const DEFAULT_MAKER = "0x9f3c…MM-04";
-const ROSTER = [DEFAULT_MAKER, "0x1a2b…MM-01", "0x77de…MM-07", "0xc410…MM-11"];
-const SPANS = ["7D", "1M", "3M", "6M"];
-const SPAN_MULT: Record<string, number> = {
-  "7D": 0.42,
-  "1M": 1,
-  "3M": 2.6,
-  "6M": 4.4,
+export const SPANS = ["7D", "1M", "3M", "6M"] as const;
+export const PERIODS: Record<string, MakerPeriod> = {
+  "7D": "7d",
+  "1M": "1m",
+  "3M": "3m",
+  "6M": "6m",
 };
 
-/** Donut radius; the track is a 3/4 arc so the gap sits at the bottom. */
-const R = 46;
+export function compactAddress(address: string): string {
+  return address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "—";
+}
 
-const POSITIONS = [
-  {
-    pair: "USDC/USDT",
-    curve: "Straight",
-    fee: "0.04%",
-    kind: "Pegged",
-    cov: 1.0,
-    wide: false,
-    cur: "253.79 / 254.46",
-    op: "253.79 / 254.46",
-    fees: 0,
-    apy: null as number | null,
-    vol: 0,
-    splitA: 50,
-    a: "USDC",
-    b: "USDT",
-  },
-  {
-    pair: "WBTC/USDC",
-    curve: "Concentrated",
-    fee: "0.05%",
-    kind: "Volatile",
-    cov: 0.96,
-    wide: true,
-    cur: "0.0381 / 2,410.4",
-    op: "0.0382 / 2,388.0",
-    fees: 412,
-    apy: 14.2,
-    vol: 1.84e6,
-    splitA: 62,
-    a: "WBTC",
-    b: "USDC",
-  },
-  {
-    pair: "WETH/USDC",
-    curve: "Concentrated",
-    fee: "0.05%",
-    kind: "Volatile",
-    cov: 0.88,
-    wide: false,
-    cur: "1.204 / 3,702.1",
-    op: "1.250 / 3,640.0",
-    fees: 268,
-    apy: 11.6,
-    vol: 1.02e6,
-    splitA: 44,
-    a: "WETH",
-    b: "USDC",
-  },
-];
+export function usd(value: number | null | undefined): string {
+  return value == null
+    ? "—"
+    : value.toLocaleString("en-US", {
+        style: "currency",
+        currency: "USD",
+        notation: value >= 10_000 ? "compact" : "standard",
+        maximumFractionDigits: 2,
+      });
+}
 
-const SETTLEMENTS = [
-  {
-    trade: 4,
-    inn: "12,400 USDC",
-    out: "12,398 USDT",
-    fee: "+$4.96",
-    share: "38%",
-  },
-  {
-    trade: 1,
-    inn: "0.0182 WBTC",
-    out: "740 USDC",
-    fee: "+$0.57",
-    share: "12%",
-  },
-  {
-    trade: 7,
-    inn: "0.076 WBTC",
-    out: "1.44 ETH",
-    fee: "+$1.18",
-    share: "19%",
-  },
-  {
-    trade: 0,
-    inn: "0.95 ETH",
-    out: "2,942 USDC",
-    fee: "+$3.25",
-    share: "38%",
-  },
-  { trade: 5, inn: "0.62 WETH", out: "1,918 USDC", fee: "—", share: "44%" },
-  {
-    trade: 3,
-    inn: "1.2 ETH",
-    out: "3,713 USDC",
-    fee: "+$0.29",
-    share: "24%",
-  },
-];
+export function percent(value: number | null | undefined): string {
+  return value == null ? "—" : `${value.toFixed(1)}%`;
+}
 
-const STATUS_TONE: Record<string, [string, string]> = {
-  confirmed: ["var(--lime-wash-soft)", "var(--green-darkest)"],
-  declined: ["var(--warn-bg)", "var(--warn-ink)"],
-  "reorg-open": ["var(--info-bg)", "var(--info-ink)"],
-  failed: ["var(--err-bg)", "var(--err-ink)"],
-  pending: ["#eef0f4", "#4a5a72"],
-  partial: ["var(--warn-bg)", "var(--warn-ink)"],
-};
+const numberText = (value: number | null | undefined) =>
+  value == null
+    ? "—"
+    : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+const quantityText = (value: string) =>
+  Number(value).toLocaleString("en-US", { maximumSignificantDigits: 8 });
+const ratioText = (value: number | null | undefined) =>
+  value == null ? "—" : `${value.toFixed(2)}×`;
+const deltaText = (value: number | null | undefined) =>
+  value == null
+    ? "—"
+    : `${value < 0 ? "▼" : "▲"} ${Math.abs(value).toFixed(1)}%`;
 
-export { SPANS, ROSTER, DEFAULT_MAKER, SETTLEMENTS };
+export function balanceText(balances: PositionBalance[]): string {
+  return balances.length
+    ? balances.map((b) => `${quantityText(b.display)} ${b.symbol}`).join(" · ")
+    : "—";
+}
 
-export function makerView(s: AppState) {
-  const span = s.mkSpan;
-  const mult = SPAN_MULT[span] ?? 1;
-  const addr = s.mkSel ?? DEFAULT_MAKER;
-  const money = (n: number) =>
-    n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : `$${(n / 1e3).toFixed(1)}k`;
-  const feesRouted = Math.round(5080 * mult);
-
-  // Bars are re-weighted per span so the peak (and the average line) move with it.
-  const scaled = MAKER_BARS.map(
-    (h, i) => h * (0.72 + Math.sin(i * 1.7 + mult) * 0.18 * mult),
-  );
-  const peak = Math.max(...scaled) || 1;
-  const topIdx = scaled.indexOf(peak);
-  const sum = scaled.reduce((x, y) => x + y, 0);
-  const avg = sum / scaled.length;
-  const base = (8204 * mult) / 7;
-
-  const dimmed = (i: number) => s.mkTip === null || s.mkTip === i;
-
+function positionRow(p: Position, open: boolean, span: string) {
+  const first = p.committed[0];
+  const second = p.committed[1];
+  const split =
+    p.committedUsd && first?.usd != null
+      ? (first.usd / p.committedUsd) * 100
+      : null;
   return {
-    addr,
-    span,
-    tab: s.mkTab,
+    hash: p.hash,
+    pair: p.pair,
+    meta: `${p.curve} · ${p.feeBps / 100}% · ${p.pairType}`,
+    cov: `${ratioText(p.coverage)} cov`,
+    covNum: ratioText(p.coverage),
+    width: p.rangeKind === "full" ? "Full" : "Bounded",
+    widthBg:
+      p.rangeKind === "full" ? "var(--surface)" : "var(--lime-wash-soft)",
+    widthFg:
+      p.rangeKind === "full" ? "var(--text-mid)" : "var(--green-darkest)",
+    open,
+    splitA: `${split ?? 0}%`,
+    labelA: `${percent(split)} ${first?.symbol ?? ""}`,
+    labelB: `${percent(split == null ? null : 100 - split)} ${second?.symbol ?? ""}`,
+    stats: [
+      { label: "Current balance", value: balanceText(p.committed) },
+      { label: "Opening balance", value: balanceText(p.opening) },
+      { label: `Fees ${span}`, value: usd(p.feesUsd) },
+      { label: `APY ${span}`, value: percent(p.apyPct) },
+      { label: "Volume", value: usd(p.volumeUsd) },
+    ].map((stat, i) => ({
+      ...stat,
+      sep: i === 0 ? "transparent" : "var(--surface)",
+    })),
+  };
+}
 
-    kpis: [
-      {
-        label: "Shared liquidity",
-        value: "$18.4k",
-        delta: "▲ 3.1%",
-        deltaFg: "var(--green-deep)",
-        bg: "var(--paper)",
-      },
-      {
-        label: "Volume, total",
-        value: money(6.2e6 * mult),
-        delta: "▲ 8.4%",
-        deltaFg: "var(--green-deep)",
-        bg: "var(--paper)",
-      },
-      {
-        label: "Wallet balance",
-        value: "$21.0k",
-        delta: "",
-        deltaFg: "var(--text-muted)",
-        bg: "var(--paper)",
-      },
-      {
-        label: "Pullable",
-        value: "$16.9k",
-        delta: "",
-        deltaFg: "var(--text-muted)",
-        bg: "var(--lime-wash-mid)",
-      },
-      {
-        label: "Shared-liq ratio",
-        value: "0.96×",
-        delta: "",
-        deltaFg: "var(--text-muted)",
-        bg: "var(--paper)",
-      },
-      {
-        label: "Active positions",
-        value: "3",
-        delta: "",
-        deltaFg: "var(--text-muted)",
-        bg: "var(--paper)",
-      },
-      {
-        label: `Fees, ${span}`,
-        value: `$${feesRouted.toLocaleString("en-US")}`,
-        delta: "▲ 2.6%",
-        deltaFg: "var(--green-deep)",
-        bg: "var(--paper)",
-      },
-    ].map((k, i) => ({
+const TOKEN_TINTS: Record<string, string> = {
+  USDC: "#e6f0fb",
+  USDT: "#e2f4ef",
+  WBTC: "#fbeee0",
+  WETH: "#eeeef4",
+};
+
+function assetRow(asset: InventoryAsset, open: boolean) {
+  const ratio =
+    asset.wallet.usd && asset.shared.usd != null
+      ? asset.shared.usd / asset.wallet.usd
+      : null;
+  return {
+    address: asset.address,
+    sym: asset.symbol,
+    tint: TOKEN_TINTS[asset.symbol] ?? "var(--surface)",
+    open,
+    across: `Across ${asset.legs.length} ${asset.legs.length === 1 ? "position" : "positions"}`,
+    wallet: usd(asset.wallet.usd),
+    walletAmt: `${quantityText(asset.wallet.display)} ${asset.symbol}`,
+    shared: usd(asset.shared.usd),
+    sharedAmt: `${quantityText(asset.shared.display)} ${asset.symbol}`,
+    fees: usd(asset.feesUsd),
+    apy: percent(asset.apyPct),
+    ratio: ratioText(ratio),
+    legs: asset.legs.map((leg) => ({
+      hash: leg.hash,
+      pair: leg.pair,
+      meta: `${leg.curve} · ${leg.feeBps / 100}%`,
+      cur: `${quantityText(leg.current.display)} ${asset.symbol}`,
+      curUsd: usd(leg.current.usd),
+      op: `${quantityText(leg.opening.display)} ${asset.symbol}`,
+      fees: usd(leg.feesUsd),
+      apy: percent(leg.apyPct),
+      cov: ratioText(leg.coverage),
+    })),
+  };
+}
+
+function shareChart(
+  dashboard: MakerDashboard | undefined,
+  hovered: number | null,
+) {
+  const total = dashboard?.pairFills;
+  const filled = dashboard?.fills;
+  const segments = [
+    { label: "This maker", count: filled, color: "var(--lime)" },
+    {
+      label: "Other makers",
+      count:
+        total == null || filled == null
+          ? undefined
+          : Math.max(0, total - filled),
+      color: "var(--ink)",
+    },
+  ];
+  const circumference = 2 * Math.PI * 46;
+  const arcLength = circumference * 0.75;
+  let offset = 0;
+  const shares = segments.map((segment, i) => {
+    const share = total && segment.count != null ? segment.count / total : 0;
+    const length = Math.max(0, share * arcLength - 7);
+    const result = {
+      ...segment,
+      label: segment.label,
+      value: total ? percent(share * 100) : "—",
+      dot: segment.color,
+      op: hovered === null || hovered === i ? 1 : 0.4,
+      dash: `${length.toFixed(1)} ${(circumference - length).toFixed(1)}`,
+      offset: (-offset).toFixed(1),
+    };
+    offset += share * arcLength;
+    return result;
+  });
+  const selected = hovered === null ? undefined : shares[hovered];
+  return {
+    trackDash: `${arcLength.toFixed(1)} ${(circumference * 0.25).toFixed(1)}`,
+    arcs: shares.filter((share) => Number.parseFloat(share.dash) > 0),
+    shares,
+    donutCap: selected?.label ?? "total",
+    donutVal: numberText(selected ? selected.count : total),
+    tip: !!selected,
+    tipLabel: selected?.label ?? "",
+    tipPct: selected?.value ?? "",
+    tipAmt: `${numberText(selected?.count)} orders`,
+  };
+}
+
+function bucketLabel(bucket: ActivityBucket, span: string): string {
+  const date = new Date(bucket.from * 1000);
+  return span === "7D"
+    ? date
+        .toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" })
+        .slice(0, 1)
+    : date.toLocaleDateString("en-US", {
+        day: "numeric",
+        month: "numeric",
+        timeZone: "UTC",
+      });
+}
+
+function activityCharts(
+  dashboard: MakerDashboard | undefined,
+  state: AppState,
+) {
+  const buckets = dashboard?.activity ?? [];
+  const peak = Math.max(0, ...buckets.map((b) => b.fills));
+  const topIndex = buckets.findIndex((b) => b.fills === peak);
+  const average = buckets.length
+    ? buckets.reduce((sum, b) => sum + b.fills, 0) / buckets.length
+    : 0;
+  const maxLatency = Math.max(1200, ...buckets.map((b) => b.latencyMs ?? 0));
+  const y = (latency: number) => 116 - (latency / maxLatency) * 112;
+  const points = buckets.map((bucket, i) => ({
+    bucket,
+    x: i * 70,
+    y: bucket.latencyMs == null ? null : y(bucket.latencyMs),
+  }));
+  // Empty buckets break the line: interpolating across them would invent measurements.
+  const lines: string[] = [];
+  let segment: string[] = [];
+  for (const point of points) {
+    if (point.y !== null) segment.push(`${point.x},${point.y.toFixed(1)}`);
+    else if (segment.length) {
+      lines.push(segment.join(" "));
+      segment = [];
+    }
+  }
+  if (segment.length) lines.push(segment.join(" "));
+  return {
+    fills: numberText(dashboard?.fills),
+    fillsDelta: deltaText(dashboard?.fillsChangePct),
+    bars: buckets.map((bucket, i) => ({
+      day: bucketLabel(bucket, state.mkSpan),
+      h: `${peak ? (bucket.fills / peak) * 100 : 0}%`,
+      bg:
+        state.mkBar === i
+          ? "var(--ink)"
+          : i === topIndex
+            ? "var(--lime)"
+            : "#eeeeea",
+      dayFg:
+        state.mkBar === i || i === topIndex ? "var(--ink)" : "var(--text-dim)",
+      tip: state.mkBar === i,
+      value: `${numberText(bucket.fills)} fills`,
+    })),
+    avgTop: `${peak ? 100 - (average / peak) * 100 : 100}%`,
+    avgVal: numberText(average),
+    latency:
+      dashboard?.latencyMs == null
+        ? "—"
+        : `${numberText(dashboard.latencyMs)} ms`,
+    latDelta:
+      dashboard?.previousLatencyMs == null
+        ? "no previous fills"
+        : `from ${numberText(dashboard.previousLatencyMs)} ms baseline`,
+    latAxis: [numberText(maxLatency), numberText(maxLatency / 2), "0"],
+    latLines: lines.map((line) =>
+      line.includes(" ") ? line : `${line} ${line}`,
+    ),
+    latDays: buckets.map((b) => bucketLabel(b, state.mkSpan)),
+    latPts: points.map(({ bucket, y: value }, i) => ({
+      left: `${(i / 6) * 100}%`,
+      top: `${((value ?? 116) / 120) * 100}%`,
+      shift: i === 0 ? "-10%" : i === 6 ? "-90%" : "-50%",
+      tip: state.mkLat === i && value !== null,
+      value: `${numberText(bucket.latencyMs)} ms`,
+    })),
+  };
+}
+
+export function makerView(
+  state: AppState,
+  data: {
+    address: string | undefined;
+    dashboard: MakerDashboard | undefined;
+    positions: Position[];
+    inventory: InventoryAsset[];
+    settlements: MakerSettlement[];
+    notice: string | undefined;
+  },
+) {
+  const d = data.dashboard;
+  const span = state.mkSpan;
+  const kpis = [
+    {
+      label: "Shared liquidity",
+      value: usd(d?.sharedLiquidityUsd),
+      change: d?.liquidityChangePct,
+    },
+    {
+      label: "Volume, total",
+      value: usd(d?.volumeUsd),
+      change: d?.volumeChangePct,
+    },
+    { label: "Wallet balance", value: usd(d?.walletUsd) },
+    { label: "Pullable", value: usd(d?.pullableUsd) },
+    { label: "Shared-liq ratio", value: ratioText(d?.coverage) },
+    { label: "Active positions", value: numberText(d?.activePositions) },
+    {
+      label: `Fees, ${span}`,
+      value: usd(d?.feesUsd),
+      change: d?.feesChangePct,
+    },
+  ];
+  const settlements = data.settlements;
+  return {
+    addr: compactAddress(data.address ?? ""),
+    span,
+    tab: state.mkTab,
+    kpis: kpis.map((k, i) => ({
       ...k,
+      delta: "change" in k ? deltaText(k.change) : "",
+      deltaFg:
+        k.change != null && k.change < 0
+          ? "var(--warn-ink)"
+          : "var(--green-deep)",
+      bg: i === 3 ? "var(--lime-wash-mid)" : "var(--paper)",
       sep: i === 0 ? "transparent" : "var(--line)",
     })),
-
     tabs: [
-      { key: "Positions", label: `Positions ${POSITIONS.length}` },
+      { key: "Positions", label: `Positions ${data.positions.length}` },
       { key: "Assets", label: "Assets" },
       { key: "Settlements", label: "Settlements" },
     ],
     tabNote:
-      s.mkTab === "Positions"
-        ? `${POSITIONS.length} active · ${span}`
-        : s.mkTab === "Assets"
-          ? `${ASSET_ROWS.length} tokens committed`
-          : `${Math.round(214 * mult)} fills · ${span}`,
-
-    positions: POSITIONS.map((p, i) => {
-      const open = s.mkOpen === i;
+      data.notice ??
+      (state.mkTab === "Positions"
+        ? `${numberText(d?.activePositions)} active · ${span}`
+        : state.mkTab === "Assets"
+          ? `${data.inventory.length} tokens committed`
+          : `${numberText(d?.fills)} fills · ${span}`),
+    positions: data.positions.map((p, i) =>
+      positionRow(p, state.mkOpen === i, span),
+    ),
+    assets: data.inventory.map((asset, i) =>
+      assetRow(asset, state.mkAsset === i),
+    ),
+    settlements: settlements.map((trade) => {
+      const row = tradeRow(trade);
       return {
-        pair: p.pair,
-        meta: `${p.curve} · ${p.fee} · ${p.kind}`,
-        cov: `${p.cov.toFixed(2)}× cov`,
-        covNum: `${p.cov.toFixed(2)}×`,
-        width: p.wide ? "Wide" : "Tight",
-        widthBg: p.wide ? "var(--surface)" : "var(--lime-wash-soft)",
-        widthFg: p.wide ? "var(--text-mid)" : "var(--green-darkest)",
-        open,
-        splitA: `${p.splitA}%`,
-        labelA: `${p.splitA}% ${p.a}`,
-        labelB: `${100 - p.splitA}% ${p.b}`,
-        stats: [
-          { label: "Current balance", value: p.cur },
-          { label: "Opening balance", value: p.op },
-          {
-            label: `Fees ${span}`,
-            value: `$${Math.round(p.fees * mult).toLocaleString("en-US")}`,
-          },
-          {
-            label: `APY ${span}`,
-            value: p.apy === null ? "—" : `${p.apy.toFixed(1)}%`,
-          },
-          {
-            label: "Volume",
-            value: p.vol ? money(p.vol * mult) : "$0",
-          },
-        ].map((st, j) => ({
-          ...st,
-          sep: j === 0 ? "transparent" : "var(--surface)",
-        })),
+        trade: trade.id,
+        pair: row.pair,
+        blk: row.blockLabel,
+        tx: row.transactionLabel,
+        status: trade.status,
+        inn: row.input,
+        out: row.output,
+        fee: usd(trade.feeUsd),
+        share: percent(trade.sharePct),
+        stBg: row.statusStyle.background,
+        stFg: row.statusStyle.color,
       };
     }),
-
-    assets: ASSET_ROWS.map((t, i) => ({
-      sym: t.sym,
-      tint: t.tint,
-      across: `Across ${t.legs.length} ${t.legs.length === 1 ? "position" : "positions"}`,
-      wallet: `$${Math.round(t.wallet).toLocaleString("en-US")}`,
-      walletAmt: `${t.walletAmt} ${t.sym}`,
-      shared: `$${Math.round(t.shared).toLocaleString("en-US")}`,
-      sharedAmt: `${t.sharedAmt} ${t.sym}`,
-      fees: `$${Math.round(t.fees * mult).toLocaleString("en-US")}`,
-      apy: t.apy ? `${t.apy.toFixed(1)}%` : "–",
-      ratio: `${(t.shared / t.wallet).toFixed(2)}×`,
-      open: s.mkAsset === i,
-      legs: t.legs.map((l) => ({
-        pair: l.pair,
-        meta: l.meta,
-        cur: `${l.cur} ${t.sym}`,
-        curUsd: `$${Math.round(l.usd).toLocaleString("en-US")}`,
-        op: `${l.op} ${t.sym}`,
-        fees: `$${Math.round(l.fees * mult).toLocaleString("en-US")}`,
-        apy: l.apy ? `${l.apy.toFixed(1)}%` : "–",
-        cov: `${l.cov.toFixed(2)}×`,
-      })),
-    })),
-
-    settlements: SETTLEMENTS.map((x) => {
-      const t = TRADES[x.trade];
-      const [stBg, stFg] = STATUS_TONE[t.status];
-      return {
-        trade: x.trade,
-        pair: t.pair,
-        blk: t.blk === "—" ? "unsettled" : `blk ${t.blk}`,
-        tx: t.tx,
-        status: t.status,
-        inn: x.inn,
-        out: x.out,
-        fee: x.fee,
-        share: t.status === "failed" || t.status === "declined" ? "—" : x.share,
-        stBg,
-        stFg,
-      };
-    }),
-
-    insight: "MM-04 is quoting 18bps wide on ETH/USDC",
-
-    trackDash: `${(2 * Math.PI * R * 0.75).toFixed(1)} ${(2 * Math.PI * R * 0.25).toFixed(1)}`,
-    arcs: (() => {
-      const C = 2 * Math.PI * R * 0.75;
-      const full = 2 * Math.PI * R;
-      const gap = 7;
-      let acc = 0;
-      return SHARE_SEGS.map((seg, i) => {
-        const len = Math.max(0, (seg.pct / 100) * C - gap);
-        const arc = {
-          color: seg.color,
-          dash: `${len.toFixed(1)} ${(full - len).toFixed(1)}`,
-          offset: (-acc).toFixed(1),
-          op: dimmed(i) ? 1 : 0.3,
-        };
-        acc += (seg.pct / 100) * C;
-        return arc;
-      });
-    })(),
-    donutCap: s.mkTip === null ? "total" : SHARE_SEGS[s.mkTip].label,
-    donutVal:
-      s.mkTip === null
-        ? `$${feesRouted.toLocaleString("en-US")}`
-        : `$${Math.round((feesRouted * SHARE_SEGS[s.mkTip].pct) / 100).toLocaleString("en-US")}`,
-    tip: s.mkTip !== null,
-    tipLabel: s.mkTip === null ? "" : SHARE_SEGS[s.mkTip].label,
-    tipPct: s.mkTip === null ? "" : `${SHARE_SEGS[s.mkTip].pct}%`,
-    tipAmt:
-      s.mkTip === null
-        ? ""
-        : `$${Math.round((feesRouted * SHARE_SEGS[s.mkTip].pct) / 100).toLocaleString("en-US")} routed`,
-    shares: SHARE_SEGS.map((seg, i) => ({
-      label: seg.label,
-      value: `${seg.pct}%`,
-      dot: seg.color,
-      op: dimmed(i) ? 1 : 0.4,
-    })),
-
-    fills: Math.round(8204 * mult).toLocaleString("en-US"),
-    fillsDelta: "↑ 8%",
-    bars: scaled.map((v, i) => {
-      const on = s.mkBar === i;
-      return {
-        day: DAY_LABELS[i],
-        h: `${Math.max(8, (v / peak) * 100).toFixed(0)}%`,
-        bg: on ? "var(--ink)" : i === topIdx ? "var(--lime)" : "#eeeeea",
-        dayFg: on || i === topIdx ? "var(--ink)" : "var(--text-dim)",
-        tip: on,
-        value: `${Math.round(base * (v / (sum / 7))).toLocaleString("en-US")} fills`,
-      };
-    }),
-    avgTop: `${(100 - (avg / peak) * 100).toFixed(1)}%`,
-    avgVal: Math.round((8204 * mult) / 7).toLocaleString("en-US"),
-
-    latency: `${Math.round(820 / (0.6 + mult * 0.4))} ms`,
-    latDelta: "from 760 ms baseline",
-    latLine: LAT_SERIES.map(
-      (v, i) => `${i * 70},${(v * (0.8 + mult * 0.2)).toFixed(0)}`,
-    ).join(" "),
-    latPts: LAT_SERIES.map((v, i) => {
-      const y = v * (0.8 + mult * 0.2);
-      return {
-        left: `${((i / (LAT_SERIES.length - 1)) * 100).toFixed(2)}%`,
-        top: `${Math.min(96, Math.max(4, (y / 120) * 100)).toFixed(2)}%`,
-        shift: i === 0 ? "-10%" : i === LAT_SERIES.length - 1 ? "-90%" : "-50%",
-        tip: s.mkLat === i,
-        value: `${Math.round((y / (0.8 + mult * 0.2)) * 8.5)} ms`,
-      };
-    }),
+    insight: data.notice ?? d?.insight ?? "—",
+    ...shareChart(d, state.mkTip),
+    ...activityCharts(d, state),
   };
 }

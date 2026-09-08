@@ -1,24 +1,22 @@
-//! The maker read-surface: turns shipped strategies into positions, the positions list, and the
-//! roster — composing the registry snapshot, the balances oracle (pullable), USD valuation, the T1
-//! range decoder, the T2 metrics store, and the event log (opening balances). The current curve spot
-//! (`mid_price`) is filled by the marginal-price task.
-
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::ops::Range;
 use std::sync::Arc;
 
 use alloy_primitives::{Address, U256};
 use itertools::Itertools;
 
+use super::history::{marginal_price, price_history, window_times};
 use crate::asset::AssetManager;
 use crate::deps::balances::BalancesOracle;
 use crate::deps::ledger::Clock;
 use crate::deps::maker_metrics::{MakerMetrics, MakerMetricsStore, PositionMetrics, TokenVolume};
-use crate::deps::registry::EventStore;
+use crate::deps::registry::{BlockTimes, EventStore, StoreError};
 use crate::primitives::amount::{Amount, Holdings, TokenAmounts};
 use crate::primitives::asset::Token;
 use crate::primitives::maker::{
     ActiveStats, Economics, FillShare, InventoryLeg, InventoryRow, MakerDashboard, MakerKpis,
-    MakerSummary, Position, PositionBalances, PreviewResponse, PriceRange, Split,
+    MakerPeriod, MakerSummary, Position, PositionBalances, PositionHistory, PreviewResponse,
+    PriceRange, Split,
 };
 use crate::primitives::pool::classify_pair;
 use crate::primitives::registry::{
@@ -31,8 +29,6 @@ use crate::valuation::Valuation;
 use crate::SolventError;
 
 const DAY: u64 = 86_400;
-/// The activity window for economics and active-stats.
-const WINDOW_DAYS: u64 = 7;
 /// Basis points in one whole unit (100%); a fee in bps over this is the fraction taken.
 const BPS_PER_UNIT: f64 = 10_000.0;
 
@@ -43,6 +39,7 @@ pub struct MakerService {
     metrics: Arc<dyn MakerMetricsStore>,
     balances: Arc<dyn BalancesOracle>,
     events: Arc<dyn EventStore>,
+    block_times: Arc<dyn BlockTimes>,
     clock: Arc<dyn Clock>,
     chain: ChainId,
 }
@@ -56,6 +53,7 @@ impl MakerService {
         metrics: Arc<dyn MakerMetricsStore>,
         balances: Arc<dyn BalancesOracle>,
         events: Arc<dyn EventStore>,
+        block_times: Arc<dyn BlockTimes>,
         clock: Arc<dyn Clock>,
         chain: ChainId,
     ) -> Self {
@@ -66,6 +64,7 @@ impl MakerService {
             metrics,
             balances,
             events,
+            block_times,
             clock,
             chain,
         }
@@ -114,11 +113,64 @@ impl MakerService {
         let Some(strategy) = snapshot.strategy_by_hash(hash).cloned() else {
             return Ok(None);
         };
-        self.build(&strategy, true).await
+        self.build(
+            &strategy,
+            true,
+            MakerPeriod::Week.window(self.clock.now_unix()),
+        )
+        .await
+    }
+
+    /// On-chain price history, using block time and committed reserves after each transaction.
+    pub async fn history(
+        &self,
+        hash: StrategyHash,
+    ) -> Result<Option<PositionHistory>, SolventError> {
+        let Some(strategy) = self.registry.load().strategy_by_hash(hash).cloned() else {
+            return Ok(None);
+        };
+        let Some(pair) = strategy.pair() else {
+            return Ok(None);
+        };
+        let (base, quote) = self.assets.base_quote(&pair);
+        let events = self.events.history(self.chain, hash).await?;
+        let mut hashes = events
+            .iter()
+            .map(|e| {
+                if e.transaction_hash.is_none() || e.cursor().is_none() {
+                    return Err(StoreError::Unpositioned);
+                }
+                e.block_hash.ok_or(StoreError::Unpositioned)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        hashes.dedup();
+        let window = MakerPeriod::Week.window(self.clock.now_unix());
+        let times = window_times(self.block_times.as_ref(), &hashes, window.start).await?;
+        Ok(Some(price_history(
+            &strategy,
+            &self.assets.token_or_default(base),
+            &self.assets.token_or_default(quote),
+            &events,
+            &times,
+            window,
+        )?))
     }
 
     /// A maker's active positions (list projection — no detail stats).
-    pub async fn positions(&self, maker: MakerId) -> Result<Vec<Position>, SolventError> {
+    pub async fn positions(
+        &self,
+        maker: MakerId,
+        period: MakerPeriod,
+    ) -> Result<Vec<Position>, SolventError> {
+        self.positions_in(maker, period.window(self.clock.now_unix()))
+            .await
+    }
+
+    async fn positions_in(
+        &self,
+        maker: MakerId,
+        window: Range<u64>,
+    ) -> Result<Vec<Position>, SolventError> {
         let strategies: Vec<MakerStrategy> = self
             .registry
             .load()
@@ -127,7 +179,7 @@ impl MakerService {
             .collect();
         let mut positions = Vec::new();
         for strategy in &strategies {
-            if let Some(position) = self.build(strategy, false).await? {
+            if let Some(position) = self.build(strategy, false, window.clone()).await? {
                 positions.push(position);
             }
         }
@@ -167,12 +219,15 @@ impl MakerService {
 
     /// One maker's dashboard: headline KPIs with period-over-period deltas, fill-share on its pairs,
     /// latency, and a competitive insight. Composed at the producer (all USD valued here).
-    pub async fn dashboard(&self, maker: MakerId) -> Result<MakerDashboard, SolventError> {
-        let now = self.clock.now_unix();
-        let window = WINDOW_DAYS * DAY;
+    pub async fn dashboard(
+        &self,
+        maker: MakerId,
+        period: MakerPeriod,
+    ) -> Result<MakerDashboard, SolventError> {
+        let window = period.window(self.clock.now_unix());
 
         // Headline totals reuse the position builder, so the dashboard can't drift from the list.
-        let positions = self.positions(maker).await?;
+        let positions = self.positions_in(maker, window.clone()).await?;
         let kpis = position_kpis(&positions);
 
         let strategies = self.active_priceable_strategies(maker);
@@ -180,35 +235,52 @@ impl MakerService {
             .wallet_usd(maker.0, &strategy_tokens(&strategies))
             .await?;
 
-        let metrics = self.window_metrics(maker, now, window).await?;
-        let deltas = self
-            .window_deltas(&metrics, kpis.volume_usd, kpis.shared_liquidity_usd)
-            .await;
-        let fill_share = self
-            .fill_share(
-                &strategies,
-                metrics.current.fills,
-                now.saturating_sub(window),
+        let historical = self
+            .registry
+            .load()
+            .strategies()
+            .filter(|s| s.key.maker == maker)
+            .cloned()
+            .collect::<Vec<_>>();
+        let metrics = self.window_metrics(maker, window.clone()).await?;
+        let volume_usd = self.usd_of(&metrics.current.volume).await;
+        let fees_usd = self.period_fees(&historical, window.clone()).await?;
+        let previous_fees = self
+            .period_fees(
+                &historical,
+                window.start.saturating_sub(window.end - window.start)..window.start,
             )
+            .await?;
+        let fill_share = self
+            .fill_share(&historical, metrics.current.fills, window)
             .await?;
 
         Ok(MakerDashboard {
             maker: maker.0,
-            window_days: WINDOW_DAYS as u32,
+            window_days: period.days(),
             active_positions: positions.len() as u64,
             kpis: MakerKpis {
                 shared_liquidity_usd: kpis.shared_liquidity_usd,
-                volume_usd: kpis.volume_usd,
+                volume_usd,
                 wallet_balance_usd,
                 pullable_usd: kpis.pullable_usd,
                 shared_liq_ratio: ratio(kpis.pullable_usd, kpis.shared_liquidity_usd),
-                fees_usd: kpis.fees_usd,
-                shared_liquidity_change_pct: deltas.shared_liquidity_change_pct,
-                volume_change_pct: deltas.volume_change_pct,
-                fees_change_pct: deltas.fees_change_pct,
+                fees_usd,
+                shared_liquidity_change_pct: None,
+                volume_change_pct: change_pct(
+                    volume_usd,
+                    self.usd_of(&metrics.previous.volume).await,
+                ),
+                fees_change_pct: change_pct(fees_usd, previous_fees),
             },
             fill_share,
             latency_p50_ms: metrics.current.latency_p50_ms,
+            previous_latency_p50_ms: metrics.previous.latency_p50_ms,
+            fills_change_pct: change_pct(
+                Some(metrics.current.fills as f64),
+                Some(metrics.previous.fills as f64),
+            ),
+            activity: metrics.current.activity,
             insight: self.undercut_insight(maker, &strategies),
         })
     }
@@ -228,41 +300,35 @@ impl MakerService {
     async fn window_metrics(
         &self,
         maker: MakerId,
-        now: u64,
-        window: u64,
+        window: Range<u64>,
     ) -> Result<WindowMetrics, SolventError> {
-        let current = self
-            .metrics
-            .maker(maker, now.saturating_sub(window), now)
-            .await?;
-        let previous = self
-            .metrics
-            .maker(
-                maker,
-                now.saturating_sub(2 * window),
-                now.saturating_sub(window),
-            )
-            .await?;
+        let previous = window.start.saturating_sub(window.end - window.start)..window.start;
+        let current = self.metrics.maker(maker, window).await?;
+        let previous = self.metrics.maker(maker, previous).await?;
         Ok(WindowMetrics { current, previous })
     }
 
-    /// Period-over-period KPI deltas: volume vs the previous window, fees tracking volume, and the
-    /// shared-liquidity change from net trading flow.
-    async fn window_deltas(
+    async fn period_fees(
         &self,
-        metrics: &WindowMetrics,
-        volume_usd: Option<f64>,
-        shared_liquidity_usd: Option<f64>,
-    ) -> WindowDeltas {
-        let volume_change_pct = change_pct(volume_usd, self.usd_of(&metrics.previous.volume).await);
-        WindowDeltas {
-            volume_change_pct,
-            // Fees track volume at a stable fee mix, so the fee delta mirrors the volume delta.
-            fees_change_pct: volume_change_pct,
-            shared_liquidity_change_pct: self
-                .liquidity_change(&metrics.current, shared_liquidity_usd)
-                .await,
+        strategies: &[MakerStrategy],
+        window: Range<u64>,
+    ) -> Result<Option<f64>, SolventError> {
+        let mut fees = Vec::with_capacity(strategies.len());
+        for strategy in strategies {
+            let Some(fee) = priceable_fee(strategy) else {
+                continue;
+            };
+            let metrics = self
+                .metrics
+                .position(strategy.key.strategy_hash, fee.pair, window.clone())
+                .await?;
+            fees.push(
+                self.usd_volume(&metrics)
+                    .await
+                    .map(|volume| volume * f64::from(fee.fee_bps) / BPS_PER_UNIT),
+            );
         }
+        Ok(sum_usd(fees))
     }
 
     /// The maker's fills as a share of all fills on the pairs it quotes.
@@ -270,7 +336,7 @@ impl MakerService {
         &self,
         strategies: &[MakerStrategy],
         filled: u64,
-        since: u64,
+        window: Range<u64>,
     ) -> Result<FillShare, SolventError> {
         let pairs: Vec<TokenPair> = strategies
             .iter()
@@ -278,7 +344,7 @@ impl MakerService {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
-        let pair_fills = self.metrics.pair_fills(&pairs, since).await?;
+        let pair_fills = self.metrics.pair_fills(&pairs, window).await?;
         Ok(FillShare {
             filled,
             pair_fills,
@@ -298,15 +364,6 @@ impl MakerService {
             .map(|(addr, h)| (self.assets.token_or_default(*addr), h.balance))
             .collect();
         Ok(self.valuation.tvl_usd(&priced).await)
-    }
-
-    /// Change in shared liquidity attributable to trading: net USD flow (`inflow − outflow`) over the
-    /// window, against the reconstructed start-of-window liquidity. Assumes trades are the in-window
-    /// driver (ship/dock/push mid-window not modeled).
-    async fn liquidity_change(&self, cur: &MakerMetrics, shared_usd: Option<f64>) -> Option<f64> {
-        let net = self.usd_of(&cur.inflow).await? - self.usd_of(&cur.volume).await?;
-        let start = shared_usd? - net;
-        (start > 0.0).then(|| net / start * 100.0)
     }
 
     /// A cheaper competitor on one of the maker's pairs — the largest fee undercut by another maker,
@@ -350,13 +407,22 @@ impl MakerService {
 
     /// The maker's positions re-grouped by token — the Assets tab. Each token row aggregates the
     /// positions holding it (its `legs`), with wallet vs committed balances and economics.
-    pub async fn inventory(&self, maker: MakerId) -> Result<Vec<InventoryRow>, SolventError> {
-        let groups = self.group_legs_by_token(maker).await?;
+    pub async fn inventory(
+        &self,
+        maker: MakerId,
+        period: MakerPeriod,
+    ) -> Result<Vec<InventoryRow>, SolventError> {
+        let groups = self
+            .group_legs_by_token(maker, period.window(self.clock.now_unix()))
+            .await?;
         let tokens: Vec<Address> = groups.keys().copied().collect();
         let holdings = self.balances.holdings(maker.0, &tokens).await?;
         let mut rows = Vec::with_capacity(groups.len());
         for (addr, group) in groups {
-            rows.push(self.inventory_row(addr, group, &holdings).await);
+            rows.push(
+                self.inventory_row(addr, group, &holdings, period.days())
+                    .await,
+            );
         }
         Ok(rows)
     }
@@ -366,6 +432,7 @@ impl MakerService {
     async fn group_legs_by_token(
         &self,
         maker: MakerId,
+        window: Range<u64>,
     ) -> Result<BTreeMap<Address, TokenGroup>, SolventError> {
         let strategies: Vec<MakerStrategy> = self
             .registry
@@ -375,7 +442,7 @@ impl MakerService {
             .collect();
         let mut groups: BTreeMap<Address, TokenGroup> = BTreeMap::new();
         for strategy in &strategies {
-            let Some(position) = self.build(strategy, true).await? else {
+            let Some(position) = self.build(strategy, false, window.clone()).await? else {
                 continue;
             };
             for entry in &position.balances.virtual_balances.entries {
@@ -391,6 +458,7 @@ impl MakerService {
                     })
                     .legs
                     .push(InventoryLeg {
+                        strategy_hash: position.strategy_hash.clone(),
                         pair: position.pair.clone(),
                         curve: position.curve.clone(),
                         fee_bps: position.fee_bps,
@@ -413,6 +481,7 @@ impl MakerService {
         addr: Address,
         group: TokenGroup,
         holdings: &BTreeMap<Address, Holdings>,
+        days: u32,
     ) -> InventoryRow {
         let TokenGroup { token, legs } = group;
         let wallet_raw = holdings.get(&addr).map_or(U256::ZERO, |h| h.balance);
@@ -429,7 +498,7 @@ impl MakerService {
             .amount(shared_raw, addr, token.decimals)
             .await;
         let fees_usd = sum_usd(legs.iter().map(|leg| leg.fees_usd));
-        let apy_pct = annualized_apy(fees_usd, shared.usd);
+        let apy_pct = annualized_apy(fees_usd, shared.usd, days);
         InventoryRow {
             token,
             wallet,
@@ -444,6 +513,7 @@ impl MakerService {
         &self,
         strategy: &MakerStrategy,
         detail: bool,
+        window: Range<u64>,
     ) -> Result<Option<Position>, SolventError> {
         let CurveSpec::Priceable { curve, fees_in_bps } = &strategy.curve else {
             return Ok(None);
@@ -465,26 +535,20 @@ impl MakerService {
         let actual = self.pullable(strategy).await?;
         let shortfall = self.shortfall(&strategy.balances, &actual);
         let coverage = coverage(&actual, &virtual_balances);
-        // Opening balances read the ship-time event log — detail only (off the list hot path).
-        let opening = if detail {
-            self.opening(strategy.key.strategy_hash).await?
-        } else {
-            TokenAmounts {
-                entries: Vec::new(),
-                total_usd: None,
-            }
-        };
+        let opening = self.opening(strategy.key.strategy_hash).await?;
 
+        let days = ((window.end - window.start) / DAY).max(1) as u32;
         let metrics = self
             .metrics
-            .position(strategy.key.strategy_hash, pair, self.since())
+            .position(strategy.key.strategy_hash, pair, window)
             .await?;
         let volume_usd = self.usd_volume(&metrics).await;
-        let economics = economics(volume_usd, fee_bps, virtual_balances.total_usd);
+        let economics = economics(volume_usd, fee_bps, virtual_balances.total_usd, days);
 
         Ok(Some(Position {
             strategy_hash: format!("{:#x}", strategy.key.strategy_hash.0),
             pair: self.assets.pair_label(&pair),
+            mid_price: marginal_price(strategy, curve, &base, &quote),
             base,
             quote,
             maker: strategy.key.maker.0,
@@ -496,7 +560,6 @@ impl MakerService {
             ),
             state: if strategy.active { "active" } else { "docked" }.to_string(),
             fee_bps,
-            mid_price: None,
             range,
             balances: PositionBalances {
                 split: split(&virtual_balances),
@@ -510,6 +573,7 @@ impl MakerService {
             economics,
             active_stats: detail.then_some(ActiveStats {
                 fills_7d: metrics.fills,
+                daily_fills: metrics.daily_fills,
                 volume_7d_usd: volume_usd,
                 quote_uptime_pct: metrics.quote_uptime_pct,
                 last_fill_at: metrics.last_fill_at,
@@ -574,25 +638,28 @@ impl MakerService {
         (!deficits.is_empty()).then(|| format!("short {}", deficits.join(" · ")))
     }
 
-    /// The strategy's opening balances — the `Pushed` legs at its ship block — valued. Empty if the
-    /// ship isn't in the log yet.
+    /// Initial pushes in the ship transaction, excluding other swaps mined in the same block.
     async fn opening(&self, hash: StrategyHash) -> Result<TokenAmounts, SolventError> {
         let history = self.events.history(self.chain, hash).await?;
-        // A strategy first appears at its ship block, and `ship()` emits its opening deposit as
-        // `Pushed` legs in that block; swaps arrive in later blocks, so the first block's pushes
-        // are exactly the opening.
-        let Some(ship_block) = history.iter().filter_map(|e| e.block_number).min() else {
+        let ship = history
+            .iter()
+            .find(|e| matches!(e.event, AquaEvent::Shipped { .. }));
+        let Some(ship_tx) = ship.and_then(|e| e.transaction_hash) else {
             return Ok(TokenAmounts {
                 entries: Vec::new(),
                 total_usd: None,
             });
         };
         let mut opening: BTreeMap<Address, U256> = BTreeMap::new();
-        for e in &history {
-            if e.block_number == Some(ship_block) {
-                if let AquaEvent::Pushed { token, amount, .. } = &e.event {
-                    *opening.entry(*token).or_default() += *amount;
-                }
+        for event in history
+            .iter()
+            .filter(|e| e.transaction_hash == Some(ship_tx) && !e.removed)
+        {
+            if let AquaEvent::Pushed { token, amount, .. } = event.event {
+                let balance = opening.entry(token).or_default();
+                *balance = balance
+                    .checked_add(amount)
+                    .ok_or_else(|| StoreError::Db("opening balance overflow".into()))?;
             }
         }
         Ok(self.valued(&opening).await)
@@ -625,31 +692,18 @@ impl MakerService {
             &quote.symbol,
         )
     }
-
-    fn since(&self) -> u64 {
-        self.clock.now_unix().saturating_sub(WINDOW_DAYS * DAY)
-    }
 }
 
 /// The dashboard's headline totals, folded from the position list.
 struct PositionKpis {
     shared_liquidity_usd: Option<f64>,
     pullable_usd: Option<f64>,
-    volume_usd: Option<f64>,
-    fees_usd: Option<f64>,
 }
 
 /// A metrics window and the equal window before it, for period-over-period deltas.
 struct WindowMetrics {
     current: MakerMetrics,
     previous: MakerMetrics,
-}
-
-/// The dashboard's period-over-period KPI deltas.
-struct WindowDeltas {
-    volume_change_pct: Option<f64>,
-    fees_change_pct: Option<f64>,
-    shared_liquidity_change_pct: Option<f64>,
 }
 
 /// A token's legs across the maker's positions — the Assets-tab transpose of one token.
@@ -682,8 +736,6 @@ fn position_kpis(positions: &[Position]) -> PositionKpis {
                 .map(|p| p.balances.virtual_balances.total_usd),
         ),
         pullable_usd: sum_usd(positions.iter().map(|p| p.balances.actual.total_usd)),
-        volume_usd: sum_usd(positions.iter().map(|p| p.economics.volume_usd)),
-        fees_usd: sum_usd(positions.iter().map(|p| p.economics.fees_usd)),
     }
 }
 
@@ -719,20 +771,25 @@ fn find_amount(amounts: &TokenAmounts, token: Address) -> Option<&Amount> {
 
 /// USD economics from window volume, the strategy's fee, and committed liquidity. APY annualizes the
 /// window's fees over the committed liquidity: `fees/liquidity · 365/window`.
-fn economics(volume_usd: Option<f64>, fee_bps: u32, liquidity_usd: Option<f64>) -> Economics {
+fn economics(
+    volume_usd: Option<f64>,
+    fee_bps: u32,
+    liquidity_usd: Option<f64>,
+    days: u32,
+) -> Economics {
     let fees_usd = volume_usd.map(|v| v * f64::from(fee_bps) / BPS_PER_UNIT);
     Economics {
-        apy_pct: annualized_apy(fees_usd, liquidity_usd),
+        apy_pct: annualized_apy(fees_usd, liquidity_usd, days),
         fees_usd,
         volume_usd,
     }
 }
 
 /// Annualize a window's fees over the liquidity that earned them: `fees/liq · 365/window · 100`.
-fn annualized_apy(fees_usd: Option<f64>, liquidity_usd: Option<f64>) -> Option<f64> {
+fn annualized_apy(fees_usd: Option<f64>, liquidity_usd: Option<f64>, days: u32) -> Option<f64> {
     match (fees_usd, liquidity_usd) {
         (Some(fees), Some(liq)) if liq > 0.0 => {
-            Some(fees / liq * (365.0 / WINDOW_DAYS as f64) * 100.0)
+            Some(fees / liq * (365.0 / f64::from(days)) * 100.0)
         }
         _ => None,
     }
@@ -902,15 +959,14 @@ mod tests {
         async fn maker(
             &self,
             _: MakerId,
-            _: u64,
-            now: u64,
+            window: std::ops::Range<u64>,
         ) -> Result<MakerMetrics, MakerMetricsError> {
             // Current window (now = clock) delivers 1 WETH ($2000) and receives 2010 USDC (net +$10);
             // the previous window (earlier `now`) delivered only 0.5 WETH ($1000) → +100% volume.
-            let current = now >= 1_000_000;
+            let current = window.end >= 1_000_000;
             Ok(MakerMetrics {
                 fills: if current { 20 } else { 0 },
-                fills_by_day: [0; 7],
+                activity: Vec::new(),
                 last_fill_at: Some(1_700),
                 volume: vec![TokenVolume {
                     token: addr(WETH),
@@ -936,9 +992,10 @@ mod tests {
             &self,
             _: StrategyHash,
             _: TokenPair,
-            _: u64,
+            _: std::ops::Range<u64>,
         ) -> Result<PositionMetrics, MakerMetricsError> {
             Ok(PositionMetrics {
+                daily_fills: vec![0; 7],
                 fills: 5,
                 volume: vec![TokenVolume {
                     token: addr(WETH),
@@ -959,8 +1016,12 @@ mod tests {
             })
         }
 
-        async fn pair_fills(&self, _: &[TokenPair], _: u64) -> Result<u64, MakerMetricsError> {
-            Ok(50)
+        async fn pair_fills(
+            &self,
+            pairs: &[TokenPair],
+            _: std::ops::Range<u64>,
+        ) -> Result<u64, MakerMetricsError> {
+            Ok(if pairs.is_empty() { 0 } else { 50 })
         }
     }
 
@@ -971,9 +1032,17 @@ mod tests {
         }
     }
 
-    /// A ship at block 100 (1 WETH + 2000 USDC opening) followed by a later swap inflow at block 200
-    /// — the opening reader must count only the ship-block legs.
+    /// A ship and a later swap in the same block must still have different opening balances.
     struct FakeEvents;
+    #[async_trait]
+    impl BlockTimes for FakeEvents {
+        async fn timestamps(
+            &self,
+            _: &[B256],
+        ) -> Result<BTreeMap<B256, u64>, crate::deps::registry::BlockTimesError> {
+            Ok(BTreeMap::new())
+        }
+    }
     #[async_trait]
     impl EventStore for FakeEvents {
         async fn cursor(&self, _: ChainId) -> Result<Option<EventCursor>, StoreError> {
@@ -997,7 +1066,7 @@ mod tests {
             _: ChainId,
             hash: StrategyHash,
         ) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
-            let push = |token, amount, block| EventExt {
+            let push = |token, amount, tx| EventExt {
                 event: AquaEvent::Pushed {
                     maker: MakerId(Address::ZERO),
                     app: Address::ZERO,
@@ -1007,13 +1076,20 @@ mod tests {
                 },
                 address: Address::ZERO,
                 block_hash: None,
-                block_number: Some(block),
-                transaction_hash: None,
+                block_number: Some(100),
+                transaction_hash: Some(B256::from([tx; 32])),
                 transaction_index: None,
                 log_index: None,
                 removed: false,
             };
+            let shipped = push(addr(WETH), U256::ZERO, 100).map_event(|_| AquaEvent::Shipped {
+                maker: MakerId(Address::ZERO),
+                app: Address::ZERO,
+                strategy_hash: hash,
+                strategy: Default::default(),
+            });
             Ok(vec![
+                shipped,
                 push(addr(WETH), U256::from(1_000_000_000_000_000_000u128), 100),
                 push(addr(USDC), U256::from(2_000_000_000u64), 100),
                 push(addr(USDC), U256::from(500_000_000u64), 200), // later swap — excluded
@@ -1117,6 +1193,7 @@ mod tests {
             valuation,
             Arc::new(FakeMetrics),
             balances,
+            Arc::new(FakeEvents),
             Arc::new(FakeEvents),
             Arc::new(FixedClock),
             ChainId(1),
@@ -1279,7 +1356,10 @@ mod tests {
             pullable,
         );
 
-        let d = svc.dashboard(MakerId(addr(9))).await.unwrap();
+        let d = svc
+            .dashboard(MakerId(addr(9)), MakerPeriod::Week)
+            .await
+            .unwrap();
 
         assert_eq!(d.active_positions, 1);
         // shared = 1 WETH ($2000) + 2000 USDC = $4000; pullable = 0.5 WETH + 2000 USDC = $3000.
@@ -1291,10 +1371,11 @@ mod tests {
         assert_eq!(d.kpis.fees_usd, Some(1.0));
         // Current volume $2000 vs the previous window's $1000 → +100%.
         assert_eq!(d.kpis.volume_change_pct, Some(100.0));
-        assert_eq!(d.kpis.fees_change_pct, Some(100.0));
-        // Net trade flow: inflow $2010 − outflow $2000 = +$10 against start $3990 ≈ +0.25%.
-        let liq = d.kpis.shared_liquidity_change_pct.expect("net flow priced");
-        assert!((liq - 0.2506).abs() < 0.01, "liq change {liq}");
+        assert_eq!(d.kpis.fees_change_pct, Some(0.0));
+        assert_eq!(
+            d.kpis.shared_liquidity_change_pct, None,
+            "trade flows cannot reconstruct deposits and docks"
+        );
         // Fill share: 20 of 50 fills on the maker's pairs.
         assert_eq!(d.fill_share.filled, 20);
         assert_eq!(d.fill_share.pair_fills, 50);
@@ -1319,7 +1400,10 @@ mod tests {
         let snap = Snapshot::from_strategies([xyc_strategy(9), usdc_usdt_strategy(9, 8)]);
         let svc = service(snap, holdings);
 
-        let inv = svc.inventory(MakerId(addr(9))).await.unwrap();
+        let inv = svc
+            .inventory(MakerId(addr(9)), MakerPeriod::Week)
+            .await
+            .unwrap();
 
         // Three token rows, ordered by address: USDC(2), WETH(3), USDT(4).
         assert_eq!(inv.len(), 3);
@@ -1335,6 +1419,18 @@ mod tests {
         // Opening comes from the event log: the WETH/USDC position opened at 2000 USDC.
         let weth_leg = usdc.legs.iter().find(|l| l.pair.contains("WETH")).unwrap();
         assert_eq!(weth_leg.opening.display, "2000");
+        assert_eq!(
+            weth_leg.strategy_hash,
+            StrategyHash(B256::from([9; 32])).to_string()
+        );
+        assert_eq!(
+            usdc.legs
+                .iter()
+                .find(|l| l.pair.contains("USDT"))
+                .unwrap()
+                .strategy_hash,
+            StrategyHash(B256::from([8; 32])).to_string()
+        );
 
         let weth = &inv[1];
         assert_eq!(weth.token.symbol, "WETH");
@@ -1346,5 +1442,27 @@ mod tests {
         assert_eq!(usdt.token.symbol, "USDT");
         assert_eq!(usdt.legs.len(), 1);
         assert_eq!(usdt.shared.usd, Some(1000.0));
+    }
+    #[tokio::test]
+    async fn docking_preserves_period_economics_and_pair_fill_share() {
+        let mut strategy = xyc_strategy(9);
+        let active = service(
+            Snapshot::from_strategies([strategy.clone()]),
+            HashMap::new(),
+        )
+        .dashboard(MakerId(addr(9)), MakerPeriod::Week)
+        .await
+        .unwrap();
+        strategy.active = false;
+        let docked = service(Snapshot::from_strategies([strategy]), HashMap::new())
+            .dashboard(MakerId(addr(9)), MakerPeriod::Week)
+            .await
+            .unwrap();
+        assert_eq!(docked.active_positions, 0);
+        assert_eq!(docked.kpis.shared_liquidity_usd, Some(0.0));
+        assert_eq!(docked.kpis.volume_usd, active.kpis.volume_usd);
+        assert_eq!(docked.kpis.fees_usd, active.kpis.fees_usd);
+        assert_eq!(docked.fill_share.share_pct, active.fill_share.share_pct);
+        assert_eq!(docked.fill_share.pair_fills, 50);
     }
 }

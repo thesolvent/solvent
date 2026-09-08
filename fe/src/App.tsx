@@ -4,7 +4,7 @@ import { FaucetBanner } from "@/components/FaucetBanner";
 import { Header } from "@/components/Header";
 import { TransitionRoutes } from "@/components/TransitionRoutes";
 import { AppProvider } from "@/AppProvider";
-import { useApp, useAppActions } from "@/state";
+import { useAppActions } from "@/state";
 import { CreatePoolPage } from "@/views/CreatePoolPage";
 import { ExplorerPage } from "@/views/ExplorerPage";
 import { HomePage } from "@/views/HomePage";
@@ -16,14 +16,6 @@ import { SwapPage } from "@/views/SwapPage";
 import { TradeDetailPage } from "@/views/TradeDetailPage";
 
 import styles from "./App.module.css";
-
-/** Explorer's sub-views are still stack-driven, so its route resolves which one to show. */
-function ExplorerRoute() {
-  const { state } = useApp();
-
-  if (state.xpStrat !== null) return <StrategyPage />;
-  return <ExplorerPage />;
-}
 
 function Shell() {
   const { config } = useAppActions();
@@ -40,7 +32,12 @@ function Shell() {
         <Route path="/pools/:pair" element={<PoolDetailPage />} />
         <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
         <Route path="/makers" element={<MakersPage />} />
-        <Route path="/explorer" element={<ExplorerRoute />} />
+        <Route path="/makers/:maker" element={<MakersPage />} />
+        <Route path="/explorer" element={<ExplorerPage />} />
+        <Route
+          path="/explorer/strategies/:strategyHash"
+          element={<StrategyPage />}
+        />
         <Route path="/explorer/trades/:tradeId" element={<TradeDetailPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </TransitionRoutes>

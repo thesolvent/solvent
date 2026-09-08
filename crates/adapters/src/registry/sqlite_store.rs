@@ -143,17 +143,21 @@ impl EventStore for SqliteStore {
         strategy_hash: StrategyHash,
     ) -> Result<Vec<EventExt<AquaEvent>>, StoreError> {
         let rows: Vec<Json<EventExt<AquaEvent>>> = sqlx::query_scalar(
-            "SELECT event FROM aqua_event WHERE chain = ? ORDER BY block_number, log_index",
+            "SELECT event FROM aqua_event
+             WHERE chain = ? AND COALESCE(
+                 json_extract(event, '$.event.Shipped.strategy_hash'),
+                 json_extract(event, '$.event.Pushed.strategy_hash'),
+                 json_extract(event, '$.event.Pulled.strategy_hash'),
+                 json_extract(event, '$.event.Docked.strategy_hash')
+             ) = ?
+             ORDER BY block_number, log_index",
         )
         .bind(i64_of(chain.0)?)
+        .bind(strategy_hash.to_string())
         .fetch_all(&self.pool)
         .await
         .map_err(db)?;
-        Ok(rows
-            .into_iter()
-            .map(|Json(event)| event)
-            .filter(|e| e.event.key().strategy_hash == strategy_hash)
-            .collect())
+        Ok(rows.into_iter().map(|Json(event)| event).collect())
     }
 
     async fn recent(

@@ -9,6 +9,7 @@ export function toTrade(api: Trade): TradeRecord {
   const legs = api.legs ?? [];
   const total = legs.reduce((sum, leg) => sum + BigInt(leg.amount_out.raw), 0n);
   return {
+    signaturePresent: api.signature_present ?? null,
     id: api.id,
     status: api.status,
     taker: api.taker,
@@ -38,6 +39,7 @@ export function toTrade(api: Trade): TradeRecord {
     legs: legs.map((leg) => ({
       maker: leg.maker,
       strategyHash: leg.strategy_hash,
+      curve: leg.curve ?? null,
       input: { symbol: api.input.token.symbol, display: leg.amount_in.display },
       output: {
         symbol: api.output.token.symbol,

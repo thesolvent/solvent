@@ -702,6 +702,14 @@
   }
 }
 
+.livePulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  composes: pulse from "../styles/animations.module.css";
+}
+
 .srOnly {
   position: absolute;
   width: 1px;
@@ -852,16 +860,13 @@
 }
 
 .timeline {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  grid-template-rows: 22px 1fr;
+  position: relative;
   height: 128px;
   min-width: 0;
   margin-top: 10px;
 }
 
 .timelineMeta {
-  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   height: 22px;
@@ -885,7 +890,9 @@
 .step {
   --stage-color: var(--lime);
   min-width: 0;
-  margin: 0 3px;
+  position: absolute;
+  top: 22px;
+  width: calc(16.666% - 6px);
   color: var(--text-dim);
 }
 
@@ -1038,7 +1045,7 @@
   text-decoration: none;
   width: 100%;
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr) 74px 22px;
+  grid-template-columns: 132px minmax(0, 1fr) 74px 22px;
   gap: 14px;
   align-items: center;
   text-align: left;

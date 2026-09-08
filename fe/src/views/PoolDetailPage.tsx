@@ -328,16 +328,9 @@ export function PoolDetailPage() {
                 key={m.addr}
                 type="button"
                 className={styles.makerRow}
-                onClick={() => {
-                  set({
-                    xpStrat: {
-                      maker: m.addr,
-                      curve: m.curve,
-                      pair: d.pair,
-                    },
-                  });
-                  navigate("/explorer");
-                }}
+                onClick={() =>
+                  navigate(`/explorer/strategies/${m.strategyHash}`)
+                }
               >
                 <span
                   className={styles.makerDot}

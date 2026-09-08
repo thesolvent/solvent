@@ -251,6 +251,20 @@ the project is pre-1.0 and evolving.
     types), so a renamed Rust field surfaces as a compile/gate failure, never a runtime one.
 
 ### Added — frontend (`fe/`, React + Vite)
+- **Live Makers and strategy details** — connect the original dashboard and strategy panels to
+  address-based reads, rolling maker periods, confirmed-order fill share and submission-to-confirmation
+  latency. Keep the existing chart/control placement, restore the prior Explorer/Trade layout,
+  and use strategy-hash URLs for existing entity links and the green route transition.
+- **Strategy price history** — derive fee-free marginal prices from each Aqua program and committed
+  reserves, replay complete transactions with block timestamps, and retain gaps before creation or
+  after docking. Header reads use a bounded cache and skip individual timestamps before the window.
+- **Maker analytics windows** — apply settlement periods before pagination, retain historical
+  volume/fee estimates and pair fill share after docking, and retain meaningful fractional token
+  quantities. Shared-liquidity change remains unavailable until deposit/dock history is valued.
+- **Accurate maker settlement pages** — one maker supplying several strategies appears once per
+  trade, with combined exact token amounts and correctly aggregated share/fees. The trades API
+  accepts `strategy_hash`, inventory legs expose their strategy hash, and generated SDK types
+  reflect both additions. Owner/trade indexes support the filtered reads.
 - **Internal navigation shares the green route transition** — pool and Explorer trade links,
   breadcrumbs, header actions, redirects, and browser Back/Forward all reveal their destination
   behind the same sweep. Rapid navigation cancels stale timers; reduced motion opens immediately.

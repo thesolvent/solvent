@@ -6,6 +6,7 @@ import type {
 } from "@/data/explorer";
 
 export interface TradeFilter {
+  strategy_hash?: string;
   status?: string;
   base?: string;
   quote?: string;

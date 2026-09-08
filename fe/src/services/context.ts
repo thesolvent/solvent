@@ -1,3 +1,4 @@
+import type { MakersPort } from "@/ports/makers";
 import { createContext, useContext } from "react";
 
 import type { AssetsPort } from "@/ports/assets";
@@ -8,6 +9,7 @@ import type { SystemPort } from "@/ports/system";
 
 /** Outbound dependencies, injected at the composition root so services never import adapters. */
 export interface Services {
+  makers: MakersPort;
   explorer: ExplorerPort;
   assets: AssetsPort;
   pools: PoolsPort;

@@ -7,15 +7,16 @@ use std::sync::Arc;
 use alloy_primitives::{Address, U256};
 
 use crate::asset::AssetManager;
-use crate::deps::trade::{Page, TradeFilter, TradeStats, TradeStore};
+use crate::deps::trade::{MakerFill, Page, TradeFilter, TradeStats, TradeStore};
 use crate::primitives::amount::{format_units, share_pct, TokenAmount};
 use crate::primitives::trade::{
-    MakerLeg, MakerTrade, Trade, TradeAction, TradeId, TradeInfo, TradeLeg, TradeView,
+    MakerLeg, MakerTrade, Trade, TradeAction, TradeId, TradeInfo, TradeView,
 };
 use crate::valuation::Valuation;
 use crate::SolventError;
 
 pub struct TradeService {
+    registry: Arc<crate::registry::SharedSnapshot>,
     trades: Arc<dyn TradeStore>,
     assets: Arc<AssetManager>,
     valuation: Arc<Valuation>,
@@ -26,8 +27,10 @@ impl TradeService {
         trades: Arc<dyn TradeStore>,
         assets: Arc<AssetManager>,
         valuation: Arc<Valuation>,
+        registry: Arc<crate::registry::SharedSnapshot>,
     ) -> Self {
         Self {
+            registry,
             trades,
             assets,
             valuation,
@@ -61,15 +64,16 @@ impl TradeService {
         &self,
         maker: Address,
         page: &Page,
+        window: Option<std::ops::Range<u64>>,
     ) -> Result<Vec<MakerTrade>, SolventError> {
-        let fills = self.trades.list_for_maker(maker, page).await?;
+        let fills = self.trades.list_for_maker(maker, page, window).await?;
         let mut items = Vec::with_capacity(fills.len());
         for fill in &fills {
             let dec_in = self.assets.decimals(&fill.trade.token_in);
             let dec_out = self.assets.decimals(&fill.trade.token_out);
             items.push(MakerTrade {
-                share_pct: maker_share_pct(&fill.trade, &fill.leg),
-                fee_usd: maker_fee_usd(&fill.trade, &fill.leg, dec_in, dec_out),
+                share_pct: maker_share_pct(fill),
+                fee_usd: maker_fee_usd(fill, dec_in, dec_out),
                 trade: self.summary(&fill.trade).await,
             });
         }
@@ -103,6 +107,7 @@ impl TradeService {
             None => None,
         };
         TradeView {
+            signature_present: None,
             id: trade.id.to_string(),
             status: trade.status.as_str().to_string(),
             taker: trade.taker,
@@ -133,7 +138,18 @@ impl TradeService {
         let token_out = self.assets.token_or_default(info.trade.token_out);
         let mut legs = Vec::with_capacity(info.legs.len());
         for leg in &info.legs {
+            let curve = self
+                .registry
+                .load()
+                .strategy_by_hash(leg.strategy_hash)
+                .and_then(|s| match &s.curve {
+                    crate::primitives::registry::CurveSpec::Priceable { curve, .. } => {
+                        Some(crate::primitives::registry::curve_label(curve).to_string())
+                    }
+                    _ => None,
+                });
             legs.push(MakerLeg {
+                curve,
                 maker: leg.maker.to_string(),
                 strategy_hash: leg.strategy_hash.to_string(),
                 amount_in: self
@@ -147,6 +163,7 @@ impl TradeService {
             });
         }
         TradeView {
+            signature_present: Some(info.trade.signature.is_some()),
             lifecycle: Some(
                 info.attempts
                     .iter()
@@ -166,18 +183,18 @@ impl TradeService {
 
 /// The maker's slice of the trade — its delivered amount over the trade's total. Settled trades only
 /// (an unsettled trade has no total yet).
-fn maker_share_pct(trade: &Trade, leg: &TradeLeg) -> Option<f64> {
-    Some(share_pct(leg.amount_out, trade.amount_out?))
+fn maker_share_pct(fill: &MakerFill) -> Option<f64> {
+    Some(share_pct(fill.amount_out, fill.trade.amount_out?))
 }
 
 /// The maker's captured fee: value received minus value delivered, at the trade-time prices stored
 /// on the trade. Settled + priced trades only.
-fn maker_fee_usd(trade: &Trade, leg: &TradeLeg, dec_in: u8, dec_out: u8) -> Option<f64> {
-    trade.amount_out?;
-    let price_in = trade.token_in_price_usd?;
-    let price_out = trade.token_out_price_usd?;
-    let received_usd = human(leg.amount_in, dec_in) * price_in;
-    let delivered_usd = human(leg.amount_out, dec_out) * price_out;
+fn maker_fee_usd(fill: &MakerFill, dec_in: u8, dec_out: u8) -> Option<f64> {
+    fill.trade.amount_out?;
+    let price_in = fill.trade.token_in_price_usd?;
+    let price_out = fill.trade.token_out_price_usd?;
+    let received_usd = human(fill.amount_in, dec_in) * price_in;
+    let delivered_usd = human(fill.amount_out, dec_out) * price_out;
     Some(received_usd - delivered_usd)
 }
 
@@ -195,9 +212,9 @@ mod tests {
     use ulid::Ulid;
 
     use crate::deps::routing::{PriceOracle, PriceOracleError};
-    use crate::deps::trade::{CreateResult, MakerFill, Settlement, TradeStoreError};
+    use crate::deps::trade::{CreateResult, Settlement, TradeStoreError};
     use crate::primitives::asset::{TokenList, TokenMeta};
-    use crate::primitives::trade::{TradeAttempt, TradeStatus};
+    use crate::primitives::trade::{TradeAttempt, TradeLeg, TradeStatus};
     use crate::primitives::{IntentId, MakerId, StrategyHash, UsdPrice};
     use crate::registry::SharedSnapshot;
 
@@ -216,6 +233,7 @@ mod tests {
     /// Returns canned reads; the writes are unused by the read-surface.
     struct FakeStore {
         info: Option<TradeInfo>,
+        maker_fill: Option<MakerFill>,
     }
     #[async_trait]
     impl TradeStore for FakeStore {
@@ -251,8 +269,13 @@ mod tests {
             &self,
             _: Address,
             _: &Page,
+            _: Option<std::ops::Range<u64>>,
         ) -> Result<Vec<MakerFill>, TradeStoreError> {
-            Ok(Vec::new())
+            Ok(self
+                .maker_fill
+                .iter()
+                .map(|fill| MakerFill::new(fill.trade.clone(), fill.amount_in, fill.amount_out))
+                .collect())
         }
         async fn stats(&self) -> Result<TradeStats, TradeStoreError> {
             Ok(TradeStats {
@@ -265,6 +288,13 @@ mod tests {
     }
 
     fn service(info: Option<TradeInfo>) -> TradeService {
+        service_with_store(FakeStore {
+            info,
+            maker_fill: None,
+        })
+    }
+
+    fn service_with_store(store: FakeStore) -> TradeService {
         let list = TokenList {
             name: "t".into(),
             tokens: vec![
@@ -290,7 +320,12 @@ mod tests {
         };
         let assets = Arc::new(AssetManager::new(list, Arc::new(SharedSnapshot::default())));
         let valuation = Arc::new(Valuation::new(Arc::new(Prices)));
-        TradeService::new(Arc::new(FakeStore { info }), assets, valuation)
+        TradeService::new(
+            Arc::new(store),
+            assets,
+            valuation,
+            Arc::new(SharedSnapshot::default()),
+        )
     }
 
     fn a_trade() -> Trade {
@@ -369,11 +404,7 @@ mod tests {
             attempts: Vec::new(),
             legs: Vec::new(),
         }));
-        let filter = TradeFilter {
-            status: None,
-            taker: None,
-            pair: None,
-        };
+        let filter = TradeFilter::default();
         let page = Page {
             limit: 50,
             cursor: None,
@@ -408,27 +439,56 @@ mod tests {
         assert_eq!(dto.deadline_block, Some(123));
     }
 
-    #[test]
-    fn fee_and_share_use_trade_time_prices() {
-        // Maker received 2010 USDC (6dp), delivered 1 WETH (18dp) of a 2-WETH trade.
-        let leg = leg(2_010_000_000, 1_000_000_000_000_000_000);
-        let t = settled(Some(2_000_000_000_000_000_000), Some(1.0), Some(2000.0));
-        // fee = 2010·$1 − 1·$2000 = $10 at the stored prices.
-        assert_eq!(maker_fee_usd(&t, &leg, 6, 18), Some(10.0));
-        // share = 1 WETH of the 2-WETH trade = 50%.
-        assert_eq!(maker_share_pct(&t, &leg), Some(50.0));
+    #[tokio::test]
+    async fn maker_feed_values_combined_amounts_at_trade_time_prices() {
+        // Two strategies together received 3010 USDC and delivered 2 WETH of a 4-WETH trade.
+        // The stored WETH price ($1500) differs from today's oracle price ($2000).
+        let trade = Trade {
+            token_out: Address::from([1; 20]),
+            ..settled(Some(4_000_000_000_000_000_000), Some(1.0), Some(1500.0))
+        };
+        let svc = service_with_store(FakeStore {
+            info: None,
+            maker_fill: Some(MakerFill::new(
+                trade,
+                U256::from(3_010_000_000u64),
+                U256::from(2_000_000_000_000_000_000u64),
+            )),
+        });
+        let fills = svc
+            .maker_trades(
+                Address::from([3; 20]),
+                &Page {
+                    limit: 50,
+                    cursor: None,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].fee_usd, Some(10.0));
+        assert_eq!(fills[0].share_pct, Some(50.0));
     }
 
     #[test]
     fn unsettled_or_unpriced_has_no_fee() {
         let leg = leg(2_010_000_000, 1_000_000_000_000_000_000);
         // Unsettled (no delivered total): no share, no fee.
-        let pending = settled(None, Some(1.0), Some(2000.0));
-        assert_eq!(maker_fee_usd(&pending, &leg, 6, 18), None);
-        assert_eq!(maker_share_pct(&pending, &leg), None);
+        let pending = MakerFill::new(
+            settled(None, Some(1.0), Some(2000.0)),
+            leg.amount_in,
+            leg.amount_out,
+        );
+        assert_eq!(maker_fee_usd(&pending, 6, 18), None);
+        assert_eq!(maker_share_pct(&pending), None);
         // Settled but unpriced: share available, fee not.
-        let unpriced = settled(Some(2_000_000_000_000_000_000), None, None);
-        assert_eq!(maker_fee_usd(&unpriced, &leg, 6, 18), None);
-        assert_eq!(maker_share_pct(&unpriced, &leg), Some(50.0));
+        let unpriced = MakerFill::new(
+            settled(Some(2_000_000_000_000_000_000), None, None),
+            leg.amount_in,
+            leg.amount_out,
+        );
+        assert_eq!(maker_fee_usd(&unpriced, 6, 18), None);
+        assert_eq!(maker_share_pct(&unpriced), Some(50.0));
     }
 }

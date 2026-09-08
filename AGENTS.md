@@ -6,6 +6,14 @@ code itself. (Backend = the Rust workspace under `crates/`; on-chain = `contract
 
 ## Core rules (non-negotiable)
 
+- **Frontend design is a hard constraint.** Preserve the original mock/hardcoded layouts,
+  dimensions, typography, colors, charts, controls and field placement. Wire real data into
+  existing slots. Ask the user before adding, removing or moving a visible field, link, control
+  or panel, or changing the visual design. Missing API data is a backend requirement, not
+  permission to redesign or remove UI. This applies to existing pages as well as new work.
+  Already reviewed pages outside the current task stay unchanged; do not restore them to an
+  older mock snapshot. Ask before changing their behavior or navigation.
+
 - **IMPORTANT: never commit until I have reviewed and approved** — code, docs, and plans
   alike. "Consistency" or "it's obvious" is not approval. **Confirm before every `push`.**
   **No `Co-Authored-By` trailer** on commits.

@@ -35,6 +35,15 @@ function timestamp(at: number | null): string {
       });
 }
 
+export function relativeTime(at: number | null, now = Date.now()): string {
+  if (at == null) return "—";
+  const seconds = Math.max(0, Math.floor(now / 1000) - at);
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
 export function explorerUrl(
   base: string | undefined,
   kind: "tx" | "address",
@@ -61,7 +70,7 @@ export function explorerStats(stats: ExplorerStats | undefined) {
     {
       label: "Block height",
       value: numberText(stats?.blockHeight),
-      sub: "",
+      sub: "live",
       accent: "var(--green)",
     },
     {
@@ -149,7 +158,7 @@ export function activityRow(record: ActivityRecord) {
     kindFg: kind.color,
     who: shortHash(record.maker),
     tx: shortHash(record.txHash),
-    when: `${record.blockNumber == null ? "block unknown" : `blk ${numberText(record.blockNumber)}`} · ${timestamp(record.at)}`,
+    when: `${record.blockNumber == null ? "block unknown" : `blk ${numberText(record.blockNumber)}`} · ${relativeTime(record.at)}`,
     flow: record.amount
       ? tokenText(record.amount)
       : record.kind === "docked"
@@ -165,15 +174,12 @@ export function tradeDetail(trade: TradeRecord) {
     title: `Trade #${trade.id}`,
     status: trade.status,
     statusStyle: row.statusStyle,
-    blockLabel: row.blockLabel,
+    blockLabel: `${row.blockLabel} · ${relativeTime(trade.settledAt ?? trade.createdAt)}`,
     transactionLabel: row.transactionLabel,
     summary: [
       {
-        label:
-          trade.status === "confirmed"
-            ? "Input → received"
-            : "Input → minimum output",
-        value: `${tokenText(trade.input)} → ${tokenText(trade.output)}`,
+        label: "In → out",
+        value: `${row.input} → ${row.output}`,
       },
       { label: "Price impact", value: row.impact },
       { label: "Resolver", value: "Zero-inventory" },
@@ -183,6 +189,7 @@ export function tradeDetail(trade: TradeRecord) {
       sep: i === 0 ? "transparent" : "var(--line)",
     })),
     legs: trade.legs.map((leg) => ({
+      curve: leg.curve ?? "—",
       maker: leg.maker,
       hash: leg.strategyHash,
       name: shortHash(leg.maker),
@@ -200,7 +207,7 @@ export function tradeDetail(trade: TradeRecord) {
         fullValue: trade.orderHash ?? "—",
       },
       { label: "Deadline", value: timestamp(trade.deadlineAt) },
-      { label: "Created", value: timestamp(trade.createdAt) },
+      { label: "Signature", value: trade.signaturePresent ? "Provided" : "—" },
     ],
     profit: trade.surplus ? tokenText(trade.surplus) : "—",
     profitTag: ["declined", "failed"].includes(trade.status)

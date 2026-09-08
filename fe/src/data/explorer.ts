@@ -9,6 +9,7 @@ export interface TradeStage {
 }
 
 export interface TradeSource {
+  curve: string | null;
   maker: string;
   strategyHash: string;
   input: TokenQuantity;
@@ -17,6 +18,7 @@ export interface TradeSource {
 }
 
 export interface TradeRecord {
+  signaturePresent: boolean | null;
   id: string;
   status: string;
   taker: string;

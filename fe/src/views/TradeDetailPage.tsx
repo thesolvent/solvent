@@ -6,7 +6,6 @@ import { Crumbs } from "@/components/Crumbs";
 import { explorerUrl, tradeDetail } from "@/lib/explorer";
 import { useAppActions } from "@/state";
 import { TradeLifecycle } from "./TradeLifecycle";
-import { QueryFreshness } from "./QueryFreshness";
 
 import styles from "./explorer.module.css";
 
@@ -73,9 +72,10 @@ export function TradeDetailPage() {
         >
           {detail.status}
         </span>
-        <span className={styles.headMeta}>{detail.blockLabel}</span>
+        <span className={styles.headMeta}>
+          {query.isError ? "Refresh delayed" : detail.blockLabel}
+        </span>
         <span className={styles.spacer} />
-        <QueryFreshness query={query} />
         <span>
           <a
             className={styles.txLink}
@@ -92,11 +92,8 @@ export function TradeDetailPage() {
       </div>
 
       {query.isError && (
-        <p role="alert" className={styles.emptyNote}>
-          Couldn’t refresh this trade.{" "}
-          <button type="button" onClick={() => void query.refetch()}>
-            Try again
-          </button>
+        <p role="alert" className={styles.srOnly}>
+          Couldn’t refresh this trade. Retrying automatically.
         </p>
       )}
       <div className={styles.stats4}>
@@ -123,21 +120,15 @@ export function TradeDetailPage() {
           <div className={styles.sourcedHead}>
             <span className={styles.sourcedTitle}>Sourced from</span>
             <span className={styles.sourcedHint}>
-              open a maker in the block explorer
+              click a leg to open the maker
             </span>
           </div>
           <div data-scroll="1" className={styles.legList}>
             {detail.legs.map((leg) => (
-              <a
+              <Link
                 key={`${leg.maker}:${leg.hash}`}
                 className={styles.legRow}
-                href={explorerUrl(
-                  config.data?.block_explorer_url,
-                  "address",
-                  leg.maker,
-                )}
-                target="_blank"
-                rel="noopener noreferrer"
+                to={`/explorer/strategies/${leg.hash}`}
                 title={leg.maker}
               >
                 <span className={styles.legMaker}>
@@ -154,6 +145,7 @@ export function TradeDetailPage() {
                     <span className={styles.legAmount} title={leg.amt}>
                       {leg.amt}
                     </span>
+                    <span className={styles.legCurve}>{leg.curve}</span>
                   </span>
                   <span className={styles.legTrack}>
                     <span
@@ -163,8 +155,8 @@ export function TradeDetailPage() {
                   </span>
                 </span>
                 <span className={styles.legShare}>{leg.share}</span>
-                <span className={styles.legChevron}>↗</span>
-              </a>
+                <span className={styles.legChevron}>›</span>
+              </Link>
             ))}
             {detail.empty && (
               <div className={styles.emptyNote}>{detail.emptyText}</div>

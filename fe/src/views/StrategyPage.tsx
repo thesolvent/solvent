@@ -1,18 +1,45 @@
+import { useNavigate, useParams } from "react-router-dom";
+import { usePosition, usePositionHistory } from "@/services/makers";
+import { useTrades } from "@/services/explorer";
+import { slug } from "@/services/pools";
 import { Crumbs } from "@/components/Crumbs";
 import { strategyDetail } from "@/lib/strategy";
-import { useApp } from "@/state";
 
 import styles from "./explorer.module.css";
 
 export function StrategyPage() {
-  const { state, push, pop } = useApp();
-  const sd = strategyDetail(state.xpStrat);
+  const navigate = useNavigate();
+  const { strategyHash } = useParams();
+  const position = usePosition(strategyHash);
+  const history = usePositionHistory(strategyHash);
+  const settlements = useTrades(
+    strategyHash
+      ? { status: "confirmed", strategy_hash: strategyHash }
+      : undefined,
+  );
+  const notice = position.isError
+    ? "Couldn’t load this strategy"
+    : history.isError
+      ? "Price history unavailable"
+      : position.isPending
+        ? "Loading strategy…"
+        : "";
+  const sd = strategyDetail(
+    position.data,
+    history.data,
+    settlements.data?.items ?? [],
+    notice,
+  );
 
   return (
     <div className={styles.rootFramed}>
       <div className={styles.frame}>
         <div className={styles.head}>
-          <button type="button" className={styles.back} onClick={pop}>
+          <button
+            type="button"
+            className={styles.back}
+            onClick={() => navigate(-1)}
+          >
             ←
           </button>
           <div className={styles.headTitle}>
@@ -30,16 +57,9 @@ export function StrategyPage() {
           <button
             type="button"
             className={styles.crossLink}
+            disabled={!position.data}
             onClick={() =>
-              push(
-                {
-                  page: "Pools",
-                  detail: sd.poolIndex,
-                  create: false,
-                  xpStrat: null,
-                },
-                "Strategy",
-              )
+              position.data && navigate(`/pools/${slug(position.data.pair)}`)
             }
           >
             part of {sd.pool} pool ↗
@@ -47,17 +67,9 @@ export function StrategyPage() {
           <button
             type="button"
             className={styles.crossLinkMono}
+            disabled={!position.data}
             onClick={() =>
-              push(
-                {
-                  page: "Makers",
-                  mkSel: sd.maker,
-                  detail: null,
-                  create: false,
-                  xpStrat: null,
-                },
-                "Strategy",
-              )
+              position.data && navigate(`/makers/${position.data.maker}`)
             }
           >
             by {sd.maker} ↗
@@ -121,33 +133,39 @@ export function StrategyPage() {
               preserveAspectRatio="none"
               className={styles.curveSvg}
             >
-              <rect
-                x="0"
-                y={sd.bandY}
-                width="640"
-                height={sd.bandH}
-                fill="#f4f9e4"
-              />
-              <line
-                x1="0"
-                y1={sd.bandY}
-                x2="640"
-                y2={sd.bandY}
-                stroke="var(--green)"
-                strokeWidth="1.4"
-                strokeDasharray="5 5"
-                vectorEffect="non-scaling-stroke"
-              />
-              <line
-                x1="0"
-                y1={sd.bandY2}
-                x2="640"
-                y2={sd.bandY2}
-                stroke="var(--green)"
-                strokeWidth="1.4"
-                strokeDasharray="5 5"
-                vectorEffect="non-scaling-stroke"
-              />
+              {sd.showBand && (
+                <rect
+                  x="0"
+                  y={sd.bandY}
+                  width="640"
+                  height={sd.bandH}
+                  fill="#f4f9e4"
+                />
+              )}
+              {sd.showBounds && (
+                <line
+                  x1="0"
+                  y1={sd.bandY}
+                  x2="640"
+                  y2={sd.bandY}
+                  stroke="var(--green)"
+                  strokeWidth="1.4"
+                  strokeDasharray="5 5"
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
+              {sd.showBounds && (
+                <line
+                  x1="0"
+                  y1={sd.bandY2}
+                  x2="640"
+                  y2={sd.bandY2}
+                  stroke="var(--green)"
+                  strokeWidth="1.4"
+                  strokeDasharray="5 5"
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
               <line
                 x1="0"
                 y1="150"
@@ -175,15 +193,18 @@ export function StrategyPage() {
                 strokeWidth="1"
                 vectorEffect="non-scaling-stroke"
               />
-              <polyline
-                points={sd.line}
-                fill="none"
-                stroke="var(--ink)"
-                strokeWidth="1.8"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                vectorEffect="non-scaling-stroke"
-              />
+              {sd.lines.map((line, i) => (
+                <polyline
+                  key={i}
+                  points={line}
+                  fill="none"
+                  stroke="var(--ink)"
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
             </svg>
             <div className={styles.spark}>
               {sd.spark.map((b, i) => (
@@ -214,7 +235,7 @@ export function StrategyPage() {
                 key={`${x.hash}-${i}`}
                 type="button"
                 className={styles.fillRow}
-                onClick={() => push({ xpStrat: null }, "Strategy")}
+                onClick={() => navigate(`/explorer/trades/${x.id}`)}
               >
                 <div className={styles.fillTop}>
                   <span className={styles.mono}>{x.hash}</span>
@@ -233,7 +254,11 @@ export function StrategyPage() {
             ))}
             {sd.noFills && (
               <div className={styles.emptyNote}>
-                No settlements yet — this strategy has not been pulled.
+                {settlements.isError
+                  ? "Couldn’t load settlements."
+                  : settlements.isPending
+                    ? "Loading settlements…"
+                    : "No settlements yet — this strategy has not been pulled."}
               </div>
             )}
           </section>
