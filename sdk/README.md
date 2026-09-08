@@ -18,6 +18,30 @@ Pure builders are separate from HTTP and on-chain I/O. Consumers can import indi
 | `orders/` | Build a typed Permit2 order | None |
 | `swap/` | Connected swap client and per-intent execution | Injected API and viem clients |
 
+## Repeated maker positions
+
+Use a different salt to ship multiple positions with the same maker, curve, range, fee, and
+initial token amounts:
+
+```ts
+import { Strategy } from "@solvent/sdk/construction";
+
+const strategy = Strategy.inRange({ base, quote, mid: "3000", halfWidthPct: 8 }).fee(5);
+const first = strategy.build(maker);
+const second = strategy.salt(1n).build(maker);
+```
+
+`salt` reuses SwapVM's `withSalt` instruction, which changes the strategy hash while preserving
+the pricing instructions. It accepts an unsigned 64-bit bigint; zero keeps the unsalted program.
+The same maker, configuration, and salt reproduce the same hash. `fee` and `salt` return new
+builders and compose in either order. Ship both orders with the same token amounts to give
+each copy the same initial inventory.
+
+Aqua hashes are immutable, including after a position is docked. A repeat seed checks
+`rawBalances.tokensCount`: `0` is unused, `255` is docked, and other values are active. Skip
+docked salts and choose an unused salt for a replacement; an existing active copy needs no
+new mint, approval, or ship.
+
 ## Swapping
 
 Create a client once for the connected wallet. The wallet client must have its chain configured; the SDK also checks the live network before approving or signing. Each intent represents one payment authorization:

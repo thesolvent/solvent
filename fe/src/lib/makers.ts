@@ -56,7 +56,7 @@ export function balanceText(balances: PositionBalance[]): string {
     : "—";
 }
 
-function positionRow(p: Position, open: boolean, span: string) {
+function positionRow(p: Position, span: string) {
   const first = p.committed[0];
   const second = p.committed[1];
   const split =
@@ -74,7 +74,6 @@ function positionRow(p: Position, open: boolean, span: string) {
       p.rangeKind === "full" ? "var(--surface)" : "var(--lime-wash-soft)",
     widthFg:
       p.rangeKind === "full" ? "var(--text-mid)" : "var(--green-darkest)",
-    open,
     splitA: `${split ?? 0}%`,
     labelA: `${percent(split)} ${first?.symbol ?? ""}`,
     labelB: `${percent(split == null ? null : 100 - split)} ${second?.symbol ?? ""}`,
@@ -192,6 +191,15 @@ function bucketLabel(bucket: ActivityBucket, span: string): string {
       });
 }
 
+function bucketRange(bucket: ActivityBucket): string {
+  const date = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+  return `${date.formatRange(new Date(bucket.from * 1000), new Date((bucket.to - 1) * 1000))} · UTC`;
+}
+
 function activityCharts(
   dashboard: MakerDashboard | undefined,
   state: AppState,
@@ -220,9 +228,18 @@ function activityCharts(
     }
   }
   if (segment.length) lines.push(segment.join(" "));
+  const fillBucket = state.mkBar === null ? undefined : buckets[state.mkBar];
+  const latencyBucket = state.mkLat === null ? undefined : buckets[state.mkLat];
   return {
     fills: numberText(dashboard?.fills),
     fillsDelta: deltaText(dashboard?.fillsChangePct),
+    fillsTip: fillBucket
+      ? {
+          label: bucketRange(fillBucket),
+          value: numberText(fillBucket.fills),
+          detail: "fills",
+        }
+      : null,
     bars: buckets.map((bucket, i) => ({
       day: bucketLabel(bucket, state.mkSpan),
       h: `${peak ? (bucket.fills / peak) * 100 : 0}%`,
@@ -234,8 +251,6 @@ function activityCharts(
             : "#eeeeea",
       dayFg:
         state.mkBar === i || i === topIndex ? "var(--ink)" : "var(--text-dim)",
-      tip: state.mkBar === i,
-      value: `${numberText(bucket.fills)} fills`,
     })),
     avgTop: `${peak ? 100 - (average / peak) * 100 : 100}%`,
     avgVal: numberText(average),
@@ -252,12 +267,17 @@ function activityCharts(
       line.includes(" ") ? line : `${line} ${line}`,
     ),
     latDays: buckets.map((b) => bucketLabel(b, state.mkSpan)),
-    latPts: points.map(({ bucket, y: value }, i) => ({
+    latencyTip:
+      latencyBucket?.latencyMs != null
+        ? {
+            label: bucketRange(latencyBucket),
+            value: `${numberText(latencyBucket.latencyMs)} ms`,
+            detail: "p50",
+          }
+        : null,
+    latPts: points.map(({ y: value }, i) => ({
       left: `${(i / 6) * 100}%`,
-      top: `${((value ?? 116) / 120) * 100}%`,
-      shift: i === 0 ? "-10%" : i === 6 ? "-90%" : "-50%",
-      tip: state.mkLat === i && value !== null,
-      value: `${numberText(bucket.latencyMs)} ms`,
+      top: value === null ? null : `${(value / 120) * 100}%`,
     })),
   };
 }
@@ -312,7 +332,7 @@ export function makerView(
       sep: i === 0 ? "transparent" : "var(--line)",
     })),
     tabs: [
-      { key: "Positions", label: `Positions ${data.positions.length}` },
+      { key: "Positions", label: "Positions" },
       { key: "Assets", label: "Assets" },
       { key: "Settlements", label: "Settlements" },
     ],
@@ -323,9 +343,7 @@ export function makerView(
         : state.mkTab === "Assets"
           ? `${data.inventory.length} tokens committed`
           : `${numberText(d?.fills)} fills · ${span}`),
-    positions: data.positions.map((p, i) =>
-      positionRow(p, state.mkOpen === i, span),
-    ),
+    positions: data.positions.map((p) => positionRow(p, span)),
     assets: data.inventory.map((asset, i) =>
       assetRow(asset, state.mkAsset === i),
     ),
@@ -345,7 +363,11 @@ export function makerView(
         stFg: row.statusStyle.color,
       };
     }),
-    insight: data.notice ?? d?.insight ?? "—",
+    insight:
+      data.notice ??
+      (d
+        ? `This maker filled ${numberText(d.fills)} ${d.fills === 1 ? "order" : "orders"} in the last ${d.windowDays} days.`
+        : "—"),
     ...shareChart(d, state.mkTip),
     ...activityCharts(d, state),
   };

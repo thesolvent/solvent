@@ -278,6 +278,22 @@
   background: var(--lime-wash-mid);
 }
 
+.pairRow {
+  composes: posRow;
+  min-height: 46px;
+}
+
+.pairRowOpen {
+  composes: pairRow;
+  background: var(--lime-wash-mid);
+}
+
+.pairPositions {
+  padding: 0 16px 12px 38px;
+  background: var(--paper-soft);
+  composes: row200 from "../styles/animations.module.css";
+}
+
 .caret {
   font-size: 10px;
   color: var(--text-dim);
@@ -321,6 +337,22 @@
   padding: 3px 9px;
   white-space: nowrap;
   flex: none;
+}
+
+.posToggle {
+  display: flex;
+  align-items: center;
+  gap: inherit;
+  flex: 1;
+  min-width: 0;
+  margin: -11px 0;
+  padding: 11px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .posActions {
@@ -969,7 +1001,7 @@
   flex: none;
 }
 
-.donutTip {
+.chartTooltip {
   position: absolute;
   right: 16px;
   top: 10px;
@@ -982,25 +1014,25 @@
   composes: pop130 from "../styles/animations.module.css";
 }
 
-.donutTipLabel {
+.chartTooltipLabel {
   font-size: 10px;
   color: var(--on-dark-dim);
   white-space: nowrap;
 }
 
-.donutTipRow {
+.chartTooltipRow {
   display: flex;
   align-items: baseline;
   gap: 8px;
   white-space: nowrap;
 }
 
-.donutTipPct {
+.chartTooltipValue {
   font-size: 14px;
   font-weight: 700;
 }
 
-.donutTipAmt {
+.chartTooltipDetail {
   font-size: 11px;
   color: var(--lime);
 }
@@ -1102,22 +1134,6 @@
     background 180ms ease;
 }
 
-.barTip {
-  position: absolute;
-  left: 50%;
-  bottom: 100%;
-  transform: translate(-50%, -5px);
-  background: var(--ink);
-  color: var(--paper);
-  font-size: 10px;
-  font-weight: 600;
-  padding: 3px 7px;
-  border-radius: 4px;
-  white-space: nowrap;
-  z-index: 5;
-  composes: pop120 from "../styles/animations.module.css";
-}
-
 .barDay {
   font-size: 9.5px;
   transition: color 180ms ease;
@@ -1191,20 +1207,6 @@
   border-radius: 50%;
   background: var(--paper);
   border: 2.5px solid var(--green);
-}
-
-.latTip {
-  position: absolute;
-  left: 50%;
-  background: var(--ink);
-  color: var(--paper);
-  font-size: 10px;
-  font-weight: 600;
-  padding: 3px 7px;
-  border-radius: 4px;
-  white-space: nowrap;
-  z-index: 5;
-  composes: pop120 from "../styles/animations.module.css";
 }
 
 .latDays {

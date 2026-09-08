@@ -35,7 +35,7 @@ type SdkBuilder = AquaXYCAmmStrategy | AquaPeggedAmmStrategy;
  * Strategy.pegged({ tokenA, tokenB, linearWidth }).build(maker);
  * ```
  *
- * Instances are immutable — `fee` returns a new `Strategy`. */
+ * Instances are immutable — `fee` and `salt` return a new `Strategy`. */
 export class Strategy {
     private constructor(
         private readonly resolve: () => SdkBuilder,
@@ -90,6 +90,11 @@ export class Strategy {
     /** A maker fee, in bps, taken on the input token. */
     fee(bps: number): Strategy {
         return new Strategy(this.resolve, bps);
+    }
+
+    /** Give an otherwise identical position a distinct identity; zero keeps the unsalted program. */
+    salt(value: bigint): Strategy {
+        return new Strategy(() => this.resolve().withSalt(value), this.feeBps);
     }
 
     /** Encode for `maker`: the program, its hash, and the order to ship. */

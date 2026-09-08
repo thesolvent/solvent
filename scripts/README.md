@@ -25,7 +25,7 @@ pnpm --dir scripts etch
 set -a; . ./devnet/generated/env.sh; set +a
 cargo run --bin solvent
 
-# 5. Eight pools, 24 confirmed sample trades, then the read-API health check.
+# 5. Two positions on each of eight pairs, 24 confirmed sample trades, then the read-API health check.
 pnpm --dir scripts starter
 ```
 
@@ -50,7 +50,7 @@ cd contracts && forge script script/DeployDevnet.s.sol:DeployDevnet --broadcast 
 |---|---|
 | `bootstrap` | Manifest → `solvent.toml`, `devnet/generated/tokens.json`, `devnet/generated/env.sh`. Re-run after every deploy. |
 | `etch` | Installs Multicall3 and Permit2 runtime code and verifies the Permit2 signing domain on devnet. |
-| `seed` | Mints, approves Aqua, and ships eight token pairs. An existing strategy hash is skipped; a changed market mid can create a new strategy on the same pair. |
+| `seed` | Ensures two active positions on each of eight token pairs, with the same maker, settings, and initial amounts. Reuses active hashes, skips docked hashes, and mints/approves only when new copies are needed. A changed market mid can create a new configuration on the same pair. |
 | `trades` | Adds 24 sample trades: three per seeded pair, covering both directions, sized at roughly $1,000–$1,500 each. Uses the SDK approval/signing flow and verifies every settlement receipt. Each run adds a new batch. |
 | `starter` | Runs `seed`, `trades`, then `smoke`. Requires the deployed, configured chain and running API from steps 1–4. |
 | `smoke` | Calls the read API through the SDK client and prints a status matrix. Exits non-zero on any failure. |
@@ -74,6 +74,17 @@ cd contracts && forge script script/DeployDevnet.s.sol:DeployDevnet --broadcast 
 The eight pairs are WETH/USDC, WBTC/USDC, LINK/USDC, DAI/USDC, WETH/DAI, WBTC/DAI,
 LINK/DAI, and USDT/USDC. Pair definitions are shared by both scripts in `src/seed/pairs.ts`.
 Seeding preserves prior positions and trades. The extra pairs use the existing Core-6 tokens.
+
+Each configuration uses deterministic salts starting with the original unsalted order (`0`),
+then `1`, `2`, and so on until two active copies exist. Aqua permanently marks docked hashes
+with `rawBalances.tokensCount = 255`, so they are skipped rather than re-shipped. The other
+states are `0` for unused and `1..254` for active, even when a token's balance is zero.
+Rerunning the seed with unchanged pricing leaves both active copies untouched. If rounded
+oracle mids change, the new configuration receives its own two copies; previous configurations
+remain. Run `pnpm --dir scripts seed` by itself to populate positions without generating trades.
+
+The seed regression checks run with `node --test scripts/src/seed/strategies.test.ts` from the
+repository root after building the SDK.
 
 The trade generator uses public Anvil account #8, separate from the maker accounts and personal
 wallets. It funds gas if needed and mints dev tokens. Both write scripts verify the chain ID,

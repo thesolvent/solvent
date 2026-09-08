@@ -89,6 +89,53 @@ describe("Strategy.inRange", () => {
   });
 });
 
+describe.each([
+  {
+    curve: "concentrated",
+    strategy: Strategy.concentrated({
+      base: { address: LO, decimals: 18 },
+      quote: { address: HI, decimals: 18 },
+      priceMin: "0.95",
+      priceMax: "1.05",
+    }),
+  },
+  {
+    curve: "pegged",
+    strategy: Strategy.pegged({
+      tokenA: { address: LO, decimals: 18, reserve: 100n * 10n ** 18n },
+      tokenB: { address: HI, decimals: 18, reserve: 100n * 10n ** 18n },
+      linearWidth: linearWidthFromSymmetricRangePercent(1),
+    }),
+  },
+])("Strategy.salt ($curve)", ({ strategy }) => {
+  it("creates repeatable distinct identities while preserving the pricing program", () => {
+    const original = strategy.build(MAKER);
+    const first = strategy.salt(1n).build(MAKER);
+    const second = strategy.salt(2n).build(MAKER);
+
+    expect(first.strategyHash).not.toBe(original.strategyHash);
+    expect(second.strategyHash).not.toBe(first.strategyHash);
+    expect(first.program.startsWith(original.program)).toBe(true);
+    expect(second.program.startsWith(original.program)).toBe(true);
+    expect(strategy.salt(1n).build(MAKER)).toEqual(first);
+    expect(strategy.salt(0n).build(MAKER)).toEqual(original);
+    expect(strategy.build(MAKER)).toEqual(original);
+  });
+
+  it("composes with fees in either order without mutating either builder", () => {
+    const original = strategy.build(MAKER);
+    const fee = strategy.fee(30);
+    const withFee = fee.build(MAKER);
+    const salted = fee.salt(1n).build(MAKER);
+
+    expect(strategy.salt(1n).fee(30).build(MAKER)).toEqual(salted);
+    expect(salted.strategyHash).not.toBe(withFee.strategyHash);
+    expect(salted.program.startsWith(withFee.program)).toBe(true);
+    expect(fee.build(MAKER)).toEqual(withFee);
+    expect(strategy.build(MAKER)).toEqual(original);
+  });
+});
+
 describe("bandToPrices", () => {
   it("brackets the mid symmetrically", () => {
     expect(bandToPrices("100", 5)).toEqual({ priceMin: "95", priceMax: "105" });

@@ -11,9 +11,28 @@ import {
 import { useApp } from "@/state";
 import { useNavigate, useParams } from "react-router-dom";
 
+import { MakerPositions } from "./MakerPositions";
 import styles from "./MakersPage.module.css";
 
-const POS_ACTIONS = ["Push", "Dock"];
+function ChartTooltip({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <div className={styles.chartTooltip} role="tooltip">
+      <div className={styles.chartTooltipLabel}>{label}</div>
+      <div className={styles.chartTooltipRow}>
+        <span className={styles.chartTooltipValue}>{value}</span>
+        <span className={styles.chartTooltipDetail}>{detail}</span>
+      </div>
+    </div>
+  );
+}
 
 export function MakersPage() {
   const navigate = useNavigate();
@@ -86,7 +105,7 @@ export function MakersPage() {
                   : styles.rosterButton
               }
               onClick={() => {
-                set({ mkOpen: null, mkAsset: null, mkTip: null });
+                set({ mkAsset: null, mkTip: null });
                 navigate(`/makers/${a}`);
               }}
             >
@@ -152,7 +171,15 @@ export function MakersPage() {
                   key={t.key}
                   type="button"
                   className={t.key === mk.tab ? styles.tabOn : styles.tab}
-                  onClick={() => set({ mkTab: t.key })}
+                  onClick={() =>
+                    set({
+                      mkTab: t.key,
+                      mkAsset:
+                        t.key === "Assets" && state.mkTab !== "Assets"
+                          ? 0
+                          : state.mkAsset,
+                    })
+                  }
                 >
                   {t.label}
                 </button>
@@ -162,86 +189,7 @@ export function MakersPage() {
           </div>
 
           {mk.tab === "Positions" && (
-            <div data-scroll="1" className={styles.list}>
-              {mk.positions.map((p, i) => (
-                <div key={p.hash} className={styles.posGroup}>
-                  <div
-                    className={p.open ? styles.posRowOpen : styles.posRow}
-                    onClick={() => set({ mkOpen: p.open ? -1 : i })}
-                  >
-                    <span className={p.open ? styles.caretOpen : styles.caret}>
-                      ▸
-                    </span>
-                    <span className={styles.posPair}>{p.pair}</span>
-                    <span className={styles.posMeta}>{p.meta}</span>
-                    <span className={styles.posCov}>{p.cov}</span>
-                    <span
-                      className={styles.posWidth}
-                      style={{
-                        background: p.widthBg,
-                        color: p.widthFg,
-                      }}
-                    >
-                      {p.width}
-                    </span>
-                    <span className={styles.posActions}>
-                      {POS_ACTIONS.map((label) => (
-                        <button
-                          key={label}
-                          type="button"
-                          className={styles.posAction}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </span>
-                  </div>
-
-                  {p.open && (
-                    <div className={styles.posDetail}>
-                      <div className={styles.posStats}>
-                        {p.stats.map((st) => (
-                          <div
-                            key={st.label}
-                            className={styles.posStat}
-                            style={{
-                              backgroundImage: `linear-gradient(${st.sep}, ${st.sep})`,
-                            }}
-                          >
-                            <div className={styles.posStatLabel}>
-                              {st.label}
-                            </div>
-                            <div className={styles.posStatValue}>
-                              {st.value}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className={styles.coverage}>
-                        <span className={styles.coverageLabel}>
-                          Coverage {p.covNum}
-                        </span>
-                        <span className={styles.coverageBar}>
-                          <span
-                            className={styles.coverageA}
-                            style={{
-                              width: p.splitA,
-                            }}
-                          >
-                            {p.labelA}
-                          </span>
-                          <span className={styles.coverageB}>{p.labelB}</span>
-                        </span>
-                        <button type="button" className={styles.clone}>
-                          Clone
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+            <MakerPositions key={address} positions={mk.positions} />
           )}
 
           {mk.tab === "Assets" && (
@@ -470,13 +418,11 @@ export function MakersPage() {
               </div>
             </div>
             {mk.tip && (
-              <div className={styles.donutTip}>
-                <div className={styles.donutTipLabel}>{mk.tipLabel}</div>
-                <div className={styles.donutTipRow}>
-                  <span className={styles.donutTipPct}>{mk.tipPct}</span>
-                  <span className={styles.donutTipAmt}>{mk.tipAmt}</span>
-                </div>
-              </div>
+              <ChartTooltip
+                label={mk.tipLabel}
+                value={mk.tipPct}
+                detail={mk.tipAmt}
+              />
             )}
           </section>
 
@@ -511,11 +457,7 @@ export function MakersPage() {
                         height: b.h,
                         background: b.bg,
                       }}
-                    >
-                      {b.tip && (
-                        <span className={styles.barTip}>{b.value}</span>
-                      )}
-                    </span>
+                    />
                     <span className={styles.barDay} style={{ color: b.dayFg }}>
                       {b.day}
                     </span>
@@ -523,6 +465,7 @@ export function MakersPage() {
                 ))}
               </div>
             </div>
+            {mk.fillsTip && <ChartTooltip {...mk.fillsTip} />}
           </section>
 
           <section className={styles.cardLast}>
@@ -582,22 +525,8 @@ export function MakersPage() {
                     onMouseEnter={() => set({ mkLat: i })}
                     onMouseLeave={() => set({ mkLat: null })}
                   >
-                    {pt.tip && (
-                      <>
-                        <span
-                          className={styles.latDot}
-                          style={{ top: pt.top }}
-                        />
-                        <span
-                          className={styles.latTip}
-                          style={{
-                            top: pt.top,
-                            transform: `translate(${pt.shift}, -160%)`,
-                          }}
-                        >
-                          {pt.value}
-                        </span>
-                      </>
+                    {pt.top !== null && (
+                      <span className={styles.latDot} style={{ top: pt.top }} />
                     )}
                   </span>
                 ))}
@@ -608,6 +537,7 @@ export function MakersPage() {
                 ))}
               </div>
             </div>
+            {mk.latencyTip && <ChartTooltip {...mk.latencyTip} />}
           </section>
         </div>
       </div>

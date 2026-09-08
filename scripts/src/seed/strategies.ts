@@ -1,6 +1,9 @@
 /** Seed maker liquidity through the SDK's strategy construction and position write path. */
 import type { SolventClient } from "@solvent/sdk/client";
-import type { Strategy as StrategyBuilder } from "@solvent/sdk/construction";
+import type {
+    BuiltStrategy,
+    Strategy as StrategyBuilder,
+} from "@solvent/sdk/construction";
 import { parseUnits, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
@@ -23,6 +26,7 @@ const MAKER_KEYS: readonly Hex[] = [
 
 /** Minted per token, well above what is shipped, so a maker keeps a wallet balance behind it. */
 const MINT_UNITS = 1_000_000;
+const COPIES_PER_PAIR = 2;
 
 type Pricing = { kind: "pegged" } | { kind: "ranged"; mid: number };
 
@@ -60,8 +64,7 @@ function pricingFor(spec: PairSpec, mids: Map<string, number>): Pricing {
     return { kind: "ranged", mid };
 }
 
-// Aqua rejects re-shipping a strategy (`StrategiesMustBeImmutable`), so a repeat run checks whether
-// this maker already holds a balance under the hash and skips instead of reverting.
+// Aqua retains a docked hash forever: tokensCount 0 is unused, 255 is docked, and the rest are active.
 const AQUA_ABI = [
     {
         type: "function",
@@ -134,22 +137,22 @@ function strategyFor(
     return curve.fee(spec.feeBps);
 }
 
-async function isShipped(
+async function tokensCount(
     { manifest, publicClient }: Devnet,
     maker: Address,
     strategyHash: Hex,
     token: Address,
-): Promise<boolean> {
+): Promise<number> {
     const [, tokensCount] = await publicClient.readContract({
         address: manifest.aqua as Address,
         abi: AQUA_ABI,
         functionName: "rawBalances",
         args: [maker, manifest.router as Address, strategyHash, token],
     });
-    return tokensCount > 0;
+    return tokensCount;
 }
 
-async function seedPair(
+export async function seedPair(
     env: Devnet,
     spec: PairSpec,
     key: Hex,
@@ -162,22 +165,28 @@ async function seedPair(
         app: manifest.router as Address,
     });
     const sized = legs(manifest, spec, pricing);
-    const built = strategyFor(spec, sized, pricing).build(account.address);
+    const strategy = strategyFor(spec, sized, pricing);
+    const pending: BuiltStrategy[] = [];
+    let active = 0;
+    for (let salt = 0n; active + pending.length < COPIES_PER_PAIR; salt += 1n) {
+        const built = strategy.salt(salt).build(account.address);
+        const count = await tokensCount(
+            env,
+            account.address,
+            built.strategyHash,
+            sized.base.address,
+        );
+        if (count === 0) pending.push(built);
+        else if (count < 255) active += 1;
+    }
 
     const at =
         pricing.kind === "pegged"
             ? "pegged"
             : `mid ${pricing.mid.toLocaleString("en-US")}`;
     const label = `${spec.base}/${spec.quote}  ${at.padEnd(14)} maker ${account.address.slice(0, 10)}`;
-    if (
-        await isShipped(
-            env,
-            account.address,
-            built.strategyHash,
-            sized.base.address,
-        )
-    ) {
-        return `${label}  (already shipped)`;
+    if (pending.length === 0) {
+        return `${label}  (${active} active copies; already shipped)`;
     }
 
     const maker = env.wallet(account);
@@ -191,24 +200,28 @@ async function seedPair(
         );
     }
 
-    await maker.send(
-        pos.ship({
-            strategy: built.order,
-            amounts: [
-                { token: sized.base.address, amount: sized.baseAmount },
-                { token: sized.quote.address, amount: sized.quoteAmount },
-            ],
-        }),
-    );
+    for (const built of pending) {
+        await maker.send(
+            pos.ship({
+                strategy: built.order,
+                amounts: [
+                    { token: sized.base.address, amount: sized.baseAmount },
+                    { token: sized.quote.address, amount: sized.quoteAmount },
+                ],
+            }),
+        );
+    }
 
-    return label;
+    return `${label}  (${pending.length} shipped; ${COPIES_PER_PAIR} active copies)`;
 }
 
 async function main(): Promise<void> {
     const env = await connectDevnet();
     const { manifest } = env;
     const mids = await midPrices(env.api);
-    console.log(`seed: ${PAIRS.length} pairs · aqua ${manifest.aqua}\n`);
+    console.log(
+        `seed: ${PAIRS.length} pairs · ${COPIES_PER_PAIR} active copies each · aqua ${manifest.aqua}\n`,
+    );
 
     for (const [index, spec] of PAIRS.entries()) {
         const key = MAKER_KEYS[index % MAKER_KEYS.length];

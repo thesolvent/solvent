@@ -82,7 +82,6 @@ export type AppState = {
   mkSel: string | null;
   mkSpan: string;
   mkTab: string;
-  mkOpen: number | null;
   mkAsset: number | null;
   mkTip: number | null;
   mkBar: number | null;
@@ -160,7 +159,6 @@ export const INITIAL_STATE: AppState = {
   mkSel: null,
   mkSpan: "1M",
   mkTab: "Positions",
-  mkOpen: 0,
   mkAsset: null,
   mkTip: null,
   mkBar: null,
