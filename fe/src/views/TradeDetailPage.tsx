@@ -1,36 +1,111 @@
+import { useEffect } from "react";
+import { Link, useParams } from "react-router-dom";
+import { useTrade } from "@/services/explorer";
+import { useConfig } from "@/services/system";
 import { Crumbs } from "@/components/Crumbs";
-import { tradeDetail } from "@/lib/explorer";
+import { explorerUrl, tradeDetail, tradeProblem } from "@/lib/explorer";
 import { useApp } from "@/state";
+import { QueryFreshness } from "./QueryFreshness";
 
 import styles from "./explorer.module.css";
 
 export function TradeDetailPage() {
-  const { state, set, push, pop } = useApp();
-  const td = tradeDetail(state);
+  const { state, set } = useApp();
+  const { tradeId } = useParams();
+  const query = useTrade(tradeId);
+  const config = useConfig();
+  // A direct trade URL must return to the list regardless of the previous strategy selection.
+  useEffect(() => set({ xpStrat: null, trail: [] }), [set]);
+  if (!query.data)
+    return (
+      <div className={styles.root}>
+        <Link
+          to="/explorer"
+          className={styles.back}
+          aria-label="Back to Explorer"
+        >
+          ←
+        </Link>
+        {query.isError ? (
+          <p className={styles.emptyNote} role="alert">
+            {tradeProblem(query.error)}{" "}
+            <button type="button" onClick={() => void query.refetch()}>
+              Try again
+            </button>
+          </p>
+        ) : (
+          <p className={styles.emptyNote} role="status">
+            Loading trade…
+          </p>
+        )}
+      </div>
+    );
+  const trade = query.data;
+  const td = tradeDetail(trade, state.tdStage);
+  const txUrl = explorerUrl(
+    config.data?.block_explorer_url,
+    "tx",
+    trade.txHash,
+  );
 
   return (
     <div className={styles.root}>
+      <span
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className={styles.srOnly}
+      >
+        Trade {td.status}. {td.stageDone} of 6 stages recorded.
+      </span>
       <div className={styles.head}>
-        <button type="button" className={styles.back} onClick={pop}>
+        <Link
+          to="/explorer"
+          className={styles.back}
+          aria-label="Back to Explorer"
+        >
           ←
-        </button>
+        </Link>
         <div className={styles.headTitle}>
-          <Crumbs current={td.id} />
+          <Crumbs
+            current={td.id}
+            trail={[{ label: "Explorer", to: "/explorer" }]}
+          />
           <div className={styles.title}>{td.id}</div>
         </div>
         <span
-          className={styles.statusPill}
+          key={td.status}
+          className={styles.liveStatus}
           style={{ background: td.stBg, color: td.stFg }}
         >
           {td.status}
         </span>
         <span className={styles.headMeta}>{td.meta}</span>
         <span className={styles.spacer} />
+        <QueryFreshness query={query} />
         <span>
-          <span className={styles.txLink}>{td.tx} ↗</span>
+          <a
+            className={styles.txLink}
+            href={txUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="View transaction"
+            title={trade.txHash ?? undefined}
+          >
+            {td.tx}
+            {txUrl && " ↗"}
+          </a>
         </span>
       </div>
 
+      {query.isError && (
+        <p role="alert" className={styles.emptyNote}>
+          Couldn’t refresh this trade.{" "}
+          <button type="button" onClick={() => void query.refetch()}>
+            Try again
+          </button>
+        </p>
+      )}
       <div className={styles.stats4}>
         {td.summary.map((k) => (
           <div
@@ -41,7 +116,9 @@ export function TradeDetailPage() {
             }}
           >
             <div className={styles.statLabel}>{k.label}</div>
-            <div className={styles.statValueSm}>{k.value}</div>
+            <div className={styles.statValueSm} title={k.value}>
+              {k.value}
+            </div>
           </div>
         ))}
       </div>
@@ -75,8 +152,12 @@ export function TradeDetailPage() {
               ))}
             </div>
 
-            <div className={styles.timeline}>
-              <div className={styles.timelineMeta}>
+            <div
+              className={styles.timeline}
+              role="list"
+              aria-label="Trade lifecycle"
+            >
+              <div className={styles.timelineMeta} aria-hidden="true">
                 {td.steps.map((st) => (
                   <div key={st.label} className={styles.timelineMetaCell}>
                     {st.meta}
@@ -88,12 +169,17 @@ export function TradeDetailPage() {
                 <div
                   key={st.label}
                   className={styles.step}
+                  role="listitem"
+                  aria-label={`${st.label}: ${st.done ? "recorded" : st.state}`}
+                  aria-current={st.current ? "step" : undefined}
                   style={{ left: st.barX }}
                   onMouseEnter={() => set({ tdStage: i })}
                   onMouseLeave={() => set({ tdStage: null })}
                 >
                   <div
-                    className={styles.stepBar}
+                    className={
+                      st.current ? styles.stepBarCurrent : styles.stepBar
+                    }
                     style={{
                       boxShadow: st.barShadow,
                       borderStyle: st.barStyle,
@@ -101,13 +187,15 @@ export function TradeDetailPage() {
                       transform: st.scale,
                     }}
                   >
-                    <span
-                      className={styles.stepFill}
-                      style={{
-                        animationDelay: st.delay,
-                        background: st.barBg,
-                      }}
-                    />
+                    {st.done && (
+                      <span
+                        className={styles.stepFill}
+                        style={{
+                          animationDelay: st.delay,
+                          background: st.barBg,
+                        }}
+                      />
+                    )}
                   </div>
                   <div
                     className={styles.stepLead}
@@ -127,28 +215,37 @@ export function TradeDetailPage() {
           <div className={styles.sourcedHead}>
             <span className={styles.sourcedTitle}>Sourced from</span>
             <span className={styles.sourcedHint}>
-              click a leg to open the maker
+              open a maker in the block explorer
             </span>
           </div>
           <div data-scroll="1" className={styles.legList}>
             {td.legs.map((l) => (
-              <button
-                key={l.hash}
-                type="button"
+              <a
+                key={`${l.maker}:${l.hash}`}
                 className={styles.legRow}
-                onClick={() => push({ xpStrat: l.sel }, td.id)}
+                href={explorerUrl(
+                  config.data?.block_explorer_url,
+                  "address",
+                  l.maker,
+                )}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={l.maker}
               >
                 <span className={styles.legMaker}>
                   <span className={styles.legChip}>{l.tag}</span>
                   <span className={styles.legStack}>
-                    <span className={styles.legName}>{l.maker}</span>
-                    <span className={styles.legHash}>{l.hash}</span>
+                    <span className={styles.legName}>{l.name}</span>
+                    <span className={styles.legHash} title={l.hash}>
+                      {l.shortHash}
+                    </span>
                   </span>
                 </span>
                 <span className={styles.legAmountCol}>
                   <span className={styles.legAmountRow}>
-                    <span className={styles.legAmount}>{l.amt}</span>
-                    <span className={styles.legCurve}>{l.curve}</span>
+                    <span className={styles.legAmount} title={l.amt}>
+                      {l.amt}
+                    </span>
                   </span>
                   <span className={styles.legTrack}>
                     <span
@@ -158,15 +255,10 @@ export function TradeDetailPage() {
                   </span>
                 </span>
                 <span className={styles.legShare}>{l.share}</span>
-                <span className={styles.legChevron}>›</span>
-              </button>
+                <span className={styles.legChevron}>↗</span>
+              </a>
             ))}
-            {td.empty && (
-              <div className={styles.emptyNote}>
-                No makers were sourced — the quote was declined before
-                reservation.
-              </div>
-            )}
+            {td.empty && <div className={styles.emptyNote}>{td.emptyText}</div>}
           </div>
         </section>
 
@@ -185,7 +277,12 @@ export function TradeDetailPage() {
             {td.facts.map((d) => (
               <div key={d.label} className={styles.factRow}>
                 <span className={styles.factLabel}>{d.label}</span>
-                <span className={styles.factValue}>{d.value}</span>
+                <span
+                  className={styles.factValue}
+                  title={d.fullValue ?? d.value}
+                >
+                  {d.value}
+                </span>
               </div>
             ))}
           </div>

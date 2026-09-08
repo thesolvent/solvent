@@ -1,5 +1,5 @@
 export { createSolventClient } from "./client";
-export type { SolventClient, SolventClientConfig, List } from "./client";
+export type { SolventClient, SolventClientConfig, List, TradesQuery, ActivityQuery } from "./client";
 export type {
   AppConfig,
   Asset,

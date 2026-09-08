@@ -1,0 +1,49 @@
+{
+  "items": [
+    {
+      "kind": "pushed",
+      "maker": "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc",
+      "strategy_hash": "0xdf5e829a35df245710c4b5147fa243e52190f892ef196c216ecc168858cdf2f9",
+      "token": {
+        "token": {
+          "address": "0x0165878a594ca255338adfa4d48449f69242eb8f",
+          "chain_id": 31337,
+          "symbol": "DAI",
+          "decimals": 18
+        },
+        "amount": {
+          "raw": "4949995002086627513862",
+          "display": "4949.995002086627513862",
+          "usd": 4949.995002086627
+        }
+      },
+      "at": 1788869025,
+      "block_number": 39064,
+      "tx_hash": "0x2eeadddfbc9549954a3568c0eeae187b331bf51925ef50a63af144439ccdce7e",
+      "log_index": 7
+    },
+    {
+      "kind": "pulled",
+      "maker": "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc",
+      "strategy_hash": "0xdf5e829a35df245710c4b5147fa243e52190f892ef196c216ecc168858cdf2f9",
+      "token": {
+        "token": {
+          "address": "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9",
+          "chain_id": 31337,
+          "symbol": "USDC",
+          "decimals": 6
+        },
+        "amount": {
+          "raw": "4946047017",
+          "display": "4946.047017",
+          "usd": 4947.159877578825
+        }
+      },
+      "at": 1788869025,
+      "block_number": 39064,
+      "tx_hash": "0x2eeadddfbc9549954a3568c0eeae187b331bf51925ef50a63af144439ccdce7e",
+      "log_index": 3
+    }
+  ],
+  "next_cursor": "WzM5MDY0LDNd"
+}

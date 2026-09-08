@@ -1,5 +1,6 @@
 import { DEFAULT_MAKER, ROSTER, SPANS, makerView } from "@/lib/makers";
 import { useApp } from "@/state";
+import { useNavigate } from "react-router-dom";
 
 import styles from "./MakersPage.module.css";
 
@@ -7,6 +8,7 @@ const POS_ACTIONS = ["Push", "Dock"];
 const LAT_DAYS = ["S", "M", "T", "W", "T", "F", "S"];
 
 export function MakersPage() {
+  const navigate = useNavigate();
   const { state, set, push } = useApp();
   const mk = makerView(state);
 
@@ -287,16 +289,10 @@ export function MakersPage() {
                 <div
                   key={`${t.pair}-${i}`}
                   className={styles.settleRow}
-                  onClick={() =>
-                    push(
-                      {
-                        page: "Explorer",
-                        xpTrade: t.trade,
-                        xpStrat: null,
-                      },
-                      "Makers",
-                    )
-                  }
+                  onClick={() => {
+                    set({ xpStrat: null });
+                    navigate("/explorer");
+                  }}
                 >
                   <span className={styles.settlePair}>
                     <span className={styles.settlePairName}>{t.pair}</span>

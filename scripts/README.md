@@ -23,9 +23,8 @@ pnpm --dir scripts etch
 set -a; . ./devnet/generated/env.sh; set +a
 cargo run --bin solvent
 
-# 5. Maker liquidity, then a health check of the whole read API.
-pnpm --dir scripts seed
-pnpm --dir scripts smoke
+# 5. Eight pools, 24 confirmed sample trades, then the read-API health check.
+pnpm --dir scripts starter
 ```
 
 Add the faucet with `docker compose -f devnet/docker-compose.yml up -d faucet` (it builds the Rust
@@ -49,7 +48,9 @@ cd contracts && forge script script/DeployDevnet.s.sol:DeployDevnet --broadcast 
 |---|---|
 | `bootstrap` | Manifest → `solvent.toml`, `devnet/generated/tokens.json`, `devnet/generated/env.sh`. Re-run after every deploy. |
 | `etch` | Installs Multicall3 and Permit2 runtime code and verifies the Permit2 signing domain on devnet. |
-| `seed` | Mints, approves Aqua, and ships one strategy per pair. **Idempotent** — Aqua rejects re-shipping, so an existing position is skipped. |
+| `seed` | Mints, approves Aqua, and ships eight token pairs. An existing strategy hash is skipped; a changed market mid can create a new strategy on the same pair. |
+| `trades` | Adds 24 sample trades: three per seeded pair, covering both directions, sized at roughly $1,000–$1,500 each. Uses the SDK approval/signing flow and verifies every settlement receipt. Each run adds a new batch. |
+| `starter` | Runs `seed`, `trades`, then `smoke`. Requires the deployed, configured chain and running API from steps 1–4. |
 | `smoke` | Calls the read API through the SDK client and prints a status matrix. Exits non-zero on any failure. |
 
 ## Notes
@@ -58,7 +59,23 @@ cd contracts && forge script script/DeployDevnet.s.sol:DeployDevnet --broadcast 
   and positions modules a maker client uses, so a break here is a genuine break.
 - The deploy manifest is bind-mounted to `contracts/deployments/` so the host can generate config
   from it; the chain itself persists in the `anvil-state` volume.
-- `seed` runs under a resolver hook (`src/lib/register.mjs`): the published `@1inch` ESM imports its
-  own files without extensions, which Node's resolver rejects.
+- Node seed/trade scripts use the SDK's published CommonJS entry points through `createRequire`;
+  upstream ESM assumes a bundler. No custom module loader is needed.
 - Generated config, the token list, the signing env, the database, and the manifest are untracked.
 - Permit2 uses the same checked-in runtime fixture as the Rust integration harness. `etch` verifies its domain for chain 31337 before signing tests run.
+
+## Review data
+
+The eight pairs are WETH/USDC, WBTC/USDC, LINK/USDC, DAI/USDC, WETH/DAI, WBTC/DAI,
+LINK/DAI, and USDT/USDC. Pair definitions are shared by both scripts in `src/seed/pairs.ts`.
+Seeding preserves prior positions and trades. The extra pairs use the existing Core-6 tokens.
+
+The trade generator uses public Anvil account #8, separate from the maker accounts and personal
+wallets. It funds gas if needed and mints dev tokens. Both write scripts verify the chain ID,
+deployment addresses, and API token metadata against the manifest before writing.
+
+`devnet/generated/review-trades.json` records the batch's trade IDs, status, amounts, and transaction
+links, including any submitted trade still awaiting completion if a run fails. The script stops on
+a failed/declined trade, a 90-second settlement timeout, or a reverted receipt. A transport retry
+reuses the same SDK intent and authorization; rerunning the command starts a new batch. Generated
+data stays local and is not included in Git pushes.

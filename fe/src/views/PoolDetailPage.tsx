@@ -1,10 +1,13 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { Crumbs } from "@/components/Crumbs";
 import { poolDetail } from "@/lib/pool-detail";
+import { tokenText } from "@/lib/explorer";
+import { useTrades } from "@/services/explorer";
 import { usePool, usePoolDepth, usePoolRoster } from "@/services/pools";
 import { useApp } from "@/state";
+import { QueryFreshness } from "./QueryFreshness";
 
 import styles from "./PoolDetailPage.module.css";
 
@@ -15,6 +18,11 @@ export function PoolDetailPage() {
   const navigate = useNavigate();
   const { pair } = useParams();
   const pool = usePool(pair);
+  const settlements = useTrades(
+    pool?.ref
+      ? { status: "confirmed", base: pool.ref.base, quote: pool.ref.quote }
+      : undefined,
+  );
   const d = poolDetail({
     pool,
     roster: usePoolRoster(pool),
@@ -322,7 +330,6 @@ export function PoolDetailPage() {
                 className={styles.makerRow}
                 onClick={() => {
                   set({
-                    xpTrade: null,
                     xpStrat: {
                       maker: m.addr,
                       curve: m.curve,
@@ -353,29 +360,71 @@ export function PoolDetailPage() {
 
           <div className={styles.settleHead}>
             <div className={styles.settleTag}>
-              <span className={styles.settlePulse} />
               <span className={styles.settleTitle}>Settlements</span>
             </div>
-            <span className={styles.settleLive}>live</span>
+            <QueryFreshness query={settlements} />
           </div>
 
-          <div data-scroll="1" className={styles.settleList}>
-            {d.settlements.map((x) => (
-              <button
-                key={x.from + x.ago}
-                type="button"
-                className={styles.settleRow}
-                onClick={() => {
-                  set({ xpTrade: 0, xpStrat: null });
-                  navigate("/explorer");
-                }}
-              >
-                <span className={styles.settleFrom}>{x.from}</span>
-                <span className={styles.settleArrow}>→</span>
-                <span className={styles.settleTo}>{x.to}</span>
-                <span className={styles.settleAgo}>{x.ago}</span>
-              </button>
-            ))}
+          <div
+            data-scroll="1"
+            className={styles.settleList}
+            aria-busy={settlements.isFetching}
+          >
+            {settlements.isLoading && (
+              <p className={styles.settleLive} role="status">
+                Loading settlements…
+              </p>
+            )}
+            {settlements.isError && (
+              <p className={styles.settleLive} role="alert">
+                Couldn’t refresh settlements.{" "}
+                <button
+                  type="button"
+                  onClick={() => void settlements.refetch()}
+                >
+                  Try again
+                </button>
+              </p>
+            )}
+            {settlements.isSuccess && settlements.data.items.length === 0 && (
+              <p className={styles.settleLive}>
+                No confirmed trades for this pair yet.
+              </p>
+            )}
+            {settlements.data?.items.map((trade) => {
+              const settledAt =
+                trade.settledAt == null
+                  ? null
+                  : new Date(trade.settledAt * 1000);
+              return (
+                <Link
+                  key={trade.id}
+                  className={styles.settleRow}
+                  to={`/explorer/trades/${encodeURIComponent(trade.id)}`}
+                  aria-label={`Open trade ${trade.id}`}
+                >
+                  <span className={styles.settleFrom}>
+                    {tokenText(trade.input)}
+                  </span>
+                  <span className={styles.settleArrow}>→</span>
+                  <span className={styles.settleTo}>
+                    {tokenText(trade.output)}
+                  </span>
+                  <time
+                    className={styles.settleAgo}
+                    dateTime={settledAt?.toISOString()}
+                    title={settledAt?.toLocaleString()}
+                  >
+                    {settledAt?.toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }) ?? "Time unavailable"}
+                  </time>
+                </Link>
+              );
+            })}
           </div>
         </section>
       </div>

@@ -251,6 +251,17 @@ the project is pre-1.0 and evolving.
     types), so a renamed Rust field surfaces as a compile/gate failure, never a runtime one.
 
 ### Added — frontend (`fe/`, React + Vite)
+- **Live Explorer and trade detail** — trades, protocol activity, and aggregate stats come from the
+  API through an Explorer port, DTO mappers, and TanStack Query. Server filters and cursor paging
+  replace fixture filtering. Trade URLs use stable IDs (`/explorer/trades/:tradeId`), with recorded
+  lifecycle times, maker legs, and deployment-specific transaction/address links. Pending details
+  refresh until terminal; missing data stays unknown, and non-confirmed output is labelled as the
+  signed minimum. Two Playwright checks exercise the views against a running devnet.
+- **Live refresh and settlement progress** — pending trade detail refreshes every two seconds and
+  stops periodic polling at terminal states. Recorded stages animate as they arrive, with an awaited
+  stage indicator and reduced-motion support. Explorer, activity, stats, pool data and assets refresh
+  every five seconds while visible and on focus/reconnect; timestamps distinguish fresh, delayed,
+  and paused updates. Pool detail now lists actual confirmed settlements for both pair directions.
 - **S4 · pools — the list and detail views, wired end to end.** The frontend gains the same seam the
   backend has: `ports/` (the domain types views speak), `adapters/{http,mappers}` (OpenAPI DTO →
   domain), `services/` (TanStack Query hooks), `lib/` (view-model math), `views/` (as migrated from
@@ -273,8 +284,14 @@ the project is pre-1.0 and evolving.
     nothing.
 - **`@solvent/scripts`** — a devnet runbook package: manifest bootstrap, a Multicall3 etch, idempotent
   strategy seeding priced off the server's own oracle, and an endpoint smoke matrix.
+  - **`starter`** seeds eight distinct pairs, executes 24 sample trades covering both directions,
+    and checks the read API. Scripts verify the devnet deployment before minting or signing, reuse
+    SDK approval/signing, and save a local report counting only receipt-verified confirmations.
+    Node uses the supported CommonJS SDK/viem entry points without a custom module loader.
 
 ### Changed — backend (`crates/`)
+- **Trade responses expose stored price impact** for Explorer list and detail. OpenAPI and SDK types
+  carry the optional value; the existing `deadline_block` field is documented as Unix seconds.
 - **Pools carry `tvl_change_24h_pct`** — the value-weighted 24h move of what the pool holds,
   all-or-nothing across its tokens, so a partial reading can never understate it.
 - **Pool makers carry `actual`** — the committed amount capped by what Aqua may actually pull, so a
@@ -282,6 +299,9 @@ the project is pre-1.0 and evolving.
   not the same as nothing being deliverable.
 
 ### Fixed — backend (`crates/`)
+- **Trade surplus uses the input token's decimals and USD price.** Exact-out routing records expected
+  retained-input profit, net of estimated gas. Formatting it as output token units made DAI→USDC
+  profit appear a trillion times too large; the amount and valuation now use the actual denomination.
 - **Price impact no longer falls as the trade grows.** The near-zero baseline was probed at a
   millionth of the trade size, which quotes only a handful of whole base units — a rate wrong
   enough that the real one looked better than it, and the size of that gap was reported as impact
@@ -294,7 +314,7 @@ the project is pre-1.0 and evolving.
 - **Depth bisection stops on a relative tolerance** — converging to the last wei cost ~40 further
   rounds of curve math for precision no caller can observe.
 
-_Next: S4 — swap, makers, and explorer._
+_Next: S4 — makers and strategy reads, then the create-position wizard._
 
 ## [0.1.0] — 2026-08-28
 

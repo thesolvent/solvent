@@ -97,7 +97,7 @@ impl TradeService {
         let surplus = match trade.surplus {
             Some(s) => Some(
                 self.valuation
-                    .amount(s, token_out.address, token_out.decimals)
+                    .amount(s, token_in.address, token_in.decimals)
                     .await,
             ),
             None => None,
@@ -115,6 +115,7 @@ impl TradeService {
                 token: token_out,
             },
             surplus,
+            price_impact_pct: trade.price_impact_pct,
             tx_hash: trade.tx_hash.map(|h| h.to_string()),
             block_number: trade.block_number,
             created_at: trade.created_at,
@@ -190,6 +191,7 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
     use async_trait::async_trait;
+    use rust_decimal::Decimal;
     use ulid::Ulid;
 
     use crate::deps::routing::{PriceOracle, PriceOracleError};
@@ -199,11 +201,15 @@ mod tests {
     use crate::primitives::{IntentId, MakerId, StrategyHash, UsdPrice};
     use crate::registry::SharedSnapshot;
 
-    struct NoPrices;
+    struct Prices;
     #[async_trait]
-    impl PriceOracle for NoPrices {
+    impl PriceOracle for Prices {
         async fn price(&self, token: Address) -> Result<UsdPrice, PriceOracleError> {
-            Err(PriceOracleError::NotFound(token))
+            match token {
+                t if t == Address::from([1; 20]) => Ok(UsdPrice(Decimal::from(2_000))),
+                t if t == Address::from([2; 20]) => Ok(UsdPrice(Decimal::ONE)),
+                _ => Err(PriceOracleError::NotFound(token)),
+            }
         }
     }
 
@@ -261,18 +267,29 @@ mod tests {
     fn service(info: Option<TradeInfo>) -> TradeService {
         let list = TokenList {
             name: "t".into(),
-            tokens: vec![TokenMeta {
-                chain_id: 31337,
-                address: Address::from([1; 20]),
-                symbol: "WETH".into(),
-                name: "Wrapped Ether".into(),
-                decimals: 18,
-                logo_uri: None,
-                tags: vec![],
-            }],
+            tokens: vec![
+                TokenMeta {
+                    chain_id: 31337,
+                    address: Address::from([1; 20]),
+                    symbol: "WETH".into(),
+                    name: "Wrapped Ether".into(),
+                    decimals: 18,
+                    logo_uri: None,
+                    tags: vec![],
+                },
+                TokenMeta {
+                    chain_id: 31337,
+                    address: Address::from([2; 20]),
+                    symbol: "USDC".into(),
+                    name: "USD Coin".into(),
+                    decimals: 6,
+                    logo_uri: None,
+                    tags: vec![],
+                },
+            ],
         };
         let assets = Arc::new(AssetManager::new(list, Arc::new(SharedSnapshot::default())));
-        let valuation = Arc::new(Valuation::new(Arc::new(NoPrices)));
+        let valuation = Arc::new(Valuation::new(Arc::new(Prices)));
         TradeService::new(Arc::new(FakeStore { info }), assets, valuation)
     }
 
@@ -321,6 +338,27 @@ mod tests {
             token_in_price_usd: price_in,
             token_out_price_usd: price_out,
             ..a_trade()
+        }
+    }
+
+    #[tokio::test]
+    async fn surplus_uses_the_input_tokens_decimals_and_price() {
+        let svc = service(None);
+        // Exact-out profit is retained input: 1.25 WETH at $2,000, or 1.25 USDC at $1.
+        for (input, output, raw, usd) in [
+            (1, 2, 1_250_000_000_000_000_000u64, 2_500.0),
+            (2, 1, 1_250_000u64, 1.25),
+        ] {
+            let trade = Trade {
+                token_in: Address::from([input; 20]),
+                token_out: Address::from([output; 20]),
+                surplus: Some(U256::from(raw)),
+                ..a_trade()
+            };
+            let surplus = svc.summary(&trade).await.surplus.unwrap();
+            assert_eq!(surplus.raw, raw.to_string());
+            assert_eq!(surplus.display, "1.25");
+            assert_eq!(surplus.usd, Some(usd));
         }
     }
 

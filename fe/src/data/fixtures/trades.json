@@ -1,0 +1,85 @@
+{
+  "items": [
+    {
+      "id": "01M20EE2KWWZJS6S5E4B1RD3F6",
+      "status": "confirmed",
+      "taker": "0x72c6a76c510b04880149d9afec403bb3f1fb1312",
+      "input": {
+        "token": {
+          "address": "0x0165878a594ca255338adfa4d48449f69242eb8f",
+          "chain_id": 31337,
+          "symbol": "DAI",
+          "decimals": 18
+        },
+        "amount": {
+          "raw": "5000000000000000000000",
+          "display": "5000",
+          "usd": 5000.0
+        }
+      },
+      "output": {
+        "token": {
+          "address": "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9",
+          "chain_id": 31337,
+          "symbol": "USDC",
+          "decimals": 6
+        },
+        "amount": {
+          "raw": "4946047017",
+          "display": "4946.047017",
+          "usd": 4947.159877578825
+        }
+      },
+      "surplus": {
+        "raw": "49634363660778046388",
+        "display": "49.634363660778046388",
+        "usd": 49.63436366077806
+      },
+      "tx_hash": "0x2eeadddfbc9549954a3568c0eeae187b331bf51925ef50a63af144439ccdce7e",
+      "block_number": 39064,
+      "created_at": 1788869020,
+      "settled_at": 1788869025
+    },
+    {
+      "id": "01M20D2Q7538J4WZY074Q8NH1Z",
+      "status": "confirmed",
+      "taker": "0xa1affb3283490184c944ed406d82537e720b977a",
+      "input": {
+        "token": {
+          "address": "0x0165878a594ca255338adfa4d48449f69242eb8f",
+          "chain_id": 31337,
+          "symbol": "DAI",
+          "decimals": 18
+        },
+        "amount": {
+          "raw": "5000000000000000000000",
+          "display": "5000",
+          "usd": 5000.0
+        }
+      },
+      "output": {
+        "token": {
+          "address": "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9",
+          "chain_id": 31337,
+          "symbol": "USDC",
+          "decimals": 6
+        },
+        "amount": {
+          "raw": "4947032712",
+          "display": "4947.032712",
+          "usd": 4948.1457943602
+        }
+      },
+      "surplus": {
+        "raw": "49633669482536946981",
+        "display": "49.633669482536946981",
+        "usd": 49.633669482536945
+      },
+      "tx_hash": "0x71c54bb88cc0482ffc7509b3ec1664037b03205137b85c770ea38d0a23deed66",
+      "block_number": 37689,
+      "created_at": 1788867599,
+      "settled_at": 1788867605
+    }
+  ],
+  "next_cursor": "IjAxTTIwRDJRNzUzOEo0V1pZMDc0UThOSDFaIg"
+}

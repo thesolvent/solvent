@@ -18,7 +18,6 @@ export type Snap = {
   page: Page;
   detail: number | null;
   create: boolean;
-  xpTrade: number | null;
   xpStrat: StratSel | null;
   maker: string | null;
 };
@@ -78,7 +77,6 @@ export type AppState = {
   pTag: string;
   pNet: string;
 
-  xpTrade: number | null;
   xpStrat: StratSel | null;
   maker: string | null;
 
@@ -159,7 +157,6 @@ export const INITIAL_STATE: AppState = {
   pTag: "All",
   pNet: "All networks",
 
-  xpTrade: null,
   xpStrat: null,
   maker: null,
 

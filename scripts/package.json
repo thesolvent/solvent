@@ -8,7 +8,9 @@
     "bootstrap": "node src/devnet/bootstrap.ts",
     "etch": "node src/devnet/etch.ts",
     "smoke": "node src/smoke/endpoints.ts",
-    "seed": "node --import ./src/lib/register.mjs src/seed/strategies.ts",
+    "seed": "node src/seed/strategies.ts",
+    "trades": "node src/seed/trades.ts",
+    "starter": "pnpm seed && pnpm trades && pnpm smoke",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -1,4 +1,4 @@
-import type { components } from "./generated/types";
+import type { components, operations } from "./generated/types";
 import { SolventApiError, SolventNetworkError } from "./errors";
 import { defaultTransport, type Transport } from "./transport";
 
@@ -44,6 +44,8 @@ export interface SolventClientConfig {
 }
 
 type PageQuery = { cursor?: string; limit?: number };
+export type TradesQuery = NonNullable<operations["trades"]["parameters"]["query"]>;
+export type ActivityQuery = NonNullable<operations["activity"]["parameters"]["query"]>;
 type Query = Record<string, string | number | boolean | undefined>;
 
 /** The typed read/write client over the Solvent API. Every method throws {@link SolventApiError}
@@ -56,9 +58,9 @@ export interface SolventClient {
   poolDepth(query: { base: string; quote: string }): Promise<PoolDepth>;
   quote(body: QuoteRequest): Promise<QuoteResponse>;
   swap(body: SwapRequest): Promise<SwapResponse>;
-  trades(query?: PageQuery): Promise<List<Trade>>;
+  trades(query?: TradesQuery): Promise<List<Trade>>;
   tradeDetail(id: string): Promise<Trade>;
-  activity(query?: PageQuery): Promise<List<ActivityEvent>>;
+  activity(query?: ActivityQuery): Promise<List<ActivityEvent>>;
   stats(): Promise<Stats>;
   makers(): Promise<List<MakerSummary>>;
   maker(maker: string): Promise<MakerDashboard>;

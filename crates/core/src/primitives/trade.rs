@@ -124,7 +124,7 @@ pub struct Trade {
     pub signature: Option<Bytes>,
     /// Price impact of the routed quote, in percent.
     pub price_impact_pct: Option<f64>,
-    /// The resolver's surplus over the taker's signed floor, net of gas, in `token_out` units.
+    /// Expected resolver profit from exact-out routing, net of estimated gas, in `token_in` base units.
     pub surplus: Option<U256>,
     pub tx_hash: Option<B256>,
     pub block_number: Option<u64>,
@@ -178,7 +178,10 @@ pub struct TradeView {
     pub input: TokenAmount,
     /// The output token and the amount delivered (or the signed floor, until it settles).
     pub output: TokenAmount,
-    /// The resolver's surplus over the signed floor, net of gas, in output-token units.
+    /// Price impact of the routed quote, in percent; absent when no route was found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_impact_pct: Option<f64>,
+    /// Expected resolver profit from exact-out routing, net of estimated gas, in input-token units.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub surplus: Option<Amount>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -197,6 +200,7 @@ pub struct TradeView {
     /// The signed order hash — detail only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order_hash: Option<String>,
+    /// Signed order expiry as Unix seconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deadline_block: Option<u64>,
 }

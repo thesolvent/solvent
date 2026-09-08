@@ -50,7 +50,6 @@ export function AppProvider({
             trail: [],
             detail: null,
             create: false,
-            xpTrade: null,
             xpStrat: null,
           });
           wipeTimers.current.push(
@@ -73,7 +72,6 @@ export function AppProvider({
         page,
         detail: previous.detail,
         create: previous.create,
-        xpTrade: previous.xpTrade,
         xpStrat: previous.xpStrat,
         maker: previous.maker,
       };
@@ -98,7 +96,6 @@ export function AppProvider({
       set({
         detail: null,
         create: false,
-        xpTrade: null,
         xpStrat: null,
         maker: null,
         trail: [],

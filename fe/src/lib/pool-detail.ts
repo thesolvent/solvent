@@ -65,7 +65,6 @@ export type PoolDetail = {
   totalLiq: string;
   makers: DetailMaker[];
   makerTotal: number;
-  settlements: { from: string; to: string; ago: string }[];
 };
 
 type Point = [x: number, y: number];
@@ -358,7 +357,5 @@ export function poolDetail(input: PoolDetailInput): PoolDetail {
     totalLiq: levels.length ? amountLabel(totalSize, baseSym) : "—",
     makers: rosterBy(roster, deliverable),
     makerTotal: roster?.makers.length ?? 0,
-    // Per-pool settlements need a pair-filtered trade read.
-    settlements: [],
   };
 }

@@ -1,229 +1,343 @@
-import { DROP_OPTIONS, explorerView, type DropKey } from "@/lib/explorer";
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import {
+  activityRow,
+  DROP_OPTIONS,
+  explorerStats,
+  explorerUrl,
+  tradeRow,
+  type DropKey,
+} from "@/lib/explorer";
+import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
+import { useActivity, useExplorerStats, useTrades } from "@/services/explorer";
+import { usePools } from "@/services/pools";
+import { useConfig } from "@/services/system";
 import { useApp } from "@/state";
-
+import { QueryFreshness } from "./QueryFreshness";
 import styles from "./explorer.module.css";
 
 const TABS = ["Trades", "Activity"];
 
-export function ExplorerPage() {
-  const { state, set, push } = useApp();
-  const xp = explorerView(state);
+function FilterDrop({ dkey, options }: { dkey: DropKey; options: string[] }) {
+  const { state, set } = useApp();
+  const open = state.xpOpen === dkey;
+  const current = state[dkey];
+  return (
+    <div className={styles.dropWrap}>
+      <button
+        type="button"
+        className={open ? styles.dropButtonOpen : styles.dropButton}
+        aria-expanded={open}
+        onClick={() => set({ xpOpen: open ? null : dkey })}
+      >
+        <span>{current}</span>
+        <span
+          aria-hidden="true"
+          className={open ? styles.dropCaretOpen : styles.dropCaret}
+        >
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div className={styles.dropMenu}>
+          {options.map((option) => (
+            <button
+              key={option}
+              type="button"
+              className={
+                current === option ? styles.dropItemOn : styles.dropItem
+              }
+              onClick={() => set({ [dkey]: option, xpOpen: null })}
+            >
+              <span>{option}</span>
+              <span className={styles.dropMark}>
+                {current === option ? "✓" : ""}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
-  const Drop = ({ dkey }: { dkey: DropKey }) => {
-    const open = state.xpOpen === dkey;
-    const current = state[dkey];
-    return (
-      <div className={styles.dropWrap}>
+function TradeList({ filter }: { filter: TradeFilter }) {
+  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
+  const query = useTrades(filter, cursors.at(-1));
+  const rows = query.data?.items.map(tradeRow) ?? [];
+  return (
+    <>
+      <div data-scroll="1" className={styles.list} aria-busy={query.isFetching}>
+        {query.isPending && (
+          <p className={styles.emptyNote} role="status">
+            Loading trades…
+          </p>
+        )}
+        {query.isError && (
+          <p className={styles.emptyNote} role="alert">
+            {query.data ? "Couldn’t refresh trades." : "Couldn’t load trades."}{" "}
+            <button type="button" onClick={() => void query.refetch()}>
+              Try again
+            </button>
+          </p>
+        )}
+        {!query.isPending && !query.isError && rows.length === 0 && (
+          <p className={styles.emptyNote}>No trades match these filters.</p>
+        )}
+        {rows.map((trade) => (
+          <Link
+            key={trade.id}
+            className={styles.tradeRow}
+            to={`/explorer/trades/${encodeURIComponent(trade.id)}`}
+            aria-label={`Open trade ${trade.id}`}
+          >
+            <span className={styles.tradePair}>
+              <span className={styles.tradePairName}>{trade.pair}</span>
+              <span className={styles.tradeBlk}>{trade.blk}</span>
+            </span>
+            <span className={styles.tradeFlow}>
+              <span className={styles.tradeIn}>{trade.inn}</span>
+              <span className={styles.tradeArrow}>→</span>
+              <span className={styles.tradeOut}>{trade.out}</span>
+            </span>
+            <span className={styles.tradeCell}>
+              <span className={styles.tradeCellValue}>{trade.makers}</span>
+              <span className={styles.tradeCellLabel}>makers</span>
+            </span>
+            <span className={styles.tradeCell}>
+              <span className={styles.tradeCellValue}>{trade.impact}</span>
+              <span className={styles.tradeCellLabel}>impact</span>
+            </span>
+            <span className={styles.tradeStatusCell}>
+              <span
+                className={styles.statusPill}
+                style={{ background: trade.stBg, color: trade.stFg }}
+              >
+                {trade.status}
+              </span>
+              <span className={styles.tradeTx}>{trade.tx}</span>
+            </span>
+            <span className={styles.chevron}>›</span>
+          </Link>
+        ))}
+      </div>
+      <div className={styles.footBar}>
         <button
           type="button"
-          className={open ? styles.dropButtonOpen : styles.dropButton}
-          onClick={() => set({ xpOpen: open ? null : dkey })}
+          className={styles.footButton}
+          disabled={cursors.length === 1 || query.isFetching}
+          onClick={() => setCursors((previous) => previous.slice(0, -1))}
         >
-          <span>{current}</span>
-          <span className={open ? styles.dropCaretOpen : styles.dropCaret}>
-            ▾
-          </span>
+          ← Prev
         </button>
-        {open && (
-          <div className={styles.dropMenu}>
-            {DROP_OPTIONS[dkey].map((o) => (
-              <button
-                key={o}
-                type="button"
-                className={current === o ? styles.dropItemOn : styles.dropItem}
-                onClick={() => set({ [dkey]: o, xpOpen: null })}
-              >
-                <span>{o}</span>
-                <span className={styles.dropMark}>
-                  {current === o ? "✓" : ""}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
+        <span className={styles.footNote}>
+          Page {cursors.length} · {rows.length} shown
+          <QueryFreshness query={query} />
+        </span>
+        <button
+          type="button"
+          className={styles.footButton}
+          disabled={
+            !query.data?.nextCursor || query.isFetching || query.isError
+          }
+          onClick={() => {
+            if (query.data?.nextCursor)
+              setCursors((previous) => [...previous, query.data.nextCursor]);
+          }}
+        >
+          Next →
+        </button>
       </div>
-    );
-  };
+    </>
+  );
+}
 
+function ActivityList({
+  filter,
+  explorerBase,
+}: {
+  filter: ActivityFilter;
+  explorerBase: string | undefined;
+}) {
+  const query = useActivity(filter);
+  const rows =
+    query.data?.pages.flatMap((page) => page.items).map(activityRow) ?? [];
+  return (
+    <>
+      <div data-scroll="1" className={styles.list} aria-busy={query.isFetching}>
+        {query.isPending && (
+          <p className={styles.emptyNote} role="status">
+            Loading activity…
+          </p>
+        )}
+        {query.isError && (
+          <p className={styles.emptyNote} role="alert">
+            {query.data
+              ? "Couldn’t refresh activity."
+              : "Couldn’t load activity."}{" "}
+            <button type="button" onClick={() => void query.refetch()}>
+              Try again
+            </button>
+          </p>
+        )}
+        {!query.isPending && !query.isError && rows.length === 0 && (
+          <p className={styles.emptyNote}>
+            {query.hasNextPage
+              ? "No matching events loaded. Load more to search older events."
+              : "No activity matches these filters."}
+          </p>
+        )}
+        {rows.map((row) => (
+          <a
+            key={row.id}
+            className={styles.activityRow}
+            href={explorerUrl(explorerBase, "tx", row.txHash)}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`View ${row.kind} transaction ${row.tx}`}
+          >
+            <div className={styles.activityTop}>
+              <span className={styles.mono}>{row.tx}</span>
+              <span
+                className={styles.kindTag}
+                style={{ background: row.kindBg, color: row.kindFg }}
+              >
+                {row.kind}
+              </span>
+              <span className={styles.who} title={row.maker}>
+                {row.who}
+              </span>
+              <span className={styles.spacer} />
+              <span className={styles.when}>{row.when}</span>
+            </div>
+            <div className={styles.activityBottom}>
+              <span className={styles.flow}>{row.flow}</span>
+              <span className={styles.spacer} />
+              <span className={styles.activityText} title={row.strategyHash}>
+                {row.text}
+              </span>
+            </div>
+          </a>
+        ))}
+      </div>
+      <div className={styles.footBar}>
+        <span className={styles.liveTag}>
+          <span>{rows.length} events loaded</span>
+          <QueryFreshness query={query} />
+        </span>
+        <button
+          type="button"
+          className={styles.footButton}
+          disabled={!query.hasNextPage || query.isFetching}
+          onClick={() => void query.fetchNextPage()}
+        >
+          Load more
+        </button>
+      </div>
+    </>
+  );
+}
+
+export function ExplorerPage() {
+  const { state, set } = useApp();
+  const pools = usePools();
+  const config = useConfig();
+  const stats = useExplorerStats();
+  const isTrades = state.xpTab === "Trades";
+  const pairs = [...new Set(pools.map((pool) => pool.pair.replace(/\s/g, "")))];
+  const pair = pools.find(
+    (pool) => pool.pair.replace(/\s/g, "") === state.xpPair,
+  )?.ref;
+  const filter: TradeFilter = {
+    ...(state.xpStatus === "All status" ? {} : { status: state.xpStatus }),
+    ...(pair ? { base: pair.base, quote: pair.quote } : {}),
+  };
+  const activityFilter: ActivityFilter = {
+    ...(state.xpType === "All types" ? {} : { kind: state.xpType }),
+    ...(state.xpEnt === "All entities" ? {} : { entity: state.xpEnt }),
+  };
   return (
     <div className={styles.root}>
       <div className={styles.headWide}>
         <div className={styles.headTitle}>
           <div className={styles.eyebrow}>Explorer</div>
-          <div className={styles.titleLg}>{xp.pageTitle}</div>
+          <div className={styles.titleLg}>
+            {isTrades ? "Trades" : "Protocol activity"}
+          </div>
         </div>
         <span className={styles.limeSquare} />
-        <p className={styles.pageDesc}>{xp.pageDesc}</p>
+        <p className={styles.pageDesc}>
+          {isTrades
+            ? "Every intent through Solvent: pair, in → out, makers sourced, status, price impact and tx."
+            : "Aqua-level events: makers registering strategies, pushing and pulling balance, and docking positions."}
+        </p>
       </div>
-
       <div className={styles.stats5}>
-        {xp.stats.map((k) => (
+        {explorerStats(stats.data).map((stat) => (
           <div
-            key={k.label}
+            key={stat.label}
             className={styles.stat}
             style={{
-              backgroundImage: `linear-gradient(${k.sep}, ${k.sep})`,
+              backgroundImage: `linear-gradient(${stat.sep}, ${stat.sep})`,
             }}
           >
-            <div className={styles.statLabel}>{k.label}</div>
+            <div className={styles.statLabel}>{stat.label}</div>
             <div className={styles.statRow}>
-              <span className={styles.statValue}>{k.value}</span>
-              <span className={styles.statSub} style={{ color: k.accent }}>
-                {k.sub}
+              <span className={styles.statValue}>{stat.value}</span>
+              <span className={styles.statSub} style={{ color: stat.accent }}>
+                {stat.sub}
               </span>
             </div>
+            {stat.label === "Block height" && <QueryFreshness query={stats} />}
           </div>
         ))}
       </div>
-
+      {stats.isError && (
+        <p role="alert" className={styles.emptyNote}>
+          Couldn’t refresh stats.{" "}
+          <button type="button" onClick={() => void stats.refetch()}>
+            Try again
+          </button>
+        </p>
+      )}
       <div className={styles.filterBar}>
         <div className={styles.tabGroup}>
-          {TABS.map((t) => (
+          {TABS.map((tab) => (
             <button
-              key={t}
+              key={tab}
               type="button"
-              className={t === state.xpTab ? styles.tabOn : styles.tab}
-              onClick={() => set({ xpTab: t, xpOpen: null })}
+              className={tab === state.xpTab ? styles.tabOn : styles.tab}
+              onClick={() => set({ xpTab: tab, xpOpen: null })}
             >
-              {t}
+              {tab}
             </button>
           ))}
         </div>
         <div className={styles.drops}>
-          {xp.isTrades ? (
+          {isTrades ? (
             <>
-              <Drop dkey="xpStatus" />
-              <Drop dkey="xpPair" />
+              <FilterDrop dkey="xpStatus" options={DROP_OPTIONS.xpStatus} />
+              <FilterDrop dkey="xpPair" options={["All pairs", ...pairs]} />
             </>
           ) : (
             <>
-              <Drop dkey="xpType" />
-              <Drop dkey="xpEnt" />
+              <FilterDrop dkey="xpType" options={DROP_OPTIONS.xpType} />
+              <FilterDrop dkey="xpEnt" options={DROP_OPTIONS.xpEnt} />
             </>
           )}
         </div>
       </div>
-
-      {xp.isTrades ? (
-        <>
-          <div data-scroll="1" className={styles.list}>
-            {xp.trades.map((t) => (
-              <div
-                key={t.index}
-                className={styles.tradeRow}
-                onClick={() => push({ xpTrade: t.index }, "Explorer")}
-              >
-                <span className={styles.tradePair}>
-                  <span className={styles.tradePairName}>{t.pair}</span>
-                  <span className={styles.tradeBlk}>{t.blk}</span>
-                </span>
-                <span className={styles.tradeFlow}>
-                  <span className={styles.tradeIn}>{t.inn}</span>
-                  <span className={styles.tradeArrow}>→</span>
-                  <span className={styles.tradeOut}>{t.out}</span>
-                </span>
-                <span className={styles.tradeCell}>
-                  <span className={styles.tradeCellValue}>{t.makers}</span>
-                  <span className={styles.tradeCellLabel}>makers</span>
-                </span>
-                <span className={styles.tradeCell}>
-                  <span className={styles.tradeCellValue}>{t.impact}</span>
-                  <span className={styles.tradeCellLabel}>impact</span>
-                </span>
-                <span className={styles.tradeStatusCell}>
-                  <span
-                    className={styles.statusPill}
-                    style={{
-                      background: t.stBg,
-                      color: t.stFg,
-                    }}
-                  >
-                    {t.status}
-                  </span>
-                  <span className={styles.tradeTx}>{t.tx}</span>
-                </span>
-                <span className={styles.chevron}>›</span>
-              </div>
-            ))}
-          </div>
-          <div className={styles.footBar}>
-            <button type="button" className={styles.footButton}>
-              ← Prev
-            </button>
-            <span className={styles.footNote}>{xp.tradeNote}</span>
-            <button type="button" className={styles.footButton}>
-              Next →
-            </button>
-          </div>
-        </>
+      {isTrades ? (
+        state.xpPair === "All pairs" || pair ? (
+          <TradeList key={JSON.stringify(filter)} filter={filter} />
+        ) : (
+          <p className={styles.emptyNote}>Selected pair is unavailable.</p>
+        )
       ) : (
-        <>
-          <div data-scroll="1" className={styles.list}>
-            {xp.rows.map(({ row: r, hasTrade, kindBg, kindFg, target }, i) => (
-              <button
-                key={`${r.tx}-${i}`}
-                type="button"
-                className={styles.activityRow}
-                onClick={() =>
-                  target.kind === "trade"
-                    ? push(
-                        {
-                          page: "Explorer",
-                          xpTrade: target.index,
-                        },
-                        "Explorer",
-                      )
-                    : push(
-                        {
-                          page: "Explorer",
-                          xpStrat: target.sel,
-                        },
-                        "Explorer",
-                      )
-                }
-              >
-                <div className={styles.activityTop}>
-                  <span className={styles.mono}>{r.tx}</span>
-                  <span
-                    className={styles.kindTag}
-                    style={{
-                      background: kindBg,
-                      color: kindFg,
-                    }}
-                  >
-                    {r.kind}
-                  </span>
-                  <span className={styles.who}>{r.who}</span>
-                  <span className={styles.spacer} />
-                  <span className={styles.when}>
-                    blk {r.blk} · {r.ago} ago
-                  </span>
-                </div>
-                <div className={styles.activityBottom}>
-                  <span className={styles.flow}>{r.flow}</span>
-                  <span className={styles.spacer} />
-                  {hasTrade && (
-                    <span className={styles.tradeLinkWrap}>
-                      <span className={styles.tradeLink}>
-                        trade {r.trade} ↗
-                      </span>
-                    </span>
-                  )}
-                  <span className={styles.activityText}>{r.text}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-          <div className={styles.footBar}>
-            <span className={styles.liveTag}>
-              <span className={styles.livePulse} />
-              <span>live · {xp.rowNote}</span>
-            </span>
-            <button type="button" className={styles.footButton}>
-              Load more
-            </button>
-          </div>
-        </>
+        <ActivityList
+          filter={activityFilter}
+          explorerBase={config.data?.block_explorer_url}
+        />
       )}
     </div>
   );

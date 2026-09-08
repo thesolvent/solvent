@@ -22,7 +22,6 @@ function ExplorerRoute() {
   const { state } = useApp();
 
   if (state.xpStrat !== null) return <StrategyPage />;
-  if (state.xpTrade !== null) return <TradeDetailPage />;
   return <ExplorerPage />;
 }
 
@@ -44,6 +43,7 @@ function Shell() {
         <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
         <Route path="/makers" element={<MakersPage />} />
         <Route path="/explorer" element={<ExplorerRoute />} />
+        <Route path="/explorer/trades/:tradeId" element={<TradeDetailPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>

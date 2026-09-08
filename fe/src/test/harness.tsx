@@ -8,6 +8,7 @@ import { anvil } from "wagmi/chains";
 
 import { AppProvider } from "@/AppProvider";
 import type { AssetsPort } from "@/ports/assets";
+import type { ExplorerPort } from "@/ports/explorer";
 import type { PoolsPort } from "@/ports/pools";
 import type { SwapPort } from "@/ports/swap";
 import type { SystemPort } from "@/ports/system";
@@ -36,6 +37,7 @@ const wagmiConfig = createConfig({
 });
 
 export interface Stubs {
+  explorer?: Partial<ExplorerPort>;
   assets?: Partial<AssetsPort>;
   pools?: Partial<PoolsPort>;
   swap?: Partial<SwapPort>;
@@ -44,6 +46,7 @@ export interface Stubs {
 
 export function fakeServices(stubs: Stubs): Services {
   return {
+    explorer: port("explorer", stubs.explorer ?? {}),
     assets: port("assets", stubs.assets ?? {}),
     pools: port("pools", stubs.pools ?? {}),
     swap: port("swap", stubs.swap ?? {}),
@@ -55,6 +58,7 @@ export function fakeServices(stubs: Stubs): Services {
 export function renderWithServices(
   ui: ReactElement,
   stubs: Stubs = {},
+  route = "/",
 ): RenderResult {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 } },
@@ -65,7 +69,7 @@ export function renderWithServices(
         services={fakeServices(stubs)}
         queryClient={queryClient}
       >
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[route]}>
           <AppProvider>{ui}</AppProvider>
         </MemoryRouter>
       </ServicesProvider>

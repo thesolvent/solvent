@@ -8,6 +8,7 @@ import { toPool } from "../mappers/pool";
 import { toDepthCurve, toPoolRoster } from "../mappers/pool-detail";
 import { swapAdapter } from "./swap";
 import { solventApi } from "./client";
+import { explorerAdapter } from "./explorer";
 
 const pools: PoolsPort = {
   async list() {
@@ -44,6 +45,7 @@ const system: SystemPort = {
 
 /** The live implementations the composition root injects. */
 export const httpServices: Services = {
+  explorer: explorerAdapter,
   assets,
   pools,
   swap: swapAdapter,

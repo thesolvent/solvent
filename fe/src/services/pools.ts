@@ -3,11 +3,13 @@ import { skipToken, useQuery } from "@tanstack/react-query";
 import type { DepthCurve, PairRef, Pool, PoolRoster } from "@/data";
 
 import { useServices } from "./context";
+import { LIVE_QUERY_OPTIONS } from "./live";
 
 /** Every pool, already formatted for display. Empty until the first read resolves. */
 export function usePools(): Pool[] {
   const { pools } = useServices();
   const { data } = useQuery({
+    ...LIVE_QUERY_OPTIONS,
     queryKey: ["pools"],
     queryFn: () => pools.list(),
   });
@@ -32,6 +34,7 @@ function usePairQuery<T>(
 ): T | undefined {
   const ref = pool?.ref;
   const { data } = useQuery({
+    ...LIVE_QUERY_OPTIONS,
     queryKey: [name, ref?.base, ref?.quote],
     queryFn: ref ? () => read(ref) : skipToken,
   });

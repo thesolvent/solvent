@@ -1118,7 +1118,10 @@ export interface components {
                     block_number?: number | null;
                     /** Format: int64 */
                     created_at: number;
-                    /** Format: int64 */
+                    /**
+                     * Format: int64
+                     * @description Signed order expiry as Unix seconds.
+                     */
                     deadline_block?: number | null;
                     id: string;
                     /** @description The swapper's input token and the maximum it authorized. */
@@ -1131,6 +1134,11 @@ export interface components {
                     order_hash?: string | null;
                     /** @description The output token and the amount delivered (or the signed floor, until it settles). */
                     output: components["schemas"]["TokenAmount"];
+                    /**
+                     * Format: double
+                     * @description Price impact of the routed quote, in percent; absent when no route was found.
+                     */
+                    price_impact_pct?: number | null;
                     /** Format: int64 */
                     settled_at?: number | null;
                     status: string;
@@ -1301,7 +1309,10 @@ export interface components {
                 block_number?: number | null;
                 /** Format: int64 */
                 created_at: number;
-                /** Format: int64 */
+                /**
+                 * Format: int64
+                 * @description Signed order expiry as Unix seconds.
+                 */
                 deadline_block?: number | null;
                 id: string;
                 /** @description The swapper's input token and the maximum it authorized. */
@@ -1314,6 +1325,11 @@ export interface components {
                 order_hash?: string | null;
                 /** @description The output token and the amount delivered (or the signed floor, until it settles). */
                 output: components["schemas"]["TokenAmount"];
+                /**
+                 * Format: double
+                 * @description Price impact of the routed quote, in percent; absent when no route was found.
+                 */
+                price_impact_pct?: number | null;
                 /** Format: int64 */
                 settled_at?: number | null;
                 status: string;
@@ -1413,7 +1429,10 @@ export interface components {
             block_number?: number | null;
             /** Format: int64 */
             created_at: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Signed order expiry as Unix seconds.
+             */
             deadline_block?: number | null;
             id: string;
             /** @description The swapper's input token and the maximum it authorized. */
@@ -1426,6 +1445,11 @@ export interface components {
             order_hash?: string | null;
             /** @description The output token and the amount delivered (or the signed floor, until it settles). */
             output: components["schemas"]["TokenAmount"];
+            /**
+             * Format: double
+             * @description Price impact of the routed quote, in percent; absent when no route was found.
+             */
+            price_impact_pct?: number | null;
             /** Format: int64 */
             settled_at?: number | null;
             status: string;

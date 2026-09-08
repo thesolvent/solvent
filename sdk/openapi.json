@@ -3058,6 +3058,7 @@
                         "null"
                       ],
                       "format": "int64",
+                      "description": "Signed order expiry as Unix seconds.",
                       "minimum": 0
                     },
                     "id": {
@@ -3098,6 +3099,14 @@
                       "$ref": "#/components/schemas/TokenAmount",
                       "description": "The output token and the amount delivered (or the signed floor, until it settles)."
                     },
+                    "price_impact_pct": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "format": "double",
+                      "description": "Price impact of the routed quote, in percent; absent when no route was found."
+                    },
                     "settled_at": {
                       "type": [
                         "integer",
@@ -3116,7 +3125,7 @@
                         },
                         {
                           "$ref": "#/components/schemas/Amount",
-                          "description": "The resolver's surplus over the signed floor, net of gas, in output-token units."
+                          "description": "Expected resolver profit from exact-out routing, net of estimated gas, in input-token units."
                         }
                       ]
                     },
@@ -3652,6 +3661,7 @@
                   "null"
                 ],
                 "format": "int64",
+                "description": "Signed order expiry as Unix seconds.",
                 "minimum": 0
               },
               "id": {
@@ -3692,6 +3702,14 @@
                 "$ref": "#/components/schemas/TokenAmount",
                 "description": "The output token and the amount delivered (or the signed floor, until it settles)."
               },
+              "price_impact_pct": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "double",
+                "description": "Price impact of the routed quote, in percent; absent when no route was found."
+              },
               "settled_at": {
                 "type": [
                   "integer",
@@ -3710,7 +3728,7 @@
                   },
                   {
                     "$ref": "#/components/schemas/Amount",
-                    "description": "The resolver's surplus over the signed floor, net of gas, in output-token units."
+                    "description": "Expected resolver profit from exact-out routing, net of estimated gas, in input-token units."
                   }
                 ]
               },
@@ -3993,6 +4011,7 @@
               "null"
             ],
             "format": "int64",
+            "description": "Signed order expiry as Unix seconds.",
             "minimum": 0
           },
           "id": {
@@ -4033,6 +4052,14 @@
             "$ref": "#/components/schemas/TokenAmount",
             "description": "The output token and the amount delivered (or the signed floor, until it settles)."
           },
+          "price_impact_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Price impact of the routed quote, in percent; absent when no route was found."
+          },
           "settled_at": {
             "type": [
               "integer",
@@ -4051,7 +4078,7 @@
               },
               {
                 "$ref": "#/components/schemas/Amount",
-                "description": "The resolver's surplus over the signed floor, net of gas, in output-token units."
+                "description": "Expected resolver profit from exact-out routing, net of estimated gas, in input-token units."
               }
             ]
           },

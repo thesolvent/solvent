@@ -1,5 +1,5 @@
 import { Crumbs } from "@/components/Crumbs";
-import { strategyDetail } from "@/lib/explorer";
+import { strategyDetail } from "@/lib/strategy";
 import { useApp } from "@/state";
 
 import styles from "./explorer.module.css";
@@ -37,7 +37,6 @@ export function StrategyPage() {
                   detail: sd.poolIndex,
                   create: false,
                   xpStrat: null,
-                  xpTrade: null,
                 },
                 "Strategy",
               )
@@ -56,7 +55,6 @@ export function StrategyPage() {
                   detail: null,
                   create: false,
                   xpStrat: null,
-                  xpTrade: null,
                 },
                 "Strategy",
               )
@@ -216,7 +214,7 @@ export function StrategyPage() {
                 key={`${x.hash}-${i}`}
                 type="button"
                 className={styles.fillRow}
-                onClick={() => push({ xpStrat: null, xpTrade: 0 }, "Strategy")}
+                onClick={() => push({ xpStrat: null }, "Strategy")}
               >
                 <div className={styles.fillTop}>
                   <span className={styles.mono}>{x.hash}</span>
