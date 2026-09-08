@@ -141,13 +141,34 @@ impl Candidate {
         })
     }
 
+    /// Probe output below which integer truncation dominates the rate it implies.
+    const MIN_PROBE_OUT: u64 = 1_000_000;
+
+    /// Fractions of the trade size to probe the marginal rate at, narrowest first.
+    const PROBE_DIVISORS: [u64; 3] = [1_000_000, 1_000, 1];
+
     /// A conservative estimate of the pool's spot marginal (net output-per-input as the trade
     /// → 0): the secant slope over a tiny probe. For a concave curve the secant lies below the
     /// true tangent, so this under-estimates — the certificate built on it may miss a case,
     /// never false-alarm. A diagnostic, not a proof.
+    ///
+    /// The probe must also be big enough to survive the quote truncating to whole base units: one
+    /// resolving to a handful of them implies a rate wrong by tens of percent, which then reads as
+    /// price impact. So widen it until its output can be divided meaningfully, and failing that
+    /// take the trade size itself, where impact is genuinely below what can be measured.
     pub fn spot_marginal(&self, amount: U256) -> Option<Ratio> {
-        let probe = (amount / U256::from(1_000_000u64)).max(U256::from(1u64));
-        Ratio::new(self.net_quote_exact_in(probe).ok()?, probe)
+        let mut marginal = None;
+        for divisor in Self::PROBE_DIVISORS {
+            let probe = (amount / U256::from(divisor)).max(U256::from(1u64));
+            let Ok(out) = self.net_quote_exact_in(probe) else {
+                break;
+            };
+            marginal = Ratio::new(out, probe);
+            if out >= U256::from(Self::MIN_PROBE_OUT) {
+                break;
+            }
+        }
+        marginal
     }
 }
 
@@ -373,6 +394,35 @@ mod tests {
 
     fn caps(entries: &[(AccountKey, u64)]) -> AvailableSnapshot {
         AvailableSnapshot(entries.iter().map(|(k, v)| (*k, U256::from(*v))).collect())
+    }
+
+    /// A trade far too small to move a deep pool must not report double-digit impact.
+    ///
+    /// The marginal rate was probed at a millionth of the trade, which on a small trade quotes
+    /// only a few whole base units — a rate wrong enough that the real one looked better than it,
+    /// and the magnitude of that gap was reported as impact.
+    #[test]
+    fn a_dust_trade_on_a_deep_pool_has_no_measurable_impact() {
+        let (in_tok, out_tok) = (tok(1), tok(2));
+        let (m, h) = (maker(9), hash(9));
+        let deep = 1_000_000_000_000_000_000u64;
+        let snapshot = Snapshot::from_strategies([xyc(m, h, in_tok, out_tok, deep)]);
+        let available = caps(&[
+            (virt(m, h, out_tok), deep),
+            (wallet(m, out_tok), deep),
+            (virt(m, h, in_tok), deep),
+            (wallet(m, in_tok), deep),
+        ]);
+
+        const SIZE: u64 = 1_000_000;
+        let amount = U256::from(SIZE);
+        let selection = select(&snapshot, &available, &request(in_tok, out_tok, SIZE), 4);
+        let out = selection.chosen[0]
+            .net_quote_exact_in(amount)
+            .expect("a dust trade prices against a pool this deep");
+
+        let impact = price_impact_pct(&selection.chosen, amount, out);
+        assert!(impact < 0.1, "dust trade reported {impact}% impact");
     }
 
     #[test]
