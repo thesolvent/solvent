@@ -89,7 +89,6 @@ export type AppState = {
   mkBar: number | null;
   mkLat: number | null;
 
-  tdStage: number | null;
   xpTab: string;
   xpType: string;
   xpEnt: string;
@@ -169,7 +168,6 @@ export const INITIAL_STATE: AppState = {
   mkBar: null,
   mkLat: null,
 
-  tdStage: null,
   xpTab: "Trades",
   xpType: "All types",
   xpEnt: "All entities",

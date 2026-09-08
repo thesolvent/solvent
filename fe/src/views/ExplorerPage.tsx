@@ -2,11 +2,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   activityRow,
-  DROP_OPTIONS,
   explorerStats,
   explorerUrl,
   tradeRow,
-  type DropKey,
 } from "@/lib/explorer";
 import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
 import { useActivity, useExplorerStats, useTrades } from "@/services/explorer";
@@ -17,6 +15,24 @@ import { QueryFreshness } from "./QueryFreshness";
 import styles from "./explorer.module.css";
 
 const TABS = ["Trades", "Activity"];
+
+const DROP_OPTIONS = {
+  xpType: ["All types", "pull", "push", "dock", "register"],
+  xpEnt: ["All entities", "Maker", "Resolver"],
+  xpStatus: [
+    "All status",
+    "created",
+    "quoted",
+    "reserved",
+    "simulated",
+    "submitted",
+    "confirmed",
+    "declined",
+    "failed",
+  ],
+  xpPair: ["All pairs"],
+};
+type DropKey = keyof typeof DROP_OPTIONS;
 
 function FilterDrop({ dkey, options }: { dkey: DropKey; options: string[] }) {
   const { state, set } = useApp();
@@ -93,12 +109,12 @@ function TradeList({ filter }: { filter: TradeFilter }) {
           >
             <span className={styles.tradePair}>
               <span className={styles.tradePairName}>{trade.pair}</span>
-              <span className={styles.tradeBlk}>{trade.blk}</span>
+              <span className={styles.tradeBlk}>{trade.blockLabel}</span>
             </span>
             <span className={styles.tradeFlow}>
-              <span className={styles.tradeIn}>{trade.inn}</span>
+              <span className={styles.tradeIn}>{trade.input}</span>
               <span className={styles.tradeArrow}>→</span>
-              <span className={styles.tradeOut}>{trade.out}</span>
+              <span className={styles.tradeOut}>{trade.output}</span>
             </span>
             <span className={styles.tradeCell}>
               <span className={styles.tradeCellValue}>{trade.makers}</span>
@@ -109,13 +125,10 @@ function TradeList({ filter }: { filter: TradeFilter }) {
               <span className={styles.tradeCellLabel}>impact</span>
             </span>
             <span className={styles.tradeStatusCell}>
-              <span
-                className={styles.statusPill}
-                style={{ background: trade.stBg, color: trade.stFg }}
-              >
+              <span className={styles.statusPill} style={trade.statusStyle}>
                 {trade.status}
               </span>
-              <span className={styles.tradeTx}>{trade.tx}</span>
+              <span className={styles.tradeTx}>{trade.transactionLabel}</span>
             </span>
             <span className={styles.chevron}>›</span>
           </Link>

@@ -833,19 +833,35 @@
   text-overflow: ellipsis;
 }
 
+.phase {
+  min-width: 0;
+}
+
 .phaseRule {
   height: 3px;
   margin-top: 7px;
+  background: var(--line);
+}
+
+.phase[data-complete="true"] .phaseRule {
+  background: var(--lime);
+}
+
+.phase[data-complete="true"]:last-child .phaseRule {
+  background: var(--ink);
 }
 
 .timeline {
-  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-rows: 22px 1fr;
   height: 128px;
   min-width: 0;
   margin-top: 10px;
 }
 
 .timelineMeta {
+  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   height: 22px;
@@ -867,36 +883,61 @@
 }
 
 .step {
-  position: absolute;
-  top: 22px;
-  width: calc(16.666% - 6px);
+  --stage-color: var(--lime);
+  min-width: 0;
+  margin: 0 3px;
+  color: var(--text-dim);
+}
+
+.step[data-phase="settle"] {
+  --stage-color: var(--ink);
+}
+
+.step[data-state="recorded"] {
+  color: var(--ink);
+}
+
+.step[data-state="recorded"] .stepBar {
+  border-style: solid;
+  border-color: var(--stage-color);
+}
+
+.step:hover .stepBar {
+  transform: translateY(-2px);
+}
+
+.step[data-state="recorded"]:hover .stepBar {
+  box-shadow: 0 6px 16px rgba(11, 11, 11, 0.16);
 }
 
 .stepBar {
   position: relative;
   overflow: hidden;
   height: 34px;
-  cursor: pointer;
   transition:
     box-shadow 160ms ease,
     transform 160ms cubic-bezier(0.22, 0.8, 0.3, 1);
-  border-width: 1px;
+  border: 1px dashed #e0e0dc;
   background: var(--paper);
 }
 
 .stepFill {
+  background: var(--stage-color);
   position: absolute;
   inset: 0;
   transform-origin: left center;
   composes: fill520 from "../styles/animations.module.css";
 }
 
-.stepBarCurrent {
-  composes: stepBar;
+.step .stepFill {
+  animation-delay: calc(var(--stage-index) * 130ms);
+}
+
+[aria-current="step"] .stepBar {
   background: var(--lime-wash-faint);
 }
 
-.stepBarCurrent::after {
+[aria-current="step"] .stepBar::after {
   content: "";
   position: absolute;
   width: 32%;
@@ -919,8 +960,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .liveStatus,
-  .stepFill,
-  .stepBarCurrent::after,
+  .step .stepFill,
+  [aria-current="step"] .stepBar::after,
   .freshness .refreshDot {
     animation: none;
   }
@@ -932,11 +973,16 @@
 }
 
 .stepLead {
+  height: 8px;
   width: 1px;
   margin-left: 11px;
   background-image: linear-gradient(var(--line-mid) 55%, transparent 0);
   background-size: 1px 6px;
   background-repeat: repeat-y;
+}
+
+.step:nth-child(odd) .stepLead {
+  height: 26px;
 }
 
 .stepText {

@@ -186,6 +186,12 @@ describe("Trade detail navigation", () => {
           await vi.advanceTimersByTimeAsync(1);
         });
         expect(screen.getByRole("alert")).toHaveTextContent("Trade not found.");
+        expect(
+          screen.queryByText(`Trade #${detail.id}`),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.getByRole("link", { name: "Back to Explorer" }),
+        ).toHaveAttribute("href", "/explorer");
         await act(async () => {
           await vi.advanceTimersByTimeAsync(30_000);
         });
@@ -225,27 +231,5 @@ describe("Trade detail navigation", () => {
     expect(
       await screen.findByRole("link", { name: "Return to trade" }),
     ).toBeInTheDocument();
-  });
-
-  it("shows an unknown trade without falling back to a fixture", async () => {
-    renderWithServices(
-      routes(),
-      {
-        explorer: {
-          trade: vi
-            .fn()
-            .mockRejectedValue(new SolventApiError(404, "trade not found")),
-        },
-        system: { config: vi.fn().mockResolvedValue({}) },
-      },
-      "/explorer/trades/missing",
-    );
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Trade not found.",
-    );
-    expect(screen.queryByText(`Trade #${detail.id}`)).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "Back to Explorer" }),
-    ).toHaveAttribute("href", "/explorer");
   });
 });

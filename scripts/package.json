@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Devnet harness: bootstrap config from the deploy manifest, seed maker liquidity, smoke the API.",
+  "engines": {
+    "node": "^22.18.0 || >=24.2.0"
+  },
   "scripts": {
     "bootstrap": "node src/devnet/bootstrap.ts",
     "etch": "node src/devnet/etch.ts",

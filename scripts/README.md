@@ -2,6 +2,8 @@
 
 Bring up a devnet, point the server at it, seed maker liquidity, and check the read API is healthy.
 
+Requires Node **22.18+ (22.x)** or **24.2+** for native TypeScript execution and `import.meta.main`.
+
 Host ports: **8545** chain · **5100** explorer · **8080** Solvent server · **8081** faucet.
 
 ## Bring it up
@@ -59,8 +61,11 @@ cd contracts && forge script script/DeployDevnet.s.sol:DeployDevnet --broadcast 
   and positions modules a maker client uses, so a break here is a genuine break.
 - The deploy manifest is bind-mounted to `contracts/deployments/` so the host can generate config
   from it; the chain itself persists in the `anvil-state` volume.
-- Node seed/trade scripts use the SDK's published CommonJS entry points through `createRequire`;
-  upstream ESM assumes a bundler. No custom module loader is needed.
+- `src/lib/node-runtime.ts` loads the SDK's published CommonJS entry points through `createRequire`
+  because upstream ESM assumes a bundler. It also loads viem's client constructors from CommonJS:
+  SDK receipt retries rely on matching error constructors. Pure viem helpers can use normal imports.
+- Seed/trade modules connect only when invoked as the CLI entry point; importing them performs no
+  network calls. Their stages receive the verified devnet connection explicitly.
 - Generated config, the token list, the signing env, the database, and the manifest are untracked.
 - Permit2 uses the same checked-in runtime fixture as the Rust integration harness. `etch` verifies its domain for chain 31337 before signing tests run.
 

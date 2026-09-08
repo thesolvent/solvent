@@ -1,6 +1,7 @@
 import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
-import { isMissingTrade, isTerminalTrade } from "@/lib/explorer";
+import { SolventApiError } from "@solvent/sdk/client";
+import { isTerminalTrade } from "@/lib/trade-lifecycle";
 import { useServices } from "./context";
 import { LIVE_QUERY_OPTIONS } from "./live";
 
@@ -48,4 +49,13 @@ export function useTrade(id: string | undefined) {
         ? false
         : 2_000,
   });
+}
+
+function isMissingTrade(error: unknown): boolean {
+  return error instanceof SolventApiError && [400, 404].includes(error.status);
+}
+
+export function tradeProblem(error: unknown): string {
+  if (isMissingTrade(error)) return "Trade not found.";
+  return "Couldn’t load this trade. Try again.";
 }

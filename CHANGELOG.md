@@ -262,6 +262,10 @@ the project is pre-1.0 and evolving.
   stage indicator and reduced-motion support. Explorer, activity, stats, pool data and assets refresh
   every five seconds while visible and on focus/reconnect; timestamps distinguish fresh, delayed,
   and paused updates. Pool detail now lists actual confirmed settlements for both pair directions.
+- **Explorer maintainability** — lifecycle progress is a semantic model rendered by a focused
+  component; CSS owns layout and hover, without app-wide pointer state. Query errors stay in the
+  service layer. Stage fills preserve staggered timing and respect reduced motion regardless of
+  shared stylesheet order. Duplicate missing-trade coverage is consolidated.
 - **S4 · pools — the list and detail views, wired end to end.** The frontend gains the same seam the
   backend has: `ports/` (the domain types views speak), `adapters/{http,mappers}` (OpenAPI DTO →
   domain), `services/` (TanStack Query hooks), `lib/` (view-model math), `views/` (as migrated from
@@ -288,6 +292,9 @@ the project is pre-1.0 and evolving.
     and checks the read API. Scripts verify the devnet deployment before minting or signing, reuse
     SDK approval/signing, and save a local report counting only receipt-verified confirmations.
     Node uses the supported CommonJS SDK/viem entry points without a custom module loader.
+  - Seed commands have explicit setup, funding, execution and reporting stages, with inert imports
+    and one narrow SDK/viem runtime bridge. Native TypeScript scripts require Node 22.18+ (22.x)
+    or 24.2+; frontend and SDK runtime requirements are unchanged.
 
 ### Changed — backend (`crates/`)
 - **Trade responses expose stored price impact** for Explorer list and detail. OpenAPI and SDK types

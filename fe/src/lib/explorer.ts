@@ -1,4 +1,3 @@
-import { SolventApiError } from "@solvent/sdk/client";
 import type {
   ActivityRecord,
   ExplorerStats,
@@ -6,35 +5,15 @@ import type {
   TradeRecord,
 } from "@/data/explorer";
 
-export const STATUS_TONE: Record<string, [string, string]> = {
-  confirmed: ["var(--lime-wash-soft)", "var(--green-darkest)"],
-  declined: ["var(--warn-bg)", "var(--warn-ink)"],
-  "reorg-open": ["var(--info-bg)", "var(--info-ink)"],
-  failed: ["var(--err-bg)", "var(--err-ink)"],
-  pending: ["#eef0f4", "#4a5a72"],
+const STATUS_TONE: Record<string, { background: string; color: string }> = {
+  confirmed: {
+    background: "var(--lime-wash-soft)",
+    color: "var(--green-darkest)",
+  },
+  declined: { background: "var(--warn-bg)", color: "var(--warn-ink)" },
+  failed: { background: "var(--err-bg)", color: "var(--err-ink)" },
+  pending: { background: "#eef0f4", color: "#4a5a72" },
 };
-
-export const DROP_OPTIONS = {
-  xpType: ["All types", "pull", "push", "dock", "register"],
-  xpEnt: ["All entities", "Maker", "Resolver"],
-  xpStatus: [
-    "All status",
-    "created",
-    "quoted",
-    "reserved",
-    "simulated",
-    "submitted",
-    "confirmed",
-    "declined",
-    "failed",
-  ],
-  xpPair: ["All pairs"],
-};
-export type DropKey = keyof typeof DROP_OPTIONS;
-
-export function isTerminalTrade(status: string): boolean {
-  return ["confirmed", "declined", "failed"].includes(status);
-}
 
 export function shortHash(value: string | null): string {
   return value ? `${value.slice(0, 8)}…${value.slice(-6)}` : "—";
@@ -70,15 +49,6 @@ export function explorerUrl(
   } catch {
     return undefined;
   }
-}
-
-export function isMissingTrade(error: unknown): boolean {
-  return error instanceof SolventApiError && [400, 404].includes(error.status);
-}
-
-export function tradeProblem(error: unknown): string {
-  if (isMissingTrade(error)) return "Trade not found.";
-  return "Couldn’t load this trade. Try again.";
 }
 
 const numberText = (value: number | null | undefined) =>
@@ -131,22 +101,20 @@ export function explorerStats(stats: ExplorerStats | undefined) {
 }
 
 export function tradeRow(trade: TradeRecord) {
-  const [stBg, stFg] = STATUS_TONE[trade.status] ?? STATUS_TONE.pending;
   return {
     id: trade.id,
     pair: `${trade.input.symbol}/${trade.output.symbol}`,
-    blk:
+    blockLabel:
       trade.blockNumber == null
         ? "not settled"
         : `blk ${numberText(trade.blockNumber)}`,
-    inn: tokenText(trade.input),
-    out: `${trade.status === "confirmed" ? "" : "min. "}${tokenText(trade.output)}`,
+    input: tokenText(trade.input),
+    output: `${trade.status === "confirmed" ? "" : "min. "}${tokenText(trade.output)}`,
     makers: numberText(trade.makers),
     impact: percent(trade.priceImpactPct),
     status: trade.status,
-    tx: shortHash(trade.txHash),
-    stBg,
-    stFg,
+    transactionLabel: shortHash(trade.txHash),
+    statusStyle: STATUS_TONE[trade.status] ?? STATUS_TONE.pending,
   };
 }
 
@@ -191,43 +159,14 @@ export function activityRow(record: ActivityRecord) {
   };
 }
 
-const STAGES = [
-  "Created",
-  "Quoted",
-  "Reserved",
-  "Simulated",
-  "Submitted",
-  "Confirmed",
-];
-
-export function tradeDetail(trade: TradeRecord, hoveredStage: number | null) {
-  const terminal = isTerminalTrade(trade.status);
-  const recorded = new Map(
-    trade.lifecycle.map((stage) => [stage.status, stage.at]),
-  );
-  const stageDone = STAGES.filter((name) =>
-    recorded.has(name.toLowerCase()),
-  ).length;
-  const latestStage = STAGES.reduce(
-    (latest, name, i) =>
-      recorded.has(name.toLowerCase()) || name.toLowerCase() === trade.status
-        ? i
-        : latest,
-    -1,
-  );
-  const [stBg, stFg] = STATUS_TONE[trade.status] ?? STATUS_TONE.pending;
+export function tradeDetail(trade: TradeRecord) {
   const row = tradeRow(trade);
-  const elapsed =
-    trade.settledAt == null
-      ? null
-      : Math.max(0, trade.settledAt - trade.createdAt);
   return {
-    id: `Trade #${trade.id}`,
+    title: `Trade #${trade.id}`,
     status: trade.status,
-    stBg,
-    stFg,
-    meta: row.blk,
-    tx: row.tx,
+    statusStyle: row.statusStyle,
+    blockLabel: row.blockLabel,
+    transactionLabel: row.transactionLabel,
     summary: [
       {
         label:
@@ -243,50 +182,6 @@ export function tradeDetail(trade: TradeRecord, hoveredStage: number | null) {
       ...stat,
       sep: i === 0 ? "transparent" : "var(--line)",
     })),
-    stageDone,
-    headMeta: elapsed == null ? "pending" : `${elapsed}s`,
-    phases: [
-      {
-        tag: "Phase 1",
-        name: "Quote & reserve",
-        rule: recorded.has("reserved") ? "var(--lime)" : "var(--line)",
-      },
-      {
-        tag: "Phase 2",
-        name: "Simulate & settle",
-        rule: recorded.has("confirmed") ? "var(--ink)" : "var(--line)",
-      },
-    ],
-    steps: STAGES.map((label, i) => {
-      const at = recorded.get(label.toLowerCase());
-      const done = at !== undefined;
-      const current = !terminal && !done && i === latestStage + 1;
-      const hot = hoveredStage === i;
-      const missing =
-        trade.status === "confirmed" || i <= latestStage
-          ? "not recorded"
-          : terminal
-            ? "not reached"
-            : current
-              ? "awaiting"
-              : "pending";
-      return {
-        label,
-        done,
-        current,
-        barX: `calc(${(i * 16.666).toFixed(3)}% + 3px)`,
-        barStyle: done ? "solid" : "dashed",
-        barBd: done ? (i < 3 ? "var(--lime)" : "var(--ink)") : "#e0e0dc",
-        barBg: done ? (i < 3 ? "var(--lime)" : "var(--ink)") : "transparent",
-        leadH: `${i % 2 ? 26 : 8}px`,
-        state: done ? "" : missing,
-        meta: done ? `+${Math.max(0, at - trade.createdAt)}s` : missing,
-        scale: hot ? "translateY(-2px)" : "none",
-        barShadow: hot && done ? "0 6px 16px rgba(11,11,11,0.16)" : "none",
-        delay: done ? `${i * 130}ms` : "0ms",
-        fg: done ? "var(--ink)" : "var(--text-dim)",
-      };
-    }),
     legs: trade.legs.map((leg) => ({
       maker: leg.maker,
       hash: leg.strategyHash,
