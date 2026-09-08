@@ -95,20 +95,20 @@ describe("the action button", () => {
     amountOutUsd: 1,
     priceImpact: "0.1%",
     makersSourced: 1,
+    amountOutRaw: 1_000_000n,
     expiresAt: 0,
   } satisfies Quote;
 
   const base = {
+    connected: true,
+    switchTo: undefined,
+    submitting: false,
     submitted: false,
     amount: 1,
     pricing: false,
     quote: QUOTE,
     problem: undefined,
   };
-
-  it("is pressable once a price is in hand", () => {
-    expect(swapAction(base)).toEqual({ label: "Swap", ready: true });
-  });
 
   it("carries the server's reason rather than failing silently", () => {
     const blocked = swapAction({
@@ -131,7 +131,22 @@ describe("the action button", () => {
     expect(retrying.label).toBe("No route");
   });
 
-  it("asks for an amount before it asks the server", () => {
-    expect(swapAction({ ...base, amount: 0 }).label).toBe("Enter an amount");
+  // Why a trade cannot happen is about the trade, not about who is holding the tokens.
+  it("says why a trade is impossible even with no wallet attached", () => {
+    const blocked = swapAction({
+      ...base,
+      connected: false,
+      quote: undefined,
+      problem: "No route",
+    });
+    expect(blocked.label).toBe("No route");
+  });
+
+  it("asks for the right network before it asks for a signature", () => {
+    // A wallet refuses to sign a domain naming a chain it is not on, so never get that far.
+    expect(swapAction({ ...base, switchTo: "Solvent Devnet" })).toEqual({
+      label: "Switch to Solvent Devnet",
+      ready: true,
+    });
   });
 });

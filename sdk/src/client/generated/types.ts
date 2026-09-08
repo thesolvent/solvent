@@ -404,10 +404,16 @@ export interface components {
             block_explorer_url: string;
             /** Format: int64 */
             chain_id: number;
+            /** @description The resolver authorized to cosign taker orders. */
+            cosigner: string;
             /** Format: int32 */
             default_fee_bps: number;
             features: components["schemas"]["Features"];
             networks: string[];
+            /** @description The Permit2 contract verifying the taker witness. */
+            permit2: string;
+            /** @description The UniswapX reactor that settles taker orders. */
+            reactor: string;
         };
         /**
          * @description The complete picture of one asset: identity + static metadata + market + protocol status. Every
@@ -820,10 +826,16 @@ export interface components {
                 block_explorer_url: string;
                 /** Format: int64 */
                 chain_id: number;
+                /** @description The resolver authorized to cosign taker orders. */
+                cosigner: string;
                 /** Format: int32 */
                 default_fee_bps: number;
                 features: components["schemas"]["Features"];
                 networks: string[];
+                /** @description The Permit2 contract verifying the taker witness. */
+                permit2: string;
+                /** @description The UniswapX reactor that settles taker orders. */
+                reactor: string;
             };
             status: components["schemas"]["Status"];
         };

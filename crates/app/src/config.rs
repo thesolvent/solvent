@@ -53,6 +53,8 @@ pub struct Config {
     /// The resolver's Aqua filler contract the swap path fills through.
     #[serde(default)]
     pub filler: Address,
+    /// The UniswapX reactor a taker's order settles through; published so a client can name it.
+    pub reactor: Address,
     /// The canonical Permit2 (same on every chain); overridable for a bespoke devnet deploy.
     #[serde(default = "default_permit2")]
     pub permit2: Address,
@@ -95,7 +97,7 @@ impl Config {
     }
 
     /// The subset the FE reads at bootstrap (the `/config` payload). `earn`/`send_buy` are MVP-off.
-    pub fn app_config(&self) -> AppConfig {
+    pub fn app_config(&self, cosigner: Address) -> AppConfig {
         AppConfig {
             chain_id: self.chain_id,
             features: Features {
@@ -106,6 +108,9 @@ impl Config {
             default_fee_bps: self.default_fee_bps,
             networks: self.networks.clone(),
             block_explorer_url: self.block_explorer_url.clone(),
+            reactor: self.reactor,
+            permit2: self.permit2,
+            cosigner,
         }
     }
 }

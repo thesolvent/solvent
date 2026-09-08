@@ -34,7 +34,6 @@ export type AppState = {
   fromToken: string;
   toToken: string;
   amount: string;
-  swapped: boolean;
   openCell: string | null;
 
   poolQuery: PoolQuery;
@@ -110,7 +109,6 @@ export const INITIAL_STATE: AppState = {
   fromToken: "ETH",
   toToken: "SOL",
   amount: "2.500",
-  swapped: false,
   openCell: null,
 
   poolQuery: {

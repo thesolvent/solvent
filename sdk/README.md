@@ -1,10 +1,6 @@
 # `@solvent/sdk`
 
-A client-side, **non-custodial** TypeScript SDK for [Solvent](../README.md). It builds
-market-maker strategies and the calldata to open, top-up, and close positions, and it reads
-the backend API — all from the browser or a script. It **never holds keys and never sends a
-transaction**: the position builders return unsigned `{ to, data, value }` calldata for the
-maker's own wallet to sign and broadcast.
+A client-side, **non-custodial** TypeScript SDK for [Solvent](../README.md). It builds strategies, position calldata, and taker orders; reads the backend API; and executes wallet operations through clients supplied by the caller. Private keys and wallet connection remain with the host application.
 
 ```bash
 pnpm add @solvent/sdk
@@ -12,31 +8,52 @@ pnpm add @solvent/sdk
 
 ## Architecture — hexagonal, applied where it pays
 
-The backend is strict hexagonal (pure `core` · `deps` ports · `adapters` · `app`). A client SDK
-does not need that shape wholesale: ~90% of it is pure computation with a single I/O boundary.
-So the SDK keeps the *spirit* — a pure core isolated from I/O, dependency inversion at the one
-seam that varies — without ceremony:
+Pure builders are separate from HTTP and on-chain I/O. Consumers can import individual subpaths:
 
-| Module | Role | I/O | Depends on |
-| --- | --- | --- | --- |
-| `construction/` | build a strategy program + hash + order | none (pure) | `@1inch/swap-vm-sdk` |
-| `positions/` | encode approve / ship / dock / push calldata | none (pure) | `@1inch/aqua-sdk`, `viem` |
-| `client/` | typed reads + writes over the HTTP API | **the only I/O** | a `Transport` port |
+| Module | Role | I/O |
+| --- | --- | --- |
+| `construction/` | Strategy program, hash, and order | None |
+| `positions/` | Approve, ship, dock, and push calldata | None |
+| `client/` | Typed backend API | Injected HTTP transport |
+| `orders/` | Build a typed Permit2 order | None |
+| `swap/` | Connected swap client and per-intent execution | Injected API and viem clients |
 
-The two pure modules need no ports — there is nothing to invert a dependency against (the same
-reason Uniswap's SDK and `@1inch/aqua-sdk` are plain functions). The one real seam is the HTTP
-**`Transport`** — a `fetch`-shaped function injected into `createSolventClient(...)`, defaulting
-to the platform `fetch`. That is the whole hexagon: pure core, one port, one adapter.
+## Swapping
 
-Further decisions: the client is a **functional factory** (not a class); its wire types are
+Create a client once for the connected wallet. The wallet client must have its chain configured; the SDK also checks the live network before approving or signing. Each intent represents one payment authorization:
+
+```ts
+import { createSolventClient } from "@solvent/sdk/client";
+import { createSwapClient } from "@solvent/sdk/swap";
+
+// publicClient and walletClient are viem clients supplied by the host.
+const api = createSolventClient({ baseUrl: "http://localhost:8080" });
+const swaps = createSwapClient({ api, publicClient, walletClient });
+const intent = swaps.createIntent({
+  swapper: walletAddress,
+  tokenIn,
+  tokenOut,
+  amountIn: 100n * 10n ** 18n,
+  minAmountOut: minimumFromQuote,
+  deadline: Math.floor(Date.now() / 1000) + 600,
+});
+
+const submitted = await intent.submit();
+const trade = await api.tradeDetail(submitted.trade_id);
+```
+
+`createIntent` snapshots the terms without performing I/O. `submit` fetches deployment settings, checks balance and allowance, confirms any required exact-amount approval, signs the order, and submits it. Concurrent calls share one operation. After an uncertain HTTP failure, retry **the same intent object's `submit()`**; it reuses the signed order so the resolver can deduplicate it. A successful submission response is cached. `SwapDeclinedError` means the resolver explicitly declined that intent; creating a fresh intent is an explicit new attempt.
+
+Submission is an acknowledgment, not confirmation. Read `api.tradeDetail(trade_id)` to follow settlement. Intent state is in memory; applications that need reload recovery must persist and reconcile their own workflow.
+
+`swaps.tokenAccount({ token, owner, spender })` returns `{ balance, allowance }` in bigint base units. The wallet adapter binds dependencies once and keeps account checks, approval simulation, receipt verification, and signing private. A sufficient allowance is reused; a partial allowance is reset before increasing it. Local signers and injected wallets both work without React dependencies. React applications can supply Wagmi's `useClient` and `useConnectorClient` results.
+
+The separate `orders` subpath retains `buildSwapOrder(venue, terms)` for callers that only need unsigned encoding. It uses upstream UniswapX encoding and generates an unordered nonce with Web Crypto when one is not supplied. Display formatting and slippage policy belong to the application.
+
+Clients use **functional factories** with private bound dependencies; API wire types are
 **generated from the backend's OpenAPI document** so they cannot drift from the server; failures
 are **thrown typed errors**. Packaging is dual ESM/CJS with `sideEffects: false` for full
 tree-shaking, and each module publishes its own subpath export (`@solvent/sdk/construction`, …).
-
-## Status
-
-Scaffold in place (build · typecheck · test toolchain). Modules land across M5:
-`construction` (T2) · `positions` (T3) · `client` + OpenAPI codegen (T4).
 
 ## Development
 

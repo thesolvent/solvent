@@ -1,6 +1,6 @@
 # Solvent server config. Copy to `solvent.toml` (or point SOLVENT_CONFIG at another path — the
 # `.toml` extension is implicit). `bind_addr`, `rpc_url`, `chain_id`, `aqua_address`, and
-# `app_address` are required.
+# `app_address`, and `reactor` are required.
 
 bind_addr = "0.0.0.0:8080"
 rpc_url = "http://localhost:8545"
@@ -29,6 +29,27 @@ native_token = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"  # WETH
 gas_units_per_leg = 150000
 binance_ws_url = "wss://stream.binance.com:9443"
 
+# USD stablecoins with no Binance pair — the quote unit itself. Pegged to $1 at boot so every
+# supported asset values (USDC/DAI drift and keep their live *USDT feed above; only USDT is pegged).
+usd_stable_pegs = ["0xdac17f958d2ee523a2206206994597c13d831ec7"]  # USDT
+
+# Swap (submit) path. The resolver's Aqua filler contract and the account authorized to call it;
+# the filler-owner and cosigner signing keys are read from the environment, never this file:
+#   SOLVENT_SIGNER_KEY    — the filler-owner key that signs and pays for fills
+#   SOLVENT_COSIGNER_KEY  — the key that cosigns each order's decay before it fills
+filler = "0x0000000000000000000000000000000000000000"
+# Required: the deployed UniswapX V2 reactor used by taker orders.
+reactor = "0x0000000000000000000000000000000000000000"
+# Canonical Permit2 (same on every chain); override only for a bespoke devnet deploy.
+permit2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+confirmations = 1          # blocks a fill waits before it settles
+reservation_ttl_secs = 60  # how long a hold survives before the TTL sweep may release it
+decay_window_secs = 60     # the cosigner's decay window applied to each order
+
+# The tx engine's durable state (redb): in-flight fills are persisted here so a restart recovers
+# and reconciles them rather than losing track. Point it at a persistent volume in production.
+wallet_state_db = "walletkit.redb"
+
 # Binance symbol -> the tokens it prices. Devnet tokens sit at mainnet addresses, so mainnet
 # symbols apply. Stables quoted against USDT read ~1; USDT itself has no pair and stays gas-free.
 [[price_symbols]]
@@ -50,22 +71,3 @@ tokens = ["0x6b175474e89094c44da98b954eedeac495271d0f"]  # DAI
 [[price_symbols]]
 symbol = "LINKUSDT"
 tokens = ["0x514910771af9ca656af840dff83e8264ecf986ca"]  # LINK
-
-# USD stablecoins with no Binance pair — the quote unit itself. Pegged to $1 at boot so every
-# supported asset values (USDC/DAI drift and keep their live *USDT feed above; only USDT is pegged).
-usd_stable_pegs = ["0xdac17f958d2ee523a2206206994597c13d831ec7"]  # USDT
-
-# Swap (submit) path. The resolver's Aqua filler contract and the account authorized to call it;
-# the filler-owner and cosigner signing keys are read from the environment, never this file:
-#   SOLVENT_SIGNER_KEY    — the filler-owner key that signs and pays for fills
-#   SOLVENT_COSIGNER_KEY  — the key that cosigns each order's decay before it fills
-filler = "0x0000000000000000000000000000000000000000"
-# Canonical Permit2 (same on every chain); override only for a bespoke devnet deploy.
-permit2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
-confirmations = 1          # blocks a fill waits before it settles
-reservation_ttl_secs = 60  # how long a hold survives before the TTL sweep may release it
-decay_window_secs = 60     # the cosigner's decay window applied to each order
-
-# The tx engine's durable state (redb): in-flight fills are persisted here so a restart recovers
-# and reconciles them rather than losing track. Point it at a persistent volume in production.
-wallet_state_db = "walletkit.redb"

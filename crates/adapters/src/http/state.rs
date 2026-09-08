@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use alloy::primitives::Address;
 use serde::Serialize;
 use solvent_core::asset::AssetManager;
 use solvent_core::balances::BalancesService;
@@ -35,6 +36,15 @@ pub struct AppConfig {
     pub default_fee_bps: u32,
     pub networks: Vec<String>,
     pub block_explorer_url: String,
+    /// The UniswapX reactor that settles taker orders.
+    #[schema(value_type = String)]
+    pub reactor: Address,
+    /// The Permit2 contract verifying the taker witness.
+    #[schema(value_type = String)]
+    pub permit2: Address,
+    /// The resolver authorized to cosign taker orders.
+    #[schema(value_type = String)]
+    pub cosigner: Address,
 }
 
 /// Shared handler context: the config payload, a chain provider (block height), and the registry

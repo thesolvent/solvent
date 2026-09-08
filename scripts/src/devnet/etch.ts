@@ -1,50 +1,93 @@
-/**
- * Place canonical infra on the devnet chain.
- *
- * Multicall3 lives at one address on every real chain, and alloy's multicall builder reads that
- * address — but a fresh anvil hosts no code there, so every batched balance/allowance read fails to
- * decode. Foundry cheatcodes only mutate a script's local simulation, so the placement happens here
- * over `anvil_setCode` with the runtime bytecode our own build produced.
- */
+/** Install canonical infrastructure on the local devnet, matching the Rust integration harness. */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+    createTestClient,
+    getTypesForEIP712Domain,
+    hashDomain,
+    http,
+    parseAbi,
+    publicActions,
+    type Hex,
+} from "viem";
 
 import { REPO_ROOT } from "../lib/manifest.ts";
 
 const RPC_URL = process.env.SOLVENT_RPC_URL ?? "http://127.0.0.1:8545";
-
 const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
-const ARTIFACT = resolve(REPO_ROOT, "contracts/out/DevMulticall3.sol/DevMulticall3.json");
+const PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+const ARTIFACT = resolve(
+    REPO_ROOT,
+    "contracts/out/DevMulticall3.sol/DevMulticall3.json",
+);
+const PERMIT2_RUNTIME = resolve(
+    REPO_ROOT,
+    "crates/adapters/tests/fixtures/permit2_runtime.hex",
+);
 
-async function rpc<T>(method: string, params: unknown[]): Promise<T> {
-  const response = await fetch(RPC_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  const body = (await response.json()) as { result?: T; error?: { message: string } };
-  if (body.error) throw new Error(`${method}: ${body.error.message}`);
-  return body.result as T;
-}
-
-function runtimeBytecode(): string {
-  try {
+function runtimeBytecode(): Hex {
     const artifact = JSON.parse(readFileSync(ARTIFACT, "utf8")) as {
-      deployedBytecode: { object: string };
+        deployedBytecode: { object: Hex };
     };
     return artifact.deployedBytecode.object;
-  } catch (cause) {
-    throw new Error(`no DevMulticall3 artifact — run 'forge build' in contracts/ first`, { cause });
-  }
 }
 
 async function main(): Promise<void> {
-  const code = runtimeBytecode();
-  await rpc("anvil_setCode", [MULTICALL3, code]);
-
-  const placed = await rpc<string>("eth_getCode", [MULTICALL3, "latest"]);
-  if (placed.length <= 2) throw new Error(`multicall3 code did not stick at ${MULTICALL3}`);
-  console.log(`etch: multicall3 ${MULTICALL3} <- ${(placed.length - 2) / 2} bytes`);
+    const client = createTestClient({
+        mode: "anvil",
+        transport: http(RPC_URL),
+    }).extend(publicActions);
+    const chainId = await client.getChainId();
+    if (chainId !== 31337)
+        throw new Error(
+            "canonical infrastructure placement requires Solvent Devnet (31337)",
+        );
+    const contracts = [
+        {
+            name: "multicall3",
+            address: MULTICALL3,
+            bytecode: runtimeBytecode(),
+        },
+        {
+            name: "permit2",
+            address: PERMIT2,
+            bytecode: readFileSync(PERMIT2_RUNTIME, "utf8").trim() as Hex,
+        },
+    ] as const;
+    for (const contract of contracts) {
+        await client.setCode(contract);
+        const placed = await client.getCode({ address: contract.address });
+        if (placed !== contract.bytecode)
+            throw new Error(`${contract.name} code did not stick`);
+        console.log(
+            `etch: ${contract.name} ${contract.address} <- ${(placed.length - 2) / 2} bytes`,
+        );
+    }
+    // Copied runtime contains immutable domain caches; verify this chain uses the canonical address.
+    const domain = await client.readContract({
+        address: PERMIT2,
+        abi: parseAbi(["function DOMAIN_SEPARATOR() view returns (bytes32)"]),
+        functionName: "DOMAIN_SEPARATOR",
+    });
+    const expected = {
+        name: "Permit2",
+        chainId,
+        verifyingContract: PERMIT2,
+    } as const;
+    if (
+        domain !==
+        hashDomain<Record<string, unknown>>({
+            domain: expected,
+            types: {
+                EIP712Domain: getTypesForEIP712Domain({ domain: expected }),
+            },
+        })
+    ) {
+        throw new Error(
+            "Permit2 domain does not match the devnet signing domain",
+        );
+    }
+    console.log("etch: Permit2 signing domain verified");
 }
 
 await main();

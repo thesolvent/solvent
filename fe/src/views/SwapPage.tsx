@@ -1,4 +1,6 @@
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useEffect, useMemo } from "react";
+import { useAccount, useSwitchChain } from "wagmi";
 
 import { DASH } from "@/data";
 import { clean, fit, money } from "@/lib/format";
@@ -12,7 +14,9 @@ import {
   tagOptions,
 } from "@/lib/swap";
 import { useAssets } from "@/services/assets";
-import { useQuote } from "@/services/swap";
+import { useQuote } from "@/services/quote";
+import { useSubmitSwap } from "@/services/swap";
+import { chain } from "@/adapters/wallet/config";
 import { useApp } from "@/state";
 
 import styles from "./SwapPage.module.css";
@@ -54,12 +58,36 @@ export function SwapPage() {
     { label: "Max slippage", value: `${config.slippage}%` },
   ];
 
+  const { isConnected, chainId } = useAccount();
+  const { openConnectModal } = useConnectModal();
+  const { switchChain } = useSwitchChain();
+  const submission = useSubmitSwap({
+    from,
+    to,
+    amount: typed,
+    quote,
+    slippagePct: config.slippage,
+  });
+
+  const switchTo = isConnected && chainId !== chain.id ? chain.name : undefined;
+
+  // One button, whichever of the three things is missing.
+  const act = () => {
+    if (!isConnected) return openConnectModal?.();
+    if (switchTo) return switchChain({ chainId: chain.id });
+    submission.send();
+  };
+
   const action = swapAction({
-    submitted: state.swapped,
+    connected: isConnected,
+    switchTo,
+    submitting: submission.submitting,
+    submitted: submission.result !== undefined,
     amount: amt,
     pricing,
     quote,
     problem,
+    submissionProblem: submission.problem,
   });
 
   const matches = useMemo(() => {
@@ -101,14 +129,12 @@ export function SwapPage() {
         fromToken: sym,
         toToken: state.toToken === sym ? state.fromToken : state.toToken,
         picker: null,
-        swapped: false,
       });
     } else {
       set({
         toToken: sym,
         fromToken: state.fromToken === sym ? state.toToken : state.fromToken,
         picker: null,
-        swapped: false,
       });
     }
   };
@@ -161,7 +187,6 @@ export function SwapPage() {
                 onChange={(e) =>
                   set({
                     amount: clean(e.target.value),
-                    swapped: false,
                   })
                 }
                 inputMode="decimal"
@@ -180,7 +205,6 @@ export function SwapPage() {
               set({
                 fromToken: state.toToken,
                 toToken: state.fromToken,
-                swapped: false,
               })
             }
           >
@@ -234,7 +258,7 @@ export function SwapPage() {
           type="button"
           className={styles.cta}
           disabled={!action.ready}
-          onClick={() => set({ swapped: true })}
+          onClick={act}
         >
           {action.label}
         </button>

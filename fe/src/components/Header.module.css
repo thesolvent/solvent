@@ -124,9 +124,21 @@
   align-items: center;
   justify-content: center;
   height: 48px;
-  width: 52px;
+  /* Wide enough for the glyph; a connected address grows the chip to fit. */
+  min-width: 52px;
+  padding: 0 12px;
   border: 1px solid var(--dark-line);
   border-left: 0;
+  background: none;
+  color: var(--paper);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.accountAddress {
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .accountGlyph {

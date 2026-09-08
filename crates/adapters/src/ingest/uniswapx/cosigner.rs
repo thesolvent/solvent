@@ -3,7 +3,7 @@
 //! decay window + exclusivity) — producing the `RawOrder` the normalizer and reactor accept. The
 //! server holds only its own cosigner key, never the swapper's.
 
-use alloy::primitives::{Address, Bytes, Signature, B256, U256};
+use alloy::primitives::{Address, Bytes, Signature, U256};
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol_types::SolValue;
 use thiserror::Error;
@@ -25,7 +25,7 @@ pub struct ServerCosigner {
 }
 
 /// A cosigned order plus the swapper the signature recovered to (the trade's taker).
-pub struct Cosigned {
+pub(crate) struct Cosigned {
     pub swapper: Address,
     pub raw: RawOrder,
 }
@@ -54,7 +54,8 @@ impl ServerCosigner {
 
     /// Verify the swapper's signature over the base order, then apply our cosignature (decay window
     /// anchored at `observed_at`). `signature` never reaches a log, and the key never leaves this fn.
-    pub fn cosign(
+    #[tracing::instrument(skip_all)]
+    pub(crate) fn cosign(
         &self,
         encoded_order: &[u8],
         signature: Bytes,
@@ -68,7 +69,15 @@ impl ServerCosigner {
         // and setting the decay afterwards keeps the signature valid.
         let hash = order_hash(&order);
         let digest = witness_digest(&order, hash, self.permit2, self.chain_id);
-        let swapper = recover(&signature, digest).ok_or(CosignError::BadSignature)?;
+        let signature = match signature.last() {
+            Some(0 | 1 | 27 | 28) => {
+                Signature::from_raw(&signature).map_err(|_| CosignError::BadSignature)?
+            }
+            _ => return Err(CosignError::BadSignature),
+        };
+        let swapper = signature
+            .recover_address_from_prehash(&digest)
+            .map_err(|_| CosignError::BadSignature)?;
         if swapper != order.info.swapper {
             return Err(CosignError::BadSignature);
         }
@@ -88,7 +97,7 @@ impl ServerCosigner {
                 ProtocolId::UniswapXV2,
                 ChainId(self.chain_id),
                 Bytes::from(order.abi_encode()),
-                signature,
+                Bytes::from(signature.as_bytes()),
                 observed_at,
             ),
         })
@@ -98,7 +107,7 @@ impl ServerCosigner {
 /// A cosigning failure — all client-input (a malformed or unverifiable order), never infra.
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum CosignError {
+pub(crate) enum CosignError {
     #[error("malformed order")]
     Decode,
     #[error("order names a different cosigner")]
@@ -107,23 +116,11 @@ pub enum CosignError {
     BadSignature,
 }
 
-/// Recover the signer of a 65-byte `r ‖ s ‖ v` (v ∈ {27,28}) signature over `digest`.
-fn recover(signature: &[u8], digest: B256) -> Option<Address> {
-    if signature.len() != 65 {
-        return None;
-    }
-    let r = U256::from_be_slice(&signature[0..32]);
-    let s = U256::from_be_slice(&signature[32..64]);
-    Signature::new(r, s, signature[64] == 28)
-        .recover_address_from_prehash(&digest)
-        .ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ingest::uniswapx::{OrderSpec, SignedOrderBuilder};
-    use alloy::primitives::address;
+    use alloy::primitives::{address, B256};
     use alloy::signers::local::PrivateKeySigner;
 
     const PERMIT2: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
@@ -178,6 +175,26 @@ mod tests {
         assert_eq!(order.cosignature.len(), 65);
         assert_eq!(order.cosignerData.decayStartTime, U256::from(1000u64));
         assert_eq!(order.cosignerData.decayEndTime, U256::from(1060u64));
+    }
+
+    #[test]
+    fn normalizes_wallet_parity_for_onchain_verification() {
+        let cosigner = key(0x22);
+        let server = ServerCosigner::new(PERMIT2, 31337, cosigner.clone(), Address::ZERO, 60);
+        let mut seen = [false; 2];
+        for byte in 1..=16 {
+            let swapper = key(byte);
+            let (encoded, canonical) = base_order(&swapper, cosigner.address());
+            let mut wallet_signature = canonical.to_vec();
+            wallet_signature[64] -= 27;
+            seen[wallet_signature[64] as usize] = true;
+            let out = server
+                .cosign(&encoded, wallet_signature.into(), 1000)
+                .expect("cosign");
+            assert_eq!(out.swapper, swapper.address());
+            assert_eq!(out.raw.signature, canonical);
+        }
+        assert_eq!(seen, [true, true]);
     }
 
     #[test]

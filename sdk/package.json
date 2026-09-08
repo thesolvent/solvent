@@ -6,7 +6,9 @@
   "type": "module",
   "packageManager": "pnpm@10.17.1",
   "sideEffects": false,
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -30,6 +32,16 @@
       "types": "./dist/client.d.ts",
       "import": "./dist/client.js",
       "require": "./dist/client.cjs"
+    },
+    "./orders": {
+      "types": "./dist/orders.d.ts",
+      "import": "./dist/orders.js",
+      "require": "./dist/orders.cjs"
+    },
+    "./swap": {
+      "types": "./dist/swap.d.ts",
+      "import": "./dist/swap.js",
+      "require": "./dist/swap.cjs"
     }
   },
   "scripts": {
@@ -42,13 +54,16 @@
   "dependencies": {
     "@1inch/aqua-sdk": "0.3.1",
     "@1inch/swap-vm-sdk": "0.4.1",
+    "@ethersproject/bignumber": "^5.7.0",
+    "@ethersproject/hash": "^5.8.0",
+    "@uniswap/uniswapx-sdk": "^3.1.1",
     "viem": "^2"
   },
   "devDependencies": {
     "@types/node": "^24",
     "openapi-typescript": "^7",
-    "typescript": "^5",
     "tsup": "^8",
+    "typescript": "^5",
     "vitest": "^3"
   }
 }

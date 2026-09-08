@@ -335,7 +335,7 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&valuation),
     ));
     let state = AppState {
-        config: Arc::new(config.app_config()),
+        config: Arc::new(config.app_config(cosigner.address())),
         head,
         assets,
         pools,

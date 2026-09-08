@@ -29,6 +29,7 @@ const QUOTE: Quote = {
   amountOutUsd: 2478.11,
   priceImpact: "0.12%",
   makersSourced: 3,
+  amountOutRaw: 2_477_852_376n,
   expiresAt: Date.now() + 30_000,
 };
 

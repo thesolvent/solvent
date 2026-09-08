@@ -1,3 +1,4 @@
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useState } from "react";
 
 import { NAV } from "@/data";
@@ -55,9 +56,34 @@ export function Header() {
           <span className={styles.currencyGlyph} />
           <span>USD</span>
         </div>
-        <div className={styles.account}>
-          <span className={styles.accountGlyph} />
-        </div>
+        <ConnectButton.Custom>
+          {({
+            account,
+            chain,
+            openConnectModal,
+            openAccountModal,
+            mounted,
+          }) => {
+            const connected = mounted && account && chain;
+            return (
+              <button
+                type="button"
+                className={styles.account}
+                aria-label={connected ? "Wallet account" : "Connect wallet"}
+                disabled={!mounted}
+                onClick={connected ? openAccountModal : openConnectModal}
+              >
+                {connected ? (
+                  <span className={styles.accountAddress}>
+                    {account.displayName}
+                  </span>
+                ) : (
+                  <span className={styles.accountGlyph} />
+                )}
+              </button>
+            );
+          }}
+        </ConnectButton.Custom>
       </div>
     </header>
   );

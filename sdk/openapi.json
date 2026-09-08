@@ -939,7 +939,10 @@
           "features",
           "default_fee_bps",
           "networks",
-          "block_explorer_url"
+          "block_explorer_url",
+          "reactor",
+          "permit2",
+          "cosigner"
         ],
         "properties": {
           "block_explorer_url": {
@@ -949,6 +952,10 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "cosigner": {
+            "type": "string",
+            "description": "The resolver authorized to cosign taker orders."
           },
           "default_fee_bps": {
             "type": "integer",
@@ -963,6 +970,14 @@
             "items": {
               "type": "string"
             }
+          },
+          "permit2": {
+            "type": "string",
+            "description": "The Permit2 contract verifying the taker witness."
+          },
+          "reactor": {
+            "type": "string",
+            "description": "The UniswapX reactor that settles taker orders."
           }
         }
       },
@@ -2080,7 +2095,10 @@
               "features",
               "default_fee_bps",
               "networks",
-              "block_explorer_url"
+              "block_explorer_url",
+              "reactor",
+              "permit2",
+              "cosigner"
             ],
             "properties": {
               "block_explorer_url": {
@@ -2090,6 +2108,10 @@
                 "type": "integer",
                 "format": "int64",
                 "minimum": 0
+              },
+              "cosigner": {
+                "type": "string",
+                "description": "The resolver authorized to cosign taker orders."
               },
               "default_fee_bps": {
                 "type": "integer",
@@ -2104,6 +2126,14 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "permit2": {
+                "type": "string",
+                "description": "The Permit2 contract verifying the taker witness."
+              },
+              "reactor": {
+                "type": "string",
+                "description": "The UniswapX reactor that settles taker orders."
               }
             }
           },

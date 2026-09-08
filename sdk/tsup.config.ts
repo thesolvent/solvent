@@ -6,6 +6,8 @@ export default defineConfig({
     construction: "src/construction/index.ts",
     positions: "src/positions/index.ts",
     client: "src/client/index.ts",
+    orders: "src/orders/index.ts",
+    swap: "src/swap/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,

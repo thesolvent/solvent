@@ -94,7 +94,7 @@ fn parse_amount(s: &str) -> Result<U256, SolventError> {
 
 /// A taker-signed order submission, mirroring the UniswapX Orders API (`{ encodedOrder, signature,
 /// chainId, quoteId? }`). The taker's client builds + signs the base order; the server cosigns.
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct SwapRequest {
     #[serde(rename = "encodedOrder")]
     pub encoded_order: String,

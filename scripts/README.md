@@ -15,7 +15,7 @@ docker compose -f devnet/docker-compose.yml up seed
 # 2. Generate solvent.toml, the token list, and the signing env from the deploy manifest.
 pnpm --dir scripts bootstrap
 
-# 3. Place Multicall3 at its canonical address (a fresh chain hosts no code there).
+# 3. Place Multicall3 + Permit2 at their canonical addresses and verify the signing domain.
 forge build --root contracts   # once, for the artifact
 pnpm --dir scripts etch
 
@@ -48,7 +48,7 @@ cd contracts && forge script script/DeployDevnet.s.sol:DeployDevnet --broadcast 
 | Script | What it does |
 |---|---|
 | `bootstrap` | Manifest → `solvent.toml`, `devnet/generated/tokens.json`, `devnet/generated/env.sh`. Re-run after every deploy. |
-| `etch` | `anvil_setCode`s `DevMulticall3`'s runtime bytecode to the canonical Multicall3 address. |
+| `etch` | Installs Multicall3 and Permit2 runtime code and verifies the Permit2 signing domain on devnet. |
 | `seed` | Mints, approves Aqua, and ships one strategy per pair. **Idempotent** — Aqua rejects re-shipping, so an existing position is skipped. |
 | `smoke` | Calls the read API through the SDK client and prints a status matrix. Exits non-zero on any failure. |
 
@@ -61,5 +61,4 @@ cd contracts && forge script script/DeployDevnet.s.sol:DeployDevnet --broadcast 
 - `seed` runs under a resolver hook (`src/lib/register.mjs`): the published `@1inch` ESM imports its
   own files without extensions, which Node's resolver rejects.
 - Generated config, the token list, the signing env, the database, and the manifest are untracked.
-- **Permit2 is not placed yet.** Its `pragma 0.8.17` conflicts with the repo's `solc 0.8.30`, so it
-  cannot be compiled here; the order-signing flow needs it.
+- Permit2 uses the same checked-in runtime fixture as the Rust integration harness. `etch` verifies its domain for chain 31337 before signing tests run.

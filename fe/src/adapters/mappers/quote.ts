@@ -25,6 +25,7 @@ export function toQuote(api: QuoteResponse, decimalsOut: number): Quote {
     amountOutUsd: api.amount_out.usd ?? 0,
     priceImpact: `${api.price_impact_pct.toFixed(2)}%`,
     makersSourced: api.makers_sourced,
+    amountOutRaw: BigInt(api.amount_out.raw),
     expiresAt: Date.parse(api.expires_at),
   };
 }

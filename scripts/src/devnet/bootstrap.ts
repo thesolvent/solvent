@@ -117,6 +117,7 @@ binance_ws_url = "wss://stream.binance.com:9443"
 usd_stable_pegs = [${pegs}]
 
 filler = "${manifest.filler}"
+reactor = "${manifest.reactor}"
 permit2 = "${manifest.permit2}"
 confirmations = 1
 reservation_ttl_secs = 60

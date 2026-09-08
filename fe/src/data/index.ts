@@ -479,6 +479,12 @@ export type PoolRoster = {
   makers: RosterMaker[];
 };
 
+/** What the resolver made of a submitted order. */
+export type SubmittedSwap = {
+  tradeId: string;
+  status: string;
+};
+
 /** One sampled point on the depth curve, in whole tokens. */
 export type DepthLevel = {
   /** Input size the quote was taken for. */
@@ -521,6 +527,8 @@ export type Quote = {
   amountOutUsd: number;
   priceImpact: string;
   makersSourced: number;
+  /** The output in base units, which is what an order has to name. */
+  amountOutRaw: bigint;
   /** When the server stops honouring this price, as epoch milliseconds. */
   expiresAt: number;
 };

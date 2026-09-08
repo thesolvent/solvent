@@ -98,17 +98,83 @@ export interface SwapAction {
  * The server's own words carry the reason, so a clearer message upstream needs no change here.
  */
 export function swapAction(input: {
+  connected: boolean;
+  /** The network to move to before signing, or `undefined` when already on it. */
+  switchTo: string | undefined;
+  submitting: boolean;
   submitted: boolean;
   amount: number;
   pricing: boolean;
   quote: Quote | undefined;
   problem: string | undefined;
+  submissionProblem?: string;
 }): SwapAction {
-  const { submitted, amount, pricing, quote, problem } = input;
+  const {
+    connected,
+    switchTo,
+    submitting,
+    submitted,
+    amount,
+    pricing,
+    quote,
+    problem,
+    submissionProblem,
+  } = input;
+  if (submitting) return { label: "Confirm in your wallet", ready: false };
   if (submitted) return { label: "Intent submitted to Aqua", ready: false };
   if (amount <= 0) return { label: "Enter an amount", ready: false };
+  // A trade that cannot happen says so whether or not a wallet is attached.
   if (problem) return { label: problem, ready: false };
-  if (pricing || !quote)
+  if (!connected) return { label: "Connect a wallet", ready: true };
+  // An order names its chain, and a wallet will not sign for one it is not on.
+  if (switchTo) return { label: `Switch to ${switchTo}`, ready: true };
+  if (pricing || !quote) {
     return { label: "Finding the best price", ready: false };
-  return { label: "Swap", ready: true };
+  }
+  return {
+    label: submissionProblem ? `${submissionProblem} — try again` : "Swap",
+    ready: true,
+  };
+}
+
+/** EIP-1193's code for a request the person declined. */
+const USER_REJECTED = 4001;
+
+/** Guard against a cause chain that loops back on itself. */
+const MAX_CAUSES = 10;
+
+/**
+ * Whether the person simply said no.
+ *
+ * Matched on name and code rather than `instanceof`: the wallet stack resolves several copies of
+ * viem, and a class from one copy is not the same object as the class from another.
+ */
+function isWalletRejection(error: unknown): boolean {
+  let cause = error;
+  for (let depth = 0; cause && depth < MAX_CAUSES; depth += 1) {
+    const { name, code } = cause as { name?: string; code?: number };
+    if (name === "UserRejectedRequestError" || code === USER_REJECTED) {
+      return true;
+    }
+    cause = (cause as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
+ * Why a submission failed, in words meant for the person who tried.
+ *
+ * The server writes its refusals for a reader, but a wallet writes them for a developer — dumping
+ * one on the button gives a stack trace where a sentence belongs.
+ */
+export function submissionProblem(error: Error | null): string | undefined {
+  if (!error) return undefined;
+  if (isSwapDeclined(error)) return "The resolver declined this swap";
+  return isWalletRejection(error)
+    ? "Wallet request rejected"
+    : "Could not submit the swap";
+}
+
+export function isSwapDeclined(error: Error | null): boolean {
+  return error?.name === "SwapDeclinedError";
 }

@@ -2,6 +2,9 @@ import { QueryClient } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
+import { WagmiProvider, createConfig, http } from "wagmi";
+import { mock } from "wagmi/connectors";
+import { anvil } from "wagmi/chains";
 
 import { AppProvider } from "@/AppProvider";
 import type { AssetsPort } from "@/ports/assets";
@@ -22,6 +25,15 @@ function port<T extends object>(name: string, stubs: Partial<T>): T {
     },
   });
 }
+
+/** A wallet that is present but not connected, which is what a view sees before anyone connects. */
+const wagmiConfig = createConfig({
+  chains: [anvil],
+  connectors: [
+    mock({ accounts: ["0x0000000000000000000000000000000000000001"] }),
+  ],
+  transports: { [anvil.id]: http() },
+});
 
 export interface Stubs {
   assets?: Partial<AssetsPort>;
@@ -48,10 +60,15 @@ export function renderWithServices(
     defaultOptions: { queries: { retry: false, staleTime: 0 } },
   });
   return render(
-    <ServicesProvider services={fakeServices(stubs)} queryClient={queryClient}>
-      <MemoryRouter>
-        <AppProvider>{ui}</AppProvider>
-      </MemoryRouter>
-    </ServicesProvider>,
+    <WagmiProvider config={wagmiConfig}>
+      <ServicesProvider
+        services={fakeServices(stubs)}
+        queryClient={queryClient}
+      >
+        <MemoryRouter>
+          <AppProvider>{ui}</AppProvider>
+        </MemoryRouter>
+      </ServicesProvider>
+    </WagmiProvider>,
   );
 }

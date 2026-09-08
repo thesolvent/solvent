@@ -1,15 +1,12 @@
-import { parseUnits } from "viem";
-
 import type { AssetsPort } from "@/ports/assets";
 import type { PoolsPort } from "@/ports/pools";
-import type { SwapPort } from "@/ports/swap";
 import type { SystemPort } from "@/ports/system";
 import type { Services } from "@/services/context";
 
 import { toAsset } from "../mappers/asset";
 import { toPool } from "../mappers/pool";
 import { toDepthCurve, toPoolRoster } from "../mappers/pool-detail";
-import { toQuote } from "../mappers/quote";
+import { swapAdapter } from "./swap";
 import { solventApi } from "./client";
 
 const pools: PoolsPort = {
@@ -41,20 +38,14 @@ const assets: AssetsPort = {
   },
 };
 
-const swap: SwapPort = {
-  async quote({ from, to, amount }) {
-    const priced = await solventApi.quote({
-      token_in: from.address,
-      token_out: to.address,
-      amount_in: parseUnits(amount, from.decimals).toString(),
-    });
-    return toQuote(priced, to.decimals);
-  },
-};
-
 const system: SystemPort = {
   config: () => solventApi.config(),
 };
 
 /** The live implementations the composition root injects. */
-export const httpServices: Services = { assets, pools, swap, system };
+export const httpServices: Services = {
+  assets,
+  pools,
+  swap: swapAdapter,
+  system,
+};
