@@ -259,8 +259,15 @@
   font-family: inherit;
 }
 
-.cta:hover {
+.cta:hover:not(:disabled) {
   background: var(--green-mid);
+}
+
+/* A trade that cannot happen says why here, so the reason is never left off-screen. */
+.cta:disabled {
+  background: var(--line);
+  color: var(--text-muted);
+  cursor: not-allowed;
 }
 
 .footnote {

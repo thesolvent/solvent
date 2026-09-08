@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { AppProvider } from "@/AppProvider";
 import type { AssetsPort } from "@/ports/assets";
 import type { PoolsPort } from "@/ports/pools";
+import type { SwapPort } from "@/ports/swap";
 import type { SystemPort } from "@/ports/system";
 import { ServicesProvider } from "@/services/ServicesProvider";
 import type { Services } from "@/services/context";
@@ -25,6 +26,7 @@ function port<T extends object>(name: string, stubs: Partial<T>): T {
 export interface Stubs {
   assets?: Partial<AssetsPort>;
   pools?: Partial<PoolsPort>;
+  swap?: Partial<SwapPort>;
   system?: Partial<SystemPort>;
 }
 
@@ -32,6 +34,7 @@ export function fakeServices(stubs: Stubs): Services {
   return {
     assets: port("assets", stubs.assets ?? {}),
     pools: port("pools", stubs.pools ?? {}),
+    swap: port("swap", stubs.swap ?? {}),
     system: port("system", stubs.system ?? {}),
   };
 }

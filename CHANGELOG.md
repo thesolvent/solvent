@@ -260,6 +260,17 @@ the project is pre-1.0 and evolving.
   - **Pool detail** at its own address (`/pools/:pair`) — aggregated depth plotted from the depth
     endpoint, a maker roster with a **Virtual / Actual** toggle, and impact tiers that put the marker
     and its readout on the curve while hovered.
+- **S4 · swap — the widget priced by the server.** The output amount, price impact and fill count
+  come from `POST /v1/swap/quote` rather than a mid-price estimate, so what is shown includes fee
+  and impact. The quote paces its own refresh off the expiry the server issued, re-prices on
+  return to the tab, and re-polls a failure so an outage heals without retyping.
+  - **Pair-constrained pickers** — the output leg offers only assets the input one is quotable
+    against (which also makes picking the same asset twice impossible), and an asset in no pair is
+    not offered at all. Both legs always name a pair the deployment actually serves.
+  - **The action button carries the reason** — a size with no route is disabled and says so in the
+    server's own words, returning to `Swap` when a size is fillable.
+  - **Filter vocabularies read off the served assets**, so no tag or chain is offered that matches
+    nothing.
 - **`@solvent/scripts`** — a devnet runbook package: manifest bootstrap, a Multicall3 etch, idempotent
   strategy seeding priced off the server's own oracle, and an endpoint smoke matrix.
 
@@ -271,6 +282,13 @@ the project is pre-1.0 and evolving.
   not the same as nothing being deliverable.
 
 ### Fixed — backend (`crates/`)
+- **Price impact no longer falls as the trade grows.** The near-zero baseline was probed at a
+  millionth of the trade size, which quotes only a handful of whole base units — a rate wrong
+  enough that the real one looked better than it, and the size of that gap was reported as impact
+  (24.98% on a 2.5 DAI trade against a $500k pool; a saturated `u64::MAX` at the limit). The probe
+  now widens until its output can be divided meaningfully.
+- **A tag is a label, not a key** — stablecoin classification matched `"stables"` case-sensitively,
+  so a catalog that cased a tag for people to read would silently stop classifying it.
 - **A configured stablecoin peg reports a 0% daily move**, not an absent one: a token held at par by
   configuration has not moved, which is different from having no reading.
 - **Depth bisection stops on a relative tolerance** — converging to the last wei cost ~40 further

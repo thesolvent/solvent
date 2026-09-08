@@ -83,15 +83,6 @@ export const TOKENS: Token[] = [
   },
 ];
 
-export const NETWORKS = [
-  "All networks",
-  "Ethereum",
-  "Solana",
-  "Arbitrum",
-  "Base",
-];
-export const TAGS = ["All", "Aqua", "Stables", "Majors", "DeFi"];
-
 /** Baseline band half-width, in the create-pool chart's own units. */
 export const BAND_K0 = 46;
 
@@ -498,6 +489,40 @@ export type DepthLevel = {
   price: number;
   impactPct: number;
   makersUsed: number;
+};
+
+/** Shown wherever there is no value to show — the domain deals in ready-to-render strings. */
+export const DASH = "—";
+
+/**
+ * A served asset: what the picker shows, plus what naming it to the server needs.
+ *
+ * Distinct from `Token` below, whose sample rows carry neither an address nor decimals — a quote
+ * cannot be asked for without both, so they are required here rather than optional.
+ */
+export type Asset = {
+  address: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  price: number;
+  /** Signed 24h move, already formatted. */
+  change: string;
+  tags: string[];
+  net: string;
+  /** Pairs this asset is quotable in, as "BASE/QUOTE" labels. */
+  pairs: string[];
+};
+
+/** A priced route for one swap, as the widget reads it. */
+export type Quote = {
+  /** Output amount, at the precision the widget prints. */
+  amountOut: string;
+  amountOutUsd: number;
+  priceImpact: string;
+  makersSourced: number;
+  /** When the server stops honouring this price, as epoch milliseconds. */
+  expiresAt: number;
 };
 
 export type DepthCurve = {

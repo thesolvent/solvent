@@ -1,13 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
 
+import type { Asset } from "@/data";
+
 import { useServices } from "./context";
 
-/** Symbols of the assets this deployment supports. Empty until the first read resolves. */
-export function useAssetSymbols(): string[] {
+/** Assets this deployment serves. Empty until the first read resolves. */
+export function useAssets(): Asset[] {
   const { assets } = useServices();
   const { data } = useQuery({
-    queryKey: ["assets", "symbols"],
-    queryFn: () => assets.symbols(),
+    queryKey: ["assets"],
+    queryFn: () => assets.list(),
   });
   return data ?? [];
+}
+
+/** Symbols alone, for the filter cells that only name assets. */
+export function useAssetSymbols(): string[] {
+  return useAssets().map((asset) => asset.symbol);
 }

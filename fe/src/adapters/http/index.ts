@@ -1,10 +1,15 @@
+import { parseUnits } from "viem";
+
 import type { AssetsPort } from "@/ports/assets";
 import type { PoolsPort } from "@/ports/pools";
+import type { SwapPort } from "@/ports/swap";
 import type { SystemPort } from "@/ports/system";
 import type { Services } from "@/services/context";
 
+import { toAsset } from "../mappers/asset";
 import { toPool } from "../mappers/pool";
 import { toDepthCurve, toPoolRoster } from "../mappers/pool-detail";
+import { toQuote } from "../mappers/quote";
 import { solventApi } from "./client";
 
 const pools: PoolsPort = {
@@ -25,8 +30,25 @@ const pools: PoolsPort = {
 };
 
 const assets: AssetsPort = {
-  async symbols() {
-    return (await solventApi.assets()).items.map((asset) => asset.symbol);
+  // A deployment names the chain it serves, so config is read alongside the assets themselves.
+  async list() {
+    const [served, config] = await Promise.all([
+      solventApi.assets(),
+      solventApi.config(),
+    ]);
+    const network = config.networks[0] ?? "Unknown";
+    return served.items.map((asset) => toAsset(asset, network));
+  },
+};
+
+const swap: SwapPort = {
+  async quote({ from, to, amount }) {
+    const priced = await solventApi.quote({
+      token_in: from.address,
+      token_out: to.address,
+      amount_in: parseUnits(amount, from.decimals).toString(),
+    });
+    return toQuote(priced, to.decimals);
   },
 };
 
@@ -35,4 +57,4 @@ const system: SystemPort = {
 };
 
 /** The live implementations the composition root injects. */
-export const httpServices: Services = { assets, pools, system };
+export const httpServices: Services = { assets, pools, swap, system };

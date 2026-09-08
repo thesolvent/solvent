@@ -1,7 +1,18 @@
 import { useEffect, useMemo } from "react";
 
-import { NETWORKS, TAGS, TOKENS } from "@/data";
-import { clean, fit, money, price } from "@/lib/format";
+import { DASH } from "@/data";
+import { clean, fit, money } from "@/lib/format";
+import {
+  ANY_NETWORK,
+  ANY_TAG,
+  choices,
+  networkOptions,
+  settleLegs,
+  swapAction,
+  tagOptions,
+} from "@/lib/swap";
+import { useAssets } from "@/services/assets";
+import { useQuote } from "@/services/swap";
 import { useApp } from "@/state";
 
 import styles from "./SwapPage.module.css";
@@ -11,35 +22,67 @@ const SWAP_TABS = ["Swap", "Send", "Buy"];
 export function SwapPage() {
   const { state, set, config } = useApp();
 
-  const amt = parseFloat(String(state.amount).replace(/,/g, "")) || 0;
-  const fromUsdNum = amt * price(state.fromToken);
-  const out = fromUsdNum / price(state.toToken);
-  const decimals = out >= 1000 ? 2 : out >= 1 ? 4 : 6;
-  const outStr = out.toLocaleString("en-US", {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
+  const assets = useAssets();
+  const bySymbol = (symbol: string) => assets.find((a) => a.symbol === symbol);
+  const from = bySymbol(state.fromToken);
+  const to = bySymbol(state.toToken);
+
+  useEffect(() => {
+    const settled = settleLegs(assets, state.fromToken, state.toToken);
+    if (settled) set(settled);
+  }, [assets, state.fromToken, state.toToken, set]);
+
+  const typed = String(state.amount).replace(/,/g, "");
+  const amt = parseFloat(typed) || 0;
+  const fromUsdNum = amt * (from?.price ?? 0);
+
+  // The output is the server's price for this size, not the mid — it carries fee and impact.
+  const { quote, pricing, problem } = useQuote(from, to, typed);
+  // Nothing in means nothing out; anything else without a price is unknown, not zero.
+  const outStr = quote?.amountOut ?? (amt > 0 ? DASH : "0");
   const dotAt = outStr.indexOf(".");
 
   const routeStats = [
     { label: "Resolver", value: "Zero-inventory" },
-    { label: "Fills", value: "3 makers" },
-    { label: "Price impact", value: "0.04%" },
+    {
+      label: "Fills",
+      value: quote
+        ? `${quote.makersSourced} ${quote.makersSourced === 1 ? "maker" : "makers"}`
+        : DASH,
+    },
+    { label: "Price impact", value: quote?.priceImpact ?? DASH },
     { label: "Max slippage", value: `${config.slippage}%` },
   ];
 
+  const action = swapAction({
+    submitted: state.swapped,
+    amount: amt,
+    pricing,
+    quote,
+    problem,
+  });
+
   const matches = useMemo(() => {
     const q = state.pQuery.trim().toLowerCase();
-    return TOKENS.filter((t) => {
-      const okQ =
-        !q ||
-        t.symbol.toLowerCase().includes(q) ||
-        t.name.toLowerCase().includes(q);
-      const okTag = state.pTag === "All" || t.tags.indexOf(state.pTag) > -1;
-      const okNet = state.pNet === "All networks" || t.net === state.pNet;
-      return okQ && okTag && okNet;
-    });
-  }, [state.pQuery, state.pTag, state.pNet]);
+    return choices(assets, state.picker ?? "from", state.fromToken).filter(
+      (t) => {
+        const okQ =
+          !q ||
+          t.symbol.toLowerCase().includes(q) ||
+          t.name.toLowerCase().includes(q);
+        const okTag = state.pTag === ANY_TAG || t.tags.indexOf(state.pTag) > -1;
+        const okNet = state.pNet === ANY_NETWORK || t.net === state.pNet;
+        return okQ && okTag && okNet;
+      },
+    );
+  }, [
+    assets,
+    state.picker,
+    state.fromToken,
+    state.pQuery,
+    state.pTag,
+    state.pNet,
+  ]);
 
   useEffect(() => {
     if (!state.picker) return;
@@ -170,7 +213,9 @@ export function SwapPage() {
                 </span>
               </div>
             </div>
-            <div className={styles.amountUsd}>~$ {money(fromUsdNum)}</div>
+            <div className={styles.amountUsd}>
+              ~$ {money(quote?.amountOutUsd ?? 0)}
+            </div>
           </div>
         </div>
 
@@ -188,9 +233,10 @@ export function SwapPage() {
         <button
           type="button"
           className={styles.cta}
+          disabled={!action.ready}
           onClick={() => set({ swapped: true })}
         >
-          {state.swapped ? "Intent submitted to Aqua" : "Swap"}
+          {action.label}
         </button>
 
         {state.picker && (
@@ -221,7 +267,7 @@ export function SwapPage() {
               </label>
 
               <div className={styles.tagRow}>
-                {TAGS.map((t) => (
+                {tagOptions(assets).map((t) => (
                   <button
                     key={t}
                     type="button"
@@ -292,7 +338,7 @@ export function SwapPage() {
 
             <div className={styles.netCol}>
               <div className={styles.netHead}>Network</div>
-              {NETWORKS.map((n) => (
+              {networkOptions(assets).map((n) => (
                 <button
                   key={n}
                   type="button"

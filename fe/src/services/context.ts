@@ -2,12 +2,14 @@ import { createContext, useContext } from "react";
 
 import type { AssetsPort } from "@/ports/assets";
 import type { PoolsPort } from "@/ports/pools";
+import type { SwapPort } from "@/ports/swap";
 import type { SystemPort } from "@/ports/system";
 
 /** Outbound dependencies, injected at the composition root so services never import adapters. */
 export interface Services {
   assets: AssetsPort;
   pools: PoolsPort;
+  swap: SwapPort;
   system: SystemPort;
 }
 

@@ -1,9 +1,6 @@
 import type { Pool as ApiPool } from "@solvent/sdk/client";
 
-import type { Pool } from "@/data";
-
-/** Shown wherever the server has no value yet — the view renders plain strings. */
-const DASH = "—";
+import { DASH, type Pool } from "@/data";
 
 const USD = new Intl.NumberFormat("en-US", {
   style: "currency",

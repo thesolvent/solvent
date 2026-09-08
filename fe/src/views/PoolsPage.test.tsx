@@ -19,12 +19,15 @@ const POOL: Pool = {
   apr: "—",
 };
 
+/** The filter cells only read symbols, so the rest of an asset is left off here. */
+const SYMBOLS = ["WETH", "USDC"].map((symbol) => ({ symbol }));
+
 describe("PoolsPage", () => {
   it("renders the pools the port returns", async () => {
     const list = vi.fn().mockResolvedValue([POOL]);
     renderWithServices(<PoolsPage />, {
       pools: { list },
-      assets: { symbols: vi.fn().mockResolvedValue(["WETH", "USDC"]) },
+      assets: { list: vi.fn().mockResolvedValue(SYMBOLS) },
     });
 
     expect(await screen.findAllByText("WETH / USDC")).not.toHaveLength(0);
@@ -35,7 +38,7 @@ describe("PoolsPage", () => {
     const list = vi.fn().mockResolvedValue([]);
     const { container } = renderWithServices(<PoolsPage />, {
       pools: { list },
-      assets: { symbols: vi.fn().mockResolvedValue(["WETH", "USDC"]) },
+      assets: { list: vi.fn().mockResolvedValue(SYMBOLS) },
     });
 
     expect(await screen.findByText("Filters")).toBeInTheDocument();

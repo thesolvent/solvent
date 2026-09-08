@@ -1,0 +1,95 @@
+import { skipToken, useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+
+import type { Asset, Quote } from "@/data";
+
+import { useServices } from "./context";
+
+/** Long enough that typing an amount does not price every keystroke. */
+const SETTLE_MS = 300;
+
+/** Refresh this far ahead of the server's own expiry, so what is on screen is never past it. */
+const REFRESH_MARGIN_MS = 5_000;
+
+/** Never poll faster than this, however short a life the server gives a quote. */
+const MIN_REFRESH_MS = 5_000;
+
+/** Retry cadence for a quote that did not come back, so an outage heals without retyping. */
+const RETRY_MS = 10_000;
+
+/** Hold a value still until it stops changing. */
+function useSettled<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return settled;
+}
+
+/** A price is good until the server says it is not, so refresh just before that — and keep asking
+ *  on a cadence when there is no price at all, so a failure heals on its own. */
+function refreshIn(quote: Quote | undefined): number {
+  if (!quote) return RETRY_MS;
+  const remaining = quote.expiresAt - Date.now() - REFRESH_MARGIN_MS;
+  // An unreadable expiry must not leave the price frozen on screen.
+  return Number.isFinite(remaining)
+    ? Math.max(MIN_REFRESH_MS, remaining)
+    : RETRY_MS;
+}
+
+/** The server says why a trade cannot be priced; pass that on rather than inventing a phrase. */
+function reason(error: Error | null): string | undefined {
+  if (!error) return undefined;
+  const said = error.message.trim();
+  if (!said) return "Could not price this trade";
+  return said.charAt(0).toUpperCase() + said.slice(1);
+}
+
+export interface QuoteState {
+  quote: Quote | undefined;
+  pricing: boolean;
+  /** Why no price could be had, in the server's own words. */
+  problem: string | undefined;
+}
+
+/**
+ * The live price for what the widget currently asks.
+ *
+ * Idle until there is a real pair and a positive amount, so an empty or half-typed field never
+ * reaches the server. A quote is a price at an instant: it is never served stale, it refreshes
+ * itself before the server drops it, and it re-prices on return to a tab that sat open. Changing
+ * the pair or the size shows nothing rather than the last answer, which was to a different
+ * question; refreshing the same one updates the figure in place.
+ */
+export function useQuote(
+  from: Asset | undefined,
+  to: Asset | undefined,
+  amount: string,
+): QuoteState {
+  const { swap } = useServices();
+  const settled = useSettled(amount, SETTLE_MS);
+  const quotable =
+    from !== undefined &&
+    to !== undefined &&
+    from.address !== to.address &&
+    Number(settled) > 0;
+
+  const { data, isFetching, error, failureReason } = useQuery({
+    queryKey: ["quote", from?.address, to?.address, settled],
+    queryFn: quotable
+      ? () => swap.quote({ from, to, amount: settled })
+      : skipToken,
+    staleTime: 0,
+    refetchInterval: ({ state }) => refreshIn(state.data),
+    refetchOnWindowFocus: true,
+  });
+
+  return {
+    quote: data,
+    pricing: quotable && isFetching,
+    // `error` only lands once retries are spent, and never while they are paused; the
+    // reason is known from the first failure, and a trade that cannot happen should say so.
+    problem: reason(error ?? failureReason),
+  };
+}

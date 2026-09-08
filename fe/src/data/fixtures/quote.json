@@ -1,0 +1,41 @@
+{
+  "quote_id": "0x10868a57150e3e0154b94e4791ac0f70923451fb66a8a509abbc75b330547425",
+  "amount_out": {
+    "raw": "2477852376",
+    "display": "2477.852376",
+    "usd": 2478.13732902324
+  },
+  "price_impact_pct": 0.12,
+  "makers_sourced": 1,
+  "legs": [
+    {
+      "maker": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc",
+      "strategy_hash": "0x68dae0f1304e835b347b00874af173dd1ad376288d211759e0a3d51ad3ba52b2",
+      "token_in": {
+        "address": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+        "chain_id": 31337,
+        "symbol": "WETH",
+        "decimals": 18
+      },
+      "token_out": {
+        "address": "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9",
+        "chain_id": 31337,
+        "symbol": "USDC",
+        "decimals": 6
+      },
+      "amount_in": {
+        "raw": "1000000000000000000",
+        "display": "1",
+        "usd": 2494.575
+      },
+      "amount_out": {
+        "raw": "2477852376",
+        "display": "2477.852376",
+        "usd": 2478.13732902324
+      },
+      "curve": "Concentrated",
+      "share_pct": 100.0
+    }
+  ],
+  "expires_at": "2026-09-07T21:04:38Z"
+}

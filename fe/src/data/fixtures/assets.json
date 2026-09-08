@@ -1,0 +1,88 @@
+{
+  "items": [
+    {
+      "address": "0x0165878a594ca255338adfa4d48449f69242eb8f",
+      "chain_id": 31337,
+      "symbol": "DAI",
+      "name": "Dai Stablecoin",
+      "decimals": 18,
+      "tags": ["Stables"],
+      "logo_uri": null,
+      "price_usd": 1.0,
+      "change_24h_pct": 0.0,
+      "supported": true,
+      "active_strategy_count": 1,
+      "pairs": ["DAI/USDC"]
+    },
+    {
+      "address": "0x2279b7a0a67db372996a5fab50d91eaa73d2ebe6",
+      "chain_id": 31337,
+      "symbol": "WBTC",
+      "name": "Wrapped BTC",
+      "decimals": 8,
+      "tags": ["Majors"],
+      "logo_uri": null,
+      "price_usd": 79230.455,
+      "change_24h_pct": -0.875,
+      "supported": true,
+      "active_strategy_count": 1,
+      "pairs": ["WBTC/USDC"]
+    },
+    {
+      "address": "0x5fc8d32690cc91d4c39d9d3abcbd16989f875707",
+      "chain_id": 31337,
+      "symbol": "USDT",
+      "name": "Tether USD",
+      "decimals": 6,
+      "tags": ["Stables"],
+      "logo_uri": null,
+      "price_usd": 1.0,
+      "change_24h_pct": 0.0,
+      "supported": false,
+      "active_strategy_count": 0,
+      "pairs": []
+    },
+    {
+      "address": "0x8a791620dd6260079bf849dc5567adc3f2fdc318",
+      "chain_id": 31337,
+      "symbol": "LINK",
+      "name": "ChainLink Token",
+      "decimals": 18,
+      "tags": ["DeFi"],
+      "logo_uri": null,
+      "price_usd": 12.7675,
+      "change_24h_pct": -1.77,
+      "supported": true,
+      "active_strategy_count": 1,
+      "pairs": ["LINK/USDC"]
+    },
+    {
+      "address": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+      "chain_id": 31337,
+      "symbol": "WETH",
+      "name": "Wrapped Ether",
+      "decimals": 18,
+      "tags": ["Majors"],
+      "logo_uri": null,
+      "price_usd": 2492.885,
+      "change_24h_pct": -0.562,
+      "supported": true,
+      "active_strategy_count": 1,
+      "pairs": ["WETH/USDC"]
+    },
+    {
+      "address": "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9",
+      "chain_id": 31337,
+      "symbol": "USDC",
+      "name": "USD Coin",
+      "decimals": 6,
+      "tags": ["Stables"],
+      "logo_uri": null,
+      "price_usd": 1.000115,
+      "change_24h_pct": 0.015,
+      "supported": true,
+      "active_strategy_count": 4,
+      "pairs": ["DAI/USDC", "WBTC/USDC", "LINK/USDC", "WETH/USDC"]
+    }
+  ]
+}
