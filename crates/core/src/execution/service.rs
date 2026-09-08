@@ -63,15 +63,19 @@ impl ExecutionService {
     /// Advance the tx engine, then settle every tracked fill that reached a terminal state: on
     /// `Confirmed`, post the actual amounts the fill pulled (read from its own settlement) and drop
     /// the tracking; on failure, void and drop. Returns the fills that reached a terminal state so
-    /// the caller can settle the trade lifecycle. Each intent is isolated — a transient read error on
-    /// one is logged and left tracked to retry, never dropping the fills already collected for the
-    /// others — and a reservation a redelivery already settled is a no-op, so this is safe to call
-    /// repeatedly; after a restart it recovers the durably tracked fills through this same path.
+    /// the caller can settle the trade lifecycle and drive recapture. Each intent is isolated — a
+    /// transient error on one is logged and left tracked to retry, never dropping the fills already
+    /// collected for the others — and a reservation a redelivery already settled is a no-op, so this
+    /// is safe to call repeatedly; after a restart it recovers the durably tracked fills through
+    /// this same path.
     pub async fn reconcile(&self) -> Result<Vec<Settled>, SolventError> {
         self.execution.tick().await?;
 
         let mut settled = Vec::new();
         for f in self.execution.tracked().await? {
+            // Each intent settles on its own: a transient error on one (a status or receipt read) is
+            // logged and left tracked to retry, never aborting the pass and discarding the fills
+            // already collected for its siblings.
             let status = match self.execution.status(ExecHandle(f.intent.0)).await {
                 Ok(Some(status)) => status,
                 Ok(None) => continue,
@@ -110,7 +114,12 @@ impl ExecutionService {
                 }
                 ExecStatus::Pending => continue,
             };
-            self.execution.forget(f.intent).await?;
+            // Still tracked means it is reported again next cycle; the ledger and trade FSMs make
+            // that replay a no-op, so a failed drop costs a retry, never a lost settlement.
+            if self.execution.forget(f.intent).await.is_err() {
+                warn!(intent = %f.intent, "settled fill still tracked; retrying next cycle");
+                continue;
+            }
             settled.push(Settled {
                 intent: f.intent,
                 outcome,
