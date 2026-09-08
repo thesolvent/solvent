@@ -10,10 +10,14 @@ import { V2DutchOrderReactor } from "uniswapx/reactors/V2DutchOrderReactor.sol";
 import { IPermit2 } from "permit2/src/interfaces/IPermit2.sol";
 
 import { UniswapXAquaFiller } from "../src/UniswapXAquaFiller.sol";
+import { Erc7683AquaFiller } from "../src/Erc7683AquaFiller.sol";
+import { SameChainSettler } from "../src/SameChainSettler.sol";
+import { ISignatureTransfer } from "permit2/src/interfaces/ISignatureTransfer.sol";
 import { DevToken } from "../src/DevToken.sol";
 
-/// @notice One-shot devnet deploy: the Aqua core + its SwapVM router, the UniswapX reactor + our
-///         filler, and a set of mintable test tokens at real-world decimals. Writes an address
+/// @notice One-shot devnet deploy: the Aqua core + its SwapVM router, both protocols the resolver
+///         fills (the UniswapX reactor + its filler, and the ERC-7683 same-chain settler + its
+///         filler), and a set of mintable test tokens at real-world decimals. Writes an address
 ///         manifest the backend and frontend read. Devnet only — never a real network.
 contract DeployDevnet is Script {
     /// Canonical, chain-agnostic infra already present on the devnet chain (baked into wharfnet's
@@ -28,6 +32,16 @@ contract DeployDevnet is Script {
 
     /// No native wrapping on the devnet, so the router takes no WETH.
     address constant WETH = address(0);
+
+    /// The deployed contracts, so the manifest writer reads fields rather than positional args.
+    struct Deployment {
+        address aqua;
+        address router;
+        address reactor;
+        address filler;
+        address settler;
+        address erc7683Filler;
+    }
 
     struct Tok {
         string name;
@@ -53,6 +67,8 @@ contract DeployDevnet is Script {
         AquaSwapVMRouter router = new AquaSwapVMRouter(address(aqua), WETH, owner, ROUTER_NAME, ROUTER_VERSION);
         V2DutchOrderReactor reactor = new V2DutchOrderReactor(IPermit2(PERMIT2), address(0));
         UniswapXAquaFiller filler = new UniswapXAquaFiller(owner);
+        SameChainSettler settler = new SameChainSettler(ISignatureTransfer(PERMIT2));
+        Erc7683AquaFiller erc7683Filler = new Erc7683AquaFiller(owner);
 
         address[6] memory tokenAddrs;
         for (uint256 i = 0; i < toks.length; i++) {
@@ -61,29 +77,33 @@ contract DeployDevnet is Script {
 
         vm.stopBroadcast();
 
-        _writeManifest(address(aqua), address(router), address(reactor), address(filler), toks, tokenAddrs);
+        _writeManifest(
+            Deployment({
+                aqua: address(aqua),
+                router: address(router),
+                reactor: address(reactor),
+                filler: address(filler),
+                settler: address(settler),
+                erc7683Filler: address(erc7683Filler)
+            }),
+            toks,
+            tokenAddrs
+        );
     }
 
     /// Emit the address manifest as JSON. `router` is the Aqua app makers ship to; `filler` is the
-    /// reactor callback the resolver drives.
-    function _writeManifest(
-        address aqua,
-        address router,
-        address reactor,
-        address filler,
-        Tok[6] memory toks,
-        address[6] memory tokenAddrs
-    )
-        internal
-    {
+    /// reactor callback the resolver drives; `settler` + `erc7683Filler` are the ERC-7683 pair.
+    function _writeManifest(Deployment memory d, Tok[6] memory toks, address[6] memory tokenAddrs) internal {
         string memory root = "root";
         vm.serializeUint(root, "chain_id", block.chainid);
         vm.serializeAddress(root, "permit2", PERMIT2);
         vm.serializeAddress(root, "multicall3", MULTICALL3);
-        vm.serializeAddress(root, "aqua", aqua);
-        vm.serializeAddress(root, "router", router);
-        vm.serializeAddress(root, "reactor", reactor);
-        vm.serializeAddress(root, "filler", filler);
+        vm.serializeAddress(root, "aqua", d.aqua);
+        vm.serializeAddress(root, "router", d.router);
+        vm.serializeAddress(root, "reactor", d.reactor);
+        vm.serializeAddress(root, "filler", d.filler);
+        vm.serializeAddress(root, "settler", d.settler);
+        vm.serializeAddress(root, "erc7683_filler", d.erc7683Filler);
 
         string memory tokensObj = "tokens";
         string memory tokensJson;

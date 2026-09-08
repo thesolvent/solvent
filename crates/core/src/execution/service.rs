@@ -612,8 +612,8 @@ mod tests {
         }
     }
 
-    // A transient error on one tracked intent must not discard another's settled fill: A settles
-    // cleanly while B's status read errors — A is still reported and B stays tracked to retry.
+    // A transient error on one tracked intent must not discard another's confirmed fill: A settles
+    // cleanly while B's status read errors — A is still returned and B stays tracked to retry.
     #[tokio::test]
     async fn one_intents_error_does_not_drop_anothers_confirmed_fill() {
         let (intent_a, rid_a) = ids(1);

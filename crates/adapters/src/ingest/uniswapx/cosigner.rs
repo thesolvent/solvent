@@ -11,7 +11,9 @@ use thiserror::Error;
 use solvent_core::primitives::ingest::{ProtocolId, RawOrder};
 use solvent_core::primitives::ChainId;
 
-use super::builder::{cosign_digest, sign65, witness_digest};
+use crate::ingest::sign65;
+
+use super::builder::{cosign_digest, witness_digest};
 use super::codec::{order_hash, V2DutchOrder};
 
 /// Applies this resolver's cosignature to taker-signed orders, over a fixed Permit2 + chain. Holds

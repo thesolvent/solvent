@@ -74,12 +74,12 @@ pub fn route(
         false => bound.checked_sub(split.gross_input(per_leg_cost))?, // input + gas stays under `max_in`
     };
     let price_impact_pct = price_impact_pct(&selection.chosen, split.amount_in, split.amount_out);
-    Some(RoutePlan {
-        intent: request.intent,
-        legs: split.legs,
+    Some(RoutePlan::new(
+        request.intent,
+        split.legs,
         expected_profit,
         price_impact_pct,
-    })
+    ))
 }
 
 #[cfg(test)]

@@ -178,17 +178,17 @@ async fn execution_service(h: &Harness, led: Arc<LedgerService>) -> ExecutionSer
         .confirmations(1)
         .bump_timeout(0)
         .build();
-    let pool = SqlitePoolOptions::new()
+    let fills = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
         .await
-        .expect("fill store sqlite");
-    let fills = SqliteFillStore::new(pool);
-    fills.migrate().await.expect("migrate the fill store");
+        .expect("exec sqlite");
+    let fill_store = SqliteFillStore::new(fills);
+    fill_store.migrate().await.expect("migrate exec");
     let exec = Arc::new(WalletkitExecutor::new(
         wallet,
         SubmissionOpts::public(),
-        Arc::new(fills),
+        Arc::new(fill_store),
     ));
     let settlement = Arc::new(AquaSettlementReader::new(
         Arc::new(h.maker_provider.clone()),
