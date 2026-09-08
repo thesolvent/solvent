@@ -13,7 +13,7 @@
       "name": "Wrapped Ether",
       "decimals": 18,
       "tags": [
-        "majors"
+        "Majors"
       ]
     },
     {
@@ -23,7 +23,7 @@
       "name": "USD Coin",
       "decimals": 6,
       "tags": [
-        "stables"
+        "Stables"
       ]
     },
     {
@@ -33,7 +33,7 @@
       "name": "Tether USD",
       "decimals": 6,
       "tags": [
-        "stables"
+        "Stables"
       ]
     },
     {
@@ -43,7 +43,7 @@
       "name": "Wrapped BTC",
       "decimals": 8,
       "tags": [
-        "majors"
+        "Majors"
       ]
     },
     {
@@ -53,7 +53,7 @@
       "name": "Dai Stablecoin",
       "decimals": 18,
       "tags": [
-        "stables"
+        "Stables"
       ]
     },
     {
@@ -63,7 +63,7 @@
       "name": "ChainLink Token",
       "decimals": 18,
       "tags": [
-        "defi"
+        "DeFi"
       ]
     }
   ]

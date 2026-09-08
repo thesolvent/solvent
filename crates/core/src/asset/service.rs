@@ -27,6 +27,9 @@ pub struct AssetManager {
     registry: Arc<SharedSnapshot>,
 }
 
+/// Catalog tag that marks a token as holding a dollar peg.
+const STABLE_TAG: &str = "stables";
+
 impl AssetManager {
     /// Index the list by address and hold the registry handle.
     pub fn new(list: TokenList, registry: Arc<SharedSnapshot>) -> Self {
@@ -182,11 +185,14 @@ impl AssetManager {
         }
     }
 
-    /// Whether `address` is tagged as a stablecoin in the catalog.
+    /// Whether `address` is tagged as a stablecoin in the catalog. Tags are read by people as
+    /// well as matched on, so how the list cased one must not change what it classifies.
     pub fn is_stable(&self, address: &Address) -> bool {
-        self.catalog
-            .get(address)
-            .is_some_and(|meta| meta.tags.iter().any(|tag| tag == "stables"))
+        self.catalog.get(address).is_some_and(|meta| {
+            meta.tags
+                .iter()
+                .any(|tag| tag.eq_ignore_ascii_case(STABLE_TAG))
+        })
     }
 
     fn symbol(&self, address: &Address) -> String {

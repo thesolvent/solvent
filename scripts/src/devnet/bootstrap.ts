@@ -19,14 +19,15 @@ const ENV_OUT = resolve(REPO_ROOT, "devnet/generated/env.sh");
 const DEPLOYER_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const COSIGNER_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
-// Symbol -> token-list tag, mirroring the checked-in list's grouping.
+// Symbol -> token-list tag, mirroring the checked-in list's grouping. Tags are read by people in
+// the asset picker, so they are cased as they should appear.
 const TAGS: Record<string, string> = {
-  WETH: "majors",
-  WBTC: "majors",
-  USDC: "stables",
-  USDT: "stables",
-  DAI: "stables",
-  LINK: "defi",
+  WETH: "Majors",
+  WBTC: "Majors",
+  USDC: "Stables",
+  USDT: "Stables",
+  DAI: "Stables",
+  LINK: "DeFi",
 };
 
 // Binance feed symbol -> the devnet token it prices.
