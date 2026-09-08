@@ -1,5 +1,9 @@
 import type { Page } from "./state";
 
+export interface RouteState {
+  resetSubviews?: boolean;
+}
+
 /** The address of each top-level page. The URL is the source of truth for which one is showing,
  *  so a reload or a shared link lands where it should. */
 export const PATHS: Record<Page, string> = {

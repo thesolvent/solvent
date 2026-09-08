@@ -1,7 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { BrowserRouter, MemoryRouter } from "react-router-dom";
 import { WagmiProvider, createConfig, http } from "wagmi";
 import { mock } from "wagmi/connectors";
 import { anvil } from "wagmi/chains";
@@ -59,7 +59,10 @@ export function renderWithServices(
   ui: ReactElement,
   stubs: Stubs = {},
   route = "/",
+  router: "memory" | "browser" = "memory",
 ): RenderResult {
+  if (router === "browser") window.history.replaceState(null, "", route);
+  const app = <AppProvider>{ui}</AppProvider>;
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 } },
   });
@@ -69,9 +72,11 @@ export function renderWithServices(
         services={fakeServices(stubs)}
         queryClient={queryClient}
       >
-        <MemoryRouter initialEntries={[route]}>
-          <AppProvider>{ui}</AppProvider>
-        </MemoryRouter>
+        {router === "browser" ? (
+          <BrowserRouter>{app}</BrowserRouter>
+        ) : (
+          <MemoryRouter initialEntries={[route]}>{app}</MemoryRouter>
+        )}
       </ServicesProvider>
     </WagmiProvider>,
   );

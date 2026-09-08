@@ -1,10 +1,10 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route } from "react-router-dom";
 
 import { FaucetBanner } from "@/components/FaucetBanner";
 import { Header } from "@/components/Header";
+import { TransitionRoutes } from "@/components/TransitionRoutes";
 import { AppProvider } from "@/AppProvider";
 import { useApp, useAppActions } from "@/state";
-import { useAppSlice } from "@/store";
 import { CreatePoolPage } from "@/views/CreatePoolPage";
 import { ExplorerPage } from "@/views/ExplorerPage";
 import { HomePage } from "@/views/HomePage";
@@ -27,14 +27,12 @@ function ExplorerRoute() {
 
 function Shell() {
   const { config } = useAppActions();
-  const wipe = useAppSlice((state) => state.wipe);
 
   return (
     <div className={styles.app}>
       {config.showFaucet && <FaucetBanner />}
       <Header />
-      {wipe && <div className={styles.wipe} />}
-      <Routes>
+      <TransitionRoutes>
         <Route path="/" element={<HomePage />} />
         <Route path="/swap" element={<SwapPage />} />
         <Route path="/docs" element={<SwapPage />} />
@@ -45,7 +43,7 @@ function Shell() {
         <Route path="/explorer" element={<ExplorerRoute />} />
         <Route path="/explorer/trades/:tradeId" element={<TradeDetailPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      </TransitionRoutes>
     </div>
   );
 }

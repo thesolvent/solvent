@@ -26,7 +26,6 @@ export type Crumb = { snap: Snap; label: string };
 
 export type AppState = {
   page: Page | null;
-  wipe: boolean;
   trail: Crumb[];
 
   swapTab: string;
@@ -99,7 +98,6 @@ export type AppState = {
 
 export const INITIAL_STATE: AppState = {
   page: null,
-  wipe: false,
   trail: [],
 
   swapTab: "Swap",

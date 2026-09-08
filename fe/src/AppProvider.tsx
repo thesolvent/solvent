@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { PATHS, pageFromPath } from "./routes";
+import { PATHS, pageFromPath, type RouteState } from "./routes";
 import { useAppStore } from "./store";
 import {
   AppActionsCtx,
@@ -26,39 +26,16 @@ export function AppProvider({
   const set = useAppStore((store) => store.set);
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const wipeTimers = useRef<number[]>([]);
-
-  useEffect(
-    () => () => {
-      wipeTimers.current.forEach(clearTimeout);
-    },
-    [],
-  );
 
   const page = pageFromPath(pathname) ?? config.landingPage;
 
-  // The lime veil sweeps up over 520ms; the page swaps behind it at 210ms.
   const navTo = useCallback(
     (next: Page) => {
-      wipeTimers.current.forEach(clearTimeout);
-      wipeTimers.current = [];
-      set({ wipe: true });
-      wipeTimers.current.push(
-        window.setTimeout(() => {
-          navigate(PATHS[next]);
-          set({
-            trail: [],
-            detail: null,
-            create: false,
-            xpStrat: null,
-          });
-          wipeTimers.current.push(
-            window.setTimeout(() => set({ wipe: false }), 300),
-          );
-        }, 210),
-      );
+      navigate(PATHS[next], {
+        state: { resetSubviews: true } satisfies RouteState,
+      });
     },
-    [navigate, set],
+    [navigate],
   );
 
   const go = useCallback((next: Page) => () => navTo(next), [navTo]);

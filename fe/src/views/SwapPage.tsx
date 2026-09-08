@@ -1,5 +1,6 @@
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useEffect, useMemo } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAccount, useSwitchChain } from "wagmi";
 
 import { DASH } from "@/data";
@@ -25,6 +26,8 @@ const SWAP_TABS = ["Swap", "Send", "Buy"];
 
 export function SwapPage() {
   const { state, set, config } = useApp();
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
 
   const assets = useAssets();
   const bySymbol = (symbol: string) => assets.find((a) => a.symbol === symbol);
@@ -61,13 +64,20 @@ export function SwapPage() {
   const { isConnected, chainId } = useAccount();
   const { openConnectModal } = useConnectModal();
   const { switchChain } = useSwitchChain();
-  const submission = useSubmitSwap({
-    from,
-    to,
-    amount: typed,
-    quote,
-    slippagePct: config.slippage,
-  });
+  const submission = useSubmitSwap(
+    {
+      from,
+      to,
+      amount: typed,
+      quote,
+      slippagePct: config.slippage,
+    },
+    ({ tradeId }) => {
+      // BrowserRouter updates history before React renders a requested departure.
+      if (window.location.pathname !== pathname) return;
+      navigate(`/explorer/trades/${encodeURIComponent(tradeId)}`);
+    },
+  );
 
   const switchTo = isConnected && chainId !== chain.id ? chain.name : undefined;
 

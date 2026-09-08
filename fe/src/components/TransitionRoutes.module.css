@@ -1,0 +1,8 @@
+.wipe {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+  background: var(--lime-hero);
+  composes: wipe520 from "../styles/animations.module.css";
+}

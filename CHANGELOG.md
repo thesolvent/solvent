@@ -251,6 +251,11 @@ the project is pre-1.0 and evolving.
     types), so a renamed Rust field surfaces as a compile/gate failure, never a runtime one.
 
 ### Added — frontend (`fe/`, React + Vite)
+- **Internal navigation shares the green route transition** — pool and Explorer trade links,
+  breadcrumbs, header actions, redirects, and browser Back/Forward all reveal their destination
+  behind the same sweep. Rapid navigation cancels stale timers; reduced motion opens immediately.
+  Accepted swaps navigate to the returned trade ID, while submission failures stay on Swap and
+  late acceptance preserves a requested departure. Trade detail keeps tracking settlement.
 - **Live Explorer and trade detail** — trades, protocol activity, and aggregate stats come from the
   API through an Explorer port, DTO mappers, and TanStack Query. Server filters and cursor paging
   replace fixture filtering. Trade URLs use stable IDs (`/explorer/trades/:tradeId`), with recorded

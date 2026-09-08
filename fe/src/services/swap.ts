@@ -67,7 +67,10 @@ async function submitCurrent(
 }
 
 /** React owns mutation state; the intent owns payment authorization and retry identity. */
-export function useSubmitSwap(form: SwapForm): SwapSubmission {
+export function useSubmitSwap(
+  form: SwapForm,
+  onSubmitted?: (result: SubmittedSwap) => void,
+): SwapSubmission {
   const { swap } = useServices();
   const { address, chainId } = useAccount();
   const publicClient = useClient({ chainId });
@@ -93,6 +96,8 @@ export function useSubmitSwap(form: SwapForm): SwapSubmission {
               walletClient,
             }),
           },
+      // Per-call callbacks stop observing when the page unmounts.
+      { onSuccess: onSubmitted },
     );
   }
 
