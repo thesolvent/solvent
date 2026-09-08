@@ -9,6 +9,7 @@ use crate::deps::execution::{ExecutionError, SettlementError, SimError};
 use crate::deps::ingest::{FillBuilderError, NormalizeError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
 use crate::deps::maker_metrics::MakerMetricsError;
+use crate::deps::recapture::RecaptureStoreError;
 use crate::deps::registry::{ChainSourceError, StoreError};
 use crate::deps::trade::TradeStoreError;
 use crate::primitives::ledger::LedgerError;
@@ -62,4 +63,7 @@ pub enum SolventError {
     /// Reading maker metrics failed.
     #[error("maker metrics: {0}")]
     MakerMetrics(#[from] MakerMetricsError),
+    /// The recapture store failed.
+    #[error("recapture store: {0}")]
+    RecaptureStore(#[from] RecaptureStoreError),
 }

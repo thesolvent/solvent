@@ -10,6 +10,7 @@ pub mod maker;
 pub mod pool;
 pub mod pricing;
 pub mod quote;
+pub mod recapture;
 pub mod registry;
 pub mod routing;
 pub mod shared;

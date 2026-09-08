@@ -63,23 +63,35 @@ impl ExecutionService {
     /// Advance the tx engine, then settle every tracked fill that reached a terminal state: on
     /// `Confirmed`, post the actual amounts the fill pulled (read from its own settlement) and drop
     /// the tracking; on failure, void and drop. Returns the fills that reached a terminal state so
-    /// the caller can settle the trade lifecycle. A reservation a redelivery already settled is a
-    /// no-op, so this is safe to call repeatedly — and after a restart it recovers the durably
-    /// tracked fills through this same path.
+    /// the caller can settle the trade lifecycle. Each intent is isolated — a transient read error on
+    /// one is logged and left tracked to retry, never dropping the fills already collected for the
+    /// others — and a reservation a redelivery already settled is a no-op, so this is safe to call
+    /// repeatedly; after a restart it recovers the durably tracked fills through this same path.
     pub async fn reconcile(&self) -> Result<Vec<Settled>, SolventError> {
         self.execution.tick().await?;
 
         let mut settled = Vec::new();
         for f in self.execution.tracked().await? {
-            let Some(status) = self.execution.status(ExecHandle(f.intent.0)).await? else {
-                continue;
+            let status = match self.execution.status(ExecHandle(f.intent.0)).await {
+                Ok(Some(status)) => status,
+                Ok(None) => continue,
+                Err(_) => {
+                    warn!(intent = %f.intent, "fill status unreadable; retrying next cycle");
+                    continue;
+                }
             };
             let outcome = match status {
                 ExecStatus::Confirmed { tx, block } => {
                     match self.ledger.reservation_sources(f.reservation).await {
                         Some(sources) => {
-                            let filled = self.settlement.settled(tx, &sources).await?;
-                            settle(self.ledger.post(f.reservation, &filled).await)?;
+                            let Ok(filled) = self.settlement.settled(tx, &sources).await else {
+                                warn!(intent = %f.intent, "settlement unreadable; retrying next cycle");
+                                continue;
+                            };
+                            if settle(self.ledger.post(f.reservation, &filled).await).is_err() {
+                                warn!(intent = %f.intent, "posting the confirmed fill failed; retrying next cycle");
+                                continue;
+                            }
                             info!(intent = %f.intent, "fill confirmed; reservation posted");
                         }
                         None => {
@@ -89,7 +101,10 @@ impl ExecutionService {
                     SettledOutcome::Confirmed { tx, block }
                 }
                 ExecStatus::Failed { .. } | ExecStatus::Dropped => {
-                    settle(self.ledger.void(f.reservation).await)?;
+                    if settle(self.ledger.void(f.reservation).await).is_err() {
+                        warn!(intent = %f.intent, "voiding the failed fill failed; retrying next cycle");
+                        continue;
+                    }
                     warn!(intent = %f.intent, "fill did not land; reservation voided");
                     SettledOutcome::Failed
                 }
@@ -541,5 +556,93 @@ mod tests {
             U256::from(900u64),
             "recovered fill posted"
         );
+    }
+
+    /// Confirms one designated handle; every other handle's status read errors — models a transient
+    /// per-intent RPC failure alongside a clean settlement.
+    struct FlakyExec {
+        good: ExecHandle,
+        good_status: ExecStatus,
+        tracked: StdMutex<HashMap<IntentId, ReservationId>>,
+    }
+    #[async_trait]
+    impl Execution for FlakyExec {
+        async fn submit(
+            &self,
+            fill: &FillTx,
+            reservation: ReservationId,
+        ) -> Result<ExecHandle, ExecutionError> {
+            self.tracked
+                .lock()
+                .unwrap()
+                .insert(fill.intent, reservation);
+            Ok(ExecHandle(fill.intent.0))
+        }
+        async fn status(&self, handle: ExecHandle) -> Result<Option<ExecStatus>, ExecutionError> {
+            if handle == self.good {
+                Ok(Some(self.good_status.clone()))
+            } else {
+                Err(ExecutionError::Engine("rpc down".into()))
+            }
+        }
+        async fn forget(&self, intent: IntentId) -> Result<(), ExecutionError> {
+            self.tracked.lock().unwrap().remove(&intent);
+            Ok(())
+        }
+        async fn tracked(&self) -> Result<Vec<TrackedFill>, ExecutionError> {
+            Ok(self
+                .tracked
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(intent, reservation)| TrackedFill::new(*intent, *reservation))
+                .collect())
+        }
+        async fn tick(&self) -> Result<(), ExecutionError> {
+            Ok(())
+        }
+    }
+
+    // A transient error on one tracked intent must not discard another's confirmed fill: A settles
+    // cleanly while B's status read errors — A is still returned and B stays tracked to retry.
+    #[tokio::test]
+    async fn one_intents_error_does_not_drop_anothers_confirmed_fill() {
+        let (intent_a, rid_a) = ids(1);
+        let (intent_b, rid_b) = ids(2);
+        let led = ledger(1000);
+        led.reserve(rid_a, intent_a, vec![source(100)], 60)
+            .await
+            .unwrap();
+        led.reserve(rid_b, intent_b, vec![source(100)], 60)
+            .await
+            .unwrap();
+
+        let exec = Arc::new(FlakyExec {
+            good: ExecHandle(intent_a.0),
+            good_status: confirmed(),
+            tracked: StdMutex::new(HashMap::new()),
+        });
+        let svc = ExecutionService::new(
+            Arc::new(FakeSim(SimVerdict::Ok)),
+            exec,
+            Arc::new(FakeSettle(vec![U256::from(100u64)])),
+            led,
+        );
+        svc.fill(pending(intent_a, rid_a)).await.unwrap();
+        svc.fill(pending(intent_b, rid_b)).await.unwrap();
+
+        let settled = svc.reconcile().await.unwrap();
+        assert_eq!(
+            settled,
+            vec![Settled {
+                intent: intent_a,
+                outcome: SettledOutcome::Confirmed {
+                    tx: B256::from([2; 32]),
+                    block: 1,
+                },
+            }],
+            "A's confirmed fill survives B's error"
+        );
+        assert_eq!(svc.pending().await.unwrap(), 1, "B stays tracked to retry");
     }
 }

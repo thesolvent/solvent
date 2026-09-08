@@ -11,8 +11,8 @@ use solvent_core::deps::execution::{SettlementError, SettlementReader};
 use solvent_core::primitives::ledger::ReservationSource;
 use solvent_core::primitives::registry::AquaEvent;
 
-use crate::aqua::{into_domain, IAqua};
-use crate::events::prelude::{process_logs, Provider};
+use crate::aqua::events_in_tx;
+use crate::events::prelude::Provider;
 
 /// Reads a confirmed fill's settlement from its receipt. `aqua` is the liquidity contract whose
 /// `Pulled` events record what each maker gave up — the same contract the registry reads.
@@ -34,18 +34,9 @@ impl SettlementReader for AquaSettlementReader {
         tx: B256,
         sources: &[ReservationSource],
     ) -> Result<Vec<U256>, SettlementError> {
-        let receipt = self
-            .provider
-            .get_transaction_receipt(tx)
+        let pulls = events_in_tx(&self.provider, self.aqua, tx)
             .await
-            .map_err(|e| SettlementError::Read(e.to_string()))?
-            .ok_or_else(|| SettlementError::Read(format!("no receipt for fill tx {tx}")))?;
-
-        let pulls: Vec<AquaEvent> =
-            process_logs::<IAqua::IAquaEvents>(receipt.logs(), &[self.aqua])
-                .into_iter()
-                .map(|ext| into_domain(ext.event))
-                .collect();
+            .map_err(SettlementError::Read)?;
 
         Ok(sources.iter().map(|s| pulled_for(&pulls, s)).collect())
     }

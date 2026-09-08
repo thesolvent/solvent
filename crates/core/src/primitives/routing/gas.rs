@@ -7,6 +7,7 @@ use alloy_primitives::U256;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
+use crate::primitives::shared::valuation::pow10;
 use crate::primitives::UsdPrice;
 
 /// `gas_units × gas_price` (native wei) valued in USD at `native_price`, converted to the
@@ -34,10 +35,6 @@ pub fn per_leg_cost(
 
 fn wei_per_native() -> Decimal {
     Decimal::from(1_000_000_000_000_000_000u64)
-}
-
-fn pow10(n: u8) -> Decimal {
-    (0..n).fold(Decimal::ONE, |d, _| d * Decimal::from(10u8))
 }
 
 #[cfg(test)]

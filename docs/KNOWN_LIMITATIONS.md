@@ -111,6 +111,53 @@ or a capacity floor that keeps adding pools until the top-K can absorb the trade
 
 ---
 
+## L10 — Recapture payout is at-least-once until the operator worker is wired
+**Component:** recapture — `crates/adapters/src/recapture/alloy_payer.rs` × `crates/core/src/recapture/payout.rs`
+
+`PayoutService` settles a `(maker, token)` group only after its transfer lands, and `mark_settled`
+commits a group's rows in one transaction (all-or-nothing). The remaining gap is `AlloyRebatePayer::pay`,
+which sends the ERC-20 transfer straight over an `alloy` provider (`send().watch()`) rather than through
+the project's `walletkit` tx engine. An *ambiguous* confirmation — `send` succeeds but `watch` errors on
+an RPC timeout — returns `Err`, leaves the credit outstanding, and the next sweep re-sends; if the first
+(unconfirmed-to-us) transfer already landed, the maker is paid twice. Exactly-once payout is walletkit's
+job — a durable handle + status re-check on retry, exactly as `WalletkitExecutor` gives the fill path —
+and the plan named it (`tier0-recapture-plan.md`, Task 4: "Reuses: the execution tx-engine"). **Inert
+today:** `AlloyRebatePayer` is exercised only by tests; nothing runs the payout worker (the in-binary
+worker is deferred, blocked on the app composition root — see the recapture design's scope note). The
+gate: route the payer through `walletkit::Wallet` *before* that worker is ever enabled, so the
+double-pay window never opens in production.
+
+## L11 — `Erc7683AquaFiller` duplicates the Aqua-sourcing machinery
+**Component:** contracts — `contracts/src/Erc7683AquaFiller.sol` × `contracts/src/UniswapXAquaFiller.sol`
+
+`SourceSwap`, the balance snapshot, the profitability guard, `_takerTraits`, `_pushUnique`/`_addAmount`
+and `sweep` exist in both fillers (~150 duplicated lines). This **contradicts** the house rule to
+extract shared logic at the second use, and was chosen knowingly: extracting an `AquaSourcing` base
+would have touched a working, audited-once contract days before the ETHOnline deadline, and the
+UniswapX filler's 20 tests are the only thing standing behind it.
+
+- **Blast radius:** none functionally — the duplication is exact and both copies are covered by their
+  own suites. The cost is future: a guard fix must be made twice, and the two can silently diverge.
+- **Disposition:** **extract `AquaSourcing` after the deadline**, with both suites as the safety net.
+  The two fillers genuinely differ only in their entrypoint and which callback they implement
+  (`reactorCallback` vs `preTransferInCallback`), so the shared base is a clean cut.
+
+## L12 — ERC-7683 fills are bounded to four maker legs
+**Component:** contracts — `contracts/src/Erc7683AquaFiller.sol` (`MAX_LEGS`)
+
+The 7683 path sources multi-leg by **nesting**: leg *i*'s flash callback launches leg *i+1*, and the
+innermost settles. Recursion depth therefore equals leg count, so it is bounded at 4 and
+`Erc7683FillBuilder` rejects wider plans off-chain (`FillBuilderError::TooManyLegs`). UniswapX, whose
+legs are sequential rather than nested, is unaffected and keeps the router's `max_legs`.
+
+- **Blast radius:** a routed plan wider than four legs is not fillable on the 7683 path; the router's
+  sparsity heuristic rarely produces one at realistic gas, but it can.
+- **Disposition:** raising the bound is a constant plus a gas measurement of the deepest nest. If wide
+  plans ever matter more than gas, the alternative is a settler-side callback (design §5.1), which
+  removes the nesting entirely at the cost of asking the settler for a favour.
+
+---
+
 # Performance — refactor before production
 
 MVP-simple choices that are correct but do unwanted work / hold heavy state. None is on the 500 ms

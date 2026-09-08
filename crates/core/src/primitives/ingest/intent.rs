@@ -13,6 +13,7 @@ use crate::primitives::{ChainId, IntentId};
 #[non_exhaustive]
 pub enum ProtocolId {
     UniswapXV2,
+    Erc7683,
 }
 
 /// What the taker pays: the token and its amount over time.

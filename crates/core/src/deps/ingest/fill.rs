@@ -30,4 +30,9 @@ pub enum FillBuilderError {
     MissingStrategy,
     #[error("a routed leg's shipped program did not decode")]
     UndecodableProgram,
+    /// The plan is wider than the protocol's filler can source in one transaction.
+    #[error("plan has {given} legs, more than the filler's {max}")]
+    TooManyLegs { given: usize, max: usize },
+    #[error("the intent's encoded order did not decode")]
+    UndecodableOrder,
 }

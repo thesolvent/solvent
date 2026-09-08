@@ -43,6 +43,11 @@ impl UsdPrice {
     }
 }
 
+/// `10^n` as a `Decimal` — the base-unit ↔ whole-token scale factor shared by valuations.
+pub(crate) fn pow10(n: u8) -> Decimal {
+    (0..n).fold(Decimal::ONE, |d, _| d * Decimal::from(10u8))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

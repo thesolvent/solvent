@@ -5,11 +5,13 @@
 //! prefix the reactor's raw `ecrecover` rejects).
 
 use alloy::primitives::{keccak256, Address, Bytes, B256, U256};
-use alloy::signers::{local::PrivateKeySigner, SignerSync};
+use alloy::signers::local::PrivateKeySigner;
 use alloy::sol_types::{eip712_domain, SolValue};
 
 use solvent_core::primitives::ingest::{ProtocolId, RawOrder};
 use solvent_core::primitives::ChainId;
+
+use crate::ingest::sign65;
 
 use super::codec::{
     order_hash, CosignerData, DutchInput, DutchOutput, OrderInfo, V2DutchOrder, DUTCH_OUTPUT_TYPE,
@@ -170,15 +172,6 @@ pub(crate) fn witness_digest(
         ]
         .concat(),
     )
-}
-
-/// A 65-byte `r ‖ s ‖ v` signature with `v ∈ {27, 28}`, as the reactor's `ecrecover` expects
-/// (alloy's `as_bytes` lays it out exactly so).
-pub(crate) fn sign65(signer: &PrivateKeySigner, digest: B256) -> Bytes {
-    let sig = signer
-        .sign_hash_sync(&digest)
-        .expect("a local signer signs a 32-byte digest infallibly");
-    Bytes::from(sig.as_bytes())
 }
 
 #[cfg(test)]

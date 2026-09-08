@@ -134,7 +134,7 @@ pub fn load_fixture() -> Fixture {
 /// A deployed stack on a live anvil: maker (account #0) + taker (account #1)
 /// providers, the Aqua + router instances, and two canonically-ordered tokens.
 pub struct Harness {
-    _anvil: AnvilInstance,
+    _anvil: Option<AnvilInstance>,
     pub maker: Address,
     pub taker: Address,
     pub maker_signer: PrivateKeySigner,
@@ -151,6 +151,10 @@ pub struct Harness {
     pub fx: Fixture,
 }
 
+// Standard anvil dev accounts (#0 maker, #1 taker) — well-known throwaway keys, devnet only.
+const DEV_KEY_0: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const DEV_KEY_1: &str = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+
 impl Harness {
     pub async fn setup() -> Self {
         let anvil = Anvil::new()
@@ -161,22 +165,38 @@ impl Harness {
             .arg("1")
             .try_spawn()
             .expect("spawn anvil (is it on PATH?)");
-        let fx = load_fixture();
-
         let maker_signer: PrivateKeySigner = anvil.keys()[0].clone().into();
         let taker_signer: PrivateKeySigner = anvil.keys()[1].clone().into();
+        let endpoint = anvil.endpoint();
+        Self::build(endpoint, maker_signer, taker_signer, Some(anvil)).await
+    }
+
+    /// Attach to an already-running node (the docker devnet) with the standard anvil dev accounts,
+    /// deploying a fresh stack onto it so the whole flow is observable in that chain's explorer.
+    pub async fn attach(rpc: &str) -> Self {
+        let maker_signer: PrivateKeySigner = DEV_KEY_0.parse().expect("dev key 0");
+        let taker_signer: PrivateKeySigner = DEV_KEY_1.parse().expect("dev key 1");
+        Self::build(rpc.to_string(), maker_signer, taker_signer, None).await
+    }
+
+    async fn build(
+        endpoint: String,
+        maker_signer: PrivateKeySigner,
+        taker_signer: PrivateKeySigner,
+        anvil: Option<AnvilInstance>,
+    ) -> Self {
+        let fx = load_fixture();
         let maker = maker_signer.address();
         let taker = taker_signer.address();
         assert_eq!(maker, fx.maker, "harness maker must match the fixture's");
-        let endpoint = anvil.endpoint();
 
         let maker_provider = ProviderBuilder::new()
             .wallet(EthereumWallet::from(maker_signer.clone()))
-            .connect_http(anvil.endpoint_url())
+            .connect_http(endpoint.parse().expect("endpoint url"))
             .erased();
         let taker_provider = ProviderBuilder::new()
             .wallet(EthereumWallet::from(taker_signer.clone()))
-            .connect_http(anvil.endpoint_url())
+            .connect_http(endpoint.parse().expect("endpoint url"))
             .erased();
 
         let aqua = Aqua::deploy(maker_provider.clone())
@@ -616,7 +636,16 @@ pub struct Stack {
 /// Deploy the ingest→fill stack: the base harness, etched Permit2 + Multicall3, and the reactor +
 /// `UniswapXAquaFiller` (owned by the maker, who is the filler's `onlyOwner`).
 pub async fn setup() -> Stack {
-    let h = Harness::setup().await;
+    assemble(Harness::setup().await).await
+}
+
+/// Assemble the fill stack on an already-running node (the docker devnet) using the standard anvil
+/// dev accounts, so ingest → fill → recapture is observable in that chain's explorer.
+pub async fn setup_attached(rpc: &str) -> Stack {
+    assemble(Harness::attach(rpc).await).await
+}
+
+async fn assemble(h: Harness) -> Stack {
     for (addr, code) in [(MULTICALL3, MULTICALL3_CODE), (PERMIT2, PERMIT2_CODE)] {
         let bytes: Bytes = code.trim().parse().expect("bytecode");
         h.maker_provider
