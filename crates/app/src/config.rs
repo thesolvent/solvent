@@ -40,6 +40,9 @@ pub struct Config {
     /// Binance combined-stream WS base for the token-price feed.
     #[serde(default = "default_binance_ws")]
     pub binance_ws_url: String,
+    /// Binance Spot REST base for historical klines used only by charts.
+    #[serde(default = "default_binance_rest")]
+    pub binance_rest_url: String,
     /// Gas a single fill leg costs on this chain, in gas units — sizes the sparsity threshold.
     #[serde(default = "default_gas_units")]
     pub gas_units_per_leg: u64,
@@ -108,6 +111,8 @@ impl Config {
             default_fee_bps: self.default_fee_bps,
             networks: self.networks.clone(),
             block_explorer_url: self.block_explorer_url.clone(),
+            aqua: self.aqua_address,
+            app: self.app_address,
             reactor: self.reactor,
             permit2: self.permit2,
             cosigner,
@@ -132,6 +137,9 @@ fn default_token_list() -> String {
 }
 fn default_binance_ws() -> String {
     "wss://stream.binance.com:9443".to_string()
+}
+fn default_binance_rest() -> String {
+    "https://api.binance.com".to_string()
 }
 fn default_gas_units() -> u64 {
     150_000

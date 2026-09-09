@@ -8,7 +8,10 @@ import {
 } from "../../src/client/index";
 
 /** A transport that returns a 200 envelope wrapping `result`, capturing the URL it was called with. */
-function okTransport(result: unknown, onUrl?: (url: string) => void): Transport {
+function okTransport(
+  result: unknown,
+  onUrl?: (url: string) => void,
+): Transport {
   return async (url) => {
     onUrl?.(url);
     return new Response(JSON.stringify({ status: 200, result }), {
@@ -39,37 +42,69 @@ describe("createSolventClient", () => {
     expect(seen).toBe("https://x.test/v1/pairs?search=weth");
   });
 
-  it.each([undefined, "buy", "sell"] as const)("passes the depth direction %s to both endpoints", async (side) => {
-    const urls: string[] = [];
+  it("requests pair history with an explicit orientation and period", async () => {
+    let seen = "";
     const client = createSolventClient({
       baseUrl: "https://x.test",
-      transport: okTransport({ points: [] }, (url) => urls.push(url)),
+      transport: okTransport({ points: [] }, (url) => (seen = url)),
     });
 
-    await client.poolDepth({ base: "0x01", quote: "0x02", side });
-    await client.positionDepth("0x03", side === undefined ? undefined : { side });
+    await client.pairHistory({ base: "0x01", quote: "0x02", period: "3m" });
 
-    const suffix = side === undefined ? "" : `&side=${side}`;
-    expect(urls).toEqual([
-      `https://x.test/v1/pools/depth?base=0x01&quote=0x02${suffix}`,
-      `https://x.test/v1/positions/0x03/depth${side === undefined ? "" : `?side=${side}`}`,
-    ]);
+    expect(seen).toBe(
+      "https://x.test/v1/pairs/history?base=0x01&quote=0x02&period=3m",
+    );
   });
+
+  it.each([undefined, "buy", "sell"] as const)(
+    "passes the depth direction %s to both endpoints",
+    async (side) => {
+      const urls: string[] = [];
+      const client = createSolventClient({
+        baseUrl: "https://x.test",
+        transport: okTransport({ points: [] }, (url) => urls.push(url)),
+      });
+
+      await client.poolDepth({ base: "0x01", quote: "0x02", side });
+      await client.positionDepth(
+        "0x03",
+        side === undefined ? undefined : { side },
+      );
+
+      const suffix = side === undefined ? "" : `&side=${side}`;
+      expect(urls).toEqual([
+        `https://x.test/v1/pools/depth?base=0x01&quote=0x02${suffix}`,
+        `https://x.test/v1/positions/0x03/depth${side === undefined ? "" : `?side=${side}`}`,
+      ]);
+    },
+  );
 
   it("throws SolventApiError on an error envelope", async () => {
     const transport: Transport = async () =>
-      new Response(JSON.stringify({ status: 422, error: "no route" }), { status: 422 });
-    const client = createSolventClient({ baseUrl: "https://x.test", transport });
+      new Response(JSON.stringify({ status: 422, error: "no route" }), {
+        status: 422,
+      });
+    const client = createSolventClient({
+      baseUrl: "https://x.test",
+      transport,
+    });
     await expect(
       client.quote({ token_in: "0x", token_out: "0x", amount_in: "1" }),
-    ).rejects.toMatchObject({ name: "SolventApiError", status: 422, message: "no route" });
+    ).rejects.toMatchObject({
+      name: "SolventApiError",
+      status: 422,
+      message: "no route",
+    });
   });
 
   it("throws SolventNetworkError when the transport fails", async () => {
     const transport: Transport = async () => {
       throw new Error("offline");
     };
-    const client = createSolventClient({ baseUrl: "https://x.test", transport });
+    const client = createSolventClient({
+      baseUrl: "https://x.test",
+      transport,
+    });
     await expect(client.stats()).rejects.toBeInstanceOf(SolventNetworkError);
   });
 });

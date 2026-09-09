@@ -122,9 +122,9 @@ export function swapAction(input: {
   } = input;
   if (submitting) return { label: "Confirm in your wallet", ready: false };
   if (submitted) return { label: "Intent submitted to Aqua", ready: false };
-  if (amount <= 0) return { label: "Enter an amount", ready: false };
   // A trade that cannot happen says so whether or not a wallet is attached.
   if (problem) return { label: problem, ready: false };
+  if (amount <= 0) return { label: "Enter an amount", ready: false };
   if (!connected) return { label: "Connect a wallet", ready: true };
   // An order names its chain, and a wallet will not sign for one it is not on.
   if (switchTo) return { label: `Switch to ${switchTo}`, ready: true };
@@ -170,6 +170,7 @@ function isWalletRejection(error: unknown): boolean {
 export function submissionProblem(error: Error | null): string | undefined {
   if (!error) return undefined;
   if (isSwapDeclined(error)) return "The resolver declined this swap";
+  if (error.name === "InputValidationError") return error.message;
   return isWalletRejection(error)
     ? "Wallet request rejected"
     : "Could not submit the swap";

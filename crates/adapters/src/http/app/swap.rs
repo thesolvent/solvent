@@ -2,9 +2,9 @@
 //! (UniswapX Orders API shape): decode, verify the swapper signature, cosign, then route → reserve →
 //! persist → fill via the core `SwapService`.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use alloy::primitives::U256;
+use alloy::primitives::{Address, U256};
 use axum::extract::{Json, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,6 @@ use solvent_core::primitives::{ChainId, MakerId, StrategyHash};
 use solvent_core::quote::QuoteResponse;
 use solvent_core::swap::TradePrices;
 use solvent_core::SolventError;
-use std::time::Instant;
 use ulid::Ulid;
 
 use crate::http::primitives::{parse_addr, ApiResult, Response};
@@ -51,6 +50,27 @@ pub async fn quote(
     let token_in = parse_addr("token", &body.token_in)?;
     let token_out = parse_addr("token", &body.token_out)?;
     let amount_in = parse_amount(&body.amount_in)?;
+    if token_in == Address::ZERO || token_out == Address::ZERO {
+        return Err(SolventError::InvalidId {
+            id_type: "swap token",
+            reason: "the zero address is not supported".to_string(),
+        }
+        .into());
+    }
+    if token_in == token_out {
+        return Err(SolventError::InvalidId {
+            id_type: "swap pair",
+            reason: "input and output tokens must be distinct".to_string(),
+        }
+        .into());
+    }
+    if amount_in.is_zero() {
+        return Err(SolventError::InvalidId {
+            id_type: "amount",
+            reason: "the input amount must be positive".to_string(),
+        }
+        .into());
+    }
 
     let started = Instant::now();
     let result = state.quote.quote(token_in, token_out, amount_in).await;
@@ -128,6 +148,12 @@ pub async fn submit(
     State(state): State<AppState>,
     Json(body): Json<SwapRequest>,
 ) -> ApiResult<SwapResponse> {
+    if body.chain_id != state.config.chain_id {
+        return Err(Response::error(
+            "order chainId does not match this deployment",
+            StatusCode::BAD_REQUEST,
+        ));
+    }
     let encoded = hex_bytes("encodedOrder", &body.encoded_order)?;
     let signature = hex_bytes("signature", &body.signature)?;
     let now = SystemTime::now()

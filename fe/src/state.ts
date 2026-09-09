@@ -23,6 +23,7 @@ export type Snap = {
 };
 
 export type Crumb = { snap: Snap; label: string };
+export type CreateSpan = "7d" | "3m" | "All";
 
 export type AppState = {
   page: Page | null;
@@ -42,6 +43,7 @@ export type AppState = {
 
   create: boolean;
   createFee: string;
+  customFeePct: string;
   createPreset: string;
   corePair: number;
   flipped: boolean;
@@ -60,7 +62,7 @@ export type AppState = {
 
   step: number;
   stepDirty: Record<number, boolean>;
-  createSpan: string;
+  createSpan: CreateSpan;
   bandMax: number;
   bandMin: number;
   amtA: string;
@@ -119,6 +121,7 @@ export const INITIAL_STATE: AppState = {
 
   create: false,
   createFee: "Auto 0.01%",
+  customFeePct: "0.10",
   createPreset: "Market",
   corePair: 3,
   flipped: false,

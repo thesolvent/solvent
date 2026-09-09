@@ -1,26 +1,32 @@
 import {
+    decodeFunctionResult,
+    encodeFunctionData,
     erc20Abi,
     isAddressEqual,
-    encodeFunctionData,
-    decodeFunctionResult,
     type Account,
     type Address,
     type Client,
     type Chain,
+    type Hex,
     type Transport,
 } from "viem";
 import {
+    call,
     getAddresses,
     getBlockNumber,
     getChainId,
     readContract,
-    call,
+    sendTransaction as broadcastTransaction,
+    signTypedData,
     waitForTransactionReceipt,
     writeContract,
-    signTypedData,
 } from "viem/actions";
 
-import type { OrderApproval, UnsignedOrder } from "../orders";
+import {
+    assertFutureDeadline,
+    type OrderApproval,
+    type UnsignedOrder,
+} from "../orders";
 
 export interface WalletClients {
     publicClient: Client;
@@ -34,6 +40,19 @@ export type TokenAccountRequest = Pick<
 export interface TokenAccount {
     balance: bigint;
     allowance: bigint;
+}
+
+export interface AllowanceRequest extends OrderApproval {
+    /** Allow a reusable approval while checking only the amount this action needs. */
+    approvalAmount?: bigint;
+}
+
+export interface WalletTransaction {
+    owner: Address;
+    chainId: number;
+    to: Address;
+    data: Hex;
+    value: bigint;
 }
 
 /** Internal wallet adapter; clients are bound once and never owned by the SDK. */
@@ -58,6 +77,14 @@ export function createWalletSession({
         return walletClient.account?.type === "local"
             ? walletClient.account
             : owner;
+    }
+
+    async function requireSuccessfulReceipt(
+        hash: Hex,
+        revertedMessage: string,
+    ): Promise<void> {
+        const receipt = await waitForTransactionReceipt(publicClient, { hash });
+        if (receipt.status !== "success") throw new Error(revertedMessage);
     }
 
     /** Read both prerequisites from the same block so approval decisions use a consistent view. */
@@ -89,7 +116,7 @@ export function createWalletSession({
     }
 
     /** Cover an input with an exact allowance; reuse existing approval and await successful receipts. */
-    async function ensureAllowance(approval: OrderApproval): Promise<void> {
+    async function ensureAllowance(approval: AllowanceRequest): Promise<void> {
         const { amount, chainId } = approval;
         if (amount <= 0n) throw new Error("Token amount must be positive");
         if ((await getChainId(publicClient)) !== chainId)
@@ -100,7 +127,10 @@ export function createWalletSession({
         if (allowance >= amount) return;
 
         // Reset a partial allowance first, including tokens that reject nonzero-to-nonzero approvals.
-        const amounts = allowance === 0n ? [amount] : [0n, amount];
+        const target = approval.approvalAmount ?? amount;
+        if (target < amount)
+            throw new Error("Approval cannot be below the required amount");
+        const amounts = allowance === 0n ? [target] : [0n, target];
         for (const value of amounts) await approve(approval, value);
     }
 
@@ -135,8 +165,7 @@ export function createWalletSession({
             account: signer,
             chain: walletClient.chain,
         });
-        const receipt = await waitForTransactionReceipt(publicClient, { hash });
-        if (receipt.status !== "success") throw new Error("Approval reverted");
+        await requireSuccessfulReceipt(hash, "Approval reverted");
         // A successful receipt can be a cancellation or an approve that returned false.
         const current = await tokenAccount(approval);
         if (
@@ -147,21 +176,45 @@ export function createWalletSession({
     }
 
     async function sign(order: UnsignedOrder) {
-        assertNotExpired(order);
+        assertFutureDeadline(order.deadline);
         await ensureAllowance(order.approval);
         const signer = await account(order.approval);
-        assertNotExpired(order);
+        assertFutureDeadline(order.deadline);
         return signTypedData(walletClient, {
             ...order.permit,
             account: signer,
         });
     }
 
-    return { tokenAccount, sign };
-}
-
-function assertNotExpired(order: UnsignedOrder): void {
-    if (order.deadline <= Math.floor(Date.now() / 1000)) {
-        throw new Error("Swap order expired");
+    async function sendTransaction(request: WalletTransaction): Promise<Hex> {
+        if ((await getChainId(publicClient)) !== request.chainId) {
+            throw new Error("Wrong RPC network");
+        }
+        const signer = await account(request);
+        await call(publicClient, {
+            account: request.owner,
+            to: request.to,
+            data: request.data,
+            value: request.value,
+        });
+        return broadcastTransaction(walletClient, {
+            account: signer,
+            chain: walletClient.chain,
+            to: request.to,
+            data: request.data,
+            value: request.value,
+        });
     }
+
+    async function confirmTransaction(hash: Hex): Promise<void> {
+        await requireSuccessfulReceipt(hash, "Transaction reverted");
+    }
+
+    return {
+        tokenAccount,
+        ensureAllowance,
+        sendTransaction,
+        confirmTransaction,
+        sign,
+    };
 }

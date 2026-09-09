@@ -76,6 +76,9 @@ function asset(
 }
 
 const QUOTE: Quote = {
+  tokenIn: "0x1111111111111111111111111111111111111111",
+  tokenOut: "0x2222222222222222222222222222222222222222",
+  amountInRaw: 1_000_000_000_000_000_000n,
   amountOut: "2,477.85",
   amountOutUsd: 2478.11,
   priceImpact: "0.12%",

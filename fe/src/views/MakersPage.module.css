@@ -355,6 +355,20 @@
   cursor: pointer;
 }
 
+.posDisclosure {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  flex: none;
+  width: 10px;
+  margin: -11px 0;
+  padding: 11px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
 .posActions {
   display: flex;
   gap: 4px;
@@ -649,7 +663,21 @@
   align-items: center;
   padding: 9px 16px 9px 44px;
   border-top: 1px solid var(--surface);
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  background: var(--paper-soft);
+  color: inherit;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
   min-width: 0;
+  transition: background 130ms ease;
+}
+
+.legRow:hover {
+  background: var(--lime-wash-faint);
 }
 
 .legPair {

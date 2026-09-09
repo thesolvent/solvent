@@ -18,9 +18,26 @@ vi.mock("wagmi", async (original) => ({
 }));
 const ASSET = {
   address: "0x2222222222222222222222222222222222222222",
+  symbol: "WETH",
+  name: "Wrapped Ether",
   decimals: 18,
-} as Asset;
-const QUOTE = { amountOutRaw: 100n } as Quote;
+  price: 2_500,
+  change: "0%",
+  tags: ["ETH"],
+  net: "Devnet",
+  pairs: ["WETH/USDC"],
+} satisfies Asset;
+const QUOTE = {
+  tokenIn: ASSET.address,
+  tokenOut: ASSET.address,
+  amountInRaw: 1n,
+  amountOut: "100",
+  amountOutUsd: 100,
+  priceImpact: "0%",
+  makersSourced: 1,
+  amountOutRaw: 100n,
+  expiresAt: Date.now() + 60_000,
+} satisfies Quote;
 const SUBMITTED = {
   tradeId: "trade",
   status: "submitted",
@@ -154,7 +171,14 @@ describe("swap submission", () => {
 it("hides the old quote immediately while a new amount is being debounced", async () => {
   function PriceProbe() {
     const [amount, setAmount] = useState("1");
-    const { quote } = useQuote(ASSET, { ...ASSET, address: "0xother" }, amount);
+    const { quote } = useQuote(
+      ASSET,
+      {
+        ...ASSET,
+        address: "0x3333333333333333333333333333333333333333",
+      },
+      amount,
+    );
     return (
       <>
         <button onClick={() => setAmount("2")}>change amount</button>
@@ -170,4 +194,25 @@ it("hides the old quote immediately while a new amount is being debounced", asyn
   expect(await screen.findByText("old price")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "change amount" }));
   expect(screen.queryByText("old price")).not.toBeInTheDocument();
+});
+
+it("does not query a value that exceeds the input token precision", async () => {
+  function PriceProbe() {
+    const { problem } = useQuote(
+      ASSET,
+      {
+        ...ASSET,
+        address: "0x3333333333333333333333333333333333333333",
+      },
+      "1.0000000000000000001",
+    );
+    return <p>{problem}</p>;
+  }
+  const quoteRequest = vi.fn();
+  renderWithServices(<PriceProbe />, { swap: { quote: quoteRequest } });
+
+  expect(
+    await screen.findByText("Swap amount supports at most 18 decimal places"),
+  ).toBeInTheDocument();
+  expect(quoteRequest).not.toHaveBeenCalled();
 });

@@ -27,16 +27,6 @@ export function money(n: number): string {
   });
 }
 
-/** Numeric-input sanitizer: digits and a single decimal point, max 16 chars. */
-export function clean(v: string): string {
-  let out = String(v).replace(/[^0-9.]/g, "");
-  const first = out.indexOf(".");
-  if (first > -1) {
-    out = out.slice(0, first + 1) + out.slice(first + 1).replace(/\./g, "");
-  }
-  return out.slice(0, 16);
-}
-
 export function poolByPair(pair: string): Pool | undefined {
   return POOLS.find((p) => p.pair === pair);
 }

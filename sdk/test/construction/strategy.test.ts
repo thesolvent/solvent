@@ -68,6 +68,10 @@ describe("Strategy.fullRange + fee", () => {
     expect(built.program).toBe(want.programHex);
     expect(built.order).toBe(want.strategyHex);
   });
+
+  it.each([-1, 1.5, 10_000])("rejects an invalid fee of %s bps", (fee) => {
+    expect(() => Strategy.fullRange().fee(fee)).toThrow(RangeError);
+  });
 });
 
 describe("Strategy.inRange", () => {
@@ -143,6 +147,57 @@ describe("bandToPrices", () => {
   it("handles fractional percents", () => {
     expect(bandToPrices("100", 2.5)).toEqual({ priceMin: "97.5", priceMax: "102.5" });
   });
+
+  it.each([
+    ["0", 5],
+    ["100", 0],
+    ["100", 0.004],
+    ["100", 99.999],
+    ["100", 100],
+    ["100", Number.NaN],
+  ])("rejects an invalid mid %s or half-width %s", (mid, halfWidthPct) => {
+    expect(() => bandToPrices(mid, halfWidthPct)).toThrow(RangeError);
+  });
+});
+
+describe("strategy construction boundaries", () => {
+  it("rejects duplicate tokens and equal concentrated bounds", () => {
+    expect(() =>
+      Strategy.concentrated({
+        base: { address: LO, decimals: 18 },
+        quote: { address: LO, decimals: 18 },
+        priceMin: "1",
+        priceMax: "2",
+      }),
+    ).toThrow(RangeError);
+    expect(() =>
+      Strategy.concentrated({
+        base: { address: LO, decimals: 18 },
+        quote: { address: HI, decimals: 18 },
+        priceMin: "1.0",
+        priceMax: "1.00",
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it("rejects reserves or widths outside the pegged program domain", () => {
+    const tokenA = { address: LO, decimals: 18, reserve: 1n };
+    const tokenB = { address: HI, decimals: 18, reserve: 1n };
+    expect(() =>
+      Strategy.pegged({ tokenA: { ...tokenA, reserve: 0n }, tokenB, linearWidth: 0n }),
+    ).toThrow(RangeError);
+    expect(() =>
+      Strategy.pegged({
+        tokenA,
+        tokenB,
+        linearWidth: 5_000n * 10n ** 27n + 1n,
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it.each([-1n, 1n << 64n])("rejects salt %s outside uint64", (salt) => {
+    expect(() => Strategy.fullRange().salt(salt)).toThrow(RangeError);
+  });
 });
 
 describe("pegged band % ↔ linearWidth", () => {
@@ -157,4 +212,14 @@ describe("pegged band % ↔ linearWidth", () => {
       expect(Number(diff) / Number(lw)).toBeLessThan(1e-10);
     });
   }
+
+  it.each([0.01, 50])(
+    "supports the create-position custom boundary at %s%%",
+    (halfWidthPct) => {
+      const linearWidth = linearWidthFromSymmetricRangePercent(halfWidthPct);
+      const recovered = symmetricRangePercentFromLinearWidth(linearWidth);
+
+      expect(Math.abs(recovered - halfWidthPct)).toBeLessThan(1e-10);
+    },
+  );
 });

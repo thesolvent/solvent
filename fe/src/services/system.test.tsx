@@ -8,6 +8,8 @@ import { renderWithServices } from "@/test/harness";
 import { useConfig } from "./system";
 
 const CONFIG: AppConfig = {
+  aqua: "0x2222222222222222222222222222222222222222",
+  app: "0x3333333333333333333333333333333333333333",
   block_explorer_url: "http://localhost:5100",
   chain_id: 31337,
   default_fee_bps: 5,

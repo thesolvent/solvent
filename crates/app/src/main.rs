@@ -19,10 +19,11 @@ use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
 use solvent_adapters::registry::{AlloyBlockTimes, AlloyChainSource, SqliteStore};
-use solvent_adapters::routing::{BinanceFeed, GasPoller, MarketCache};
+use solvent_adapters::routing::{BinanceFeed, BinanceHistory, GasPoller, MarketCache};
 use solvent_adapters::trade::SqliteTradeStore;
-use solvent_core::asset::AssetManager;
+use solvent_core::asset::{AssetManager, PairHistoryService};
 use solvent_core::balances::BalancesService;
+use solvent_core::deps::asset::PairPriceHistorySource;
 use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ledger::BudgetSource;
@@ -166,6 +167,15 @@ async fn main() -> Result<(), StartupError> {
     let gas: Arc<dyn GasPrice> = market.clone();
     let oracle: Arc<dyn PriceOracle> = market;
     let valuation = Arc::new(Valuation::new(Arc::clone(&oracle)));
+    let history_source: Arc<dyn PairPriceHistorySource> = Arc::new(
+        BinanceHistory::new(
+            config.binance_rest_url.clone(),
+            config.price_feed_symbols(),
+            &config.usd_stable_pegs,
+        )
+        .map_err(SolventError::from)?,
+    );
+    let pair_history = Arc::new(PairHistoryService::new(history_source));
     // One per-leg gas resolver shared by both routing paths — quote and swap price gas the same way.
     let leg_cost = Arc::new(LegCostResolver::new(
         gas,
@@ -234,6 +244,7 @@ async fn main() -> Result<(), StartupError> {
         .map_err(|_| StartupError::Key("SOLVENT_COSIGNER_KEY is not a valid private key".into()))?;
     let cosigner = Arc::new(ServerCosigner::new(
         config.permit2,
+        config.reactor,
         config.chain_id,
         cosigner_signer,
         config.filler,
@@ -340,6 +351,7 @@ async fn main() -> Result<(), StartupError> {
         config: Arc::new(config.app_config(cosigner.address())),
         head,
         assets,
+        pair_history,
         pools,
         depth: solvent_adapters::http::DepthReader::new(depth),
         balances,

@@ -4,6 +4,7 @@
 
 use thiserror::Error;
 
+use crate::deps::asset::PairPriceHistorySourceError;
 use crate::deps::balances::BalancesOracleError;
 use crate::deps::execution::{ExecutionError, SettlementError, SimError};
 use crate::deps::ingest::{FillBuilderError, NormalizeError};
@@ -17,6 +18,9 @@ use crate::primitives::ledger::LedgerError;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum SolventError {
+    /// Reading historical market prices failed.
+    #[error("pair price history: {0}")]
+    PairPriceHistory(#[from] PairPriceHistorySourceError),
     #[error("block times: {0}")]
     BlockTimes(#[from] BlockTimesError),
     /// A typed identifier could not be parsed from its input.

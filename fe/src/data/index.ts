@@ -415,12 +415,6 @@ export const WALLET_TOKENS: WalletToken[] = [
   },
 ];
 
-export const TIME_LABELS: Record<string, string[]> = {
-  "7d": ["Aug 28", "Sep 1", "Sep 4"],
-  "3m": ["Jun 2026", "Jul 2026", "Sep 2026"],
-  All: ["2024", "2025", "2026"],
-};
-
 export const DEFAULT_BAND: Record<string, number> = {
   Stable: 0.05,
   Volatile: 0.35,
@@ -507,7 +501,7 @@ export const DASH = "—";
  * cannot be asked for without both, so they are required here rather than optional.
  */
 export type Asset = {
-  address: string;
+  address: `0x${string}`;
   symbol: string;
   name: string;
   decimals: number;
@@ -522,6 +516,9 @@ export type Asset = {
 
 /** A priced route for one swap, as the widget reads it. */
 export type Quote = {
+  tokenIn: `0x${string}`;
+  tokenOut: `0x${string}`;
+  amountInRaw: bigint;
   /** Output amount, at the precision the widget prints. */
   amountOut: string;
   amountOutUsd: number;

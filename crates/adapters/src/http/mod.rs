@@ -56,6 +56,7 @@ pub fn router(state: AppState) -> Router {
             get(app::makers::maker_positions),
         )
         .route("/pairs", get(app::pairs::pairs))
+        .route("/pairs/history", get(app::pairs::pair_history))
         .route("/positions/preview", post(app::positions::preview))
         .route("/positions/{hash}", get(app::makers::position_detail))
         .route("/positions/{hash}/depth", get(app::makers::position_depth))
@@ -98,9 +99,13 @@ mod tests {
     use alloy::signers::local::PrivateKeySigner;
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
-    use solvent_core::asset::{AssetManager, TokenList, TokenMeta};
+    use solvent_core::asset::{
+        AssetManager, PairHistoryService, PairPriceHistory, PriceHistoryPeriod, TokenList,
+        TokenMeta,
+    };
     use solvent_core::balances::BalancesService;
     use solvent_core::balances::Holdings;
+    use solvent_core::deps::asset::{PairPriceHistorySource, PairPriceHistorySourceError};
     use solvent_core::deps::balances::{BalancesOracle, BalancesOracleError};
     use solvent_core::deps::execution::{
         Execution, ExecutionError, SettlementError, SettlementReader, SimError, SimGate,
@@ -153,6 +158,25 @@ mod tests {
     /// A budget source that funds nothing — enough for the router to wire depth over an empty
     /// registry (the depth tests here exercise routing, not caps).
     struct ZeroBudget;
+
+    struct EmptyPairHistory;
+
+    #[async_trait::async_trait]
+    impl PairPriceHistorySource for EmptyPairHistory {
+        async fn history(
+            &self,
+            base: Address,
+            quote: Address,
+            period: PriceHistoryPeriod,
+        ) -> Result<PairPriceHistory, PairPriceHistorySourceError> {
+            Ok(PairPriceHistory {
+                base,
+                quote,
+                period,
+                points: Vec::new(),
+            })
+        }
+    }
 
     #[async_trait::async_trait]
     impl BudgetSource for ZeroBudget {
@@ -499,6 +523,7 @@ mod tests {
         ));
         let cosigner = Arc::new(ServerCosigner::new(
             Address::ZERO,
+            Address::ZERO,
             31337,
             PrivateKeySigner::from_bytes(&B256::from([1u8; 32])).unwrap(),
             Address::ZERO,
@@ -537,12 +562,15 @@ mod tests {
                 default_fee_bps: 5,
                 networks: vec!["Ethereum".to_string()],
                 block_explorer_url: "http://localhost:5100".to_string(),
+                aqua: Address::ZERO,
+                app: Address::ZERO,
                 reactor: Address::ZERO,
                 permit2: Address::ZERO,
                 cosigner: Address::ZERO,
             }),
             head: ChainHead::stub(0),
             assets,
+            pair_history: Arc::new(PairHistoryService::new(Arc::new(EmptyPairHistory))),
             pools,
             depth: DepthReader::new(depth),
             balances,
@@ -608,6 +636,14 @@ mod tests {
         assert_eq!(json["status"], "Ok");
         assert_eq!(json["result"]["chain_id"], 31337);
         assert_eq!(json["result"]["features"]["earn"], false);
+        assert_eq!(
+            json["result"]["aqua"],
+            "0x0000000000000000000000000000000000000000"
+        );
+        assert_eq!(
+            json["result"]["app"],
+            "0x0000000000000000000000000000000000000000"
+        );
     }
 
     #[tokio::test]
@@ -617,6 +653,21 @@ mod tests {
         assert_eq!(json["status"], "Ok");
         assert_eq!(json["result"]["items"][0]["symbol"], "WETH");
         assert_eq!(json["result"]["items"][0]["supported"], false);
+    }
+
+    #[tokio::test]
+    async fn pair_history_returns_the_requested_orientation_and_period() {
+        let base = Address::from([1; 20]);
+        let quote = Address::from([2; 20]);
+        let uri = format!("/v1/pairs/history?base={base}&quote={quote}&period=7d");
+
+        let (status, json) = get(&uri).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["result"]["base"], base.to_string());
+        assert_eq!(json["result"]["quote"], quote.to_string());
+        assert_eq!(json["result"]["period"], "7d");
+        assert_eq!(json["result"]["points"], serde_json::json!([]));
     }
 
     #[tokio::test]
@@ -630,6 +681,7 @@ mod tests {
             "/v1/pools",
             "/v1/pools/detail",
             "/v1/pools/depth",
+            "/v1/pairs/history",
             "/v1/swap/quote",
             "/v1/wallets/{addr}/balances",
         ] {
@@ -716,6 +768,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn swap_quote_rejects_zero_amount_and_same_token() {
+        let token = Address::from([1; 20]);
+        for body in [
+            serde_json::json!({
+                "token_in": token.to_string(),
+                "token_out": Address::from([2; 20]).to_string(),
+                "amount_in": "0",
+            }),
+            serde_json::json!({
+                "token_in": token.to_string(),
+                "token_out": token.to_string(),
+                "amount_in": "1",
+            }),
+        ] {
+            let (status, _) = post("/v1/swap/quote", body).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+        }
+    }
+
+    #[tokio::test]
     async fn swap_bad_hex_is_400() {
         let (status, _) = post(
             "/v1/swap",
@@ -727,6 +799,24 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn swap_rejects_an_order_for_another_chain_before_decoding() {
+        let (status, json) = post(
+            "/v1/swap",
+            serde_json::json!({
+                "encodedOrder": "not-hex",
+                "signature": "also-not-hex",
+                "chainId": 1,
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            json["error"],
+            "order chainId does not match this deployment"
+        );
     }
 
     #[tokio::test]

@@ -20,7 +20,13 @@ function groupPositions(positions: PositionRow[]) {
     }));
 }
 
-export function MakerPositions({ positions }: { positions: PositionRow[] }) {
+export function MakerPositions({
+  positions,
+  onOpenPosition,
+}: {
+  positions: PositionRow[];
+  onOpenPosition: (hash: string) => void;
+}) {
   const groups = groupPositions(positions);
   const [selected, setSelected] = useState<{
     pair: string | null;
@@ -62,6 +68,7 @@ export function MakerPositions({ positions }: { positions: PositionRow[] }) {
                 onToggle={(position) =>
                   setSelected({ pair: group.pair, position })
                 }
+                onOpenPosition={onOpenPosition}
               />
             )}
           </div>
@@ -75,10 +82,12 @@ function PairPositions({
   positions,
   selected,
   onToggle,
+  onOpenPosition,
 }: {
   positions: PositionRow[];
   selected: string | null;
   onToggle: (hash: string | null) => void;
+  onOpenPosition: (hash: string) => void;
 }) {
   return (
     <div className={styles.pairPositions}>
@@ -90,14 +99,21 @@ function PairPositions({
             <div className={open ? styles.posRowOpen : styles.posRow}>
               <button
                 type="button"
-                className={styles.posToggle}
-                aria-label={`Position ${p.hash}`}
+                className={styles.posDisclosure}
+                aria-label={`${open ? "Collapse" : "Expand"} ${p.pair} position ${p.hash}`}
                 aria-expanded={open}
                 onClick={toggle}
               >
                 <span className={open ? styles.caretOpen : styles.caret}>
                   ▸
                 </span>
+              </button>
+              <button
+                type="button"
+                className={styles.posToggle}
+                aria-label={`Open ${p.pair} position ${p.hash}`}
+                onClick={() => onOpenPosition(p.hash)}
+              >
                 <span className={styles.posPair}>{p.pair}</span>
                 <span className={styles.posMeta}>{p.meta}</span>
                 <span className={styles.posCov}>{p.cov}</span>

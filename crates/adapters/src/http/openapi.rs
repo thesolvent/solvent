@@ -30,6 +30,7 @@ use utoipa::OpenApi;
         crate::http::app::makers::position_depth,
         crate::http::app::makers::position_history,
         crate::http::app::pairs::pairs,
+        crate::http::app::pairs::pair_history,
         crate::http::app::positions::preview,
     ),
     components(schemas(
@@ -81,6 +82,9 @@ use utoipa::OpenApi;
         solvent_core::primitives::asset::PairInfo,
         solvent_core::primitives::asset::PairKind,
         solvent_core::primitives::asset::PairWallet,
+        solvent_core::primitives::asset::PairPriceHistory,
+        solvent_core::primitives::asset::PairPricePoint,
+        solvent_core::primitives::asset::PriceHistoryPeriod,
         crate::http::app::positions::PreviewRequest,
         crate::http::app::positions::AmountIn,
     ))

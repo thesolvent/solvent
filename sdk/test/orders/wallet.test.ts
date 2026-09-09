@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { buildSwapOrder } from "../../src/orders";
 
 const ADDRESS = "0x1111111111111111111111111111111111111111";
+const OUTPUT_TOKEN = "0x2222222222222222222222222222222222222222";
 
 describe("swap wallet payload", () => {
     it("serializes nested integers for wallet RPC without changing the signed digest", async () => {
@@ -18,7 +19,7 @@ describe("swap wallet payload", () => {
             {
                 swapper: ADDRESS,
                 tokenIn: ADDRESS,
-                tokenOut: ADDRESS,
+                tokenOut: OUTPUT_TOKEN,
                 amountIn: amount,
                 minAmountOut: 4_950_000_000n,
                 deadline: 2_000_000_000,

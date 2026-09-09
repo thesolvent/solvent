@@ -372,6 +372,55 @@
         }
       }
     },
+    "/v1/pairs/history": {
+      "get": {
+        "tags": [
+          "crate::http::app::pairs"
+        ],
+        "operationId": "pair_history",
+        "parameters": [
+          {
+            "name": "base",
+            "in": "query",
+            "description": "Base token address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quote",
+            "in": "query",
+            "description": "Quote token address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "description": "Historical chart window",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PriceHistoryPeriod"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_PairPriceHistory"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/pools": {
       "get": {
         "tags": [
@@ -1083,11 +1132,21 @@
           "default_fee_bps",
           "networks",
           "block_explorer_url",
+          "aqua",
+          "app",
           "reactor",
           "permit2",
           "cosigner"
         ],
         "properties": {
+          "app": {
+            "type": "string",
+            "description": "The application whose strategies Aqua scopes independently."
+          },
+          "aqua": {
+            "type": "string",
+            "description": "The Aqua deployment holding maker virtual balances."
+          },
           "block_explorer_url": {
             "type": "string"
           },
@@ -1772,21 +1831,83 @@
           "volatile"
         ]
       },
-      "PairWallet": {
+      "PairPriceHistory": {
         "type": "object",
-        "description": "A maker's wallet balance of each side of a pair, in whole tokens.",
+        "description": "Historical market data for one oriented pair.",
         "required": [
           "base",
-          "quote"
+          "quote",
+          "period",
+          "points"
+        ],
+        "properties": {
+          "base": {
+            "type": "string"
+          },
+          "period": {
+            "$ref": "#/components/schemas/PriceHistoryPeriod"
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PairPricePoint"
+            }
+          },
+          "quote": {
+            "type": "string"
+          }
+        }
+      },
+      "PairPricePoint": {
+        "type": "object",
+        "description": "One timestamped pair midpoint, quoted as `quote` per one `base`.",
+        "required": [
+          "timestamp_ms",
+          "price"
+        ],
+        "properties": {
+          "price": {
+            "type": "number",
+            "format": "double"
+          },
+          "timestamp_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "volume_usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "USD-denominated market volume for the interval when the source provides it."
+          }
+        }
+      },
+      "PairWallet": {
+        "type": "object",
+        "description": "A maker's wallet balance of each side of a pair, as display numbers and exact base units.",
+        "required": [
+          "base",
+          "quote",
+          "base_raw",
+          "quote_raw"
         ],
         "properties": {
           "base": {
             "type": "number",
             "format": "double"
           },
+          "base_raw": {
+            "type": "string"
+          },
           "quote": {
             "type": "number",
             "format": "double"
+          },
+          "quote_raw": {
+            "type": "string"
           }
         }
       },
@@ -2179,6 +2300,15 @@
           }
         }
       },
+      "PriceHistoryPeriod": {
+        "type": "string",
+        "description": "The history window requested by a price chart.",
+        "enum": [
+          "7d",
+          "3m",
+          "all"
+        ]
+      },
       "PriceRange": {
         "type": "object",
         "description": "A position's price range in human `quote per base` terms; which fields are set depends on `kind`.",
@@ -2351,11 +2481,21 @@
               "default_fee_bps",
               "networks",
               "block_explorer_url",
+              "aqua",
+              "app",
               "reactor",
               "permit2",
               "cosigner"
             ],
             "properties": {
+              "app": {
+                "type": "string",
+                "description": "The application whose strategies Aqua scopes independently."
+              },
+              "aqua": {
+                "type": "string",
+                "description": "The Aqua deployment holding maker virtual balances."
+              },
               "block_explorer_url": {
                 "type": "string"
               },
@@ -3503,6 +3643,51 @@
                 "format": "int32",
                 "description": "The window (days) the KPIs and deltas cover.",
                 "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
+      "Response_PairPriceHistory": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "Historical market data for one oriented pair.",
+            "required": [
+              "base",
+              "quote",
+              "period",
+              "points"
+            ],
+            "properties": {
+              "base": {
+                "type": "string"
+              },
+              "period": {
+                "$ref": "#/components/schemas/PriceHistoryPeriod"
+              },
+              "points": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PairPricePoint"
+                }
+              },
+              "quote": {
+                "type": "string"
               }
             }
           },

@@ -2,6 +2,7 @@ import type { Page } from "./state";
 
 export interface RouteState {
   resetSubviews?: boolean;
+  waitForStrategyIndex?: boolean;
 }
 
 /** The address of each top-level page. The URL is the source of truth for which one is showing,

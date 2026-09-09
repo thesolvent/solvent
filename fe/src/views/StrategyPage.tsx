@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { DepthChart } from "@/components/DepthChart";
 import { depthChart } from "@/lib/depth-chart";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   usePosition,
   usePositionHistory,
@@ -11,15 +11,22 @@ import { useTrades } from "@/services/explorer";
 import { slug } from "@/services/pools";
 import { Crumbs } from "@/components/Crumbs";
 import { strategyDetail, rangeDescription } from "@/lib/strategy";
+import type { RouteState } from "@/routes";
 
 import styles from "./explorer.module.css";
 
 export function StrategyPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { strategyHash } = useParams();
-  const position = usePosition(strategyHash);
-  const history = usePositionHistory(strategyHash);
-  const depth = usePositionDepth(position.data);
+  const waitForIndex = Boolean(
+    (location.state as RouteState | null)?.waitForStrategyIndex,
+  );
+  const position = usePosition(strategyHash, { waitForIndex });
+  const history = usePositionHistory(position.data ? strategyHash : undefined);
+  const depth = usePositionDepth(position.data, {
+    waitForLiquidity: waitForIndex,
+  });
   const [hoverFrac, setHoverFrac] = useState<number | null>(null);
   const rangeHint = useId();
   const settlements = useTrades(
@@ -52,7 +59,9 @@ export function StrategyPage() {
       : position.isPending || depth.isPending
         ? "Loading strategy depth…"
         : !chart.aggPath
-          ? "No executable liquidity for this strategy"
+          ? waitForIndex
+            ? "Synchronizing strategy liquidity…"
+            : "No executable liquidity for this strategy"
           : undefined;
 
   return (

@@ -160,6 +160,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pairs/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["pair_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pools": {
         parameters: {
             query?: never;
@@ -437,6 +453,10 @@ export interface components {
         };
         /** @description Runtime config the FE reads instead of hardcoding — also the `/config` response body. */
         AppConfig: {
+            /** @description The application whose strategies Aqua scopes independently. */
+            app: string;
+            /** @description The Aqua deployment holding maker virtual balances. */
+            aqua: string;
             block_explorer_url: string;
             /** Format: int64 */
             chain_id: number;
@@ -700,12 +720,33 @@ export interface components {
          * @enum {string}
          */
         PairKind: "stable" | "volatile";
-        /** @description A maker's wallet balance of each side of a pair, in whole tokens. */
+        /** @description Historical market data for one oriented pair. */
+        PairPriceHistory: {
+            base: string;
+            period: components["schemas"]["PriceHistoryPeriod"];
+            points: components["schemas"]["PairPricePoint"][];
+            quote: string;
+        };
+        /** @description One timestamped pair midpoint, quoted as `quote` per one `base`. */
+        PairPricePoint: {
+            /** Format: double */
+            price: number;
+            /** Format: int64 */
+            timestamp_ms: number;
+            /**
+             * Format: double
+             * @description USD-denominated market volume for the interval when the source provides it.
+             */
+            volume_usd?: number | null;
+        };
+        /** @description A maker's wallet balance of each side of a pair, as display numbers and exact base units. */
         PairWallet: {
             /** Format: double */
             base: number;
+            base_raw: string;
             /** Format: double */
             quote: number;
+            quote_raw: string;
         };
         /**
          * @description A pool: the aggregation of all active, priceable strategies over one canonical pair. USD and
@@ -837,6 +878,11 @@ export interface components {
             /** @description Human warnings, e.g. insufficient balance for a leg. */
             warnings: string[];
         };
+        /**
+         * @description The history window requested by a price chart.
+         * @enum {string}
+         */
+        PriceHistoryPeriod: "7d" | "3m" | "all";
         /** @description A position's price range in human `quote per base` terms; which fields are set depends on `kind`. */
         PriceRange: {
             /** Format: double */
@@ -892,6 +938,10 @@ export interface components {
             error?: string | null;
             /** @description Runtime config the FE reads instead of hardcoding — also the `/config` response body. */
             result?: {
+                /** @description The application whose strategies Aqua scopes independently. */
+                app: string;
+                /** @description The Aqua deployment holding maker virtual balances. */
+                aqua: string;
                 block_explorer_url: string;
                 /** Format: int64 */
                 chain_id: number;
@@ -1249,6 +1299,18 @@ export interface components {
                  * @description The window (days) the KPIs and deltas cover.
                  */
                 window_days: number;
+            };
+            status: components["schemas"]["Status"];
+        };
+        /** @description The envelope wrapping every response. `status_code` sets the HTTP status (never serialized). */
+        Response_PairPriceHistory: {
+            error?: string | null;
+            /** @description Historical market data for one oriented pair. */
+            result?: {
+                base: string;
+                period: components["schemas"]["PriceHistoryPeriod"];
+                points: components["schemas"]["PairPricePoint"][];
+                quote: string;
             };
             status: components["schemas"]["Status"];
         };
@@ -1781,6 +1843,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Response_List_PairInfo"];
+                };
+            };
+        };
+    };
+    pair_history: {
+        parameters: {
+            query: {
+                /** @description Base token address */
+                base: string;
+                /** @description Quote token address */
+                quote: string;
+                /** @description Historical chart window */
+                period: components["schemas"]["PriceHistoryPeriod"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_PairPriceHistory"];
                 };
             };
         };

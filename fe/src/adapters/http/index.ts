@@ -8,6 +8,7 @@ import { toAsset } from "../mappers/asset";
 import { toPool } from "../mappers/pool";
 import { toDepthCurve, toPoolRoster } from "../mappers/pool-detail";
 import { swapAdapter } from "./swap";
+import { positionsAdapter } from "./positions";
 import { solventApi } from "./client";
 import { explorerAdapter } from "./explorer";
 
@@ -50,6 +51,7 @@ export const httpServices: Services = {
   explorer: explorerAdapter,
   assets,
   pools,
+  positions: positionsAdapter,
   swap: swapAdapter,
   system,
 };

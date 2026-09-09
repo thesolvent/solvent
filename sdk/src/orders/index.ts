@@ -17,6 +17,13 @@ import {
     type TypedData,
     type TypedDataDomain,
 } from "viem";
+import {
+    assertDistinctAddresses,
+    InputValidationError,
+    validatedAddress,
+    validatedUint,
+} from "../validation";
+
 /** Upstream is ethers-typed; convert amounts at this boundary. */
 const big = (amount: bigint) => BigNumber.from(amount.toString());
 
@@ -64,6 +71,23 @@ export interface UnsignedOrder {
     deadline: number;
 }
 
+type ValidatedOrderVenue = OrderVenue & {
+    reactor: Address;
+    permit2: Address;
+    cosigner: Address;
+};
+
+type ValidatedOrderTerms = OrderTerms & {
+    swapper: Address;
+    tokenIn: Address;
+    tokenOut: Address;
+};
+
+interface ValidatedSwapOrder {
+    venue: ValidatedOrderVenue;
+    terms: ValidatedOrderTerms;
+}
+
 /**
  * The order for one swap, unsigned.
  *
@@ -74,30 +98,29 @@ export function buildSwapOrder(
     venue: OrderVenue,
     terms: OrderTerms,
 ): UnsignedOrder {
+    const { venue: checkedVenue, terms: checkedTerms } = validateSwapOrder(
+        venue,
+        terms,
+    );
     const order = new V2DutchOrderBuilder(
-        venue.chainId,
-        venue.reactor,
-        venue.permit2,
+        checkedVenue.chainId,
+        checkedVenue.reactor,
+        checkedVenue.permit2,
     )
-        .cosigner(venue.cosigner)
-        .swapper(terms.swapper)
-        .nonce(
-            big(
-                terms.nonce ??
-                    BigInt(toHex(crypto.getRandomValues(new Uint8Array(32)))),
-            ),
-        )
-        .deadline(terms.deadline)
+        .cosigner(checkedVenue.cosigner)
+        .swapper(checkedTerms.swapper)
+        .nonce(big(checkedTerms.nonce ?? randomNonce()))
+        .deadline(checkedTerms.deadline)
         .input({
-            token: terms.tokenIn,
-            startAmount: big(terms.amountIn),
-            endAmount: big(terms.amountIn),
+            token: checkedTerms.tokenIn,
+            startAmount: big(checkedTerms.amountIn),
+            endAmount: big(checkedTerms.amountIn),
         })
         .output({
-            token: terms.tokenOut,
-            startAmount: big(terms.minAmountOut),
-            endAmount: big(terms.minAmountOut),
-            recipient: terms.swapper,
+            token: checkedTerms.tokenOut,
+            startAmount: big(checkedTerms.minAmountOut),
+            endAmount: big(checkedTerms.minAmountOut),
+            recipient: checkedTerms.swapper,
         })
         .buildPartial();
 
@@ -112,15 +135,71 @@ export function buildSwapOrder(
         encodedOrder: order.serialize() as Hex,
         permit: {
             ...payload,
-            domain: { ...payload.domain, chainId: venue.chainId },
+            domain: { ...payload.domain, chainId: checkedVenue.chainId },
         },
         approval: {
-            chainId: venue.chainId,
-            owner: getAddress(terms.swapper),
-            token: getAddress(terms.tokenIn),
-            spender: getAddress(venue.permit2),
-            amount: terms.amountIn,
+            chainId: checkedVenue.chainId,
+            owner: getAddress(checkedTerms.swapper),
+            token: getAddress(checkedTerms.tokenIn),
+            spender: getAddress(checkedVenue.permit2),
+            amount: checkedTerms.amountIn,
         },
-        deadline: terms.deadline,
+        deadline: checkedTerms.deadline,
     };
+}
+
+export function assertFutureDeadline(
+    deadline: number,
+    now = Math.floor(Date.now() / 1_000),
+): void {
+    if (!Number.isSafeInteger(deadline) || deadline <= 0) {
+        throw new InputValidationError(
+            "deadline",
+            "invalid_integer",
+            "Deadline must be a positive integer in Unix seconds",
+        );
+    }
+    if (deadline <= now) {
+        throw new InputValidationError(
+            "deadline",
+            "expired",
+            "Swap order expired",
+        );
+    }
+}
+
+function validateSwapOrder(
+    venue: OrderVenue,
+    terms: OrderTerms,
+): ValidatedSwapOrder {
+    if (!Number.isSafeInteger(venue.chainId) || venue.chainId <= 0) {
+        throw new InputValidationError(
+            "chain ID",
+            "invalid_integer",
+            "Chain ID must be a positive safe integer",
+        );
+    }
+    const reactor = validatedAddress(venue.reactor, "reactor");
+    const permit2 = validatedAddress(venue.permit2, "Permit2");
+    const cosigner = validatedAddress(venue.cosigner, "cosigner");
+    const swapper = validatedAddress(terms.swapper, "swapper");
+    const tokenIn = validatedAddress(terms.tokenIn, "input token");
+    const tokenOut = validatedAddress(terms.tokenOut, "output token");
+    assertDistinctAddresses(tokenIn, tokenOut, "swap tokens");
+    validatedUint(terms.amountIn, 256, "input amount", { positive: true });
+    validatedUint(terms.minAmountOut, 256, "minimum output", {
+        positive: true,
+    });
+    if (terms.nonce !== undefined) {
+        validatedUint(terms.nonce, 256, "nonce");
+    }
+    assertFutureDeadline(terms.deadline);
+    return {
+        venue: { ...venue, reactor, permit2, cosigner },
+        terms: { ...terms, swapper, tokenIn, tokenOut },
+    };
+}
+
+function randomNonce(): bigint {
+    return BigInt(toHex(crypto.getRandomValues(new Uint8Array(32))));
 }

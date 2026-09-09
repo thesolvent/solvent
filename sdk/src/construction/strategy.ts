@@ -9,13 +9,27 @@ import {
 import { formatUnits, parseUnits } from "viem";
 
 import type { Address, Hex } from "../index";
+import {
+    assertDistinctAddresses,
+    decimalValuesEqual,
+    InputValidationError,
+    validatedAddress,
+    validatedFeeBps,
+    validatedPositiveDecimal,
+    validatedSalt,
+    validatedTokenDecimals,
+    validatedUint,
+} from "../validation";
 
 const { Price } = instructions.concentrate;
+const MAX_LINEAR_WIDTH = 5_000n * 10n ** 27n;
 
 export type TokenRef = { address: Address; decimals: number };
 export type PeggedTokenInfo = TokenRef & { reserve: bigint };
 
 export interface BuiltStrategy {
+    /** The maker encoded into the Aqua order. */
+    maker: Address;
     /** The SwapVM program bytes. */
     program: Hex;
     /** `keccak256(order)` — the on-chain strategy identifier (Aqua mode needs no domain). */
@@ -54,6 +68,16 @@ export class Strategy {
         priceMin: string;
         priceMax: string;
     }): Strategy {
+        validatePair(p.base, p.quote);
+        validatedPositiveDecimal(p.priceMin, "minimum price");
+        validatedPositiveDecimal(p.priceMax, "maximum price");
+        if (decimalValuesEqual(p.priceMin, p.priceMax)) {
+            throw new InputValidationError(
+                "price range",
+                "out_of_range",
+                "Minimum and maximum prices must be different",
+            );
+        }
         return new Strategy(() =>
             concentrate(p.base, p.quote, p.priceMin, p.priceMax),
         );
@@ -66,6 +90,8 @@ export class Strategy {
         mid: string;
         halfWidthPct: number;
     }): Strategy {
+        validatePair(p.base, p.quote);
+        validatedPositiveDecimal(p.mid, "market price");
         const { priceMin, priceMax } = bandToPrices(p.mid, p.halfWidthPct);
         return new Strategy(() =>
             concentrate(p.base, p.quote, priceMin, priceMax),
@@ -78,6 +104,21 @@ export class Strategy {
         tokenB: PeggedTokenInfo;
         linearWidth: bigint;
     }): Strategy {
+        validatePair(p.tokenA, p.tokenB);
+        validatedUint(p.tokenA.reserve, 256, "token A reserve", {
+            positive: true,
+        });
+        validatedUint(p.tokenB.reserve, 256, "token B reserve", {
+            positive: true,
+        });
+        validatedUint(p.linearWidth, 256, "linear width");
+        if (p.linearWidth > MAX_LINEAR_WIDTH) {
+            throw new InputValidationError(
+                "linear width",
+                "out_of_range",
+                "Linear width exceeds the SwapVM maximum",
+            );
+        }
         return new Strategy(() =>
             AquaPeggedAmmStrategy.new({
                 tokenA: peggedToken(p.tokenA),
@@ -89,26 +130,29 @@ export class Strategy {
 
     /** A maker fee, in bps, taken on the input token. */
     fee(bps: number): Strategy {
-        return new Strategy(this.resolve, bps);
+        return new Strategy(this.resolve, validatedFeeBps(bps));
     }
 
     /** Give an otherwise identical position a distinct identity; zero keeps the unsalted program. */
     salt(value: bigint): Strategy {
-        return new Strategy(() => this.resolve().withSalt(value), this.feeBps);
+        const salt = validatedSalt(value);
+        return new Strategy(() => this.resolve().withSalt(salt), this.feeBps);
     }
 
     /** Encode for `maker`: the program, its hash, and the order to ship. */
     build(maker: Address): BuiltStrategy {
+        const checkedMaker = validatedAddress(maker, "maker");
         const base = this.resolve();
         const built =
             this.feeBps === undefined ? base : base.withFeeTokenIn(this.feeBps);
         const program = built.build();
         const order = Order.new({
-            maker: new SdkAddress(maker),
+            maker: new SdkAddress(checkedMaker),
             traits: MakerTraits.default(),
             program,
         });
         return {
+            maker: checkedMaker,
             program: program.toString() as Hex,
             strategyHash: order.hash().toString() as Hex,
             order: order.encode().toString() as Hex,
@@ -153,10 +197,39 @@ export function bandToPrices(
     mid: string,
     halfWidthPct: number,
 ): { priceMin: string; priceMax: string } {
+    if (
+        !Number.isFinite(halfWidthPct) ||
+        halfWidthPct <= 0 ||
+        halfWidthPct >= 100
+    ) {
+        throw new RangeError("halfWidthPct must be between 0 and 100");
+    }
+    validatedPositiveDecimal(mid, "market price");
+    const fractionDigits = mid.split(".")[1]?.length ?? 0;
+    if (fractionDigits > 18) {
+        throw new InputValidationError(
+            "market price",
+            "too_many_decimals",
+            "Market price supports at most 18 decimal places",
+        );
+    }
     const scaled = parseUnits(mid, 18);
     const bps = BigInt(Math.round(halfWidthPct * 100));
+    if (bps <= 0n || bps >= 10_000n) {
+        throw new RangeError(
+            "halfWidthPct must resolve between 1 and 9,999 basis points",
+        );
+    }
     return {
         priceMin: formatUnits((scaled * (10_000n - bps)) / 10_000n, 18),
         priceMax: formatUnits((scaled * (10_000n + bps)) / 10_000n, 18),
     };
+}
+
+function validatePair(left: TokenRef, right: TokenRef): void {
+    const leftAddress = validatedAddress(left.address, "base token");
+    const rightAddress = validatedAddress(right.address, "quote token");
+    assertDistinctAddresses(leftAddress, rightAddress, "token pair");
+    validatedTokenDecimals(left.decimals, "base token decimals");
+    validatedTokenDecimals(right.decimals, "quote token decimals");
 }

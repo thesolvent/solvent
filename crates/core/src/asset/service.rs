@@ -8,7 +8,7 @@ use std::sync::Arc;
 use alloy_primitives::Address;
 use itertools::Itertools;
 
-use crate::primitives::amount::TokenBalance;
+use crate::primitives::amount::{Amount, TokenBalance};
 use crate::primitives::asset::{
     Asset, PairInfo, PairKind, PairWallet, Token, TokenList, TokenMeta,
 };
@@ -121,9 +121,15 @@ impl AssetManager {
                 mid: mid_price(valuation, base.address, quote.address).await,
                 default_fee_bps,
                 default_band_pct,
-                wallet: wallet.map(|bals| PairWallet {
-                    base: wallet_balance(bals, &base.address),
-                    quote: wallet_balance(bals, &quote.address),
+                wallet: wallet.map(|balances| {
+                    let base_balance = wallet_balance(balances, &base.address);
+                    let quote_balance = wallet_balance(balances, &quote.address);
+                    PairWallet {
+                        base: display_balance(base_balance),
+                        quote: display_balance(quote_balance),
+                        base_raw: raw_balance(base_balance),
+                        quote_raw: raw_balance(quote_balance),
+                    }
                 }),
                 base,
                 quote,
@@ -217,12 +223,21 @@ async fn mid_price(valuation: &Valuation, base: Address, quote: Address) -> Opti
 }
 
 /// The maker's whole-token balance of `addr`, or `0` when the wallet doesn't hold it.
-fn wallet_balance(balances: &[TokenBalance], addr: &Address) -> f64 {
+fn wallet_balance<'a>(balances: &'a [TokenBalance], addr: &Address) -> Option<&'a Amount> {
     balances
         .iter()
         .find(|b| b.token.address == *addr)
-        .and_then(|b| b.balance.display.parse().ok())
+        .map(|balance| &balance.balance)
+}
+
+fn display_balance(balance: Option<&Amount>) -> f64 {
+    balance
+        .and_then(|amount| amount.display.parse().ok())
         .unwrap_or(0.0)
+}
+
+fn raw_balance(balance: Option<&Amount>) -> String {
+    balance.map_or_else(|| "0".to_string(), |amount| amount.raw.clone())
 }
 
 /// Whether `search` (case-insensitive) matches either token's symbol or address.
@@ -292,8 +307,11 @@ mod tests {
     }
 
     fn balance(mgr: &AssetManager, n: u8, display: &str) -> TokenBalance {
+        let raw: U256 = alloy_primitives::utils::parse_units(display, mgr.decimals(&token(n)))
+            .expect("test amount must parse")
+            .into();
         let amount = Amount {
-            raw: "0".to_string(),
+            raw: raw.to_string(),
             display: display.to_string(),
             usd: None,
         };
@@ -444,7 +462,11 @@ mod tests {
 
     #[tokio::test]
     async fn pairs_include_wallet_balances_when_supplied() {
-        let mgr = manager(vec![meta(1, "WETH"), stable_meta(2, "USDC")], vec![]);
+        let usdc = TokenMeta {
+            decimals: 6,
+            ..stable_meta(2, "USDC")
+        };
+        let mgr = manager(vec![meta(1, "WETH"), usdc], vec![]);
         let wallet = vec![balance(&mgr, 1, "1.5"), balance(&mgr, 2, "500")];
         let pairs = mgr
             .pairs(
@@ -463,5 +485,7 @@ mod tests {
         let w = weth_usdc.wallet.as_ref().unwrap();
         assert_eq!(w.base, 1.5); // WETH
         assert_eq!(w.quote, 500.0); // USDC
+        assert_eq!(w.base_raw, "1500000000000000000");
+        assert_eq!(w.quote_raw, "500000000");
     }
 }

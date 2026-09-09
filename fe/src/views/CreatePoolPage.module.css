@@ -292,10 +292,11 @@
   margin-bottom: 9px;
 }
 
-.flip {
+.orientation {
   border: 1px solid var(--line);
   background: var(--paper);
-  padding: 5px 11px;
+  height: 32px;
+  padding: 0 11px;
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
@@ -306,7 +307,7 @@
     color 140ms ease;
 }
 
-.flip:hover {
+.orientation:hover {
   background: var(--ink);
   color: var(--paper);
 }
@@ -1070,7 +1071,7 @@
 
 .feeGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 3px;
   flex: 1;
   min-width: 0;
@@ -1098,6 +1099,32 @@
   border-color: var(--lime);
   background: var(--lime-wash);
   color: var(--ink);
+}
+
+.feeCustom {
+  composes: feeOn;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: text;
+  overflow: visible;
+}
+
+.feeCustomValue {
+  display: inline-flex;
+  align-items: center;
+}
+
+.feeInput {
+  width: 42px;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: right;
 }
 
 .curveRow {

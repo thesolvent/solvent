@@ -42,6 +42,11 @@
       "types": "./dist/swap.d.ts",
       "import": "./dist/swap.js",
       "require": "./dist/swap.cjs"
+    },
+    "./validation": {
+      "types": "./dist/validation.d.ts",
+      "import": "./dist/validation.js",
+      "require": "./dist/validation.cjs"
     }
   },
   "scripts": {

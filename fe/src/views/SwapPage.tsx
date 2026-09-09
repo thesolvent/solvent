@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAccount, useSwitchChain } from "wagmi";
 
 import { DASH } from "@/data";
-import { clean, fit, money } from "@/lib/format";
+import { fit, money } from "@/lib/format";
 import {
   ANY_NETWORK,
   ANY_TAG,
@@ -39,8 +39,9 @@ export function SwapPage() {
     if (settled) set(settled);
   }, [assets, state.fromToken, state.toToken, set]);
 
-  const typed = String(state.amount).replace(/,/g, "");
-  const amt = parseFloat(typed) || 0;
+  const typed = state.amount;
+  const numericAmount = Number(typed);
+  const amt = Number.isFinite(numericAmount) ? numericAmount : 0;
   const fromUsdNum = amt * (from?.price ?? 0);
 
   // The output is the server's price for this size, not the mid — it carries fee and impact.
@@ -194,13 +195,9 @@ export function SwapPage() {
                 className={styles.amountInput}
                 style={{ fontSize: fit(state.amount) }}
                 value={state.amount}
-                onChange={(e) =>
-                  set({
-                    amount: clean(e.target.value),
-                  })
-                }
+                onChange={(e) => set({ amount: e.target.value })}
                 inputMode="decimal"
-                maxLength={16}
+                maxLength={258}
               />
             </div>
             <div className={styles.amountUsd}>~$ {money(fromUsdNum)}</div>

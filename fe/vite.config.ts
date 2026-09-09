@@ -6,7 +6,10 @@ import { configDefaults, defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+      assert: fileURLToPath(new URL("./src/shims/assert.ts", import.meta.url)),
+    },
   },
   server: {
     // Honour the harness-assigned port; 5173 may already be taken.
@@ -21,5 +24,10 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     css: true,
+    server: {
+      deps: {
+        inline: ["@solvent/sdk", "@1inch/swap-vm-sdk", "@1inch/byte-utils"],
+      },
+    },
   },
 });

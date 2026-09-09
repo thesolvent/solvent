@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::depth::DepthReader;
 use alloy::primitives::Address;
 use serde::Serialize;
-use solvent_core::asset::AssetManager;
+use solvent_core::asset::{AssetManager, PairHistoryService};
 use solvent_core::balances::BalancesService;
 use solvent_core::deps::quote_log::QuoteLog;
 use solvent_core::deps::registry::EventStore;
@@ -37,6 +37,12 @@ pub struct AppConfig {
     pub default_fee_bps: u32,
     pub networks: Vec<String>,
     pub block_explorer_url: String,
+    /// The Aqua deployment holding maker virtual balances.
+    #[schema(value_type = String)]
+    pub aqua: Address,
+    /// The application whose strategies Aqua scopes independently.
+    #[schema(value_type = String)]
+    pub app: Address,
     /// The UniswapX reactor that settles taker orders.
     #[schema(value_type = String)]
     pub reactor: Address,
@@ -55,6 +61,7 @@ pub struct AppState {
     pub config: Arc<AppConfig>,
     pub head: ChainHead,
     pub assets: Arc<AssetManager>,
+    pub pair_history: Arc<PairHistoryService>,
     pub pools: Arc<PoolService>,
     pub depth: DepthReader,
     pub balances: Arc<BalancesService>,

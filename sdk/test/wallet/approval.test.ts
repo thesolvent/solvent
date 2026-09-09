@@ -1,5 +1,5 @@
 import { anvil } from "viem/chains";
-import { createClient, custom, type Address } from "viem";
+import { createClient, custom, maxUint256, type Address } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OrderApproval, UnsignedOrder } from "../../src/orders";
@@ -13,6 +13,7 @@ const rpc = vi.hoisted(() => ({
     write: vi.fn(),
     receipt: vi.fn(),
     sign: vi.fn(),
+    send: vi.fn(),
 }));
 vi.mock("viem/actions", async (original) => ({
     ...(await original<typeof import("viem/actions")>()),
@@ -24,6 +25,7 @@ vi.mock("viem/actions", async (original) => ({
     writeContract: rpc.write,
     waitForTransactionReceipt: rpc.receipt,
     signTypedData: rpc.sign,
+    sendTransaction: rpc.send,
 }));
 const client = createClient({
     chain: anvil,
@@ -63,9 +65,28 @@ beforeEach(() => {
     rpc.write.mockResolvedValue("0xapproval");
     rpc.receipt.mockResolvedValue({ status: "success" });
     rpc.sign.mockResolvedValue("0xsigned");
+    rpc.send.mockResolvedValue("0xsent");
 });
 
 describe("token approval orchestration", () => {
+    it("checks the required balance while granting a reusable allowance", async () => {
+        rpc.read
+            .mockResolvedValueOnce(100n)
+            .mockResolvedValueOnce(0n)
+            .mockResolvedValueOnce(100n)
+            .mockResolvedValueOnce(maxUint256);
+
+        await session.ensureAllowance({
+            ...approval,
+            approvalAmount: maxUint256,
+        });
+
+        expect(rpc.write.mock.calls[0][1].args).toEqual([
+            approval.spender,
+            maxUint256,
+        ]);
+    });
+
     it.each([
         { allowance: 0n, writes: [10n] },
         { allowance: 3n, writes: [0n, 10n] },
@@ -159,5 +180,34 @@ describe("token approval orchestration", () => {
         ) {
             expect(rpc.write).not.toHaveBeenCalled();
         }
+    });
+});
+
+describe("transaction preflight", () => {
+    const transaction = {
+        owner: approval.owner,
+        chainId: approval.chainId,
+        to: approval.spender,
+        data: "0x1234" as const,
+        value: 0n,
+    };
+
+    it("simulates the exact transaction before broadcasting", async () => {
+        await expect(session.sendTransaction(transaction)).resolves.toBe("0xsent");
+        expect(rpc.call).toHaveBeenCalledWith(client, {
+            account: transaction.owner,
+            to: transaction.to,
+            data: transaction.data,
+            value: transaction.value,
+        });
+        expect(rpc.send).toHaveBeenCalledOnce();
+    });
+
+    it("does not broadcast when simulation reverts", async () => {
+        rpc.call.mockRejectedValueOnce(new Error("execution reverted"));
+        await expect(session.sendTransaction(transaction)).rejects.toThrow(
+            "execution reverted",
+        );
+        expect(rpc.send).not.toHaveBeenCalled();
     });
 });

@@ -18,6 +18,7 @@ use super::codec::{order_hash, V2DutchOrder};
 /// the cosigner key only (never a swapper key), so it is not `Debug` (the key must not print).
 pub struct ServerCosigner {
     permit2: Address,
+    reactor: Address,
     chain_id: u64,
     cosigner: PrivateKeySigner,
     exclusive_filler: Address,
@@ -33,6 +34,7 @@ pub(crate) struct Cosigned {
 impl ServerCosigner {
     pub fn new(
         permit2: Address,
+        reactor: Address,
         chain_id: u64,
         cosigner: PrivateKeySigner,
         exclusive_filler: Address,
@@ -40,6 +42,7 @@ impl ServerCosigner {
     ) -> ServerCosigner {
         ServerCosigner {
             permit2,
+            reactor,
             chain_id,
             cosigner,
             exclusive_filler,
@@ -62,6 +65,7 @@ impl ServerCosigner {
         observed_at: u64,
     ) -> Result<Cosigned, CosignError> {
         let mut order = V2DutchOrder::abi_decode(encoded_order).map_err(|_| CosignError::Decode)?;
+        self.validate_order(&order, observed_at)?;
         if order.cosigner != self.cosigner.address() {
             return Err(CosignError::WrongCosigner);
         }
@@ -102,6 +106,61 @@ impl ServerCosigner {
             ),
         })
     }
+
+    fn validate_order(&self, order: &V2DutchOrder, observed_at: u64) -> Result<(), CosignError> {
+        if order.info.reactor != self.reactor {
+            return Err(CosignError::UnsupportedOrder("reactor is not supported"));
+        }
+        if order.info.swapper == Address::ZERO {
+            return Err(CosignError::UnsupportedOrder("swapper is the zero address"));
+        }
+        if order.info.additionalValidationContract != Address::ZERO
+            || !order.info.additionalValidationData.is_empty()
+        {
+            return Err(CosignError::UnsupportedOrder(
+                "additional validation hooks are not supported",
+            ));
+        }
+        if order.baseInput.token == Address::ZERO {
+            return Err(CosignError::UnsupportedOrder(
+                "input token is the zero address",
+            ));
+        }
+        if order.baseInput.startAmount.is_zero()
+            || order.baseInput.startAmount != order.baseInput.endAmount
+        {
+            return Err(CosignError::UnsupportedOrder(
+                "input must have one positive fixed amount",
+            ));
+        }
+        let [output] = order.baseOutputs.as_slice() else {
+            return Err(CosignError::UnsupportedOrder(
+                "exactly one output is required",
+            ));
+        };
+        if output.token == Address::ZERO || output.token == order.baseInput.token {
+            return Err(CosignError::UnsupportedOrder(
+                "output token must be nonzero and distinct from input",
+            ));
+        }
+        if output.startAmount.is_zero() || output.startAmount != output.endAmount {
+            return Err(CosignError::UnsupportedOrder(
+                "output must have one positive fixed amount",
+            ));
+        }
+        if output.recipient != order.info.swapper {
+            return Err(CosignError::UnsupportedOrder(
+                "output recipient must be the swapper",
+            ));
+        }
+        let decay_end = observed_at.saturating_add(self.decay_window_secs);
+        if order.info.deadline < U256::from(decay_end) {
+            return Err(CosignError::UnsupportedOrder(
+                "deadline is shorter than the resolver decay window",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// A cosigning failure — all client-input (a malformed or unverifiable order), never infra.
@@ -114,6 +173,8 @@ pub(crate) enum CosignError {
     WrongCosigner,
     #[error("invalid swapper signature")]
     BadSignature,
+    #[error("unsupported order: {0}")]
+    UnsupportedOrder(&'static str),
 }
 
 #[cfg(test)]
@@ -124,6 +185,7 @@ mod tests {
     use alloy::signers::local::PrivateKeySigner;
 
     const PERMIT2: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
+    const REACTOR: Address = address!("2222222222222222222222222222222222222222");
 
     fn key(byte: u8) -> PrivateKeySigner {
         PrivateKeySigner::from_bytes(&B256::from([byte; 32])).expect("test key")
@@ -136,7 +198,7 @@ mod tests {
         // base is what a taker would post.
         let builder = SignedOrderBuilder::new(PERMIT2, 31337, swapper.clone(), key(0x99));
         let spec = OrderSpec {
-            reactor: address!("2222222222222222222222222222222222222222"),
+            reactor: REACTOR,
             nonce: U256::from(1u64),
             deadline: 2_000_000_000,
             input_token: address!("6666666666666666666666666666666666666666"),
@@ -145,7 +207,7 @@ mod tests {
             output_token: address!("7777777777777777777777777777777777777777"),
             output_start: U256::from(1000u64),
             output_end: U256::from(1000u64),
-            recipient: address!("8888888888888888888888888888888888888888"),
+            recipient: swapper.address(),
             decay_start: 0,
             decay_end: 0,
             exclusive_filler: Address::ZERO,
@@ -161,11 +223,25 @@ mod tests {
         (Bytes::from(order.abi_encode()), signature)
     }
 
+    fn mutated_order(
+        swapper: &PrivateKeySigner,
+        cosigner: Address,
+        mutate: impl FnOnce(&mut V2DutchOrder),
+    ) -> (Bytes, Bytes) {
+        let (encoded, _) = base_order(swapper, cosigner);
+        let mut order = V2DutchOrder::abi_decode(&encoded).expect("decode test order");
+        mutate(&mut order);
+        let hash = order_hash(&order);
+        let signature = sign65(swapper, witness_digest(&order, hash, PERMIT2, 31337));
+        (Bytes::from(order.abi_encode()), signature)
+    }
+
     #[test]
     fn cosigns_a_valid_order() {
         let swapper = key(0x11);
         let cosigner = key(0x22);
-        let server = ServerCosigner::new(PERMIT2, 31337, cosigner.clone(), Address::ZERO, 60);
+        let server =
+            ServerCosigner::new(PERMIT2, REACTOR, 31337, cosigner.clone(), Address::ZERO, 60);
         let (encoded, sig) = base_order(&swapper, cosigner.address());
 
         let out = server.cosign(&encoded, sig, 1000).expect("cosign");
@@ -180,7 +256,8 @@ mod tests {
     #[test]
     fn normalizes_wallet_parity_for_onchain_verification() {
         let cosigner = key(0x22);
-        let server = ServerCosigner::new(PERMIT2, 31337, cosigner.clone(), Address::ZERO, 60);
+        let server =
+            ServerCosigner::new(PERMIT2, REACTOR, 31337, cosigner.clone(), Address::ZERO, 60);
         let mut seen = [false; 2];
         for byte in 1..=16 {
             let swapper = key(byte);
@@ -201,7 +278,8 @@ mod tests {
     fn rejects_a_bad_swapper_signature() {
         let swapper = key(0x11);
         let cosigner = key(0x22);
-        let server = ServerCosigner::new(PERMIT2, 31337, cosigner.clone(), Address::ZERO, 60);
+        let server =
+            ServerCosigner::new(PERMIT2, REACTOR, 31337, cosigner.clone(), Address::ZERO, 60);
         let (encoded, _) = base_order(&swapper, cosigner.address());
         // A signature from the wrong key does not recover to the order's swapper.
         let wrong = base_order(&key(0x33), cosigner.address()).1;
@@ -214,12 +292,60 @@ mod tests {
     #[test]
     fn rejects_an_order_for_another_cosigner() {
         let swapper = key(0x11);
-        let server = ServerCosigner::new(PERMIT2, 31337, key(0x22), Address::ZERO, 60);
+        let server = ServerCosigner::new(PERMIT2, REACTOR, 31337, key(0x22), Address::ZERO, 60);
         // Order names a different cosigner (0x44).
         let (encoded, sig) = base_order(&swapper, key(0x44).address());
         assert!(matches!(
             server.cosign(&encoded, sig, 1000),
             Err(CosignError::WrongCosigner)
         ));
+    }
+
+    #[test]
+    fn rejects_every_order_shape_the_router_does_not_support() {
+        let swapper = key(0x11);
+        let cosigner = key(0x22);
+        let server =
+            ServerCosigner::new(PERMIT2, REACTOR, 31337, cosigner.clone(), Address::ZERO, 60);
+        let cases = [
+            mutated_order(&swapper, cosigner.address(), |order| {
+                order.info.reactor = Address::ZERO;
+            }),
+            mutated_order(&swapper, cosigner.address(), |order| {
+                order.info.swapper = Address::ZERO;
+            }),
+            mutated_order(&swapper, cosigner.address(), |order| {
+                order.info.additionalValidationContract = REACTOR;
+            }),
+            mutated_order(&swapper, cosigner.address(), |order| {
+                order.baseInput.startAmount = U256::ZERO;
+                order.baseInput.endAmount = U256::ZERO;
+            }),
+            mutated_order(&swapper, cosigner.address(), |order| {
+                order.baseInput.endAmount += U256::from(1u64);
+            }),
+            mutated_order(&swapper, cosigner.address(), |order| {
+                order.baseOutputs.push(order.baseOutputs[0].clone());
+            }),
+            mutated_order(&swapper, cosigner.address(), |order| {
+                order.baseOutputs[0].token = order.baseInput.token;
+            }),
+            mutated_order(&swapper, cosigner.address(), |order| {
+                order.baseOutputs[0].endAmount += U256::from(1u64);
+            }),
+            mutated_order(&swapper, cosigner.address(), |order| {
+                order.baseOutputs[0].recipient = Address::ZERO;
+            }),
+            mutated_order(&swapper, cosigner.address(), |order| {
+                order.info.deadline = U256::from(1_059u64);
+            }),
+        ];
+
+        for (encoded, signature) in cases {
+            assert!(matches!(
+                server.cosign(&encoded, signature, 1_000),
+                Err(CosignError::UnsupportedOrder(_))
+            ));
+        }
     }
 }

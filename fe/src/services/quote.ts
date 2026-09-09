@@ -1,5 +1,6 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { parseTokenAmount } from "@solvent/sdk/validation";
 import type { Asset, Quote } from "@/data";
 import { useServices } from "./context";
 
@@ -59,11 +60,21 @@ export function useQuote(
 ): QuoteState {
   const { swap } = useServices();
   const settled = useSettled(amount, SETTLE_MS);
+  let inputProblem: string | undefined;
+  if (from && settled !== "") {
+    try {
+      parseTokenAmount(settled, from.decimals, "Swap amount");
+    } catch (error) {
+      inputProblem =
+        error instanceof Error ? error.message : "Enter a valid swap amount";
+    }
+  }
   const quotable =
     from !== undefined &&
     to !== undefined &&
-    from.address !== to.address &&
-    Number(settled) > 0;
+    from.address.toLowerCase() !== to.address.toLowerCase() &&
+    inputProblem === undefined &&
+    settled !== "";
 
   const { data, isFetching, error, failureReason } = useQuery({
     queryKey: ["quote", from?.address, to?.address, settled],
@@ -80,6 +91,9 @@ export function useQuote(
     pricing: amount !== settled || (quotable && isFetching),
     // `error` only lands once retries are spent, and never while they are paused; the
     // reason is known from the first failure, and a trade that cannot happen should say so.
-    problem: amount === settled ? reason(error ?? failureReason) : undefined,
+    problem:
+      amount === settled
+        ? (inputProblem ?? reason(error ?? failureReason))
+        : undefined,
   };
 }

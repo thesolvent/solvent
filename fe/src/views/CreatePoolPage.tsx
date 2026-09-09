@@ -1,37 +1,140 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { formatUnits } from "viem";
 
 import { Crumbs } from "@/components/Crumbs";
-import { BAND_K0, CORE6 } from "@/data";
-import { clampBand, createPosition } from "@/lib/create-position";
+import { BAND_K0 } from "@/data";
+import {
+  MIN_PEGGED_BOUND_PERCENT,
+  clampBand,
+  createPosition,
+} from "@/lib/create-position";
+import type { CreatePair, PositionCurve } from "@/ports/positions";
+import {
+  useCreatePairs,
+  useCreatePosition,
+  usePairPriceHistory,
+} from "@/services/positions";
+import { slug } from "@/services/pools";
 import { useApp } from "@/state";
 
 import styles from "./CreatePoolPage.module.css";
 
-const STRATEGIES = ["Concentrated", "Pegged", "Full range"];
-const SPANS = ["7d", "3m", "All"];
-const PRESETS = ["±0.01%", "±0.04%", "±0.1%", "Market", "Full range", "Custom"];
-const TOKEN_TAGS = ["USD", "ETH", "BTC", "DeFi"];
+const STRATEGIES: readonly PositionCurve[] = [
+  "Concentrated",
+  "Pegged",
+  "Full range",
+];
+const SPANS = ["7d", "3m", "All"] as const;
+const PRESET_WIDTHS = {
+  "±0.01%": 0.01,
+  "±0.04%": 0.04,
+  "±0.1%": 0.1,
+} as const;
+const PRESETS = [
+  "±0.01%",
+  "±0.04%",
+  "±0.1%",
+  "Market",
+  "Full range",
+  "Custom",
+] as const;
+const TOKEN_TAGS = [
+  { label: "All", value: null },
+  { label: "USD", value: "USD" },
+  { label: "ETH", value: "ETH" },
+  { label: "BTC", value: "BTC" },
+  { label: "DeFi", value: "DeFi" },
+] as const;
 const RAIL_LABELS = ["Pair", "Active price", "Amount", "Summary"];
 const PANE_SUBS = [
-  "Supported devnet pairs",
+  "Top pools by TVL",
   "Drag the band or pick a preset",
   "Capped to your wallet balance",
   "Immutable once shipped",
 ];
+const EMPTY_PAIRS: readonly CreatePair[] = [];
 
 type BandEdge = "max" | "min" | "body";
 
+function pairDefaults(pair: CreatePair, corePair: number) {
+  const minimum = pair.type === "Stable" ? MIN_PEGGED_BOUND_PERCENT : 0.004;
+  const band = Math.min(10, Math.max(minimum, pair.defaultBandPct));
+  return {
+    corePair,
+    flipped: false,
+    createPreset: "Market",
+    strategy: pair.type === "Stable" ? "Pegged" : "Concentrated",
+    pegSym: pair.type === "Stable",
+    createFee: `Auto ${(pair.defaultFeeBps / 100).toFixed(2)}%`,
+    amtA: formatUnits(pair.base.balanceRaw / 2n, pair.base.decimals),
+    amtB: formatUnits(pair.quote.balanceRaw / 2n, pair.quote.decimals),
+    bandMax: band,
+    bandMin: -band,
+  };
+}
+
 export function CreatePoolPage() {
   const { state, set, pop } = useApp();
-  const c = createPosition(state);
+  const navigate = useNavigate();
+  const { pair: routePair } = useParams();
+  const pairQuery = useCreatePairs();
+  const pairs = pairQuery.data ?? EMPTY_PAIRS;
+  const selectedPair = pairs[state.corePair] ?? pairs[0];
+  const historyQuery = usePairPriceHistory(selectedPair, state.createSpan);
+  const c = createPosition(
+    state,
+    pairs,
+    pairQuery.isError ? "Couldn’t load supported pairs." : undefined,
+    historyQuery.data,
+  );
+  const creation = useCreatePosition(
+    c.pair
+      ? {
+          pair: c.pair,
+          flipped: state.flipped,
+          curve: state.strategy as PositionCurve,
+          feeBps: c.feeBps,
+          spotPrice: c.spotPrice,
+          priceMin: c.priceMin,
+          priceMax: c.priceMax,
+          halfWidthPct: c.halfWidthPct,
+          peggedSymmetric: c.peggedSymmetric,
+          amountBase: state.amtA,
+          amountQuote: state.amtB,
+        }
+      : undefined,
+    ({ strategyHash }) =>
+      navigate(`/explorer/strategies/${encodeURIComponent(strategyHash)}`, {
+        state: { waitForStrategyIndex: true },
+      }),
+  );
   const plotRef = useRef<HTMLDivElement>(null);
+  const initializedRoute = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    if (
+      !routePair ||
+      pairs.length === 0 ||
+      initializedRoute.current === routePair
+    )
+      return;
+    const index = pairs.findIndex(
+      ({ base, quote }) => slug(`${base.symbol}/${quote.symbol}`) === routePair,
+    );
+    if (index >= 0) {
+      initializedRoute.current = routePair;
+      set(pairDefaults(pairs[index], index));
+    }
+  }, [pairs, routePair, set]);
 
   // Wheel-zoom must be non-passive to preventDefault, which React's onWheel can't do.
   useEffect(() => {
@@ -57,19 +160,25 @@ export function CreatePoolPage() {
       if (!box) return;
       const r = box.getBoundingClientRect();
       const K = Number(box.getAttribute("data-k")) || BAND_K0;
+      const scaleMax =
+        Number(box.getAttribute("data-scale-max")) ||
+        Math.log1p(state.bandMax / 100) * 100;
+      const scaleMin =
+        Number(box.getAttribute("data-scale-min")) ||
+        Math.log1p(state.bandMin / 100) * 100;
       const startY = e.clientY;
-      const start = { max: state.bandMax, min: state.bandMin };
 
       const move = (ev: PointerEvent) => {
-        const dPct = (((ev.clientY - startY) / r.height) * 100) / K;
+        const dScale = (((ev.clientY - startY) / r.height) * 100) / K;
+        const percentAtScale = (scale: number) => Math.expm1(scale / 100) * 100;
         let next =
           edge === "max"
-            ? { bandMax: start.max - dPct }
+            ? { bandMax: percentAtScale(scaleMax - dScale) }
             : edge === "min"
-              ? { bandMin: start.min - dPct }
+              ? { bandMin: percentAtScale(scaleMin - dScale) }
               : {
-                  bandMax: start.max - dPct,
-                  bandMin: start.min - dPct,
+                  bandMax: percentAtScale(scaleMax - dScale),
+                  bandMin: percentAtScale(scaleMin - dScale),
                 };
         if (state.pegSym && state.strategy === "Pegged" && edge !== "body") {
           const w = Math.abs(edge === "max" ? next.bandMax! : next.bandMin!);
@@ -128,38 +237,102 @@ export function CreatePoolPage() {
 
     // Landing on a supported pair jumps the wizard's pair selection to it.
     if (one && two && one !== two) {
-      const hit = CORE6.findIndex(
+      const hit = c.pairs.findIndex(
         (x) => (x.a === one && x.b === two) || (x.a === two && x.b === one),
       );
       if (hit > -1) {
         return set({
           ...next,
           corePair: hit,
-          flipped: CORE6[hit].a !== one,
+          flipped: c.pairs[hit].a !== one,
         });
       }
     }
     set(next);
   };
 
-  const pickPreset = (x: string) => {
-    if (x === "Full range")
-      return set({ strategy: "Full range", createPreset: x });
-    const w = (
-      {
-        "±0.01%": 0.01,
-        "±0.04%": 0.04,
-        "±0.1%": 0.1,
-        Market: c.pr.band,
-        Custom: Math.abs(state.bandMax),
-      } as Record<string, number>
-    )[x];
+  const pickPreset = (preset: (typeof PRESETS)[number]) => {
+    if (preset === "Full range") {
+      set({ strategy: "Full range", createPreset: preset, chartZoom: 1 });
+      return;
+    }
+
+    const strategy =
+      state.strategy === "Full range"
+        ? c.pr.type === "Stable"
+          ? "Pegged"
+          : "Concentrated"
+        : state.strategy;
+    const boundedFitSpan = Math.max(c.pr.band * 2.6, c.pr.vol * 1.4);
+    if (preset === "Custom") {
+      const halfWidth = Math.max(
+        Math.abs(state.bandMax),
+        Math.abs(state.bandMin),
+      );
+      set({
+        createPreset: preset,
+        strategy,
+        chartZoom: Math.max(
+          0.5,
+          Math.min(400, boundedFitSpan / (halfWidth * 2.4)),
+        ),
+      });
+      return;
+    }
+
+    const halfWidth = preset === "Market" ? c.pr.band : PRESET_WIDTHS[preset];
+    const pegSym = strategy === "Pegged" ? true : state.pegSym;
     set({
-      createPreset: x,
-      strategy: c.pegged ? "Pegged" : "Concentrated",
-      chartZoom: Math.max(0.5, Math.min(400, c.fitSpan / (w * 2.4))),
-      ...clampBand(state, { bandMax: w, bandMin: -w }),
+      createPreset: preset,
+      strategy,
+      pegSym,
+      chartZoom: Math.max(
+        0.5,
+        Math.min(400, boundedFitSpan / (halfWidth * 2.4)),
+      ),
+      ...clampBand(
+        { ...state, strategy, pegSym },
+        { bandMax: halfWidth, bandMin: -halfWidth },
+      ),
     });
+  };
+
+  const flipOrientation = () =>
+    set({
+      flipped: !state.flipped,
+      amtA: state.amtB,
+      amtB: state.amtA,
+    });
+
+  const selectStrategy = (strategy: PositionCurve) => {
+    const patch = {
+      strategy,
+      createPreset: strategy === "Full range" ? "Full range" : "Custom",
+      ...(strategy === "Pegged"
+        ? {
+            pegSym: true,
+            ...clampBand(
+              { ...state, strategy, pegSym: true },
+              {
+                bandMax: c.pr.band,
+                bandMin: -c.pr.band,
+              },
+            ),
+          }
+        : {}),
+    };
+    if (state.step < 3) {
+      set(patch);
+      return;
+    }
+
+    const next = createPosition(
+      { ...state, ...patch },
+      pairs,
+      pairQuery.isError ? "Couldn’t load supported pairs." : undefined,
+      historyQuery.data,
+    );
+    set({ ...patch, ...next.amountsFromA(state.amtA) });
   };
 
   const stepFoot = (
@@ -178,7 +351,13 @@ export function CreatePoolPage() {
       <button
         type="button"
         className={styles.next}
-        onClick={() => set({ step: Math.min(4, state.step + 1) })}
+        onClick={() => {
+          const step = Math.min(4, state.step + 1);
+          set({
+            step,
+            ...(step >= 3 ? c.amountsFromA(state.amtA) : {}),
+          });
+        }}
       >
         {c.nextLabel}
       </button>
@@ -217,18 +396,7 @@ export function CreatePoolPage() {
               className={
                 x === state.strategy ? styles.strategyOn : styles.strategy
               }
-              onClick={() =>
-                set({
-                  strategy: x,
-                  createPreset: x === "Full range" ? "Full range" : "Custom",
-                  ...(x === "Pegged"
-                    ? clampBand(state, {
-                        bandMax: c.pr.band,
-                        bandMin: -c.pr.band,
-                      })
-                    : {}),
-                })
-              }
+              onClick={() => selectStrategy(x)}
             >
               {x}
             </button>
@@ -249,7 +417,11 @@ export function CreatePoolPage() {
               style={{ cursor: st.cursor }}
               aria-expanded={st.open}
               onClick={() => {
-                if (!st.locked) set({ step: st.n });
+                if (!st.locked)
+                  set({
+                    step: st.n,
+                    ...(st.n >= 3 ? c.amountsFromA(state.amtA) : {}),
+                  });
               }}
             >
               <span className={styles.railNum} style={{ color: st.numFg }}>
@@ -274,18 +446,11 @@ export function CreatePoolPage() {
                     <span className={styles.microLabel}>
                       Pair · {c.pairType}
                     </span>
-                    <button
-                      type="button"
-                      className={styles.flip}
-                      onClick={() => set({ flipped: !state.flipped })}
-                    >
-                      {c.flipLabel}
-                    </button>
                   </div>
 
                   <div className={styles.pairGrid}>
-                    {CORE6.map((q, qi) => {
-                      const on = qi === state.corePair;
+                    {c.recommendations.map((q) => {
+                      const on = q.catalogIndex === state.corePair;
                       return (
                         <button
                           key={`${q.a}/${q.b}`}
@@ -293,24 +458,13 @@ export function CreatePoolPage() {
                           className={on ? styles.pairChipOn : styles.pairChip}
                           onClick={() =>
                             set({
+                              ...pairDefaults(q.source!, q.catalogIndex),
                               step: 2,
                               stepDirty: {
                                 2: true,
                                 3: true,
                                 4: true,
                               },
-                              corePair: qi,
-                              flipped: false,
-                              createPreset: "Market",
-                              strategy:
-                                q.type === "Stable" ? "Pegged" : "Concentrated",
-                              createFee: `Auto ${q.fee}`,
-                              amtA: (q.walA * 0.5).toFixed(2),
-                              amtB: (q.walB * 0.5).toFixed(2),
-                              ...clampBand(state, {
-                                bandMax: q.band,
-                                bandMin: -q.band,
-                              }),
                             })
                           }
                         >
@@ -452,22 +606,18 @@ export function CreatePoolPage() {
                     </div>
 
                     <div className={styles.tokenTags}>
-                      {TOKEN_TAGS.map((t) => (
+                      {TOKEN_TAGS.map(({ label, value }) => (
                         <button
-                          key={t}
+                          key={label}
                           type="button"
                           className={
-                            state.tokenTag === t
+                            state.tokenTag === value
                               ? styles.tokenTagOn
                               : styles.tokenTag
                           }
-                          onClick={() =>
-                            set({
-                              tokenTag: state.tokenTag === t ? null : t,
-                            })
-                          }
+                          onClick={() => set({ tokenTag: value })}
                         >
-                          {t}
+                          {label}
                         </button>
                       ))}
                     </div>
@@ -598,6 +748,13 @@ export function CreatePoolPage() {
                           {c.pegSymLabel}
                         </button>
                       )}
+                      <button
+                        type="button"
+                        className={styles.orientation}
+                        onClick={flipOrientation}
+                      >
+                        {c.flipLabel}
+                      </button>
                       <div className={styles.zoomGroup}>
                         <button
                           type="button"
@@ -631,12 +788,7 @@ export function CreatePoolPage() {
                                 0.5,
                                 Math.min(
                                   400,
-                                  c.fitSpan /
-                                    (Math.max(
-                                      Math.abs(state.bandMax),
-                                      Math.abs(state.bandMin),
-                                    ) *
-                                      2.4),
+                                  c.fitSpan / (c.bandScaleExtent * 2.4),
                                 ),
                               ),
                             })
@@ -680,6 +832,8 @@ export function CreatePoolPage() {
                       ref={plotRef}
                       data-band-plot="1"
                       data-k={c.scaleK}
+                      data-scale-max={c.bandScaleMax}
+                      data-scale-min={c.bandScaleMin}
                       className={styles.plot}
                       onMouseMove={onChartMove}
                       onMouseLeave={() => set({ chartHover: null })}
@@ -879,7 +1033,7 @@ export function CreatePoolPage() {
                       <div className={styles.timeTicks}>
                         {c.timeTicks.map((t) => (
                           <span
-                            key={t.label}
+                            key={t.key}
                             className={styles.timeTick}
                             style={{
                               left: t.left,
@@ -923,18 +1077,37 @@ export function CreatePoolPage() {
                   <div className={styles.feeRow}>
                     <span className={styles.microLabel}>Swap fee</span>
                     <div className={styles.feeGrid}>
-                      {c.feeOptions.map((x) => (
-                        <button
-                          key={x}
-                          type="button"
-                          className={
-                            x === c.activeFee ? styles.feeOn : styles.fee
-                          }
-                          onClick={() => set({ createFee: x })}
-                        >
-                          {x}
-                        </button>
-                      ))}
+                      {c.feeOptions.map((x) =>
+                        x === "Custom" && x === c.activeFee ? (
+                          <label key={x} className={styles.feeCustom}>
+                            <span>Custom</span>
+                            <span className={styles.feeCustomValue}>
+                              <input
+                                autoFocus
+                                aria-label="Custom fee percentage"
+                                className={styles.feeInput}
+                                inputMode="decimal"
+                                value={state.customFeePct}
+                                onChange={(event) =>
+                                  set({ customFeePct: event.target.value })
+                                }
+                              />
+                              <span>%</span>
+                            </span>
+                          </label>
+                        ) : (
+                          <button
+                            key={x}
+                            type="button"
+                            className={
+                              x === c.activeFee ? styles.feeOn : styles.fee
+                            }
+                            onClick={() => set({ createFee: x })}
+                          >
+                            {x}
+                          </button>
+                        ),
+                      )}
                     </div>
                   </div>
 
@@ -943,16 +1116,7 @@ export function CreatePoolPage() {
                     <button
                       type="button"
                       className={styles.useFull}
-                      onClick={() => {
-                        const capA = Math.min(
-                          c.wallet.a,
-                          c.bPerA ? c.wallet.b / c.bPerA : c.wallet.a,
-                        );
-                        set({
-                          amtA: capA.toFixed(2),
-                          amtB: (capA * c.bPerA).toFixed(2),
-                        });
-                      }}
+                      onClick={() => set(c.maxAmounts)}
                     >
                       Use full balances
                     </button>
@@ -981,37 +1145,20 @@ export function CreatePoolPage() {
                           className={styles.amountInput}
                           value={state.amtA}
                           inputMode="decimal"
-                          onChange={(e) =>
-                            set({
-                              amtA: e.target.value,
-                              amtB: (
-                                (parseFloat(e.target.value) || 0) * c.bPerA
-                              ).toFixed(2),
-                            })
-                          }
+                          onChange={(e) => set(c.amountsFromA(e.target.value))}
                         />
                         <span className={styles.quickGroup}>
                           <button
                             type="button"
                             className={styles.quick}
-                            onClick={() =>
-                              set({
-                                amtA: (c.wallet.a / 2).toFixed(2),
-                                amtB: ((c.wallet.a / 2) * c.bPerA).toFixed(2),
-                              })
-                            }
+                            onClick={() => set(c.halfFromA)}
                           >
                             50%
                           </button>
                           <button
                             type="button"
                             className={styles.quickNext}
-                            onClick={() =>
-                              set({
-                                amtA: c.wallet.a.toFixed(2),
-                                amtB: (c.wallet.a * c.bPerA).toFixed(2),
-                              })
-                            }
+                            onClick={() => set(c.maxFromA)}
                           >
                             Max
                           </button>
@@ -1047,44 +1194,20 @@ export function CreatePoolPage() {
                           className={styles.amountInput}
                           value={state.amtB}
                           inputMode="decimal"
-                          onChange={(e) =>
-                            set({
-                              amtB: e.target.value,
-                              amtA: (c.bPerA
-                                ? (parseFloat(e.target.value) || 0) / c.bPerA
-                                : 0
-                              ).toFixed(2),
-                            })
-                          }
+                          onChange={(e) => set(c.amountsFromB(e.target.value))}
                         />
                         <span className={styles.quickGroup}>
                           <button
                             type="button"
                             className={styles.quick}
-                            onClick={() =>
-                              set({
-                                amtB: (c.wallet.b / 2).toFixed(2),
-                                amtA: (c.bPerA
-                                  ? c.wallet.b / 2 / c.bPerA
-                                  : 0
-                                ).toFixed(2),
-                              })
-                            }
+                            onClick={() => set(c.halfFromB)}
                           >
                             50%
                           </button>
                           <button
                             type="button"
                             className={styles.quickNext}
-                            onClick={() =>
-                              set({
-                                amtB: c.wallet.b.toFixed(2),
-                                amtA: (c.bPerA
-                                  ? c.wallet.b / c.bPerA
-                                  : 0
-                                ).toFixed(2),
-                              })
-                            }
+                            onClick={() => set(c.maxFromB)}
                           >
                             Max
                           </button>
@@ -1142,19 +1265,24 @@ export function CreatePoolPage() {
                     Go back
                   </button>
                   <p className={styles.footNote} style={{ color: c.footFg }}>
-                    {c.footNote}
+                    {creation.problem ?? c.footNote}
                   </p>
                   <button
                     type="button"
                     className={styles.cta}
-                    disabled={c.ctaDisabled}
+                    disabled={c.ctaDisabled || creation.submitting}
                     style={{
                       background: c.ctaBg,
                       color: c.ctaFg,
-                      cursor: c.ctaCursor,
+                      cursor: creation.submitting ? "wait" : c.ctaCursor,
                     }}
+                    onClick={creation.send}
                   >
-                    {c.cta}
+                    {creation.submitting
+                      ? "Creating position…"
+                      : creation.problem
+                        ? "Could not create — try again"
+                        : c.cta}
                   </button>
                 </div>
               </div>

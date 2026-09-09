@@ -11,6 +11,7 @@ import {
 import { useApp } from "@/state";
 import { useNavigate, useParams } from "react-router-dom";
 
+import { MakerAssets } from "./MakerAssets";
 import { MakerPositions } from "./MakerPositions";
 import styles from "./MakersPage.module.css";
 
@@ -189,99 +190,25 @@ export function MakersPage() {
           </div>
 
           {mk.tab === "Positions" && (
-            <MakerPositions key={address} positions={mk.positions} />
+            <MakerPositions
+              key={address}
+              positions={mk.positions}
+              onOpenPosition={(hash) =>
+                navigate(`/explorer/strategies/${encodeURIComponent(hash)}`)
+              }
+            />
           )}
 
           {mk.tab === "Assets" && (
-            <>
-              <div className={styles.assetHead}>
-                <span />
-                <span>Token</span>
-                <span className={styles.right}>Wallet</span>
-                <span className={styles.right}>Shared liq.</span>
-                <span className={styles.right}>Fees · APY</span>
-                <span className={styles.right}>Ratio</span>
-              </div>
-              <div data-scroll="1" className={styles.list}>
-                {mk.assets.map((t, i) => (
-                  <div key={t.address} className={styles.assetGroup}>
-                    <div
-                      className={t.open ? styles.assetRowOpen : styles.assetRow}
-                      onClick={() =>
-                        set({
-                          mkAsset: t.open ? -1 : i,
-                        })
-                      }
-                    >
-                      <span className={styles.assetGlyph}>
-                        <span
-                          className={
-                            t.open ? styles.assetCaretOpen : styles.assetCaret
-                          }
-                        >
-                          ▸
-                        </span>
-                        <span
-                          className={styles.assetChip}
-                          style={{
-                            background: t.tint,
-                          }}
-                        >
-                          {t.sym}
-                        </span>
-                      </span>
-                      <span className={styles.stack}>
-                        <span className={styles.cellStrong}>{t.sym}</span>
-                        <span className={styles.cellSub}>{t.across}</span>
-                      </span>
-                      <span className={styles.stackRight}>
-                        <span className={styles.cellStrong}>{t.wallet}</span>
-                        <span className={styles.cellSub}>{t.walletAmt}</span>
-                      </span>
-                      <span className={styles.stackRight}>
-                        <span className={styles.cellStrong}>{t.shared}</span>
-                        <span className={styles.cellSub}>{t.sharedAmt}</span>
-                      </span>
-                      <span className={styles.stackRight}>
-                        <span className={styles.cellNum}>{t.fees}</span>
-                        <span className={styles.cellSub}>{t.apy}</span>
-                      </span>
-                      <span className={styles.cellRatio}>{t.ratio}</span>
-                    </div>
-
-                    {t.open && (
-                      <div className={styles.legPanel}>
-                        <div className={styles.legHead}>
-                          <span>Position</span>
-                          <span className={styles.right}>Current</span>
-                          <span className={styles.right}>Opening</span>
-                          <span className={styles.right}>Fees · APY</span>
-                          <span className={styles.right}>Cov.</span>
-                        </div>
-                        {t.legs.map((l) => (
-                          <div key={l.hash} className={styles.legRow}>
-                            <span className={styles.stack}>
-                              <span className={styles.legPair}>{l.pair}</span>
-                              <span className={styles.cellSub}>{l.meta}</span>
-                            </span>
-                            <span className={styles.stackRight}>
-                              <span className={styles.legCell}>{l.cur}</span>
-                              <span className={styles.cellSub}>{l.curUsd}</span>
-                            </span>
-                            <span className={styles.legCell}>{l.op}</span>
-                            <span className={styles.stackRight}>
-                              <span className={styles.legCell}>{l.fees}</span>
-                              <span className={styles.cellSub}>{l.apy}</span>
-                            </span>
-                            <span className={styles.legCov}>{l.cov}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </>
+            <MakerAssets
+              assets={mk.assets}
+              onToggle={(index) =>
+                set({ mkAsset: mk.assets[index]?.open ? -1 : index })
+              }
+              onOpenPosition={(hash) =>
+                navigate(`/explorer/strategies/${encodeURIComponent(hash)}`)
+              }
+            />
           )}
 
           {mk.tab === "Settlements" && (

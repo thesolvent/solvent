@@ -17,7 +17,7 @@ function signed(pct?: number | null): string {
  */
 export function toAsset(api: ApiAsset, network: string): Asset {
   return {
-    address: api.address,
+    address: api.address as `0x${string}`,
     symbol: api.symbol,
     name: api.name,
     decimals: api.decimals,

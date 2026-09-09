@@ -8,3 +8,4 @@ export * from "./client";
 
 export * from "./orders";
 export * from "./swap";
+export * from "./validation";

@@ -91,6 +91,9 @@ describe("settling the legs", () => {
 
 describe("the action button", () => {
   const QUOTE = {
+    tokenIn: "0x1111111111111111111111111111111111111111",
+    tokenOut: "0x2222222222222222222222222222222222222222",
+    amountInRaw: 1_000_000n,
     amountOut: "1",
     amountOutUsd: 1,
     priceImpact: "0.1%",

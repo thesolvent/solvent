@@ -84,9 +84,42 @@ pub enum PairKind {
     Volatile,
 }
 
-/// A maker's wallet balance of each side of a pair, in whole tokens.
+/// A maker's wallet balance of each side of a pair, as display numbers and exact base units.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct PairWallet {
     pub base: f64,
     pub quote: f64,
+    pub base_raw: String,
+    pub quote_raw: String,
+}
+
+/// The history window requested by a price chart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize, utoipa::ToSchema)]
+pub enum PriceHistoryPeriod {
+    #[serde(rename = "7d")]
+    SevenDays,
+    #[serde(rename = "3m")]
+    ThreeMonths,
+    #[serde(rename = "all")]
+    All,
+}
+
+/// One timestamped pair midpoint, quoted as `quote` per one `base`.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+pub struct PairPricePoint {
+    pub timestamp_ms: u64,
+    pub price: f64,
+    /// USD-denominated market volume for the interval when the source provides it.
+    pub volume_usd: Option<f64>,
+}
+
+/// Historical market data for one oriented pair.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+pub struct PairPriceHistory {
+    #[schema(value_type = String)]
+    pub base: Address,
+    #[schema(value_type = String)]
+    pub quote: Address,
+    pub period: PriceHistoryPeriod,
+    pub points: Vec<PairPricePoint>,
 }

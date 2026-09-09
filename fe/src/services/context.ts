@@ -4,6 +4,7 @@ import { createContext, useContext } from "react";
 import type { AssetsPort } from "@/ports/assets";
 import type { ExplorerPort } from "@/ports/explorer";
 import type { PoolsPort } from "@/ports/pools";
+import type { PositionsPort } from "@/ports/positions";
 import type { SwapPort } from "@/ports/swap";
 import type { SystemPort } from "@/ports/system";
 
@@ -13,6 +14,7 @@ export interface Services {
   explorer: ExplorerPort;
   assets: AssetsPort;
   pools: PoolsPort;
+  positions: PositionsPort;
   swap: SwapPort;
   system: SystemPort;
 }

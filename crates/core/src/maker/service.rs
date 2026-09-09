@@ -79,6 +79,7 @@ impl MakerService {
         strategy_hash: StrategyHash,
         amounts: &[(Address, U256)],
     ) -> Result<PreviewResponse, SolventError> {
+        validate_ship_amounts(amounts)?;
         let exists = self
             .registry
             .load()
@@ -694,6 +695,38 @@ impl MakerService {
     }
 }
 
+fn validate_ship_amounts(amounts: &[(Address, U256)]) -> Result<(), SolventError> {
+    let [(left_token, left_amount), (right_token, right_amount)] = amounts else {
+        return Err(SolventError::InvalidId {
+            id_type: "position amounts",
+            reason: "exactly two token amounts are required".to_string(),
+        });
+    };
+    if *left_token == Address::ZERO || *right_token == Address::ZERO {
+        return Err(SolventError::InvalidId {
+            id_type: "position token",
+            reason: "the zero address is not supported".to_string(),
+        });
+    }
+    if left_token == right_token {
+        return Err(SolventError::InvalidId {
+            id_type: "position tokens",
+            reason: "token addresses must be distinct".to_string(),
+        });
+    }
+    let max_amount = U256::MAX >> 8;
+    if [left_amount, right_amount]
+        .into_iter()
+        .any(|amount| amount.is_zero() || *amount > max_amount)
+    {
+        return Err(SolventError::InvalidId {
+            id_type: "position amount",
+            reason: "each amount must be positive and fit in uint248".to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// The dashboard's headline totals, folded from the position list.
 struct PositionKpis {
     shared_liquidity_usd: Option<f64>,
@@ -1227,9 +1260,26 @@ mod tests {
 
     #[tokio::test]
     async fn preview_flags_an_existing_strategy() {
-        let svc = service(Snapshot::from_strategies([xyc_strategy(9)]), HashMap::new());
+        let available = Holdings {
+            balance: U256::from(100u64),
+            pullable: U256::from(100u64),
+        };
+        let svc = service_with(
+            Snapshot::from_strategies([xyc_strategy(9)]),
+            Arc::new(PreviewOracle(HashMap::from([
+                (addr(WETH), available),
+                (addr(USDC), available),
+            ]))),
+        );
         let out = svc
-            .preview(addr(9), StrategyHash(B256::from([9; 32])), &[])
+            .preview(
+                addr(9),
+                StrategyHash(B256::from([9; 32])),
+                &[
+                    (addr(WETH), U256::from(1u64)),
+                    (addr(USDC), U256::from(1u64)),
+                ],
+            )
             .await
             .unwrap();
         assert!(out.exists);
@@ -1240,13 +1290,22 @@ mod tests {
     #[tokio::test]
     async fn preview_requires_approval_when_allowance_is_short() {
         // Holds 100 WETH but only 10 is pullable (allowance-capped); shipping 50 needs an approval.
-        let oracle = PreviewOracle(HashMap::from([(
-            addr(WETH),
-            Holdings {
-                balance: U256::from(100u64),
-                pullable: U256::from(10u64),
-            },
-        )]));
+        let oracle = PreviewOracle(HashMap::from([
+            (
+                addr(WETH),
+                Holdings {
+                    balance: U256::from(100u64),
+                    pullable: U256::from(10u64),
+                },
+            ),
+            (
+                addr(USDC),
+                Holdings {
+                    balance: U256::from(100u64),
+                    pullable: U256::from(100u64),
+                },
+            ),
+        ]));
         let svc = service_with(
             Snapshot::from_strategies([xyc_strategy(9)]),
             Arc::new(oracle),
@@ -1255,7 +1314,10 @@ mod tests {
             .preview(
                 addr(1),
                 StrategyHash(B256::from([7; 32])),
-                &[(addr(WETH), U256::from(50u64))],
+                &[
+                    (addr(WETH), U256::from(50u64)),
+                    (addr(USDC), U256::from(50u64)),
+                ],
             )
             .await
             .unwrap();
@@ -1266,13 +1328,22 @@ mod tests {
 
     #[tokio::test]
     async fn preview_warns_on_insufficient_balance() {
-        let oracle = PreviewOracle(HashMap::from([(
-            addr(WETH),
-            Holdings {
-                balance: U256::from(5u64),
-                pullable: U256::from(5u64),
-            },
-        )]));
+        let oracle = PreviewOracle(HashMap::from([
+            (
+                addr(WETH),
+                Holdings {
+                    balance: U256::from(5u64),
+                    pullable: U256::from(5u64),
+                },
+            ),
+            (
+                addr(USDC),
+                Holdings {
+                    balance: U256::from(100u64),
+                    pullable: U256::from(100u64),
+                },
+            ),
+        ]));
         let svc = service_with(
             Snapshot::from_strategies([xyc_strategy(9)]),
             Arc::new(oracle),
@@ -1281,7 +1352,10 @@ mod tests {
             .preview(
                 addr(1),
                 StrategyHash(B256::from([7; 32])),
-                &[(addr(WETH), U256::from(50u64))],
+                &[
+                    (addr(WETH), U256::from(50u64)),
+                    (addr(USDC), U256::from(50u64)),
+                ],
             )
             .await
             .unwrap();
@@ -1290,6 +1364,27 @@ mod tests {
             .iter()
             .any(|w| w.contains("insufficient balance")));
         assert!(out.requires_approval.is_empty());
+    }
+
+    #[test]
+    fn preview_rejects_amounts_aqua_cannot_store() {
+        let valid = [
+            (addr(WETH), U256::from(1u64)),
+            (addr(USDC), U256::from(1u64)),
+        ];
+        assert!(validate_ship_amounts(&valid).is_ok());
+
+        let invalid = [
+            vec![],
+            vec![valid[0]],
+            vec![valid[0], valid[0]],
+            vec![(Address::ZERO, U256::from(1u64)), valid[1]],
+            vec![(addr(WETH), U256::ZERO), valid[1]],
+            vec![(addr(WETH), (U256::MAX >> 8) + U256::from(1u64)), valid[1]],
+        ];
+        for amounts in invalid {
+            assert!(validate_ship_amounts(&amounts).is_err());
+        }
     }
 
     #[tokio::test]

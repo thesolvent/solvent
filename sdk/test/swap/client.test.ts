@@ -9,16 +9,21 @@ vi.mock("../../src/swap/wallet", () => ({
     createWalletSession: () => ({ sign, tokenAccount: vi.fn() }),
 }));
 const ADDRESS = "0x1111111111111111111111111111111111111111";
+const TOKEN_IN = "0x2222222222222222222222222222222222222222";
+const TOKEN_OUT = "0x3333333333333333333333333333333333333333";
+const REACTOR = "0x4444444444444444444444444444444444444444";
+const PERMIT2 = "0x5555555555555555555555555555555555555555";
+const COSIGNER = "0x6666666666666666666666666666666666666666";
 const config = {
     chain_id: 31337,
-    reactor: ADDRESS,
-    permit2: ADDRESS,
-    cosigner: ADDRESS,
+    reactor: REACTOR,
+    permit2: PERMIT2,
+    cosigner: COSIGNER,
 } as AppConfig;
 const terms = {
     swapper: ADDRESS,
-    tokenIn: ADDRESS,
-    tokenOut: ADDRESS,
+    tokenIn: TOKEN_IN,
+    tokenOut: TOKEN_OUT,
     amountIn: 10n,
     minAmountOut: 9n,
     deadline: 2_000_000_000,
@@ -81,5 +86,26 @@ describe("swap intent", () => {
         await expect(intent.submit()).rejects.toBeInstanceOf(SwapDeclinedError);
         expect(sign).toHaveBeenCalledOnce();
         expect(api.swap).toHaveBeenCalledOnce();
+    });
+
+    it("does not retry cached signed bytes after their deadline", async () => {
+        vi.useFakeTimers();
+        try {
+            const now = new Date("2026-09-09T10:00:00Z");
+            vi.setSystemTime(now);
+            const { api, swaps } = setup();
+            api.swap.mockRejectedValueOnce(new Error("Response lost"));
+            const intent = swaps.createIntent({
+                ...terms,
+                deadline: Math.floor(now.getTime() / 1_000) + 1,
+            });
+            await expect(intent.submit()).rejects.toThrow("Response lost");
+
+            vi.setSystemTime(new Date(now.getTime() + 2_000));
+            await expect(intent.submit()).rejects.toThrow("Swap order expired");
+            expect(api.swap).toHaveBeenCalledOnce();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

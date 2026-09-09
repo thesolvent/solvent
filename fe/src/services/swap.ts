@@ -36,6 +36,9 @@ function submissionKey(
     form.to?.address,
     form.amount,
     form.slippagePct,
+    form.quote?.amountInRaw.toString(),
+    form.quote?.amountOutRaw.toString(),
+    form.quote?.expiresAt,
     address,
     chainId,
   ]);

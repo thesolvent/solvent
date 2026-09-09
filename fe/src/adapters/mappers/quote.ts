@@ -19,8 +19,13 @@ function trimmed(amount: string): string {
  * The output is re-derived from raw base units rather than read off `display`, so the precision
  * the widget prints is its own choice and not whatever the server happened to send.
  */
-export function toQuote(api: QuoteResponse, decimalsOut: number): Quote {
+export function toQuote(
+  api: QuoteResponse,
+  decimalsOut: number,
+  input: Pick<Quote, "tokenIn" | "tokenOut" | "amountInRaw">,
+): Quote {
   return {
+    ...input,
     amountOut: trimmed(formatUnits(BigInt(api.amount_out.raw), decimalsOut)),
     amountOutUsd: api.amount_out.usd ?? 0,
     priceImpact: `${api.price_impact_pct.toFixed(2)}%`,

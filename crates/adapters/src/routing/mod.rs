@@ -4,6 +4,10 @@
 //! tasks keep the cache fresh and self-heal across dropped connections. USDT ≈ USD — a fast
 //! estimate for the gas threshold, never a settlement price.
 
+mod history;
+
+pub use history::BinanceHistory;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

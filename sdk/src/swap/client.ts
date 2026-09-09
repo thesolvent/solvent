@@ -1,5 +1,9 @@
 import type { SolventClient, SwapRequest, SwapResponse } from "../client";
-import { buildSwapOrder, type OrderTerms } from "../orders";
+import {
+    assertFutureDeadline,
+    buildSwapOrder,
+    type OrderTerms,
+} from "../orders";
 import {
     createWalletSession,
     type TokenAccount,
@@ -63,6 +67,7 @@ export function createSwapClient({
 
         async function execute(): Promise<SwapResponse> {
             signed ??= await authorize(snapshot);
+            assertFutureDeadline(snapshot.deadline);
             result ??= await api.swap(signed);
             if (result.status === "declined") throw new SwapDeclinedError();
             return result;

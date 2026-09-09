@@ -11,6 +11,7 @@ import { AppProvider } from "@/AppProvider";
 import type { AssetsPort } from "@/ports/assets";
 import type { ExplorerPort } from "@/ports/explorer";
 import type { PoolsPort } from "@/ports/pools";
+import type { PositionsPort } from "@/ports/positions";
 import type { SwapPort } from "@/ports/swap";
 import type { SystemPort } from "@/ports/system";
 import { ServicesProvider } from "@/services/ServicesProvider";
@@ -42,6 +43,7 @@ export interface Stubs {
   explorer?: Partial<ExplorerPort>;
   assets?: Partial<AssetsPort>;
   pools?: Partial<PoolsPort>;
+  positions?: Partial<PositionsPort>;
   swap?: Partial<SwapPort>;
   system?: Partial<SystemPort>;
 }
@@ -52,6 +54,7 @@ export function fakeServices(stubs: Stubs): Services {
     explorer: port("explorer", stubs.explorer ?? {}),
     assets: port("assets", stubs.assets ?? {}),
     pools: port("pools", stubs.pools ?? {}),
+    positions: port("positions", stubs.positions ?? {}),
     swap: port("swap", stubs.swap ?? {}),
     system: port("system", stubs.system ?? {}),
   };
