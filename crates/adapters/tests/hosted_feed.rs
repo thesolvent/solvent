@@ -294,3 +294,74 @@ async fn live_endpoint_accepts_this_client() {
         }
     }
 }
+
+/// Watches the live endpoint through the real feed for a while, running every order through the
+/// real normalizer and reporting the verdict. Ignored: it needs the network and takes a minute.
+///
+/// `cargo test -p solvent-adapters --test hosted_feed live_watch -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn live_watch_the_book() {
+    let health = Arc::new(FeedHealth::default());
+    let feed = {
+        let client = OrdersApiClient::new(
+            "https://api.uniswap.org/v2".to_string(),
+            ChainId(1),
+            "Dutch_V2".to_string(),
+        )
+        .expect("client builds");
+        HostedFeed::new(
+            Arc::new(client),
+            ChainId(1),
+            vec![Scope::Book],
+            Duration::from_millis(250),
+            Arc::clone(&health),
+        )
+    };
+    let normalizer = UniswapXV2Normalizer::new(
+        address!("00000011F84B9aa48e5f8aA8B9897600006289Be"),
+        vec![address!("4449Cd34d1eb1FEDCF02A1Be3834FfDe8E6A6180")],
+    );
+
+    let watch = Duration::from_secs(45);
+    let mut seen: std::collections::BTreeSet<String> = Default::default();
+    let mut accepted = 0usize;
+    let mut declined = 0usize;
+    let mut stream = feed.stream();
+
+    println!("watching mainnet for {}s ...", watch.as_secs());
+    let deadline = tokio::time::Instant::now() + watch;
+    while let Ok(Some(raw)) = tokio::time::timeout_at(deadline, stream.next()).await {
+        match normalizer.normalize(&raw) {
+            Ok(intent) => {
+                let key = format!("{:#x}", intent.id.0);
+                if !seen.insert(key.clone()) {
+                    continue;
+                }
+                accepted += 1;
+                let ex = intent
+                    .exclusivity
+                    .map(|e| format!("{} (+{}bps until {})", e.filler, e.override_bps, e.ends_at))
+                    .unwrap_or_else(|| "OPEN".to_string());
+                println!(
+                    "  ACCEPT {}  in={} outs={} deadline={} reserved-for={}",
+                    &key[..14],
+                    intent.input.token,
+                    intent.outputs.len(),
+                    intent.deadline,
+                    ex
+                );
+            }
+            Err(e) => {
+                declined += 1;
+                println!("  DECLINE {e}");
+            }
+        }
+    }
+    println!(
+        "\n{} distinct orders accepted, {} declined, feed live={}",
+        accepted,
+        declined,
+        health.is_live(now())
+    );
+}

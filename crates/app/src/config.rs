@@ -105,6 +105,9 @@ pub struct Config {
     /// to outrun the page size by a wide margin, not the order rate.
     #[serde(default = "default_dedup_capacity")]
     pub dedup_capacity: u64,
+    /// Ceiling on orders held for re-pricing at once.
+    #[serde(default = "default_max_tracked")]
+    pub max_tracked_intents: usize,
     /// How long a hash stays deduped. Longer than any order lives, so a single order is admitted
     /// once however many polls return it.
     #[serde(default = "default_dedup_ttl_secs")]
@@ -207,6 +210,10 @@ fn default_feed_silence_secs() -> u64 {
 
 fn default_max_outputs() -> usize {
     4
+}
+
+fn default_max_tracked() -> usize {
+    64
 }
 
 fn default_dedup_capacity() -> u64 {

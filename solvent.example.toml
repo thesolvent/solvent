@@ -94,3 +94,4 @@ admitted_tokens = []
 max_outputs = 4            # each output is a token to source; an order with hundreds is a gas bomb
 dedup_ttl_secs = 900       # longer than any order lives, so one order is admitted once
 dedup_capacity = 16384     # bounded as well as expiring: the order stream is not ours to control
+max_tracked_intents = 64   # orders held for re-pricing at once; the feed's volume is not ours to control

@@ -89,7 +89,7 @@ impl SwapService {
         prices: TradePrices,
     ) -> Result<SwapOutcome, SolventError> {
         let now = self.clock.now_unix();
-        let Some(amounts) = swap_amounts(&intent, now) else {
+        let Some(amounts) = swap_amounts(&intent, self.config.filler, now) else {
             return self.declined(trade_id, &intent, taker, now, prices).await;
         };
 
@@ -251,7 +251,7 @@ impl SwapService {
         now: u64,
         prices: TradePrices,
     ) -> Result<SwapOutcome, SolventError> {
-        let delivery = intent.delivery(now);
+        let delivery = intent.required_output(self.config.filler, now);
         let amounts = SwapAmounts {
             token_in: intent.input.token,
             token_out: delivery.map_or(Address::ZERO, |d| d.token),
@@ -354,11 +354,11 @@ struct SwapAmounts {
     min_out: U256,
 }
 
-/// The swap's tokens and exact-out bounds, or `None` when the order has nothing this resolver can
-/// deliver. `min_out` is the whole delivery — every output leg summed, not the first one — because
-/// that is what the settler collects.
-fn swap_amounts(intent: &Intent, now: u64) -> Option<SwapAmounts> {
-    let delivery = intent.delivery(now)?;
+/// The swap's tokens and exact-out bounds, or `None` when the order has nothing this filler can
+/// deliver. `min_out` is what the settler will actually collect: every output leg summed, and raised
+/// by the exclusivity toll when the window belongs to another filler.
+fn swap_amounts(intent: &Intent, filler: Address, now: u64) -> Option<SwapAmounts> {
+    let delivery = intent.required_output(filler, now)?;
     Some(SwapAmounts {
         token_in: intent.input.token,
         token_out: delivery.token,

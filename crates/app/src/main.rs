@@ -28,6 +28,7 @@ use solvent_adapters::routing::{BinanceFeed, BinanceHistory, GasPoller, MarketCa
 use solvent_adapters::trade::SqliteTradeStore;
 use solvent_core::asset::{AssetManager, PairHistoryService};
 use solvent_core::balances::BalancesService;
+use solvent_core::decision::{DecisionConfig, DecisionService};
 use solvent_core::deps::asset::PairPriceHistorySource;
 use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::ingest::FillBuilder;
@@ -79,9 +80,12 @@ const BLOCK_TIME_SECS: u64 = 2;
 /// Routing funnel + split caps for the quote path (gas units unused until gas pricing is wired).
 const MAX_CANDIDATES: usize = 16;
 const MAX_LEGS: usize = 4;
-/// Backpressure between ingest and whatever decides on an intent. A full channel slows the feed
-/// rather than dropping orders.
+/// Backpressure between ingest and the decision loop. A full channel slows the feed rather than
+/// dropping orders.
 const INTENT_CHANNEL_CAPACITY: usize = 256;
+/// How often held orders are re-priced — one block, since that is the rate at which the state a
+/// decision rests on can change.
+const DECISION_TICK: Duration = Duration::from_secs(12);
 
 #[tokio::main]
 async fn main() -> Result<(), StartupError> {
@@ -347,6 +351,8 @@ async fn main() -> Result<(), StartupError> {
             REGISTRY_SYNC_INTERVAL,
         )
     }));
+    // Kept before the supervisor takes ownership, for the decision loop wired further down.
+    let decision_ledger = Arc::clone(&ledger);
     let ledger_registry = Arc::clone(&registry);
     tokio::spawn(supervise("ledger-sync", move || {
         run_ledger_sync(
@@ -419,7 +425,29 @@ async fn main() -> Result<(), StartupError> {
             let tx = tx.clone();
             async move { pipeline.run(vec![feed], tx).await }
         }));
-        tokio::spawn(observe_intents(rx));
+
+        // Re-price every held order once per block: that is how often the state a decision rests on
+        // can change, and an order's price only moves with time.
+        let decision = Arc::new(DecisionService::new(
+            Arc::clone(&registry),
+            Arc::clone(&decision_ledger),
+            Arc::clone(&swap),
+            Arc::clone(&leg_cost),
+            Arc::clone(&valuation),
+            Arc::new(SystemClock),
+            DecisionConfig {
+                routing: RoutingConfig::new(MAX_CANDIDATES, MAX_LEGS, config.gas_units_per_leg),
+                filler: config.filler,
+                max_tracked: config.max_tracked_intents,
+            },
+        ));
+        tokio::spawn(async move {
+            let ticks = futures::stream::unfold((), |()| async {
+                tokio::time::sleep(DECISION_TICK).await;
+                Some(((), ()))
+            });
+            decision.run(rx, Box::pin(ticks)).await;
+        });
         tracing::info!("order feed polling every {}ms", config.order_poll_ms);
     }
 
@@ -550,20 +578,6 @@ async fn run_reconcile(reconcile: Arc<ReconcileService>, interval: Duration) {
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "reconcile tick failed; retrying next tick"),
         }
-    }
-}
-
-/// Drains admitted intents until the decision loop exists to consume them. Until then the feed's
-/// value is observability: it proves the pipeline sees real orders and says which.
-async fn observe_intents(mut rx: tokio::sync::mpsc::Receiver<Intent>) {
-    while let Some(intent) = rx.recv().await {
-        tracing::info!(
-            intent = %intent.id,
-            token_in = %intent.input.token,
-            outputs = intent.outputs.len(),
-            exclusive = intent.exclusivity.is_some(),
-            "admitted order"
-        );
     }
 }
 

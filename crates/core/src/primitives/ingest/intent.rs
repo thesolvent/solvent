@@ -7,6 +7,9 @@ use alloy_primitives::{Address, Bytes, U256};
 use crate::primitives::ingest::curve::AmountCurve;
 use crate::primitives::{ChainId, IntentId};
 
+/// Basis-point denominator, as the settlement contracts use it.
+const BPS: u64 = 10_000;
+
 /// The source protocol of an intent; selects the normalizer that produced it and the fill builder
 /// that will consume `raw`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -182,6 +185,32 @@ impl Intent {
             .map(|amount| Delivery { token, amount })
     }
 
+    /// What `filler` must actually deliver at `at`: the delivery, raised by the exclusivity toll when
+    /// the window belongs to someone else.
+    ///
+    /// Mirrors `ExclusivityLib._handleExclusiveOverride`. Rounding is up, as the contract's
+    /// `mulDivUp` is — a wei short is an approval the reactor refuses. `None` when there is no single
+    /// delivery, or when the window is strict (`override_bps == 0`) and not ours, since then nobody
+    /// else may fill at any price.
+    pub fn required_output(&self, filler: Address, at: u64) -> Option<Delivery> {
+        let delivery = self.delivery(at)?;
+        let Some(exclusivity) = self.exclusivity else {
+            return Some(delivery);
+        };
+        if exclusivity.grants_rights_to(filler, at) {
+            return Some(delivery);
+        }
+        if exclusivity.override_bps == 0 {
+            return None;
+        }
+        let scale = U256::from(BPS + u64::from(exclusivity.override_bps));
+        let amount = delivery
+            .amount
+            .checked_mul(scale)?
+            .div_ceil(U256::from(BPS));
+        Some(Delivery { amount, ..delivery })
+    }
+
     pub fn new(parts: IntentParts) -> Intent {
         Intent {
             id: parts.id,
@@ -263,6 +292,71 @@ mod tests {
 
     /// Each leg decays on its own curve, so the total is summed at the instant asked for, never
     /// scaled from one leg.
+    fn reserved_for(filler: u8, bps: u16) -> Intent {
+        let mut order = intent(vec![output(2, 1_000)]);
+        order.exclusivity = Some(Exclusivity::new(addr(filler), 100, bps));
+        order
+    }
+
+    const US: u8 = 7;
+
+    #[test]
+    fn our_own_window_costs_face_value() {
+        let order = reserved_for(US, 100);
+        let d = order.required_output(addr(US), 50).expect("fillable");
+        assert_eq!(d.amount, U256::from(1_000u64));
+    }
+
+    /// Someone else's window: the toll applies until it ends, and the window is closed *at* its end
+    /// instant — the reactor compares strictly greater.
+    #[test]
+    fn another_filler_pays_the_toll_until_the_window_ends() {
+        let order = reserved_for(3, 100);
+        let toll = |t| order.required_output(addr(US), t).expect("fillable").amount;
+        assert_eq!(toll(50), U256::from(1_010u64), "inside the window");
+        assert_eq!(toll(100), U256::from(1_010u64), "at the end instant");
+        assert_eq!(toll(101), U256::from(1_000u64), "past it");
+    }
+
+    /// The contract rounds the scaled amount up; a wei short is an approval it refuses.
+    #[test]
+    fn the_toll_rounds_up() {
+        let mut order = intent(vec![output(2, 1)]);
+        order.exclusivity = Some(Exclusivity::new(addr(3), 100, 100));
+        // 1 * 10100 / 10000 = 1.01 -> 2
+        assert_eq!(
+            order
+                .required_output(addr(US), 50)
+                .expect("fillable")
+                .amount,
+            U256::from(2u64)
+        );
+    }
+
+    /// A strict window bars everyone but its holder, at any price.
+    #[test]
+    fn a_strict_window_is_unfillable_by_anyone_else() {
+        let order = reserved_for(3, 0);
+        assert!(order.required_output(addr(US), 50).is_none());
+        assert!(order.required_output(addr(3), 50).is_some());
+        assert!(
+            order.required_output(addr(US), 101).is_some(),
+            "once it lapses"
+        );
+    }
+
+    #[test]
+    fn an_open_order_never_pays_a_toll() {
+        let order = intent(vec![output(2, 1_000)]);
+        assert_eq!(
+            order
+                .required_output(addr(US), 50)
+                .expect("fillable")
+                .amount,
+            U256::from(1_000u64)
+        );
+    }
+
     #[test]
     fn each_leg_is_priced_at_the_same_instant() {
         let falling = IntentOutput::new(

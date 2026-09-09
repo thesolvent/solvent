@@ -12,10 +12,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use alloy::primitives::{address, Address, Bytes, B256};
+use alloy::primitives::{address, Address, Bytes, B256, U256};
 use futures::stream::{self, BoxStream};
 use serde::Deserialize;
-use solvent_adapters::ingest::uniswapx::UniswapXV2Normalizer;
+use solvent_adapters::ingest::uniswapx::{OrdersApiClient, Scope, UniswapXV2Normalizer};
 use solvent_core::deps::ingest::{Normalizer, OrderFeed};
 use solvent_core::deps::ledger::Clock;
 use solvent_core::ingest::{Admission, IngestPipeline};
@@ -248,4 +248,101 @@ async fn drain(pipeline: &IngestPipeline, raws: Vec<RawOrder>) -> Vec<Intent> {
         out.push(intent);
     }
     out
+}
+
+/// What the decision loop would do with a real order, second by second.
+///
+/// Ignored: it fetches live orders. Run with
+/// `cargo test -p solvent-adapters --test mainnet_corpus live_decision -- --ignored --nocapture`.
+///
+/// This exercises the loop's inputs on orders we did not construct: the required output at each
+/// instant, including the exclusivity toll when the window belongs to another filler, and the two
+/// moments the decision changes — when the window lapses, and when the decay bottoms out.
+#[tokio::test]
+#[ignore]
+async fn live_decision_timeline() {
+    // Whatever the book holds right now; fall back to the captured corpus when it is empty, which
+    // it usually is.
+    let live = fetch_live().await;
+    let orders: Vec<LiveOrder> = if live.is_empty() { corpus() } else { live };
+    let normalizer = normalizer();
+    let us = Address::repeat_byte(0x50);
+
+    for order in orders.iter().take(2) {
+        let raw = order.raw();
+        let Ok(intent) = normalizer.normalize(&raw) else {
+            println!("{} declined at the door\n", &order.order_hash[..14]);
+            continue;
+        };
+        let created = order.created_at;
+        let reserved = intent.exclusivity.map(|e| e.filler);
+        println!("order {}", &order.order_hash[..18]);
+        println!(
+            "  reserved for {}",
+            reserved.map_or("nobody (open)".to_string(), |f| format!("{f}"))
+        );
+        println!(
+            "  deadline {} ({}s after creation)",
+            intent.deadline,
+            intent.deadline - created
+        );
+        println!("  {:>6}  {:>28}  verdict", "t", "we must deliver");
+
+        let mut last: Option<U256> = None;
+        for offset in [0u64, 10, 23, 24, 25, 60, 84, 85, 120, 200] {
+            let now = created + offset;
+            if now >= intent.deadline {
+                println!(
+                    "  {:>+6}  {:>28}  past deadline — dropped",
+                    offset as i64, "-"
+                );
+                break;
+            }
+            let (shown, verdict) = match intent.required_output(us, now) {
+                Some(d) => {
+                    let note = match intent.exclusivity {
+                        Some(e) if !e.grants_rights_to(us, now) => {
+                            "toll +1% (someone else's window)"
+                        }
+                        Some(_) => "face value",
+                        None => "face value (open order)",
+                    };
+                    (d.amount, note)
+                }
+                None => (U256::ZERO, "barred — strict window, hold and retry"),
+            };
+            let moved = last.is_some_and(|p| p != shown);
+            last = Some(shown);
+            println!(
+                "  {:>+6}  {:>28}  {}{}",
+                offset as i64,
+                shown.to_string(),
+                verdict,
+                if moved { "   <- changed" } else { "" }
+            );
+        }
+        println!();
+    }
+}
+
+async fn fetch_live() -> Vec<LiveOrder> {
+    let client = OrdersApiClient::new(
+        "https://api.uniswap.org/v2".to_string(),
+        ChainId(1),
+        "Dutch_V2".to_string(),
+    )
+    .expect("client builds");
+    client
+        .open_orders(Scope::Book)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| LiveOrder {
+            order_hash: r.order_hash,
+            encoded_order: r.encoded_order,
+            signature: r.signature,
+            created_at: r.created_at,
+            facets: vec!["live".to_string()],
+        })
+        .collect()
 }
