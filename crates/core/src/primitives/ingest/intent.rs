@@ -2,7 +2,7 @@
 //! execution) consumes. Protocol-specific bytes ride along opaquely in `raw`, decoded only by the
 //! protocol's own adapter, so adding a protocol is a new adapter with no change here.
 
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::{Address, Bytes, U256};
 
 use crate::primitives::ingest::curve::AmountCurve;
 use crate::primitives::{ChainId, IntentId};
@@ -75,6 +75,19 @@ impl Exclusivity {
     pub fn grants_rights_to(&self, candidate: Address, t: u64) -> bool {
         t > self.ends_at || self.filler == candidate
     }
+}
+
+/// Everything an order's output legs come to at one instant: the token, and the total the settler
+/// will demand across every leg.
+///
+/// An order routinely pays out more than once in the same token — the swapper plus an interface fee
+/// recipient — and the settler collects the whole set. Sourcing only the first leg leaves the fill
+/// short by the rest, which the filler discovers after it has already bought from every maker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Delivery {
+    pub token: Address,
+    pub amount: U256,
 }
 
 /// A normalized, protocol-agnostic order.
@@ -152,6 +165,23 @@ impl IntentParts {
 }
 
 impl Intent {
+    /// What this order's outputs come to at `at`: the delivered token and the sum across every leg.
+    ///
+    /// `None` when there is nothing to deliver, or when the legs span more than one token. The
+    /// second case is not a shape we settle: every live mainnet order pays out in a single token,
+    /// and sourcing several would need a route and a reservation per token that either all succeed
+    /// or all unwind. Declining is honest; sourcing one of them and discovering the rest on chain
+    /// is not.
+    pub fn delivery(&self, at: u64) -> Option<Delivery> {
+        let token = self.outputs.first()?.token;
+        self.outputs
+            .iter()
+            .try_fold(U256::ZERO, |total, output| {
+                (output.token == token).then(|| total.saturating_add(output.curve.amount_at(at)))
+            })
+            .map(|amount| Delivery { token, amount })
+    }
+
     pub fn new(parts: IntentParts) -> Intent {
         Intent {
             id: parts.id,
@@ -167,5 +197,88 @@ impl Intent {
             signature: parts.signature,
             observed_at: parts.observed_at,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitives::IntentId;
+    use alloy_primitives::B256;
+
+    fn addr(n: u8) -> Address {
+        Address::repeat_byte(n)
+    }
+
+    fn intent(outputs: Vec<IntentOutput>) -> Intent {
+        Intent::new(IntentParts::new(
+            IntentId(B256::ZERO),
+            ProtocolId::UniswapXV2,
+            addr(9),
+            IntentInput::new(addr(1), AmountCurve::scalar(U256::from(100u64))),
+            outputs,
+            ChainId(1),
+        ))
+    }
+
+    fn output(token: u8, amount: u64) -> IntentOutput {
+        IntentOutput::new(
+            addr(token),
+            AmountCurve::scalar(U256::from(amount)),
+            addr(3),
+        )
+    }
+
+    #[test]
+    fn a_single_output_delivers_itself() {
+        let delivery = intent(vec![output(2, 1_000)])
+            .delivery(0)
+            .expect("delivers");
+        assert_eq!(delivery.token, addr(2));
+        assert_eq!(delivery.amount, U256::from(1_000u64));
+    }
+
+    /// The shape every multi-output mainnet order takes: the swapper's leg plus an interface fee,
+    /// same token, two recipients. Sourcing only the first is short by the fee.
+    #[test]
+    fn legs_in_one_token_sum() {
+        let delivery = intent(vec![output(2, 1_000), output(2, 25)])
+            .delivery(0)
+            .expect("delivers");
+        assert_eq!(delivery.token, addr(2));
+        assert_eq!(delivery.amount, U256::from(1_025u64));
+    }
+
+    #[test]
+    fn legs_in_different_tokens_have_no_single_delivery() {
+        assert!(intent(vec![output(2, 1_000), output(4, 25)])
+            .delivery(0)
+            .is_none());
+    }
+
+    #[test]
+    fn an_order_with_no_outputs_delivers_nothing() {
+        assert!(intent(Vec::new()).delivery(0).is_none());
+    }
+
+    /// Each leg decays on its own curve, so the total is summed at the instant asked for, never
+    /// scaled from one leg.
+    #[test]
+    fn each_leg_is_priced_at_the_same_instant() {
+        let falling = IntentOutput::new(
+            addr(2),
+            AmountCurve::dutch(U256::from(1_000u64), U256::from(900u64), 100, 200),
+            addr(3),
+        );
+        let flat = output(2, 50);
+        let order = intent(vec![falling, flat]);
+        assert_eq!(
+            order.delivery(100).expect("delivers").amount,
+            U256::from(1_050u64)
+        );
+        assert_eq!(
+            order.delivery(200).expect("delivers").amount,
+            U256::from(950u64)
+        );
     }
 }

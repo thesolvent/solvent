@@ -251,12 +251,12 @@ impl SwapService {
         now: u64,
         prices: TradePrices,
     ) -> Result<SwapOutcome, SolventError> {
-        let output = primary_output(intent, now);
+        let delivery = intent.delivery(now);
         let amounts = SwapAmounts {
             token_in: intent.input.token,
-            token_out: output.map_or(Address::ZERO, |o| o.token),
+            token_out: delivery.map_or(Address::ZERO, |d| d.token),
             amount_in: intent.input.curve.amount_at(now),
-            min_out: output.map_or(U256::ZERO, |o| o.amount),
+            min_out: delivery.map_or(U256::ZERO, |d| d.amount),
         };
         let trade = self.trade(
             trade_id,
@@ -354,29 +354,16 @@ struct SwapAmounts {
     min_out: U256,
 }
 
-/// An order output's delivered token and its amount at a given time.
-#[derive(Clone, Copy)]
-struct SwapOutput {
-    token: Address,
-    amount: U256,
-}
-
-/// The order's first output (delivered token + amount at `now`), or `None` for an output-less order.
-fn primary_output(intent: &Intent, now: u64) -> Option<SwapOutput> {
-    intent.outputs.first().map(|o| SwapOutput {
-        token: o.token,
-        amount: o.curve.amount_at(now),
-    })
-}
-
-/// The swap's tokens and exact-out bounds, or `None` when the order has no output to deliver.
+/// The swap's tokens and exact-out bounds, or `None` when the order has nothing this resolver can
+/// deliver. `min_out` is the whole delivery — every output leg summed, not the first one — because
+/// that is what the settler collects.
 fn swap_amounts(intent: &Intent, now: u64) -> Option<SwapAmounts> {
-    let output = primary_output(intent, now)?;
+    let delivery = intent.delivery(now)?;
     Some(SwapAmounts {
         token_in: intent.input.token,
-        token_out: output.token,
+        token_out: delivery.token,
         amount_in: intent.input.curve.amount_at(now),
-        min_out: output.amount,
+        min_out: delivery.amount,
     })
 }
 
@@ -842,6 +829,55 @@ mod tests {
         assert_eq!(info.trade.taker, addr(9));
         // The payout was held.
         assert!(h.ledger.available(&virt(3, USDC)) < before);
+    }
+
+    /// The shape that made this a live defect: a swapper leg plus an interface fee, same token.
+    /// Sourcing only the first leaves the fill short by the fee, which the contract discovers after
+    /// it has already bought from every maker and spent the gas.
+    #[tokio::test]
+    async fn a_fee_leg_is_sourced_too() {
+        let h = harness(vec![xyc(3, e(100, 18), e(300_000, 6))], SimVerdict::Ok).await;
+        let mut order = intent(1, addr(9), e(2, 18), e(3000, 6));
+        order.outputs.push(IntentOutput::new(
+            addr(USDC),
+            AmountCurve::scalar(e(25, 6)),
+            addr(0xFE),
+        ));
+
+        let before = h.ledger.available(&virt(3, USDC));
+        let out = h
+            .swap
+            .submit(order, addr(9), tid(), TradePrices::default())
+            .await
+            .unwrap();
+        assert_eq!(out.status, TradeStatus::Submitted);
+
+        // The hold covers both legs, not just the swapper's.
+        let held = before - h.ledger.available(&virt(3, USDC));
+        assert!(
+            held >= e(3025, 6),
+            "held {held} should cover the swapper leg plus the fee leg"
+        );
+    }
+
+    /// Legs in different tokens each need their own route and reservation, all-or-nothing. No live
+    /// order is shaped that way, so the swap path declines rather than under-sourcing.
+    #[tokio::test]
+    async fn outputs_in_two_tokens_are_declined() {
+        let h = harness(vec![xyc(3, e(100, 18), e(300_000, 6))], SimVerdict::Ok).await;
+        let mut order = intent(1, addr(9), e(2, 18), e(3000, 6));
+        order.outputs.push(IntentOutput::new(
+            addr(0xDA),
+            AmountCurve::scalar(e(25, 18)),
+            addr(0xFE),
+        ));
+
+        let out = h
+            .swap
+            .submit(order, addr(9), tid(), TradePrices::default())
+            .await
+            .unwrap();
+        assert_eq!(out.status, TradeStatus::Declined);
     }
 
     #[tokio::test]

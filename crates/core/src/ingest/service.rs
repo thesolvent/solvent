@@ -140,6 +140,13 @@ impl IngestPipeline {
             debug!("ingest drop {}: native currency leg", intent.id);
             return false;
         }
+        // Legs in different tokens would each need their own route and reservation, succeeding or
+        // unwinding together. No live order is shaped that way, so this declines rather than
+        // sourcing one token and meeting the rest on chain.
+        if intent.delivery(now).is_none() {
+            debug!("ingest drop {}: outputs span several tokens", intent.id);
+            return false;
+        }
         let tokens_allowed = self.admission.tokens.contains(&intent.input.token)
             && intent
                 .outputs
@@ -326,6 +333,18 @@ mod tests {
         let got = drain(&pipeline(map), feeds).await;
         assert_eq!(got.len(), 1, "only the four-output listed order survives");
         assert_eq!(got[0].id, IntentId(B256::from([4u8; 32])));
+    }
+
+    /// Legs in one token are fine however many there are — that is the swapper-plus-fee shape. Legs
+    /// in different tokens are declined, since each would need its own route and reservation.
+    #[tokio::test]
+    async fn admits_repeated_tokens_but_not_mixed_ones() {
+        let same = intent_with(1, ChainId(1), 2000, 5, 5, vec![addr(2), addr(2)]);
+        let mixed = intent_with(2, ChainId(1), 2000, 5, 5, vec![addr(2), addr(1)]);
+        let map = HashMap::from([(Bytes::from(vec![1]), same), (Bytes::from(vec![2]), mixed)]);
+        let got = drain(&pipeline(map), vec![feed(vec![raw(1), raw(2)])]).await;
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, IntentId(B256::from([1u8; 32])));
     }
 
     #[tokio::test]

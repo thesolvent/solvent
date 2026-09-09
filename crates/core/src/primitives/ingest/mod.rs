@@ -6,5 +6,7 @@ pub mod intent;
 pub mod raw;
 
 pub use curve::AmountCurve;
-pub use intent::{Exclusivity, Intent, IntentInput, IntentOutput, IntentParts, ProtocolId};
+pub use intent::{
+    Delivery, Exclusivity, Intent, IntentInput, IntentOutput, IntentParts, ProtocolId,
+};
 pub use raw::RawOrder;
