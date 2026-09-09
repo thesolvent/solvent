@@ -17,6 +17,7 @@ interface IFillProofVerifier {
         bytes32 originStrategyHash;
         address repaymentToken;
         uint256 repaymentAmount;
+        uint256 maxCctpFee;
         bytes32 makerQuoteHash;
         bytes32 fillId;
     }
