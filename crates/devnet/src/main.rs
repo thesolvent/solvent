@@ -17,6 +17,8 @@ use alloy::signers::local::PrivateKeySigner;
 use crate::cooldown::Cooldown;
 use crate::faucet::{router, AppState, Manifest, StartupError};
 
+const RECEIPT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 #[tokio::main]
 async fn main() -> Result<(), StartupError> {
     tracing_subscriber::fmt()
@@ -36,8 +38,9 @@ async fn main() -> Result<(), StartupError> {
         .map_err(|e| StartupError::Config(format!("RPC_URL: {e}")))?;
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(signer))
-        .connect_http(rpc)
-        .erased();
+        .connect_http(rpc);
+    provider.client().set_poll_interval(RECEIPT_POLL_INTERVAL);
+    let provider = provider.erased();
 
     let state = AppState::new(
         provider,
@@ -76,7 +79,7 @@ impl Config {
         let bind_addr: SocketAddr = optional("BIND_ADDR", "0.0.0.0:8080")
             .parse()
             .map_err(|e| StartupError::Config(format!("BIND_ADDR: {e}")))?;
-        let cooldown_secs: u64 = optional("COOLDOWN_SECS", "300")
+        let cooldown_secs: u64 = optional("COOLDOWN_SECS", "1")
             .parse()
             .map_err(|e| StartupError::Config(format!("COOLDOWN_SECS: {e}")))?;
         let drip_units: u64 = optional("DRIP_UNITS", "1000")

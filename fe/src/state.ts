@@ -97,6 +97,65 @@ export type AppState = {
   xpOpen: string | null;
 };
 
+type CreatePositionState = Pick<
+  AppState,
+  | "create"
+  | "createFee"
+  | "customFeePct"
+  | "createPreset"
+  | "corePair"
+  | "flipped"
+  | "strategy"
+  | "pegSym"
+  | "dragging"
+  | "chartHover"
+  | "chartZoom"
+  | "volHover"
+  | "tokenTag"
+  | "pickerSlot"
+  | "slotA"
+  | "slotB"
+  | "q1"
+  | "q2"
+  | "step"
+  | "stepDirty"
+  | "createSpan"
+  | "bandMax"
+  | "bandMin"
+  | "amtA"
+  | "amtB"
+  | "hoverFrac"
+>;
+
+export const INITIAL_CREATE_POSITION_STATE: CreatePositionState = {
+  create: false,
+  createFee: "Auto 0.01%",
+  customFeePct: "0.10",
+  createPreset: "Market",
+  corePair: 3,
+  flipped: false,
+  strategy: "Pegged",
+  pegSym: false,
+  dragging: null,
+  chartHover: null,
+  chartZoom: 1,
+  volHover: null,
+  tokenTag: null,
+  pickerSlot: 1,
+  slotA: null,
+  slotB: null,
+  q1: "",
+  q2: "",
+  step: 1,
+  stepDirty: {},
+  createSpan: "3m",
+  bandMax: 0.05,
+  bandMin: -0.05,
+  amtA: "",
+  amtB: "",
+  hoverFrac: null,
+};
+
 export const INITIAL_STATE: AppState = {
   page: null,
   trail: [],
@@ -119,33 +178,7 @@ export const INITIAL_STATE: AppState = {
 
   detail: null,
 
-  create: false,
-  createFee: "Auto 0.01%",
-  customFeePct: "0.10",
-  createPreset: "Market",
-  corePair: 3,
-  flipped: false,
-  strategy: "Pegged",
-  pegSym: false,
-  dragging: null,
-  chartHover: null,
-  chartZoom: 1,
-  volHover: null,
-  tokenTag: null,
-  pickerSlot: 1,
-  slotA: null,
-  slotB: null,
-  q1: "",
-  q2: "",
-
-  step: 1,
-  stepDirty: {},
-  createSpan: "3m",
-  bandMax: 0.05,
-  bandMin: -0.05,
-  amtA: "253.79",
-  amtB: "264.02",
-  hoverFrac: null,
+  ...INITIAL_CREATE_POSITION_STATE,
 
   makerSort: "Virtual",
   filterPick: { 0: 0 },

@@ -14,6 +14,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tower_http::cors::CorsLayer;
 
 use crate::cooldown::Cooldown;
 
@@ -83,6 +84,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/faucet", post(faucet))
+        .layer(CorsLayer::permissive())
         .with_state(state)
 }
 
@@ -124,7 +126,7 @@ async fn faucet(
     }
 
     let symbols = req.tokens.unwrap_or_else(|| state.manifest.symbols());
-    let mut minted = Vec::with_capacity(symbols.len());
+    let mut pending_mints = Vec::with_capacity(symbols.len());
     for symbol in symbols {
         let token = state
             .manifest
@@ -133,14 +135,17 @@ async fn faucet(
             .ok_or_else(|| AppError::BadRequest(format!("unknown token: {symbol}")))?;
         let amount =
             U256::from(state.drip_units) * U256::from(10u64).pow(U256::from(token.decimals));
-        let receipt = IDevToken::new(token.address, state.provider.clone())
+        let pending = IDevToken::new(token.address, state.provider.clone())
             .mint(who, amount)
             .send()
             .await
-            .map_err(AppError::chain)?
-            .get_receipt()
-            .await
             .map_err(AppError::chain)?;
+        pending_mints.push((symbol, amount, pending));
+    }
+
+    let mut minted = Vec::with_capacity(pending_mints.len());
+    for (symbol, amount, pending) in pending_mints {
+        let receipt = pending.get_receipt().await.map_err(AppError::chain)?;
         if !receipt.status() {
             return Err(AppError::Chain(format!(
                 "mint {symbol} reverted (tx {:#x})",

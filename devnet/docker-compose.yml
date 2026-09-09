@@ -79,7 +79,7 @@ services:
       FAUCET_PRIVATE_KEY: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
       MANIFEST_PATH: "/manifest/solvent-devnet.json"
       BIND_ADDR: "0.0.0.0:8080"
-      COOLDOWN_SECS: "60"
+      COOLDOWN_SECS: "1"
     ports:
       # 8080 on the host belongs to the Solvent server, so the faucet is published beside it.
       - "8081:8080"

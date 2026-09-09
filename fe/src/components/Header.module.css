@@ -101,24 +101,6 @@
   min-width: 0;
 }
 
-.currency {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 48px;
-  padding: 0 18px;
-  border: 1px solid var(--dark-line);
-  border-left: 0;
-  font-size: 14px;
-}
-
-.currencyGlyph {
-  width: 15px;
-  height: 15px;
-  border: 1.4px solid var(--on-dark-dim);
-  border-radius: 50%;
-}
-
 .account {
   display: flex;
   align-items: center;
@@ -128,7 +110,6 @@
   min-width: 52px;
   padding: 0 12px;
   border: 1px solid var(--dark-line);
-  border-left: 0;
   background: none;
   color: var(--paper);
   font-family: inherit;
@@ -141,9 +122,8 @@
   white-space: nowrap;
 }
 
-.accountGlyph {
-  width: 16px;
-  height: 16px;
-  border: 1.6px solid var(--paper);
-  border-radius: 50% 50% 40% 40%;
+.accountConnect {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
 }
