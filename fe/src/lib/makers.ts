@@ -65,7 +65,9 @@ function positionRow(p: Position, span: string) {
       : null;
   return {
     hash: p.hash,
+    maker: p.maker,
     pair: p.pair,
+    tokens: [p.base, p.quote],
     meta: `${p.curve} · ${p.feeBps / 100}% · ${p.pairType}`,
     cov: `${ratioText(p.coverage)} cov`,
     covNum: ratioText(p.coverage),

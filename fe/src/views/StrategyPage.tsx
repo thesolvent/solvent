@@ -95,6 +95,19 @@ export function StrategyPage() {
           <span className={styles.spacer} />
           <button
             type="button"
+            className={styles.primaryAction}
+            disabled={!position.data}
+            onClick={() =>
+              position.data &&
+              navigate(
+                `/pools/${slug(position.data.pair)}/new?clone=${encodeURIComponent(position.data.hash)}`,
+              )
+            }
+          >
+            Clone
+          </button>
+          <button
+            type="button"
             className={styles.crossLink}
             disabled={!position.data}
             onClick={() =>

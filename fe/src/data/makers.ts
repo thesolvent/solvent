@@ -46,8 +46,16 @@ export interface PositionBalance extends ValuedAmount {
   symbol: string;
 }
 
+export interface PositionToken {
+  address: string;
+  decimals: number;
+  symbol: string;
+}
+
 export interface Position {
   ref: PairRef;
+  base: PositionToken;
+  quote: PositionToken;
   hash: string;
   maker: string;
   pair: string;
@@ -59,6 +67,8 @@ export interface Position {
   rangeKind: string;
   lowerPrice: number | null;
   upperPrice: number | null;
+  belowPct: number | null;
+  abovePct: number | null;
   pairType: string;
   spot: string | null;
   committed: PositionBalance[];

@@ -77,6 +77,16 @@ export function toPosition(api: ApiPosition): Position {
       baseDecimals: api.base.decimals,
       quoteDecimals: api.quote.decimals,
     },
+    base: {
+      address: api.base.address,
+      decimals: api.base.decimals,
+      symbol: api.base.symbol,
+    },
+    quote: {
+      address: api.quote.address,
+      decimals: api.quote.decimals,
+      symbol: api.quote.symbol,
+    },
     hash: api.strategy_hash,
     maker: api.maker,
     pair: api.pair,
@@ -90,6 +100,8 @@ export function toPosition(api: ApiPosition): Position {
       api.range.lower_price == null ? null : Number(api.range.lower_price),
     upperPrice:
       api.range.upper_price == null ? null : Number(api.range.upper_price),
+    belowPct: api.range.below_pct ?? null,
+    abovePct: api.range.above_pct ?? null,
     pairType: api.pair_type,
     volumeUsd: api.economics.volume_usd ?? null,
     spot: api.mid_price ?? null,

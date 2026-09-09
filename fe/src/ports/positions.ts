@@ -60,6 +60,33 @@ export interface PositionIntent {
   submit(): Promise<CreatedPosition>;
 }
 
+export interface PositionTokenInput {
+  address: string;
+  decimals: number;
+  symbol: string;
+}
+
+export interface PushPositionInput {
+  maker: string;
+  strategyHash: string;
+  token: PositionTokenInput;
+  amount: string;
+}
+
+export interface DockPositionInput {
+  maker: string;
+  strategyHash: string;
+  tokens: readonly string[];
+}
+
+export interface PositionActionResult {
+  transactionHash: string;
+}
+
+export interface PositionActionIntent {
+  submit(): Promise<PositionActionResult>;
+}
+
 export interface PositionsPort {
   pairs(wallet?: string): Promise<CreatePair[]>;
   history(
@@ -67,4 +94,12 @@ export interface PositionsPort {
     period: PriceHistoryPeriod,
   ): Promise<PairPricePoint[]>;
   createIntent(input: PositionInput, clients: WalletClients): PositionIntent;
+  pushIntent(
+    input: PushPositionInput,
+    clients: WalletClients,
+  ): PositionActionIntent;
+  dockIntent(
+    input: DockPositionInput,
+    clients: WalletClients,
+  ): PositionActionIntent;
 }

@@ -6,7 +6,7 @@ import {
 } from "@solvent/sdk/construction";
 import { createPositionClient } from "@solvent/sdk/positions";
 import { MAX_UINT248, parseTokenAmount } from "@solvent/sdk/validation";
-import type { Address } from "viem";
+import type { Address, Hex } from "viem";
 
 import type { Asset, PairInfo } from "@solvent/sdk/client";
 import type {
@@ -74,6 +74,41 @@ export const positionsAdapter: PositionsPort = {
     return {
       async submit() {
         intent ??= sdk.createIntent(buildRequest(input));
+        return intent.submit();
+      },
+    };
+  },
+
+  pushIntent(input, clients) {
+    const sdk = createPositionClient({ api: solventApi, ...clients });
+    let intent: ReturnType<typeof sdk.pushIntent> | undefined;
+    return {
+      async submit() {
+        intent ??= sdk.pushIntent({
+          maker: input.maker as Address,
+          strategyHash: input.strategyHash as Hex,
+          token: input.token.address as Address,
+          amount: parseTokenAmount(
+            input.amount,
+            input.token.decimals,
+            `${input.token.symbol} amount`,
+          ),
+        });
+        return intent.submit();
+      },
+    };
+  },
+
+  dockIntent(input, clients) {
+    const sdk = createPositionClient({ api: solventApi, ...clients });
+    let intent: ReturnType<typeof sdk.dockIntent> | undefined;
+    return {
+      async submit() {
+        intent ??= sdk.dockIntent({
+          maker: input.maker as Address,
+          strategyHash: input.strategyHash as Hex,
+          tokens: input.tokens.map((token) => token as Address),
+        });
         return intent.submit();
       },
     };

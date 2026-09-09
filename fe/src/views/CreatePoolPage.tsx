@@ -7,7 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { formatUnits } from "viem";
 
 import { Crumbs } from "@/components/Crumbs";
@@ -18,13 +18,15 @@ import {
   createPosition,
 } from "@/lib/create-position";
 import type { CreatePair, PositionCurve } from "@/ports/positions";
+import type { Position } from "@/data/makers";
 import {
   useCreatePairs,
   useCreatePosition,
   usePairPriceHistory,
 } from "@/services/positions";
+import { usePosition } from "@/services/makers";
 import { slug } from "@/services/pools";
-import { useApp } from "@/state";
+import { useApp, type AppState } from "@/state";
 
 import styles from "./CreatePoolPage.module.css";
 
@@ -82,10 +84,101 @@ function pairDefaults(pair: CreatePair, corePair: number) {
   };
 }
 
+function sameAddress(left: string, right: string) {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+function cloneDefaults(
+  position: Position,
+  pairs: readonly CreatePair[],
+): Partial<AppState> | undefined {
+  const corePair = pairs.findIndex(
+    ({ base, quote }) =>
+      (sameAddress(base.address, position.base.address) &&
+        sameAddress(quote.address, position.quote.address)) ||
+      (sameAddress(base.address, position.quote.address) &&
+        sameAddress(quote.address, position.base.address)),
+  );
+  const pair = pairs[corePair];
+  if (!pair) return undefined;
+
+  const flipped = sameAddress(pair.base.address, position.quote.address);
+  const market = flipped ? 1 / pair.mid : pair.mid;
+  const defaults = {
+    ...pairDefaults(pair, corePair),
+    flipped,
+    step: 3,
+    stepDirty: { 2: true, 3: true, 4: true },
+    amtA: "",
+    amtB: "",
+    customFeePct: "0.10",
+    slotA: null,
+    slotB: null,
+    chartHover: null,
+    hoverFrac: null,
+  };
+
+  if (position.curve === "XYC") {
+    return {
+      ...defaults,
+      strategy: "Full range",
+      createPreset: "Full range",
+      pegSym: false,
+      chartZoom: 1,
+    };
+  }
+
+  if (position.curve === "Pegged") {
+    const width = Math.min(
+      50,
+      Math.max(
+        MIN_PEGGED_BOUND_PERCENT,
+        position.belowPct ?? 0,
+        position.abovePct ?? 0,
+      ),
+    );
+    return {
+      ...defaults,
+      strategy: "Pegged",
+      createPreset: "Custom",
+      pegSym: true,
+      bandMin: -width,
+      bandMax: width,
+      chartZoom: 1,
+    };
+  }
+
+  const lower = position.lowerPrice;
+  const upper = position.upperPrice;
+  if (
+    position.curve !== "Concentrated" ||
+    lower == null ||
+    upper == null ||
+    !Number.isFinite(lower) ||
+    !Number.isFinite(upper) ||
+    !(lower > 0 && lower < upper && market > 0)
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...defaults,
+    strategy: "Concentrated",
+    createPreset: "Custom",
+    pegSym: false,
+    bandMin: Math.max(-50, (lower / market - 1) * 100),
+    bandMax: Math.min(50, (upper / market - 1) * 100),
+    chartZoom: 1,
+  };
+}
+
 export function CreatePoolPage() {
   const { state, set, pop } = useApp();
   const navigate = useNavigate();
   const { pair: routePair } = useParams();
+  const [searchParams] = useSearchParams();
+  const cloneHash = searchParams.get("clone") ?? undefined;
+  const cloneQuery = usePosition(cloneHash);
   const pairQuery = useCreatePairs();
   const pairs = pairQuery.data ?? EMPTY_PAIRS;
   const selectedPair = pairs[state.corePair] ?? pairs[0];
@@ -119,6 +212,7 @@ export function CreatePoolPage() {
   );
   const plotRef = useRef<HTMLDivElement>(null);
   const initializedRoute = useRef<string | null>(null);
+  const initializedClone = useRef<string | null>(null);
 
   useLayoutEffect(() => {
     if (
@@ -135,6 +229,21 @@ export function CreatePoolPage() {
       set(pairDefaults(pairs[index], index));
     }
   }, [pairs, routePair, set]);
+
+  useLayoutEffect(() => {
+    if (
+      !cloneHash ||
+      !cloneQuery.data ||
+      pairs.length === 0 ||
+      initializedClone.current === cloneHash
+    ) {
+      return;
+    }
+    const defaults = cloneDefaults(cloneQuery.data, pairs);
+    if (!defaults) return;
+    initializedClone.current = cloneHash;
+    set(defaults);
+  }, [cloneHash, cloneQuery.data, pairs, set]);
 
   // Wheel-zoom must be non-passive to preventDefault, which React's onWheel can't do.
   useEffect(() => {

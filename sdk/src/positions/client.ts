@@ -1,7 +1,9 @@
 import {
     getAddress,
+    isHex,
     isAddressEqual,
     maxUint256,
+    size,
     type Address,
     type Hex,
 } from "viem";
@@ -15,7 +17,7 @@ import {
     validatedAddress,
     validatedUint,
 } from "../validation";
-import { positions } from "./builder";
+import { positions, type TxRequest } from "./builder";
 
 export interface PositionAmount {
     token: Address;
@@ -37,12 +39,35 @@ export interface PositionIntent {
     submit(): Promise<CreatedPosition>;
 }
 
+export interface PositionTransaction {
+    transactionHash: Hex;
+}
+
+export interface PositionTransactionIntent {
+    submit(): Promise<PositionTransaction>;
+}
+
+export interface PushPositionRequest {
+    maker: Address;
+    strategyHash: Hex;
+    token: Address;
+    amount: bigint;
+}
+
+export interface DockPositionRequest {
+    maker: Address;
+    strategyHash: Hex;
+    tokens: readonly Address[];
+}
+
 export interface PositionClientConfig extends WalletClients {
     api: Pick<SolventClient, "config" | "positionsPreview">;
 }
 
 export interface PositionClient {
     createIntent(request: CreatePositionRequest): PositionIntent;
+    pushIntent(request: PushPositionRequest): PositionTransactionIntent;
+    dockIntent(request: DockPositionRequest): PositionTransactionIntent;
 }
 
 export class PositionExistsError extends Error {
@@ -69,12 +94,57 @@ interface PositionPlan {
     approvals: PositionAmount[];
 }
 
+interface PositionTransactionPlan {
+    owner: Address;
+    chainId: number;
+    transaction: TxRequest;
+}
+
 /** Coordinate server preflight, reusable Aqua approval, and a confirmed `ship` transaction. */
 export function createPositionClient({
     api,
     ...clients
 }: PositionClientConfig): PositionClient {
     const wallet = createWalletSession(clients);
+
+    function actionIntent(
+        prepare: () => Promise<PositionTransactionPlan>,
+    ): PositionTransactionIntent {
+        let plan: Promise<PositionTransactionPlan> | undefined;
+        let transactionHash: Hex | undefined;
+        let result: PositionTransaction | undefined;
+        let pending: Promise<PositionTransaction> | undefined;
+
+        function actionPlan() {
+            plan ??= prepare().catch((error: unknown) => {
+                plan = undefined;
+                throw error;
+            });
+            return plan;
+        }
+
+        async function execute(): Promise<PositionTransaction> {
+            if (result) return result;
+            const current = await actionPlan();
+            transactionHash ??= await wallet.sendTransaction({
+                ...current.transaction,
+                owner: current.owner,
+                chainId: current.chainId,
+            });
+            await wallet.confirmTransaction(transactionHash);
+            result = { transactionHash };
+            return result;
+        }
+
+        return {
+            submit() {
+                pending ??= execute().finally(() => {
+                    pending = undefined;
+                });
+                return pending;
+            },
+        };
+    }
 
     function createIntent(request: CreatePositionRequest): PositionIntent {
         const snapshot = snapshotRequest(request);
@@ -165,7 +235,70 @@ export function createPositionClient({
         };
     }
 
-    return { createIntent };
+    function pushIntent(
+        request: PushPositionRequest,
+    ): PositionTransactionIntent {
+        const snapshot = { ...request };
+        return actionIntent(async () => {
+            const maker = validatedAddress(snapshot.maker, "maker");
+            const strategyHash = validatedStrategyHash(snapshot.strategyHash);
+            const token = validatedAddress(snapshot.token, "push token");
+            const amount = validatedUint(snapshot.amount, 256, "push amount", {
+                positive: true,
+            });
+            const config = await api.config();
+            const deployment = {
+                chainId: config.chain_id,
+                aqua: getAddress(config.aqua),
+                app: getAddress(config.app),
+            };
+            await wallet.ensureAllowance({
+                owner: maker,
+                chainId: deployment.chainId,
+                token,
+                spender: deployment.aqua,
+                amount,
+                approvalAmount: maxUint256,
+            });
+            return {
+                owner: maker,
+                chainId: deployment.chainId,
+                transaction: positions(deployment).push({
+                    maker,
+                    strategyHash,
+                    token,
+                    amount,
+                }),
+            };
+        });
+    }
+
+    function dockIntent(
+        request: DockPositionRequest,
+    ): PositionTransactionIntent {
+        const snapshot = { ...request, tokens: [...request.tokens] };
+        return actionIntent(async () => {
+            const maker = validatedAddress(snapshot.maker, "maker");
+            const strategyHash = validatedStrategyHash(snapshot.strategyHash);
+            const tokens = validatedPositionTokens(snapshot.tokens);
+            const config = await api.config();
+            const deployment = {
+                chainId: config.chain_id,
+                aqua: getAddress(config.aqua),
+                app: getAddress(config.app),
+            };
+            return {
+                owner: maker,
+                chainId: deployment.chainId,
+                transaction: positions(deployment).dock({
+                    strategyHash,
+                    tokens,
+                }),
+            };
+        });
+    }
+
+    return { createIntent, pushIntent, dockIntent };
 }
 
 function snapshotRequest(
@@ -231,4 +364,29 @@ function validateMaker(request: CreatePositionRequest): void {
             "Position maker must match the maker encoded in the strategy",
         );
     }
+}
+
+function validatedStrategyHash(value: Hex): Hex {
+    if (!isHex(value, { strict: true }) || size(value) !== 32) {
+        throw new InputValidationError(
+            "strategy hash",
+            "out_of_range",
+            "Strategy hash must contain exactly 32 bytes",
+        );
+    }
+    return value;
+}
+
+function validatedPositionTokens(tokens: readonly Address[]): Address[] {
+    if (tokens.length !== 2) {
+        throw new InputValidationError(
+            "position tokens",
+            "out_of_range",
+            "A position requires exactly two tokens",
+        );
+    }
+    const left = validatedAddress(tokens[0], "first position token");
+    const right = validatedAddress(tokens[1], "second position token");
+    assertDistinctAddresses(left, right, "position tokens");
+    return [left, right];
 }

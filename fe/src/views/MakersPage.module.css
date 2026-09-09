@@ -396,6 +396,154 @@
   border-color: var(--ink);
 }
 
+.posAction:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.posAction[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+
+.positionActionEditor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px 10px 38px;
+  border-top: 1px solid var(--surface);
+  background: var(--lime-wash-faint);
+  min-width: 0;
+  composes: row200 from "../styles/animations.module.css";
+}
+
+.positionActionCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 180px;
+}
+
+.positionActionTitle {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.positionActionHint {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.positionTokenPicker {
+  display: flex;
+  border: 1px solid var(--line);
+  flex: none;
+}
+
+.positionToken {
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: var(--paper);
+  padding: 7px 10px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.positionToken:last-child {
+  border-right: 0;
+}
+
+.positionTokenOn {
+  composes: positionToken;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.positionAmountField {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  flex: 0 1 170px;
+  min-width: 110px;
+}
+
+.positionAmountField span {
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.positionAmountField input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  border-left: 1px solid var(--surface);
+  padding: 0 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.positionAmountField:focus-within {
+  border-color: var(--ink);
+}
+
+.positionActionButtons {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.positionActionCancel,
+.positionActionConfirm {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 7px 11px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.positionActionConfirm {
+  border-color: var(--green);
+  background: var(--green);
+  color: var(--paper);
+}
+
+.positionActionCancel:disabled,
+.positionActionConfirm:disabled,
+.positionToken:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.positionActionProblem {
+  flex-basis: 100%;
+  max-width: 420px;
+  margin: 0 0 0 auto;
+  padding: 5px 8px;
+  background: var(--ok-bg);
+  color: var(--ok-ink-deep);
+  font-size: 10.5px;
+}
+
 .posDetail {
   padding: 0 16px 14px 38px;
   background: var(--paper-soft);
@@ -485,26 +633,6 @@
   white-space: nowrap;
   overflow: hidden;
   flex: 1;
-}
-
-.clone {
-  border: 1px solid var(--line);
-  background: var(--paper);
-  padding: 5px 12px;
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-  white-space: nowrap;
-  flex: none;
-  transition:
-    background 140ms ease,
-    color 140ms ease;
-}
-
-.clone:hover {
-  background: var(--ink);
-  color: var(--paper);
 }
 
 /* ---------- Assets ---------- */

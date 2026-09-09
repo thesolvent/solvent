@@ -8,8 +8,12 @@ export {
 export type {
     CreatePositionRequest,
     CreatedPosition,
+    DockPositionRequest,
     PositionAmount,
     PositionClient,
     PositionClientConfig,
     PositionIntent,
+    PositionTransaction,
+    PositionTransactionIntent,
+    PushPositionRequest,
 } from "./client";

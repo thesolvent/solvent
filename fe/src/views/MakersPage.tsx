@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useAccount } from "wagmi";
 import { slug, usePools } from "@/services/pools";
 import { PERIODS, SPANS, makerView } from "@/lib/makers";
 import {
@@ -8,6 +9,7 @@ import {
   useMakerInventory,
   useMakerSettlements,
 } from "@/services/makers";
+import { useManagePosition } from "@/services/positions";
 import { useApp } from "@/state";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -35,12 +37,27 @@ function ChartTooltip({
   );
 }
 
+function sameAddress(left: string | undefined, right: string | undefined) {
+  return Boolean(left && right && left.toLowerCase() === right.toLowerCase());
+}
+
 export function MakersPage() {
   const navigate = useNavigate();
   const { state, set } = useApp();
   const { maker } = useParams();
+  const { address: walletAddress } = useAccount();
   const roster = useMakers();
-  const address = maker ?? roster.data?.[0]?.address;
+  const makers = [...(roster.data ?? [])].sort(
+    (left, right) =>
+      Number(sameAddress(right.address, walletAddress)) -
+      Number(sameAddress(left.address, walletAddress)),
+  );
+  const ownMaker = makers.find(({ address: candidate }) =>
+    sameAddress(candidate, walletAddress),
+  );
+  const address = maker ?? ownMaker?.address ?? makers[0]?.address;
+  const canManage = sameAddress(address, walletAddress);
+  const positionActions = useManagePosition();
   const period = PERIODS[state.mkSpan] ?? "7d";
   const dashboard = useMakerDashboard(address, period);
   const positions = useMakerPositions(address, period);
@@ -93,10 +110,12 @@ export function MakersPage() {
       <div className={styles.head}>
         <div className={styles.headTitle}>
           <div className={styles.headLabel}>Maker</div>
-          <div className={styles.addr}>{mk.addr}</div>
+          <div className={styles.addr}>
+            {canManage ? "Your maker" : mk.addr}
+          </div>
         </div>
         <div className={styles.segmented}>
-          {roster.data?.map(({ address: a }) => (
+          {makers.map(({ address: a }) => (
             <button
               key={a}
               type="button"
@@ -110,7 +129,7 @@ export function MakersPage() {
                 navigate(`/makers/${a}`);
               }}
             >
-              {a.slice(-4)}
+              {sameAddress(a, walletAddress) ? "Your maker" : a.slice(-4)}
             </button>
           ))}
         </div>
@@ -193,9 +212,19 @@ export function MakersPage() {
             <MakerPositions
               key={address}
               positions={mk.positions}
+              canManage={canManage}
+              actionStatus={positionActions.status}
+              onClearAction={positionActions.clear}
               onOpenPosition={(hash) =>
                 navigate(`/explorer/strategies/${encodeURIComponent(hash)}`)
               }
+              onClone={(position) =>
+                navigate(
+                  `/pools/${slug(position.pair)}/new?clone=${encodeURIComponent(position.hash)}`,
+                )
+              }
+              onPush={positionActions.push}
+              onDock={positionActions.dock}
             />
           )}
 

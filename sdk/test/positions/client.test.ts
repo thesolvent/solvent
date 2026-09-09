@@ -1,5 +1,5 @@
 import { anvil } from "viem/chains";
-import { createClient, custom, maxUint256, type Address } from "viem";
+import { createClient, custom, maxUint256, type Address, type Hex } from "viem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../../src/client";
@@ -24,7 +24,7 @@ const AQUA = "0x2222222222222222222222222222222222222222" as Address;
 const APP = "0x3333333333333333333333333333333333333333" as Address;
 const TOKEN_A = "0x4444444444444444444444444444444444444444" as Address;
 const TOKEN_B = "0x5555555555555555555555555555555555555555" as Address;
-const HASH = `0x${"ab".repeat(32)}`;
+const HASH = `0x${"ab".repeat(32)}` as Hex;
 const config = {
     chain_id: 31337,
     aqua: AQUA,
@@ -232,5 +232,116 @@ describe("position creation intent", () => {
 
         expect(wallet.ensureAllowance).toHaveBeenCalledOnce();
         expect(wallet.sendTransaction).toHaveBeenCalledOnce();
+    });
+});
+
+describe("position management intents", () => {
+    it("checks push funding, approves Aqua, simulates, broadcasts, and confirms", async () => {
+        const { api, positions } = setup();
+
+        await expect(
+            positions
+                .pushIntent({
+                    maker: MAKER,
+                    strategyHash: HASH,
+                    token: TOKEN_A,
+                    amount: 25n,
+                })
+                .submit(),
+        ).resolves.toEqual({ transactionHash: HASH });
+
+        expect(api.config).toHaveBeenCalledOnce();
+        expect(api.positionsPreview).not.toHaveBeenCalled();
+        expect(wallet.ensureAllowance).toHaveBeenCalledWith({
+            owner: MAKER,
+            chainId: 31337,
+            token: TOKEN_A,
+            spender: AQUA,
+            amount: 25n,
+            approvalAmount: maxUint256,
+        });
+        expect(wallet.sendTransaction).toHaveBeenCalledWith(
+            expect.objectContaining({
+                owner: MAKER,
+                chainId: 31337,
+                to: AQUA,
+            }),
+        );
+        expect(wallet.confirmTransaction).toHaveBeenCalledWith(HASH);
+    });
+
+    it("simulates, broadcasts, and confirms a dock without token approvals", async () => {
+        const { api, positions } = setup();
+
+        await expect(
+            positions
+                .dockIntent({
+                    maker: MAKER,
+                    strategyHash: HASH,
+                    tokens: [TOKEN_A, TOKEN_B],
+                })
+                .submit(),
+        ).resolves.toEqual({ transactionHash: HASH });
+
+        expect(api.config).toHaveBeenCalledOnce();
+        expect(api.positionsPreview).not.toHaveBeenCalled();
+        expect(wallet.ensureAllowance).not.toHaveBeenCalled();
+        expect(wallet.sendTransaction).toHaveBeenCalledWith(
+            expect.objectContaining({
+                owner: MAKER,
+                chainId: 31337,
+                to: AQUA,
+            }),
+        );
+        expect(wallet.confirmTransaction).toHaveBeenCalledWith(HASH);
+    });
+
+    it("reuses a management transaction when receipt confirmation is retried", async () => {
+        wallet.confirmTransaction.mockRejectedValueOnce(
+            new Error("receipt timeout"),
+        );
+        const { positions } = setup();
+        const intent = positions.dockIntent({
+            maker: MAKER,
+            strategyHash: HASH,
+            tokens: [TOKEN_A, TOKEN_B],
+        });
+
+        await expect(intent.submit()).rejects.toThrow("receipt timeout");
+        await expect(intent.submit()).resolves.toEqual({
+            transactionHash: HASH,
+        });
+
+        expect(wallet.sendTransaction).toHaveBeenCalledOnce();
+        expect(wallet.confirmTransaction).toHaveBeenCalledTimes(2);
+    });
+
+    it("rejects invalid actions before reading deployment config", async () => {
+        const { api, positions } = setup();
+
+        await expect(
+            positions
+                .pushIntent({
+                    maker: MAKER,
+                    strategyHash: HASH,
+                    token: TOKEN_A,
+                    amount: 0n,
+                })
+                .submit(),
+        ).rejects.toThrow("push amount must be greater than zero");
+        await expect(
+            positions
+                .dockIntent({
+                    maker: MAKER,
+                    strategyHash: HASH,
+                    tokens: [TOKEN_A, TOKEN_A],
+                })
+                .submit(),
+        ).rejects.toThrow(
+            "position tokens must contain distinct token addresses",
+        );
+
+        expect(api.config).not.toHaveBeenCalled();
+        expect(wallet.sendTransaction).not.toHaveBeenCalled();
     });
 });

@@ -180,6 +180,31 @@
   font-size: 11.5px;
 }
 
+.primaryAction {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  padding: 7px 14px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 130ms ease,
+    color 130ms ease;
+}
+
+.primaryAction:hover {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.primaryAction:disabled {
+  cursor: wait;
+  opacity: 0.45;
+}
+
 /* ---------- KPI strips ---------- */
 
 .stats5 {

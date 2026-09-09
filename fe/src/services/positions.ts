@@ -5,11 +5,15 @@ import type { WalletClients } from "@solvent/sdk/swap";
 import type {
   CreatedPosition,
   CreatePair,
+  DockPositionInput,
   PairPricePoint,
+  PositionActionIntent,
+  PositionActionResult,
   PositionForm,
   PositionIntent,
   PositionsPort,
   PriceHistoryPeriod,
+  PushPositionInput,
 } from "@/ports/positions";
 import type { CreateSpan } from "@/state";
 import { useServices } from "./context";
@@ -24,6 +28,30 @@ export interface PositionSubmission {
   submitting: boolean;
   result: CreatedPosition | undefined;
   problem: string | undefined;
+}
+
+type PositionAction =
+  | { kind: "push"; input: PushPositionInput }
+  | { kind: "dock"; input: DockPositionInput };
+
+interface ActionSubmission {
+  key: string;
+  action: PositionAction;
+  intent: PositionActionIntent | undefined;
+}
+
+export interface PositionActionStatus {
+  kind: PositionAction["kind"];
+  strategyHash: string;
+  submitting: boolean;
+  problem: string | undefined;
+}
+
+export interface PositionManagement {
+  push(input: PushPositionInput): Promise<PositionActionResult>;
+  dock(input: DockPositionInput): Promise<PositionActionResult>;
+  clear(): void;
+  status: PositionActionStatus | undefined;
 }
 
 export function useCreatePairs() {
@@ -150,5 +178,90 @@ export function useCreatePosition(
       current && mutation.error instanceof Error
         ? mutation.error.message
         : undefined,
+  };
+}
+
+function positionActionIntent(
+  positions: PositionsPort,
+  action: PositionAction,
+  { publicClient, walletClient }: Partial<WalletClients>,
+): PositionActionIntent | undefined {
+  if (!publicClient || !walletClient) return undefined;
+  const clients = { publicClient, walletClient };
+  return action.kind === "push"
+    ? positions.pushIntent(action.input, clients)
+    : positions.dockIntent(action.input, clients);
+}
+
+function actionKey(
+  action: PositionAction,
+  address?: string,
+  chainId?: number,
+): string {
+  return JSON.stringify([action, address?.toLowerCase(), chainId]);
+}
+
+async function submitAction(
+  attempt: ActionSubmission,
+): Promise<PositionActionResult> {
+  if (!attempt.intent)
+    throw new Error("Connect your wallet to manage positions");
+  return attempt.intent.submit();
+}
+
+/** Keep one retry-safe SDK intent per position action while React owns its visible state. */
+export function useManagePosition(): PositionManagement {
+  const { positions } = useServices();
+  const queryClient = useQueryClient();
+  const { address, chainId } = useAccount();
+  const publicClient = useClient({ chainId });
+  const { data: walletClient } = useConnectorClient();
+  const mutation = useMutation({
+    mutationFn: submitAction,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["makers"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["pools"],
+        }),
+      ]);
+    },
+  });
+
+  function submit(action: PositionAction) {
+    const key = actionKey(action, address, chainId);
+    const previous = mutation.variables;
+    return mutation.mutateAsync(
+      previous?.key === key && previous.intent
+        ? previous
+        : {
+            key,
+            action,
+            intent: positionActionIntent(positions, action, {
+              publicClient,
+              walletClient,
+            }),
+          },
+    );
+  }
+
+  const attempt = mutation.variables;
+  return {
+    push: (input) => submit({ kind: "push", input }),
+    dock: (input) => submit({ kind: "dock", input }),
+    clear: mutation.reset,
+    status: attempt
+      ? {
+          kind: attempt.action.kind,
+          strategyHash: attempt.action.input.strategyHash,
+          submitting: mutation.isPending,
+          problem:
+            mutation.error instanceof Error
+              ? mutation.error.message
+              : undefined,
+        }
+      : undefined,
   };
 }
