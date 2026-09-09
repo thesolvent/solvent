@@ -15,7 +15,9 @@ use solvent_adapters::chain::ChainHead;
 use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
-use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
+use solvent_adapters::ingest::uniswapx::{
+    ServerCosigner, UniswapXFillBuilder, UniswapXV2Normalizer,
+};
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
 use solvent_adapters::registry::{AlloyBlockTimes, AlloyChainSource, SqliteStore};
@@ -250,6 +252,13 @@ async fn main() -> Result<(), StartupError> {
         config.filler,
         config.decay_window_secs,
     ));
+    // The self-venue path cosigns with our own key, so that is the identity its normalizer pins.
+    // The order feed's normalizer pins Uniswap's cosigner instead.
+    let normalizer = Arc::new(UniswapXV2Normalizer::new(
+        config.reactor,
+        vec![cosigner.address()],
+    ));
+
     // The account the fill tx is signed and authorized by (the filler's owner).
     let filler_owner = filler_key
         .parse::<PrivateKeySigner>()
@@ -359,6 +368,7 @@ async fn main() -> Result<(), StartupError> {
         quote,
         swap,
         cosigner,
+        normalizer,
         trades,
         registry: Arc::clone(&registry),
         registry_store,

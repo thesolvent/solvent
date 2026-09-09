@@ -2,4 +2,4 @@
 
 pub mod service;
 
-pub use service::IngestPipeline;
+pub use service::{Admission, IngestPipeline};

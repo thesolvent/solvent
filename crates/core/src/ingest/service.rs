@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use alloy_primitives::Address;
 use futures::stream::{select_all, StreamExt};
 use moka::sync::Cache;
 use tokio::sync::mpsc;
@@ -18,25 +19,50 @@ use crate::obs::debug;
 use crate::primitives::ingest::{Intent, ProtocolId, RawOrder};
 use crate::primitives::{ChainId, IntentId};
 
+/// What this deployment is willing to take on. Orders arrive from a public feed and are shaped by
+/// whoever posted them, so admission is an allow-list of what we can settle rather than a deny-list
+/// of what has bitten us.
+///
+/// Deliberately exhaustive: a new rule must break every construction site rather than default to
+/// admitting whatever it governs.
+#[derive(Clone, Debug)]
+pub struct Admission {
+    pub supported_chains: BTreeSet<ChainId>,
+    /// Tokens this resolver will touch on either side. Sourcing runs against maker positions, so a
+    /// token no maker has shipped is unfillable anyway — and the list doubles as the exclusion for
+    /// fee-on-transfer, rebasing, and blocklisting tokens, each of which settles for less than the
+    /// reactor demands and reverts inside the filler's own balance guard.
+    pub tokens: BTreeSet<Address>,
+    /// Ceiling on an order's output legs. Each one is a separate token to source and a term in the
+    /// filler's quadratic output scan, so an order with hundreds is an out-of-gas bomb.
+    pub max_outputs: usize,
+}
+
 pub struct IngestPipeline {
     normalizers: BTreeMap<ProtocolId, Arc<dyn Normalizer>>,
     dedup: Cache<IntentId, ()>,
     clock: Arc<dyn Clock>,
-    supported_chains: BTreeSet<ChainId>,
+    admission: Admission,
 }
 
 impl IngestPipeline {
     pub fn new(
         normalizers: BTreeMap<ProtocolId, Arc<dyn Normalizer>>,
         dedup_ttl: Duration,
+        dedup_capacity: u64,
         clock: Arc<dyn Clock>,
-        supported_chains: BTreeSet<ChainId>,
+        admission: Admission,
     ) -> IngestPipeline {
         IngestPipeline {
             normalizers,
-            dedup: Cache::builder().time_to_live(dedup_ttl).build(),
+            // Bounded as well as expiring: an order stream we do not control could otherwise pin
+            // arbitrarily many hashes for a whole TTL.
+            dedup: Cache::builder()
+                .time_to_live(dedup_ttl)
+                .max_capacity(dedup_capacity)
+                .build(),
             clock,
-            supported_chains,
+            admission,
         }
     }
 
@@ -85,7 +111,11 @@ impl IngestPipeline {
     /// On-chain concerns (cosignature, exact fillability) are enforced later by the reactor.
     fn is_admissible(&self, intent: &Intent) -> bool {
         let now = self.clock.now_unix();
-        if !self.supported_chains.contains(&intent.origin_chain) {
+        if !self
+            .admission
+            .supported_chains
+            .contains(&intent.origin_chain)
+        {
             debug!("ingest drop {}: unsupported chain", intent.id);
             return false;
         }
@@ -95,6 +125,28 @@ impl IngestPipeline {
         }
         if intent.outputs.is_empty() {
             debug!("ingest drop {}: no outputs", intent.id);
+            return false;
+        }
+        if intent.outputs.len() > self.admission.max_outputs {
+            debug!("ingest drop {}: too many outputs", intent.id);
+            return false;
+        }
+        // The zero address is the settlement layer's native-currency sentinel, and the filler
+        // settles ERC20 only: the reactor would pay a native output out of its own balance, which
+        // ours never funds.
+        if intent.outputs.iter().any(|o| o.token == Address::ZERO)
+            || intent.input.token == Address::ZERO
+        {
+            debug!("ingest drop {}: native currency leg", intent.id);
+            return false;
+        }
+        let tokens_allowed = self.admission.tokens.contains(&intent.input.token)
+            && intent
+                .outputs
+                .iter()
+                .all(|o| self.admission.tokens.contains(&o.token));
+        if !tokens_allowed {
+            debug!("ingest drop {}: token not admitted", intent.id);
             return false;
         }
         if intent.input.curve.amount_at(now).is_zero() {
@@ -122,30 +174,51 @@ mod tests {
 
     use super::*;
     use crate::deps::ingest::NormalizeError;
-    use crate::primitives::ingest::{AmountCurve, IntentInput, IntentOutput};
+    use crate::primitives::ingest::{AmountCurve, IntentInput, IntentOutput, IntentParts};
 
     fn addr(n: u8) -> Address {
         Address::from([n; 20])
     }
 
     fn intent(id: u8, chain: ChainId, deadline: u64, in_amt: u64, out_amt: u64) -> Intent {
-        Intent::new(
-            IntentId(B256::from([id; 32])),
-            ProtocolId::UniswapXV2,
-            IntentInput::new(addr(1), AmountCurve::scalar(U256::from(in_amt))),
-            vec![IntentOutput::new(
-                addr(2),
-                AmountCurve::scalar(U256::from(out_amt)),
-                addr(3),
-            )],
+        intent_with(id, chain, deadline, in_amt, out_amt, vec![addr(2)])
+    }
+
+    fn intent_with(
+        id: u8,
+        chain: ChainId,
+        deadline: u64,
+        in_amt: u64,
+        out_amt: u64,
+        output_tokens: Vec<Address>,
+    ) -> Intent {
+        let outputs = output_tokens
+            .into_iter()
+            .map(|token| {
+                IntentOutput::new(token, AmountCurve::scalar(U256::from(out_amt)), addr(3))
+            })
+            .collect();
+        Intent::new(IntentParts {
             deadline,
-            None,
-            addr(4),
-            chain,
-            Bytes::new(),
-            Bytes::new(),
-            0,
-        )
+            settler: addr(4),
+            ..IntentParts::new(
+                IntentId(B256::from([id; 32])),
+                ProtocolId::UniswapXV2,
+                addr(9),
+                IntentInput::new(addr(1), AmountCurve::scalar(U256::from(in_amt))),
+                outputs,
+                chain,
+            )
+        })
+    }
+
+    /// Admits chain 1 and the tokens the fixtures use.
+    fn admission() -> Admission {
+        Admission {
+            supported_chains: BTreeSet::from([ChainId(1)]),
+            tokens: BTreeSet::from([addr(1), addr(2)]),
+            max_outputs: 4,
+        }
     }
 
     fn raw(tag: u8) -> RawOrder {
@@ -193,8 +266,9 @@ mod tests {
         IngestPipeline::new(
             norms,
             Duration::from_secs(60),
+            1024,
             Arc::new(FixedClock(1000)),
-            BTreeSet::from([ChainId(1)]),
+            admission(),
         )
     }
 
@@ -234,14 +308,45 @@ mod tests {
         assert_eq!(got[0].id, IntentId(B256::from([1u8; 32])));
     }
 
+    /// One case per rule an attacker-shaped order can trip. Each is an order we would otherwise
+    /// spend gas discovering we cannot settle.
+    #[tokio::test]
+    async fn drops_orders_this_filler_cannot_settle() {
+        let native = intent_with(1, ChainId(1), 2000, 5, 5, vec![Address::ZERO]);
+        let unlisted = intent_with(2, ChainId(1), 2000, 5, 5, vec![addr(8)]);
+        let too_many = intent_with(3, ChainId(1), 2000, 5, 5, vec![addr(2); 5]);
+        let ok = intent_with(4, ChainId(1), 2000, 5, 5, vec![addr(2); 4]);
+        let map = HashMap::from([
+            (Bytes::from(vec![1]), native),
+            (Bytes::from(vec![2]), unlisted),
+            (Bytes::from(vec![3]), too_many),
+            (Bytes::from(vec![4]), ok),
+        ]);
+        let feeds = vec![feed(vec![raw(1), raw(2), raw(3), raw(4)])];
+        let got = drain(&pipeline(map), feeds).await;
+        assert_eq!(got.len(), 1, "only the four-output listed order survives");
+        assert_eq!(got[0].id, IntentId(B256::from([4u8; 32])));
+    }
+
+    #[tokio::test]
+    async fn drops_a_native_input_leg() {
+        let mut native_in = intent(1, ChainId(1), 2000, 5, 5);
+        native_in.input = IntentInput::new(Address::ZERO, AmountCurve::scalar(U256::from(5u64)));
+        let map = HashMap::from([(Bytes::from(vec![1]), native_in)]);
+        assert!(drain(&pipeline(map), vec![feed(vec![raw(1)])])
+            .await
+            .is_empty());
+    }
+
     #[tokio::test]
     async fn drops_unknown_protocol_and_normalize_errors() {
         // Empty normalizer set → no dispatch target; and a payload with no mapping → normalize error.
         let no_norms = IngestPipeline::new(
             BTreeMap::new(),
             Duration::from_secs(60),
+            1024,
             Arc::new(FixedClock(1000)),
-            BTreeSet::from([ChainId(1)]),
+            admission(),
         );
         assert!(drain(&no_norms, vec![feed(vec![raw(1)])]).await.is_empty());
 

@@ -211,6 +211,7 @@ mod tests {
             decay_start: 0,
             decay_end: 0,
             exclusive_filler: Address::ZERO,
+            exclusivity_override_bps: 100,
         };
         let raw = builder.build(&spec, 0);
         let mut order = V2DutchOrder::abi_decode(&raw.payload).expect("decode");

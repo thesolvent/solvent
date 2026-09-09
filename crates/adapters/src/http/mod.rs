@@ -151,7 +151,7 @@ mod tests {
 
     use crate::chain::ChainHead;
     use crate::http::state::{AppConfig, Features};
-    use crate::ingest::uniswapx::ServerCosigner;
+    use crate::ingest::uniswapx::{ServerCosigner, UniswapXV2Normalizer as ServerNormalizer};
     use crate::ledger::SystemClock;
     use crate::routing::MarketCache;
 
@@ -578,6 +578,7 @@ mod tests {
             quote,
             swap,
             cosigner,
+            normalizer: Arc::new(ServerNormalizer::new(Address::ZERO, vec![Address::ZERO])),
             trades: trade_svc,
             registry: Arc::clone(&registry),
             registry_store: Arc::new(NoopEventStore),

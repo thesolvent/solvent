@@ -37,6 +37,9 @@ pub struct OrderSpec {
     pub decay_end: u64,
     /// `Address::ZERO` for an open (non-exclusive) order.
     pub exclusive_filler: Address,
+    /// What a non-exclusive filler must add to every output to fill inside the window. Zero makes
+    /// the window strict and nobody else can fill; mainnet parameterizes V2 orders at 100.
+    pub exclusivity_override_bps: u16,
 }
 
 /// Mints signed+cosigned orders against a fixed Permit2 + chain, holding the swapper and cosigner keys.
@@ -89,7 +92,7 @@ impl SignedOrderBuilder {
                 decayStartTime: U256::from(spec.decay_start),
                 decayEndTime: U256::from(spec.decay_end),
                 exclusiveFiller: spec.exclusive_filler,
-                exclusivityOverrideBps: U256::ZERO,
+                exclusivityOverrideBps: U256::from(spec.exclusivity_override_bps),
                 inputAmount: U256::ZERO,
                 // One entry per output (the reactor requires the lengths match); 0 = defer to the
                 // base decay, no cosigner override.
@@ -203,6 +206,12 @@ mod tests {
         let hash = order_hash(&order);
         let permit2 = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
 
+        // `V2DutchOrderLib.hash` — every digest below is derived from it, and the normalizer
+        // publishes it as the intent id.
+        assert_eq!(
+            hash,
+            b256!("da9f2c83696505972948bd811639b25445d1e10b652ae98dd168fb47ae47c0d1")
+        );
         assert_eq!(
             cosign_digest(&order, hash),
             b256!("e475e7c8a1b4efc6e907e43fb64312e2b6494314f924214e494a511c1dadec3c")
@@ -228,6 +237,7 @@ mod tests {
             decay_start: 1000,
             decay_end: 1100,
             exclusive_filler: Address::ZERO,
+            exclusivity_override_bps: 100,
         }
     }
 

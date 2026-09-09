@@ -472,23 +472,24 @@ mod tests {
 
     /// An exact-out intent: pay up to `amount_in` WETH, deliver `min_out` USDC to `taker`.
     fn intent(order: u8, taker: Address, amount_in: U256, min_out: U256) -> Intent {
-        Intent::new(
-            IntentId(B256::from([order; 32])),
-            ProtocolId::UniswapXV2,
-            IntentInput::new(addr(WETH), AmountCurve::scalar(amount_in)),
-            vec![IntentOutput::new(
-                addr(USDC),
-                AmountCurve::scalar(min_out),
+        Intent::new(crate::primitives::ingest::IntentParts {
+            deadline: 2_000_000_000,
+            settler: addr(0xEE),
+            raw: Bytes::from(vec![0xab]),
+            signature: Bytes::from(vec![0xcd]),
+            ..crate::primitives::ingest::IntentParts::new(
+                IntentId(B256::from([order; 32])),
+                ProtocolId::UniswapXV2,
                 taker,
-            )],
-            2_000_000_000,
-            None,
-            addr(0xEE),
-            crate::primitives::ChainId(31337),
-            Bytes::from(vec![0xab]),
-            Bytes::from(vec![0xcd]),
-            0,
-        )
+                IntentInput::new(addr(WETH), AmountCurve::scalar(amount_in)),
+                vec![IntentOutput::new(
+                    addr(USDC),
+                    AmountCurve::scalar(min_out),
+                    taker,
+                )],
+                crate::primitives::ChainId(31337),
+            )
+        })
     }
 
     fn xyc(maker: u8, weth: U256, usdc: U256) -> MakerStrategy {

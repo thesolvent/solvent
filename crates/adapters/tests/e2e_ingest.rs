@@ -72,6 +72,7 @@ async fn e2e_self_hosted_order_fills_on_chain() {
         .header
         .timestamp;
     let cosigner = PrivateKeySigner::random();
+    let cosigner_address = cosigner.address();
     let builder =
         SignedOrderBuilder::new(PERMIT2, stack.chain_id, h.taker_signer.clone(), cosigner);
     let order = OrderSpec {
@@ -88,12 +89,15 @@ async fn e2e_self_hosted_order_fills_on_chain() {
         decay_start: now + 10,
         decay_end: now + 100,
         exclusive_filler: stack.filler,
+        exclusivity_override_bps: 100,
     };
     let feed = SelfHostedFeed::new(&builder, std::slice::from_ref(&order), now);
 
     // Ingest: stream → normalize.
     let raws: Vec<RawOrder> = feed.stream().collect().await;
-    let intent = UniswapXV2Normalizer.normalize(&raws[0]).expect("normalize");
+    let intent = UniswapXV2Normalizer::new(stack.reactor, vec![cosigner_address])
+        .normalize(&raws[0])
+        .expect("normalize");
 
     // Route the required output against the caps, then reserve the plan.
     let snap = snapshot.load();

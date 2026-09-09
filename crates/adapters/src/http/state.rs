@@ -19,7 +19,7 @@ use solvent_core::trade::TradeService;
 use solvent_core::valuation::Valuation;
 
 use crate::chain::ChainHead;
-use crate::ingest::uniswapx::ServerCosigner;
+use crate::ingest::uniswapx::{ServerCosigner, UniswapXV2Normalizer};
 
 /// Feature flags the FE reads at bootstrap. `earn` / `send_buy` are always off in the MVP.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -71,6 +71,9 @@ pub struct AppState {
     pub swap: Arc<SwapService>,
     /// Cosigns taker-signed orders on the swap path (holds only the resolver's cosigner key).
     pub cosigner: Arc<ServerCosigner>,
+    /// Decodes and validates the orders this server itself cosigns, so the self-venue path applies
+    /// the same admission rules as the feed. Its cosigner allow-list is our own key, not Uniswap's.
+    pub normalizer: Arc<UniswapXV2Normalizer>,
     /// The trade read-surface, backing the `/trades` and maker-settlements endpoints.
     pub trades: Arc<TradeService>,
     /// The live registry snapshot — the stat tiles read active-maker counts lock-free.
