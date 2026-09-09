@@ -107,6 +107,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 140px;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 7px 14px 7px 7px;
@@ -137,8 +138,10 @@
 }
 
 .assetSymbol {
+  flex: 1;
   font-size: 18px;
   font-weight: 500;
+  text-align: left;
 }
 
 .assetCaret {
@@ -176,6 +179,18 @@
   letter-spacing: -0.05em;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+}
+
+.amountInput::placeholder {
+  color: var(--text-muted);
+  font-size: clamp(30px, 8cqi, 42px);
+  font-weight: 200;
+  letter-spacing: -0.02em;
+  opacity: 1;
+}
+
+.amountInput:focus::placeholder {
+  opacity: 0;
 }
 
 .amountOut {
@@ -218,13 +233,19 @@
   line-height: 1;
 }
 
-.flip:hover {
+.flip:hover:not(:disabled) {
   background: var(--green);
+}
+
+.flip:disabled {
+  background: var(--line);
+  color: var(--text-muted);
+  cursor: not-allowed;
 }
 
 .route {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   border-top: 1px solid var(--line);
 }
 
@@ -268,13 +289,6 @@
   background: var(--line);
   color: var(--text-muted);
   cursor: not-allowed;
-}
-
-.footnote {
-  margin: 16px 0 0;
-  text-align: center;
-  font-size: 13.5px;
-  color: var(--text-muted);
 }
 
 /* ---------- Token picker ---------- */

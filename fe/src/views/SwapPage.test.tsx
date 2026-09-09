@@ -21,7 +21,14 @@ vi.mock("wagmi", async (original) => ({
   useConnectorClient: () => ({ data: {} }),
 }));
 
-beforeEach(() => useAppStore.setState(INITIAL_STATE));
+beforeEach(() =>
+  useAppStore.setState({
+    ...INITIAL_STATE,
+    fromToken: "WETH",
+    toToken: "USDC",
+    amount: "1",
+  }),
+);
 
 function TradeDestination() {
   const { tradeId } = useParams();
@@ -270,14 +277,18 @@ describe("SwapPage", () => {
     }
   });
 
-  it("opens on a pair the deployment serves, not the mock's default", async () => {
+  it("opens with a valid source and leaves the destination empty", async () => {
+    useAppStore.setState(INITIAL_STATE);
     renderWithServices(<SwapPage />, {
       assets: { list: vi.fn().mockResolvedValue(ASSETS) },
       swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
     });
 
-    // The initial state names ETH -> SOL; neither is served here.
     expect(await screen.findAllByText("WETH")).not.toHaveLength(0);
+    expect(screen.getByText("Select")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Select receive asset" }),
+    ).toBeDisabled();
   });
 
   it("shows the server's price and route, not a mid-price estimate", async () => {

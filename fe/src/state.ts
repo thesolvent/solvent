@@ -97,6 +97,29 @@ export type AppState = {
   xpOpen: string | null;
 };
 
+type SwapState = Pick<
+  AppState,
+  | "swapTab"
+  | "fromToken"
+  | "toToken"
+  | "amount"
+  | "picker"
+  | "pQuery"
+  | "pTag"
+  | "pNet"
+>;
+
+export const INITIAL_SWAP_STATE: SwapState = {
+  swapTab: "Swap",
+  fromToken: "",
+  toToken: "",
+  amount: "",
+  picker: null,
+  pQuery: "",
+  pTag: "All",
+  pNet: "All networks",
+};
+
 type CreatePositionState = Pick<
   AppState,
   | "create"
@@ -160,10 +183,7 @@ export const INITIAL_STATE: AppState = {
   page: null,
   trail: [],
 
-  swapTab: "Swap",
-  fromToken: "ETH",
-  toToken: "SOL",
-  amount: "2.500",
+  ...INITIAL_SWAP_STATE,
   openCell: null,
 
   poolQuery: {
@@ -183,11 +203,6 @@ export const INITIAL_STATE: AppState = {
   makerSort: "Virtual",
   filterPick: { 0: 0 },
   tvlMin: 0,
-
-  picker: null,
-  pQuery: "",
-  pTag: "All",
-  pNet: "All networks",
 
   xpStrat: null,
   maker: null,
