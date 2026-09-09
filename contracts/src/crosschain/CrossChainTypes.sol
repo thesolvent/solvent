@@ -55,6 +55,18 @@ struct DirectMakerQuote {
     uint48 expires;
 }
 
+/// @notice M2's authorization to deliver output now for a bounded CCTP USDC repayment later.
+struct MakerCreditQuote {
+    bytes32 orderId;
+    address maker;
+    bytes32 destinationStrategyHash;
+    uint256 outputAmount;
+    uint256 usdcDue;
+    uint256 maxCctpFee;
+    uint256 nonce;
+    uint48 expires;
+}
+
 library CrossChainHashLib {
     bytes32 internal constant ORDER_TYPEHASH = keccak256(
         "SolventCrossChainOrder(address user,uint256 nonce,uint256 originChainId,address originSettler,address compact,uint256 compactId,uint256 compactExpires,address inputToken,uint256 inputAmount,uint256 destinationChainId,address outputToken,uint256 minimumOutputAmount,address recipient,address destinationSettler,address fillProofVerifier,address exclusiveFiller,uint48 exclusivityEnds,uint48 fillDeadline,uint8 routeKind)"
@@ -64,6 +76,9 @@ library CrossChainHashLib {
     );
     bytes32 internal constant DIRECT_QUOTE_TYPEHASH = keccak256(
         "DirectMakerQuote(bytes32 orderId,address maker,bytes32 destinationStrategyHash,bytes32 originStrategyHash,uint256 outputAmount,uint256 repaymentAmount,uint256 nonce,uint48 expires)"
+    );
+    bytes32 internal constant CREDIT_QUOTE_TYPEHASH = keccak256(
+        "MakerCreditQuote(bytes32 orderId,address maker,bytes32 destinationStrategyHash,uint256 outputAmount,uint256 usdcDue,uint256 maxCctpFee,uint256 nonce,uint48 expires)"
     );
 
     function hashOrder(SolventCrossChainOrder memory order) internal pure returns (bytes32) {
@@ -121,6 +136,22 @@ library CrossChainHashLib {
                 quote.originStrategyHash,
                 quote.outputAmount,
                 quote.repaymentAmount,
+                quote.nonce,
+                quote.expires
+            )
+        );
+    }
+
+    function hashCreditQuote(MakerCreditQuote memory quote) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                CREDIT_QUOTE_TYPEHASH,
+                quote.orderId,
+                quote.maker,
+                quote.destinationStrategyHash,
+                quote.outputAmount,
+                quote.usdcDue,
+                quote.maxCctpFee,
                 quote.nonce,
                 quote.expires
             )

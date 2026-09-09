@@ -27,6 +27,8 @@ import {
 import { IFillProofVerifier } from "../src/interfaces/IFillProofVerifier.sol";
 import { IRepaymentProofVerifier } from "../src/interfaces/IRepaymentProofVerifier.sol";
 import { IWETH } from "../src/interfaces/IWETH.sol";
+import { IMessageTransmitterV2, ITokenMessengerV2 } from "../src/interfaces/ICctpV2.sol";
+import { ISwapVM } from "@1inch/swap-vm/src/interfaces/ISwapVM.sol";
 
 contract TestFillProofVerifier is IFillProofVerifier {
     function verifyFill(bytes calldata proof) external pure returns (VerifiedFill memory) {
@@ -104,7 +106,21 @@ contract CrossChainDirectTest is Test {
 
         vm.chainId(ARBITRUM_CHAIN_ID);
         originSettler = new CompactOriginSettler(
-            compact, IAqua(address(originAqua)), wbtc, BASE_CHAIN_ID, predictedDestination, fillVerifier
+            compact,
+            IAqua(address(originAqua)),
+            wbtc,
+            BASE_CHAIN_ID,
+            predictedDestination,
+            fillVerifier,
+            CompactOriginSettler.RoutedConfig({
+                originUsdc: destinationToken,
+                swapRouter: ISwapVM(address(1)),
+                tokenMessenger: ITokenMessengerV2(address(2)),
+                destinationUsdc: address(destinationToken),
+                destinationDomain: 6,
+                minFinalityThreshold: 2000,
+                feeRecipient: address(this)
+            })
         );
         assertEq(address(originSettler), predictedOrigin);
 
@@ -117,7 +133,20 @@ contract CrossChainDirectTest is Test {
             address(compact),
             address(wbtc),
             address(fillVerifier),
-            repaymentVerifier
+            repaymentVerifier,
+            CrossChainAquaApp.CctpConfig({
+                usdc: destinationToken,
+                messageTransmitter: IMessageTransmitterV2(address(3)),
+                originDomain: 3,
+                destinationDomain: 6,
+                originTokenMessenger: bytes32(uint256(2)),
+                destinationTokenMessenger: address(4),
+                originUsdc: address(destinationToken),
+                messageVersion: 1,
+                burnMessageVersion: 1,
+                minFinalityThreshold: 2000,
+                feeRecipient: address(this)
+            })
         );
         assertEq(address(destinationApp), predictedDestination);
 
@@ -728,6 +757,7 @@ contract CrossChainDirectTest is Test {
             originStrategyHash: quote.originStrategyHash,
             repaymentToken: address(wbtc),
             repaymentAmount: quote.repaymentAmount,
+            maxCctpFee: 0,
             makerQuoteHash: destinationApp.directQuoteDigest(quote),
             fillId: fillId
         });
