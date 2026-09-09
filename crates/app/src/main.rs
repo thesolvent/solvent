@@ -4,10 +4,12 @@
 
 mod config;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+use alloy::primitives::Address;
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::signers::local::PrivateKeySigner;
 use solvent_adapters::balances::AlloyBalancesOracle;
@@ -16,7 +18,8 @@ use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, Walletk
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
 use solvent_adapters::ingest::uniswapx::{
-    ServerCosigner, UniswapXFillBuilder, UniswapXV2Normalizer,
+    FeedHealth, HostedFeed, OrdersApiClient, Scope, ServerCosigner, UniswapXFillBuilder,
+    UniswapXV2Normalizer,
 };
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
@@ -28,6 +31,7 @@ use solvent_core::balances::BalancesService;
 use solvent_core::deps::asset::PairPriceHistorySource;
 use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::ingest::FillBuilder;
+use solvent_core::deps::ingest::{Normalizer, OrderFeed};
 use solvent_core::deps::ledger::BudgetSource;
 use solvent_core::deps::maker_metrics::MakerMetricsStore;
 use solvent_core::deps::quote_log::QuoteLog;
@@ -35,9 +39,11 @@ use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::routing::{GasPrice, PriceOracle};
 use solvent_core::deps::trade::TradeStore;
 use solvent_core::execution::ExecutionService;
+use solvent_core::ingest::{Admission, IngestPipeline};
 use solvent_core::ledger::LedgerService;
 use solvent_core::maker::MakerService;
 use solvent_core::pool::{DepthService, PoolService};
+use solvent_core::primitives::ingest::{Intent, ProtocolId};
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
@@ -73,6 +79,9 @@ const BLOCK_TIME_SECS: u64 = 2;
 /// Routing funnel + split caps for the quote path (gas units unused until gas pricing is wired).
 const MAX_CANDIDATES: usize = 16;
 const MAX_LEGS: usize = 4;
+/// Backpressure between ingest and whatever decides on an intent. A full channel slows the feed
+/// rather than dropping orders.
+const INTENT_CHANNEL_CAPACITY: usize = 256;
 
 #[tokio::main]
 async fn main() -> Result<(), StartupError> {
@@ -350,6 +359,70 @@ async fn main() -> Result<(), StartupError> {
         run_reconcile(Arc::clone(&reconcile), RECONCILE_INTERVAL)
     }));
 
+    // The live order feed. Orders are off-chain messages until someone fills them, so polling the
+    // Orders API is the only way to see one. Left off when no endpoint is configured, in which case
+    // the resolver takes orders solely from its own submit path.
+    if let Some(orders_api_url) = config.orders_api_url.clone() {
+        let feed_normalizer: Arc<dyn Normalizer> = Arc::new(UniswapXV2Normalizer::new(
+            config.reactor,
+            config.expected_cosigners.clone(),
+        ));
+        if config.expected_cosigners.is_empty() {
+            tracing::warn!("no expected_cosigners configured; the order feed will admit nothing");
+        }
+        // Fall back to the token list: those are the assets the registry can price, so nothing
+        // outside them is fillable anyway.
+        let admitted: BTreeSet<Address> = match config.admitted_tokens.is_empty() {
+            true => assets
+                .catalog_tokens()
+                .into_iter()
+                .map(|token| token.address)
+                .collect(),
+            false => config.admitted_tokens.iter().copied().collect(),
+        };
+        let pipeline = Arc::new(IngestPipeline::new(
+            BTreeMap::from([(ProtocolId::UniswapXV2, feed_normalizer)]),
+            Duration::from_secs(config.dedup_ttl_secs),
+            config.dedup_capacity,
+            Arc::new(SystemClock),
+            Admission {
+                supported_chains: BTreeSet::from([ChainId(config.chain_id)]),
+                tokens: admitted,
+                max_outputs: config.max_outputs,
+            },
+        ));
+        let orders_client = Arc::new(
+            OrdersApiClient::new(
+                orders_api_url,
+                ChainId(config.chain_id),
+                config.order_type.clone(),
+            )
+            .map_err(|e| StartupError::OrdersFeed(e.to_string()))?,
+        );
+        let feed_health = Arc::new(FeedHealth::new(Duration::from_secs(
+            config.feed_silence_secs,
+        )));
+        // Orders already assigned to us are polled apart from the wider book: the exclusivity
+        // window is seconds long and discovery must not queue behind a page of everything else.
+        let feed: Arc<dyn OrderFeed> = Arc::new(HostedFeed::new(
+            orders_client,
+            ChainId(config.chain_id),
+            vec![Scope::ExclusiveTo(config.filler), Scope::Book],
+            Duration::from_millis(config.order_poll_ms),
+            Arc::clone(&feed_health),
+        ));
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<Intent>(INTENT_CHANNEL_CAPACITY);
+        tokio::spawn(supervise("ingest", move || {
+            let pipeline = Arc::clone(&pipeline);
+            let feed = Arc::clone(&feed);
+            let tx = tx.clone();
+            async move { pipeline.run(vec![feed], tx).await }
+        }));
+        tokio::spawn(observe_intents(rx));
+        tracing::info!("order feed polling every {}ms", config.order_poll_ms);
+    }
+
     let trades = Arc::new(TradeService::new(
         Arc::clone(&trade_store),
         Arc::clone(&assets),
@@ -477,6 +550,20 @@ async fn run_reconcile(reconcile: Arc<ReconcileService>, interval: Duration) {
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "reconcile tick failed; retrying next tick"),
         }
+    }
+}
+
+/// Drains admitted intents until the decision loop exists to consume them. Until then the feed's
+/// value is observability: it proves the pipeline sees real orders and says which.
+async fn observe_intents(mut rx: tokio::sync::mpsc::Receiver<Intent>) {
+    while let Some(intent) = rx.recv().await {
+        tracing::info!(
+            intent = %intent.id,
+            token_in = %intent.input.token,
+            outputs = intent.outputs.len(),
+            exclusive = intent.exclusivity.is_some(),
+            "admitted order"
+        );
     }
 }
 

@@ -73,6 +73,42 @@ pub struct Config {
     /// Path to the tx engine's durable state (redb), so in-flight fills survive a restart.
     #[serde(default = "default_wallet_state_db")]
     pub wallet_state_db: String,
+
+    /// Root of the Orders API the live feed polls, or a local mirror serving the same shape. Unset
+    /// leaves the feed off and the resolver takes orders only from its own submit endpoint.
+    #[serde(default)]
+    pub orders_api_url: Option<String>,
+    /// The order type to ask for. UniswapX runs a different reactor and decay model per chain, and
+    /// this resolver decodes V2 Dutch orders, which mainnet serves.
+    #[serde(default = "default_order_type")]
+    pub order_type: String,
+    /// Gap between individual order-feed requests. The endpoint allows four per second; one request
+    /// leaves per interval however many scopes are polled.
+    #[serde(default = "default_order_poll_ms")]
+    pub order_poll_ms: u64,
+    /// How long the feed may fail to reach the endpoint before readiness turns false.
+    #[serde(default = "default_feed_silence_secs")]
+    pub feed_silence_secs: u64,
+    /// Cosigner keys whose signature the feed's orders must carry. The reactor only checks that a
+    /// cosignature matches the order's own `cosigner` field, so pinning the identity is ours to do;
+    /// on mainnet this is Uniswap's operational key.
+    #[serde(default)]
+    pub expected_cosigners: Vec<Address>,
+    /// Tokens the resolver will touch on either side of an order. Empty falls back to the token
+    /// list, which is the set the registry can price anyway.
+    #[serde(default)]
+    pub admitted_tokens: Vec<Address>,
+    /// Ceiling on an order's output legs.
+    #[serde(default = "default_max_outputs")]
+    pub max_outputs: usize,
+    /// Order hashes held against re-delivery. Each poll returns the same newest page, so this needs
+    /// to outrun the page size by a wide margin, not the order rate.
+    #[serde(default = "default_dedup_capacity")]
+    pub dedup_capacity: u64,
+    /// How long a hash stays deduped. Longer than any order lives, so a single order is admitted
+    /// once however many polls return it.
+    #[serde(default = "default_dedup_ttl_secs")]
+    pub dedup_ttl_secs: u64,
 }
 
 /// One Binance price symbol and the tokens whose USD price it feeds.
@@ -156,6 +192,31 @@ fn default_ttl_secs() -> u64 {
 fn default_decay_secs() -> u64 {
     60
 }
+fn default_order_type() -> String {
+    "Dutch_V2".to_string()
+}
+
+/// Four requests per second is the endpoint's published ceiling.
+fn default_order_poll_ms() -> u64 {
+    250
+}
+
+fn default_feed_silence_secs() -> u64 {
+    300
+}
+
+fn default_max_outputs() -> usize {
+    4
+}
+
+fn default_dedup_capacity() -> u64 {
+    16_384
+}
+
+fn default_dedup_ttl_secs() -> u64 {
+    900
+}
+
 fn default_wallet_state_db() -> String {
     "walletkit.redb".to_string()
 }
@@ -182,6 +243,8 @@ pub enum StartupError {
     Key(String),
     #[error("wallet state store: {0}")]
     WalletStore(String),
+    #[error("orders feed: {0}")]
+    OrdersFeed(String),
     #[error("token list: {0}")]
     TokenList(String),
     #[error(transparent)]
