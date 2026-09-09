@@ -2,6 +2,7 @@
 //! (caller-safe) message; every other variant is an infrastructure failure that collapses to `500`
 //! whose real cause is logged and whose body is generic — internals never reach the client.
 
+use axum::extract::rejection::QueryRejection;
 use axum::http::StatusCode;
 use solvent_core::SolventError;
 
@@ -29,6 +30,12 @@ impl From<SolventError> for Response<()> {
         } else {
             Response::error(err.to_string(), status)
         }
+    }
+}
+
+impl From<QueryRejection> for Response<()> {
+    fn from(err: QueryRejection) -> Self {
+        Response::error(err.body_text(), err.status())
     }
 }
 

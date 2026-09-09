@@ -341,7 +341,7 @@ async fn main() -> Result<(), StartupError> {
         head,
         assets,
         pools,
-        depth,
+        depth: solvent_adapters::http::DepthReader::new(depth),
         balances,
         makers,
         quote,

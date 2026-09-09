@@ -463,7 +463,7 @@
             "description": "buy|sell (default sell)",
             "required": false,
             "schema": {
-              "type": "string"
+              "$ref": "#/components/schemas/Side"
             }
           }
         ],
@@ -478,8 +478,14 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid token address or depth direction"
+          },
           "404": {
             "description": "No active pool for the pair"
+          },
+          "503": {
+            "description": "Depth request capacity reached or worker unavailable"
           }
         }
       }
@@ -589,6 +595,56 @@
           },
           "404": {
             "description": "Unknown position"
+          }
+        }
+      }
+    },
+    "/v1/positions/{hash}/depth": {
+      "get": {
+        "tags": [
+          "crate::http::app::makers"
+        ],
+        "summary": "One strategy's executable depth, including fees and synced wallet limits.",
+        "operationId": "position_depth",
+        "parameters": [
+          {
+            "name": "hash",
+            "in": "path",
+            "description": "Strategy hash (position id)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "side",
+            "in": "query",
+            "description": "buy|sell (default sell)",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Side"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_PoolDepth"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid strategy hash or depth direction"
+          },
+          "404": {
+            "description": "Unknown position or non-pair strategy"
+          },
+          "503": {
+            "description": "Depth request capacity reached or worker unavailable"
           }
         }
       }
@@ -4033,6 +4089,14 @@
             "$ref": "#/components/schemas/Status"
           }
         }
+      },
+      "Side": {
+        "type": "string",
+        "description": "The trade direction a depth curve is plotted for; the pair's curves are asymmetric, so buying the\nbase and selling it hit different inventory and price differently.",
+        "enum": [
+          "buy",
+          "sell"
+        ]
       },
       "Split": {
         "type": "object",

@@ -4,11 +4,13 @@
 
 use crate::ledger::SystemClock;
 use alloy::primitives::{Address, B256};
+use axum::extract::rejection::QueryRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::Deserialize;
 use solvent_core::deps::ledger::Clock;
 use solvent_core::deps::trade::Page as StorePage;
+use solvent_core::pool::{PoolDepth, Side};
 use solvent_core::primitives::maker::{
     InventoryRow, MakerDashboard, MakerPeriod, MakerSummary, Position, PositionHistory,
 };
@@ -155,10 +157,7 @@ pub async fn position_detail(
     State(state): State<AppState>,
     Path(hash): Path<String>,
 ) -> ApiResult<Position> {
-    let hash = StrategyHash(hash.parse::<B256>().map_err(|e| SolventError::InvalidId {
-        id_type: "strategy_hash",
-        reason: e.to_string(),
-    })?);
+    let hash = parse_hash(&hash)?;
     match state.makers.position(hash).await? {
         Some(position) => Ok(Response::ok(position)),
         None => Err(Response::error("position not found", StatusCode::NOT_FOUND)),
@@ -178,6 +177,15 @@ fn parse_maker(s: &str) -> Result<Address, SolventError> {
     })
 }
 
+fn parse_hash(s: &str) -> Result<StrategyHash, SolventError> {
+    s.parse::<B256>()
+        .map(StrategyHash)
+        .map_err(|e| SolventError::InvalidId {
+            id_type: "strategy_hash",
+            reason: e.to_string(),
+        })
+}
+
 /// The strategy's committed-reserve price over the last seven days.
 #[utoipa::path(get, path = "/v1/positions/{hash}/history",
     params(("hash" = String, Path, description = "Strategy hash")),
@@ -186,12 +194,79 @@ pub async fn position_history(
     State(state): State<AppState>,
     Path(hash): Path<String>,
 ) -> ApiResult<PositionHistory> {
-    let hash = StrategyHash(hash.parse::<B256>().map_err(|e| SolventError::InvalidId {
-        id_type: "strategy_hash",
-        reason: e.to_string(),
-    })?);
+    let hash = parse_hash(&hash)?;
     match state.makers.history(hash).await? {
         Some(history) => Ok(Response::ok(history)),
         None => Err(Response::error("position not found", StatusCode::NOT_FOUND)),
+    }
+}
+
+/// The direction of a position's executable depth curve.
+#[derive(Debug, Deserialize)]
+pub struct PositionDepthQuery {
+    side: Option<Side>,
+}
+
+/// One strategy's executable depth, including fees and synced wallet limits.
+#[utoipa::path(
+    get,
+    path = "/v1/positions/{hash}/depth",
+    params(
+        ("hash" = String, Path, description = "Strategy hash (position id)"),
+        ("side" = Option<Side>, Query, description = "buy|sell (default sell)"),
+    ),
+    responses(
+        (status = 200, body = Response<PoolDepth>),
+        (status = 400, description = "Invalid strategy hash or depth direction"),
+        (status = 404, description = "Unknown position or non-pair strategy"),
+        (status = 503, description = "Depth request capacity reached or worker unavailable"),
+    )
+)]
+pub async fn position_depth(
+    State(state): State<AppState>,
+    Path(hash): Path<String>,
+    query: Result<Query<PositionDepthQuery>, QueryRejection>,
+) -> ApiResult<PoolDepth> {
+    let Query(query) = query?;
+    let hash = parse_hash(&hash)?;
+    match state
+        .depth
+        .read(move |depth| depth.position_depth(hash, query.side.unwrap_or(Side::Sell)))
+        .await?
+    {
+        Some(depth) => Ok(Response::ok(depth)),
+        None => Err(Response::error("position not found", StatusCode::NOT_FOUND)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::{to_bytes, Body};
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn depth_query_errors_use_response_envelope() {
+        let state = crate::http::tests::test_state();
+        let hash = alloy::primitives::B256::ZERO;
+        let base = alloy::primitives::Address::from([1; 20]);
+        let quote = alloy::primitives::Address::from([2; 20]);
+        for query in ["side=invalid", "side=", "side=buy&side=sell"] {
+            for uri in [
+                format!("/v1/positions/{hash}/depth?{query}"),
+                format!("/v1/pools/depth?base={base}&quote={quote}&{query}"),
+            ] {
+                let response = crate::http::router(state.clone())
+                    .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+                assert_eq!(response.headers()["content-type"], "application/json");
+                let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(body["status"], "Error");
+                assert!(body["error"].as_str().unwrap().contains("side"));
+            }
+        }
     }
 }

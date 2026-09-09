@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use super::depth::DepthReader;
 use alloy::primitives::Address;
 use serde::Serialize;
 use solvent_core::asset::AssetManager;
@@ -10,7 +11,7 @@ use solvent_core::balances::BalancesService;
 use solvent_core::deps::quote_log::QuoteLog;
 use solvent_core::deps::registry::EventStore;
 use solvent_core::maker::MakerService;
-use solvent_core::pool::{DepthService, PoolService};
+use solvent_core::pool::PoolService;
 use solvent_core::quote::QuoteService;
 use solvent_core::registry::SharedSnapshot;
 use solvent_core::swap::SwapService;
@@ -55,7 +56,7 @@ pub struct AppState {
     pub head: ChainHead,
     pub assets: Arc<AssetManager>,
     pub pools: Arc<PoolService>,
-    pub depth: Arc<DepthService>,
+    pub depth: DepthReader,
     pub balances: Arc<BalancesService>,
     /// The maker read-surface: positions, the positions list, and the roster.
     pub makers: Arc<MakerService>,

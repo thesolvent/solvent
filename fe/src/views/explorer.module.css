@@ -1278,14 +1278,6 @@
   padding: 12px 18px 14px;
 }
 
-.curveHead {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex: none;
-  margin-bottom: 6px;
-}
-
 .curveTag {
   font-family: var(--font-mono);
   font-size: 9.5px;
@@ -1297,47 +1289,6 @@
 .curveNote {
   font-size: 11px;
   color: var(--line-warm);
-}
-
-.curveMid {
-  font-size: 11.5px;
-  color: var(--text-mid);
-  white-space: nowrap;
-}
-
-.curveSvg {
-  width: 100%;
-  flex: 1;
-  min-height: 0;
-  display: block;
-}
-
-.spark {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 42px;
-  flex: none;
-  margin-top: 8px;
-}
-
-.sparkBar {
-  flex: 1;
-  min-width: 0;
-  transition: background 140ms ease;
-}
-
-.curveAxis {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10.5px;
-  color: var(--text-dim);
-  flex: none;
-  margin-top: 5px;
-}
-
-.curveAxisMid {
-  color: var(--text-muted);
 }
 
 .fillsPane {
@@ -1409,4 +1360,32 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.rangeStat {
+  composes: statTight;
+  position: relative;
+  cursor: help;
+}
+
+.rangeTooltip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  top: calc(100% - 4px);
+  right: 12px;
+  width: 300px;
+  max-width: calc(100vw - 40px);
+  padding: 14px 16px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  line-height: 1.6;
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
+.rangeStat:hover .rangeTooltip,
+.rangeStat:focus .rangeTooltip {
+  display: block;
 }

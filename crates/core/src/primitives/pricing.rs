@@ -27,6 +27,35 @@ impl Ratio {
         }
     }
 
+    /// Human output-per-input price, retaining small nonzero prices and arbitrary token scales.
+    pub(crate) fn format_price(&self, input_decimals: u8, output_decimals: u8) -> String {
+        let price = &self.0 * BigInt::from(10).pow(u32::from(input_decimals))
+            / BigInt::from(10).pow(u32::from(output_decimals));
+        if price.is_zero() {
+            return "0".to_string();
+        }
+        let scale = BigInt::from(1_000_000);
+        // Six decimal places cover ordinary pairs; below that retain six significant digits.
+        let places = if (&price * &scale).to_integer().is_zero() {
+            price
+                .denom()
+                .to_str_radix(10)
+                .len()
+                .saturating_sub(price.numer().to_str_radix(10).len())
+                + 6
+        } else {
+            6
+        };
+        let scaled = (price * BigInt::from(10).pow(places as u32)).to_integer();
+        let digits = format!("{scaled:0width$}", width = places + 1);
+        let boundary = digits.len() - places;
+        let fraction = digits[boundary..].trim_end_matches('0');
+        match fraction.is_empty() {
+            true => digits[..boundary].to_string(),
+            false => format!("{}.{}", &digits[..boundary], fraction),
+        }
+    }
+
     /// The reciprocal. `None` if the ratio is zero.
     #[must_use]
     pub fn invert(self) -> Option<Ratio> {
@@ -67,10 +96,16 @@ impl Ratio {
         from_bigint(&self.0.ceil().to_integer())
     }
 
-    /// Half of this ratio — the water-fill's bisection step.
+    /// Twice this ratio without exposing the arbitrary-precision representation.
     #[must_use]
-    pub fn halved(self) -> Ratio {
-        Ratio(self.0 / BigInt::from(2))
+    pub(crate) fn doubled(&self) -> Ratio {
+        Ratio(&self.0 * BigInt::from(2))
+    }
+
+    /// The midpoint between two ratios, used by price-space bisections.
+    #[must_use]
+    pub(crate) fn midpoint(&self, other: &Ratio) -> Ratio {
+        Ratio((&self.0 + &other.0) / BigInt::from(2))
     }
 
     /// The relative difference from `other` in basis points, floored:

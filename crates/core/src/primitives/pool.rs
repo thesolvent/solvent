@@ -90,7 +90,7 @@ pub struct PoolDetail {
 
 /// The trade direction a depth curve is plotted for; the pair's curves are asymmetric, so buying the
 /// base and selling it hit different inventory and price differently.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Side {
     Buy,

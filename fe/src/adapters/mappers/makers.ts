@@ -71,6 +71,12 @@ function balances(
 
 export function toPosition(api: ApiPosition): Position {
   return {
+    ref: {
+      base: api.base.address,
+      quote: api.quote.address,
+      baseDecimals: api.base.decimals,
+      quoteDecimals: api.quote.decimals,
+    },
     hash: api.strategy_hash,
     maker: api.maker,
     pair: api.pair,

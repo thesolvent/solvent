@@ -25,6 +25,10 @@ function detail(over: Partial<PoolDetailInput> = {}) {
 }
 
 describe("impact stops", () => {
+  it("keeps small tiers at their actual fraction rather than a minimum pointer offset", () => {
+    expect(detail({ hoverFrac: 0.001 }).hover?.left).toBe("0.10%");
+  });
+
   it("places each tier at its share of the curve", () => {
     expect(detail().impacts).toEqual([
       { label: "0.5%", frac: 0.25 },

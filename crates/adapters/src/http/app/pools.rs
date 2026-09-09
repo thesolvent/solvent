@@ -5,6 +5,7 @@
 //! classification and popular tier.
 
 use alloy::primitives::Address;
+use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use serde::Deserialize;
@@ -112,23 +113,30 @@ pub struct DepthQuery {
     params(
         ("base" = String, Query, description = "Base token address"),
         ("quote" = String, Query, description = "Quote token address"),
-        ("side" = Option<String>, Query, description = "buy|sell (default sell)"),
+        ("side" = Option<Side>, Query, description = "buy|sell (default sell)"),
     ),
     responses(
         (status = 200, body = Response<PoolDepth>),
+        (status = 400, description = "Invalid token address or depth direction"),
         (status = 404, description = "No active pool for the pair"),
+        (status = 503, description = "Depth request capacity reached or worker unavailable"),
     )
 )]
 pub async fn pool_depth(
     State(state): State<AppState>,
-    Query(query): Query<DepthQuery>,
+    query: Result<Query<DepthQuery>, QueryRejection>,
 ) -> ApiResult<PoolDepth> {
+    let Query(query) = query?;
     let pair = TokenPair::new(
         parse_addr("token", &query.base)?,
         parse_addr("token", &query.quote)?,
     );
     let side = query.side.unwrap_or(Side::Sell);
-    match state.depth.depth(&pair, side) {
+    match state
+        .depth
+        .read(move |depth| depth.depth(&pair, side))
+        .await?
+    {
         Some(depth) => Ok(Response::ok(depth)),
         None => Err(Response::error("pool not found", StatusCode::NOT_FOUND)),
     }

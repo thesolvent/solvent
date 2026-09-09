@@ -244,6 +244,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/positions/{hash}/depth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One strategy's executable depth, including fees and synced wallet limits. */
+        get: operations["position_depth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/positions/{hash}/history": {
         parameters: {
             query?: never;
@@ -1413,6 +1430,12 @@ export interface components {
             };
             status: components["schemas"]["Status"];
         };
+        /**
+         * @description The trade direction a depth curve is plotted for; the pair's curves are asymmetric, so buying the
+         *     base and selling it hit different inventory and price differently.
+         * @enum {string}
+         */
+        Side: "buy" | "sell";
         /** @description One token's share of a position's committed liquidity. */
         Split: {
             /** Format: double */
@@ -1798,7 +1821,7 @@ export interface operations {
                 /** @description Quote token address */
                 quote: string;
                 /** @description buy|sell (default sell) */
-                side?: string;
+                side?: components["schemas"]["Side"];
             };
             header?: never;
             path?: never;
@@ -1814,8 +1837,22 @@ export interface operations {
                     "application/json": components["schemas"]["Response_PoolDepth"];
                 };
             };
+            /** @description Invalid token address or depth direction */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description No active pool for the pair */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Depth request capacity reached or worker unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1899,6 +1936,52 @@ export interface operations {
             };
             /** @description Unknown position */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    position_depth: {
+        parameters: {
+            query?: {
+                /** @description buy|sell (default sell) */
+                side?: components["schemas"]["Side"];
+            };
+            header?: never;
+            path: {
+                /** @description Strategy hash (position id) */
+                hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_PoolDepth"];
+                };
+            };
+            /** @description Invalid strategy hash or depth direction */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown position or non-pair strategy */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Depth request capacity reached or worker unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

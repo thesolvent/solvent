@@ -21,7 +21,7 @@ use crate::primitives::registry::{Curve, PeggedParams};
 /// A revert produced by the on-chain curve, mirrored so the port can be
 /// differential-fuzzed for exact parity. Which variant surfaces is diagnostic
 /// only — parity is defined as "the port errs iff the contract reverts".
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum CurveError {
     /// Both maker reserves must be non-zero for the constant-product leg.
@@ -90,10 +90,10 @@ fn fill_to_limit_numerical<P: Pricing + ?Sized>(
             limited: false,
         });
     }
-    // Clamp the bound to the largest input the pool still prices. An unbounded sentinel can lie
+    // Clamp the bound to the largest input the pool still prices. A large requested input can lie
     // beyond the representable/feasible range, and the finite-difference step scales to this
     // bound — a huge one overshoots the feasible range and misreads every marginal as drained.
-    let bound = feasible_bound(pool, amount_in);
+    let bound = feasible_bound(amount_in, |input| pool.quote_exact_in(input).is_ok());
     if bound.is_zero() {
         return Ok(LimitedQuote {
             amount_in: U256::ZERO,
@@ -150,17 +150,16 @@ fn fill_to_limit_numerical<P: Pricing + ?Sized>(
     })
 }
 
-/// The largest input `≤ hi` the pool still prices. Feasibility is monotone — a small input
-/// prices, a huge or out-of-range one overflows — so a bisection finds the ceiling; `hi` itself
-/// when it already prices.
-fn feasible_bound<P: Pricing + ?Sized>(pool: &P, hi: U256) -> U256 {
-    if pool.quote_exact_in(hi).is_ok() {
+/// A feasible input ceiling `≤ hi`, within the bisection precision of the representable limit.
+/// Feasibility is monotone, so the lower endpoint stays valid while an oversized input is reduced.
+pub(crate) fn feasible_bound(hi: U256, prices: impl Fn(U256) -> bool) -> U256 {
+    if prices(hi) {
         return hi;
     }
     let (mut lo, mut hi) = (U256::ZERO, hi);
     while !converged(lo, hi) {
         let mid = lo + (hi - lo) / U256::from(2u64);
-        match pool.quote_exact_in(mid).is_ok() {
+        match prices(mid) {
             true => lo = mid,
             false => hi = mid,
         }
@@ -361,11 +360,12 @@ impl Pricing for XycPool {
             });
         }
         let k = Ratio::from(self.balance_in) * Ratio::from(self.balance_out);
-        let boundary = (k * limit.clone().invert().ok_or(CurveError::DivByZero)?)
-            .floor_sqrt()
-            .ok_or(CurveError::Overflow)?;
+        let boundary = (k * limit.clone().invert().ok_or(CurveError::DivByZero)?).floor_sqrt();
         // spot > limit ⇒ boundary ≥ balance_in; a rounding tie floors the fill to zero.
-        let amount = amount_in.min(boundary.saturating_sub(self.balance_in));
+        // An unrepresentable boundary lies beyond every input the checked quote can accept.
+        let amount = boundary.map_or(amount_in, |boundary| {
+            amount_in.min(boundary.saturating_sub(self.balance_in))
+        });
         Ok(LimitedQuote {
             amount_in: amount,
             amount_out: self.quote_exact_in(amount)?,
@@ -404,18 +404,11 @@ fn concentrate_liquidity(
 /// prices the amplified pool with the plain XYC leg (`ctx.runLoop()`).
 #[derive(Debug, Clone, Copy)]
 pub struct ConcentratePool {
-    balance_in: U256,
-    balance_out: U256,
-    sqrt_price_min: U256,
-    sqrt_price_max: U256,
-    /// Whether `tokenIn` is the lower-address token — the on-chain price direction.
-    in_is_lt: bool,
+    virtual_pool: Result<XycPool, CurveError>,
 }
 
 impl ConcentratePool {
-    /// From reserves + the program's sqrt price bounds, oriented by the on-chain
-    /// `tokenIn < tokenOut` rule. `sqrt_price_{min,max}` are `1e18` fixed-point
-    /// and program-canonical (direction-independent).
+    /// From reserves and program-canonical sqrt price bounds (`1e18` fixed point).
     pub fn from_reserves_and_bounds(
         token_in: Address,
         token_out: Address,
@@ -425,57 +418,59 @@ impl ConcentratePool {
         sqrt_price_max: U256,
     ) -> Self {
         Self {
-            balance_in,
-            balance_out,
-            sqrt_price_min,
-            sqrt_price_max,
-            in_is_lt: token_in < token_out,
+            virtual_pool: Self::grow_reserves(
+                token_in < token_out,
+                balance_in,
+                balance_out,
+                sqrt_price_min,
+                sqrt_price_max,
+            ),
         }
     }
 
-    /// The virtual XYC pool the concentrated leg actually swaps against — the real
-    /// reserves grown by `_xycConcentrateGrowLiquidity2D`. Concentrate *is* XYC on
-    /// these reserves, so pricing delegates to it.
-    fn virtual_pool(&self) -> Result<XycPool, CurveError> {
+    // The reserves are immutable for this pool, so the virtual liquidity is computed once.
+    fn grow_reserves(
+        in_is_lt: bool,
+        balance_in: U256,
+        balance_out: U256,
+        sqrt_price_min: U256,
+        sqrt_price_max: U256,
+    ) -> Result<XycPool, CurveError> {
         let one = one18();
-        let (balance_lt, balance_gt) = match self.in_is_lt {
-            true => (self.balance_in, self.balance_out),
-            false => (self.balance_out, self.balance_in),
+        let (balance_lt, balance_gt) = match in_is_lt {
+            true => (balance_in, balance_out),
+            false => (balance_out, balance_in),
         };
-        let liquidity = concentrate_liquidity(
-            balance_lt,
-            balance_gt,
-            self.sqrt_price_min,
-            self.sqrt_price_max,
-        )?;
-        let (add_in, add_out) = match self.in_is_lt {
+        let liquidity =
+            concentrate_liquidity(balance_lt, balance_gt, sqrt_price_min, sqrt_price_max)?;
+        let (add_in, add_out) = match in_is_lt {
             true => (
-                ceil_div(cmul(liquidity, one)?, self.sqrt_price_max)?,
-                mul_div(liquidity, self.sqrt_price_min, one)?,
+                ceil_div(cmul(liquidity, one)?, sqrt_price_max)?,
+                mul_div(liquidity, sqrt_price_min, one)?,
             ),
             false => (
-                ceil_div(cmul(liquidity, self.sqrt_price_min)?, one)?,
-                mul_div(liquidity, one, self.sqrt_price_max)?,
+                ceil_div(cmul(liquidity, sqrt_price_min)?, one)?,
+                mul_div(liquidity, one, sqrt_price_max)?,
             ),
         };
         Ok(XycPool::from_reserves(
-            cadd(self.balance_in, add_in)?,
-            cadd(self.balance_out, add_out)?,
+            cadd(balance_in, add_in)?,
+            cadd(balance_out, add_out)?,
         ))
     }
 }
 
 impl Pricing for ConcentratePool {
     fn quote_exact_in(&self, amount_in: U256) -> Result<U256, CurveError> {
-        self.virtual_pool()?.quote_exact_in(amount_in)
+        self.virtual_pool?.quote_exact_in(amount_in)
     }
 
     fn quote_exact_out(&self, amount_out: U256) -> Result<U256, CurveError> {
-        self.virtual_pool()?.quote_exact_out(amount_out)
+        self.virtual_pool?.quote_exact_out(amount_out)
     }
 
     fn quote_with_limit(&self, amount_in: U256, limit: &Ratio) -> Result<LimitedQuote, CurveError> {
-        self.virtual_pool()?.quote_with_limit(amount_in, limit)
+        self.virtual_pool?.quote_with_limit(amount_in, limit)
     }
 }
 
@@ -530,6 +525,7 @@ fn pegged_solve(u: U256, a: U256, invariant_c: U256) -> Result<U256, CurveError>
 }
 
 /// A pegged pool's current reserves in normalized units, plus the invariant they pin.
+#[derive(Debug, Clone, Copy)]
 struct Normalized {
     x0: U256,
     y0: U256,
@@ -539,8 +535,7 @@ struct Normalized {
 /// Pegged / stableswap pool (`AquaPeggedAmmStrategy`), oriented to `(in, out)`.
 #[derive(Debug, Clone, Copy)]
 pub struct PeggedPool {
-    balance_in: U256,
-    balance_out: U256,
+    normalized: Result<Normalized, CurveError>,
     x0_init: U256,
     y0_init: U256,
     linear_width: U256,
@@ -562,9 +557,18 @@ impl PeggedPool {
             true => (params.rate_lt, params.rate_gt, params.x0, params.y0),
             false => (params.rate_gt, params.rate_lt, params.y0, params.x0),
         };
+        let normalized = (|| {
+            if balance_in.is_zero() && balance_out.is_zero() {
+                return Err(CurveError::EmptyReserves);
+            }
+            let x0 = cmul(balance_in, rate_in)?;
+            let y0 = cmul(balance_out, rate_out)?;
+            let invariant =
+                pegged_invariant_from_reserves(x0, y0, x0_init, y0_init, params.linear_width)?;
+            Ok(Normalized { x0, y0, invariant })
+        })();
         Self {
-            balance_in,
-            balance_out,
+            normalized,
             x0_init,
             y0_init,
             linear_width: params.linear_width,
@@ -575,7 +579,7 @@ impl PeggedPool {
 
     /// SwapVM SDK's `peggedSwapMarginalGtPerLtE18`, retaining the rational until display conversion.
     fn marginal_price(&self) -> Result<Ratio, CurveError> {
-        let normalized = self.normalized()?;
+        let normalized = self.normalized?;
         let weight = |balance, initial| {
             let coordinate = mul_div(balance, one27(), initial)?;
             let root = sqrt_floor(cmul(coordinate, one27())?);
@@ -592,24 +596,12 @@ impl PeggedPool {
                 * Ratio::new(self.rate_in, self.rate_out).ok_or(CurveError::DivByZero)?,
         )
     }
-
-    /// Normalized current reserves + the target invariant they pin.
-    fn normalized(&self) -> Result<Normalized, CurveError> {
-        if self.balance_in.is_zero() && self.balance_out.is_zero() {
-            return Err(CurveError::EmptyReserves);
-        }
-        let x0 = cmul(self.balance_in, self.rate_in)?;
-        let y0 = cmul(self.balance_out, self.rate_out)?;
-        let invariant =
-            pegged_invariant_from_reserves(x0, y0, self.x0_init, self.y0_init, self.linear_width)?;
-        Ok(Normalized { x0, y0, invariant })
-    }
 }
 
 impl Pricing for PeggedPool {
     fn quote_exact_in(&self, amount_in: U256) -> Result<U256, CurveError> {
         let one = one27();
-        let n = self.normalized()?;
+        let n = self.normalized?;
         let x1 = cadd(n.x0, cmul(amount_in, self.rate_in)?)?;
         let u1 = fdiv(cmul(x1, one)?, self.x0_init)?;
         let v1 = pegged_solve(u1, self.linear_width, n.invariant)?;
@@ -620,7 +612,7 @@ impl Pricing for PeggedPool {
 
     fn quote_exact_out(&self, amount_out: U256) -> Result<U256, CurveError> {
         let one = one27();
-        let n = self.normalized()?;
+        let n = self.normalized?;
         let y1 =
             n.y0.checked_sub(cmul(amount_out, self.rate_out)?)
                 .ok_or(CurveError::AmountTooLarge)?;
@@ -647,7 +639,7 @@ impl CurvePool {
     pub(crate) fn marginal_price(&self) -> Result<Ratio, CurveError> {
         match self {
             Self::Xyc(pool) => pool.marginal_price(),
-            Self::Concentrate(pool) => pool.virtual_pool()?.marginal_price(),
+            Self::Concentrate(pool) => pool.virtual_pool?.marginal_price(),
             Self::Pegged(pool) => pool.marginal_price(),
         }
     }
@@ -764,6 +756,19 @@ mod tests {
         assert_eq!(sqrt_floor(U256::from(16u64)), U256::from(4u64));
         assert_eq!(sqrt_ceil(U256::from(16u64)), U256::from(4u64));
         assert_eq!(sqrt_ceil(U256::from(17u64)), U256::from(5u64));
+    }
+
+    #[test]
+    fn xyc_limit_keeps_a_finite_fill_below_an_unrepresentable_boundary() {
+        let reserve_in = U256::from(1) << 250;
+        let pool = XycPool::from_reserves(reserve_in, U256::from(32));
+        let limit =
+            pool.marginal_price().unwrap() * Ratio::new(U256::from(1), U256::from(10_000)).unwrap();
+        let expected = pool.quote_exact_in(reserve_in).unwrap();
+        let fill = pool.quote_with_limit(reserve_in, &limit).unwrap();
+        assert_eq!(fill.amount_in, reserve_in);
+        assert_eq!(fill.amount_out, expected);
+        assert!(!fill.limited);
     }
 
     #[test]

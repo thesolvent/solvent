@@ -1,3 +1,4 @@
+import type { PairRef } from "./index";
 export type MakerPeriod = "7d" | "1m" | "3m" | "6m";
 
 export interface ActivityBucket {
@@ -46,6 +47,7 @@ export interface PositionBalance extends ValuedAmount {
 }
 
 export interface Position {
+  ref: PairRef;
   hash: string;
   maker: string;
   pair: string;

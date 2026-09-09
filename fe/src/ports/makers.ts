@@ -1,3 +1,4 @@
+import type { DepthCurve, PairRef } from "@/data";
 import type { RecordPage } from "@/data/explorer";
 import type {
   InventoryAsset,
@@ -15,6 +16,7 @@ export interface MakersPort {
   inventory(address: string, period: MakerPeriod): Promise<InventoryAsset[]>;
   positions(address: string, period: MakerPeriod): Promise<Position[]>;
   position(hash: string): Promise<Position>;
+  depth(hash: string, pair: PairRef): Promise<DepthCurve>;
   history(hash: string): Promise<PositionHistory>;
   settlements(
     address: string,

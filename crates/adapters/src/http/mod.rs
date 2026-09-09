@@ -4,11 +4,14 @@
 //! business logic lives in core services.
 
 pub mod app;
+mod depth;
 pub mod dto;
 pub mod error;
 pub mod openapi;
 pub mod primitives;
 pub mod state;
+
+pub use depth::DepthReader;
 
 use std::time::Duration;
 
@@ -55,6 +58,7 @@ pub fn router(state: AppState) -> Router {
         .route("/pairs", get(app::pairs::pairs))
         .route("/positions/preview", post(app::positions::preview))
         .route("/positions/{hash}", get(app::makers::position_detail))
+        .route("/positions/{hash}/depth", get(app::makers::position_depth))
         .route(
             "/positions/{hash}/history",
             get(app::makers::position_history),
@@ -417,7 +421,7 @@ mod tests {
         }
     }
 
-    fn test_state() -> AppState {
+    pub(super) fn test_state() -> AppState {
         let list = TokenList {
             name: "test".to_string(),
             tokens: vec![TokenMeta {
@@ -540,7 +544,7 @@ mod tests {
             head: ChainHead::stub(0),
             assets,
             pools,
-            depth,
+            depth: DepthReader::new(depth),
             balances,
             makers,
             quote,

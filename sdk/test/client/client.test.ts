@@ -39,6 +39,23 @@ describe("createSolventClient", () => {
     expect(seen).toBe("https://x.test/v1/pairs?search=weth");
   });
 
+  it.each([undefined, "buy", "sell"] as const)("passes the depth direction %s to both endpoints", async (side) => {
+    const urls: string[] = [];
+    const client = createSolventClient({
+      baseUrl: "https://x.test",
+      transport: okTransport({ points: [] }, (url) => urls.push(url)),
+    });
+
+    await client.poolDepth({ base: "0x01", quote: "0x02", side });
+    await client.positionDepth("0x03", side === undefined ? undefined : { side });
+
+    const suffix = side === undefined ? "" : `&side=${side}`;
+    expect(urls).toEqual([
+      `https://x.test/v1/pools/depth?base=0x01&quote=0x02${suffix}`,
+      `https://x.test/v1/positions/0x03/depth${side === undefined ? "" : `?side=${side}`}`,
+    ]);
+  });
+
   it("throws SolventApiError on an error envelope", async () => {
     const transport: Transport = async () =>
       new Response(JSON.stringify({ status: 422, error: "no route" }), { status: 422 });

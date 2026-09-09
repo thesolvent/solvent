@@ -16,6 +16,7 @@ use crate::primitives::ledger::AccountKey;
 use crate::primitives::pricing::{LimitedQuote, Ratio};
 use crate::primitives::registry::{CurveSpec, MakerStrategy, Snapshot, StrategyKey, TokenPair};
 use crate::primitives::routing::RouteRequest;
+use crate::registry::curves::feasible_bound;
 use crate::registry::{gross_up_by_fees, shrink_by_fees, CurveError, CurvePool, Pricing};
 
 /// A frozen, priceable maker venue for one `token_in -> token_out` direction. Carries
@@ -61,6 +62,11 @@ mod metrics {
 pub use metrics::{quote_calls, reset_quote_calls};
 
 impl Candidate {
+    /// Fee-inclusive marginal output per input, in raw token units.
+    pub(crate) fn marginal_price(&self) -> Result<Ratio, CurveError> {
+        Ok(self.pool.marginal_price()? * self.gamma()?)
+    }
+
     /// A frozen venue; built internally by [`select`], public so tests and tools can build one.
     pub fn new(
         key: StrategyKey,
@@ -87,7 +93,11 @@ impl Candidate {
         self.fees_in_bps
             .iter()
             .try_fold(Ratio::from(U256::from(1u64)), |g, &f| {
-                let factor = Ratio::new(U256::from(BPS - u64::from(f)), U256::from(BPS))
+                let retained = BPS
+                    .checked_sub(u64::from(f))
+                    .filter(|&n| n != 0)
+                    .ok_or(CurveError::InvalidParams)?;
+                let factor = Ratio::new(U256::from(retained), U256::from(BPS))
                     .ok_or(CurveError::DivByZero)?;
                 Ok(g * factor)
             })
@@ -119,6 +129,24 @@ impl Candidate {
             Ok(_) => Some(input.saturating_sub(U256::from(1u64))),
             Err(_) => None,
         }
+    }
+
+    /// Largest input within `upper` that survives the curve and fee arithmetic.
+    pub(crate) fn feasible_input(&self, upper: U256) -> U256 {
+        feasible_bound(upper, |input| self.net_quote_exact_in(input).is_ok())
+    }
+
+    /// Input spanning the executable output range, including the last atom below an asymptote.
+    pub(crate) fn full_input_bound(&self) -> U256 {
+        [self.cap_out, self.cap_out.saturating_sub(U256::from(1))]
+            .into_iter()
+            .filter(|output| !output.is_zero())
+            .find_map(|output| {
+                self.net_quote_exact_out(output)
+                    .ok()
+                    .filter(|&input| self.net_quote_exact_in(input).is_ok())
+            })
+            .unwrap_or_else(|| self.feasible_input(U256::MAX))
     }
 
     /// Fee-inclusive fill up to a gross marginal `limit`: rescale the bound to net space
@@ -275,12 +303,15 @@ fn best_first(a: &Scored, b: &Scored, exact_in: bool) -> Ordering {
 
 /// Build one eligible candidate, or `None` when the strategy can't source this pair:
 /// an unsupported curve, an empty reserve side, or no deliverable room left.
-fn build_candidate(
+pub(crate) fn build_candidate(
     strategy: &MakerStrategy,
     caps: &AvailableSnapshot,
     token_in: Address,
     token_out: Address,
 ) -> Option<Candidate> {
+    if !strategy.active {
+        return None;
+    }
     let CurveSpec::Priceable { curve, fees_in_bps } = &strategy.curve else {
         return None;
     };
@@ -334,6 +365,34 @@ mod tests {
     use crate::primitives::{IntentId, MakerId, StrategyHash};
     use alloy_primitives::B256;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn invalid_flat_fees_fail_pricing_without_panicking() {
+        let candidate = Candidate::new(
+            StrategyKey {
+                maker: maker(1),
+                app: Address::ZERO,
+                strategy_hash: hash(1),
+            },
+            tok(1),
+            tok(2),
+            U256::from(1000),
+            U256::from(1000),
+            CurvePool::from_curve(
+                &Curve::Xyc,
+                tok(1),
+                tok(2),
+                U256::from(1000),
+                U256::from(1000),
+            ),
+            vec![1_000_000_001],
+        );
+        assert_eq!(candidate.marginal_price(), Err(CurveError::InvalidParams));
+        assert_eq!(
+            candidate.net_quote_with_limit(U256::from(10), &Ratio::zero()),
+            Err(CurveError::InvalidParams)
+        );
+    }
 
     fn request(in_tok: Address, out_tok: Address, amount: u64) -> RouteRequest {
         RouteRequest {

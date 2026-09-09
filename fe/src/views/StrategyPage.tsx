@@ -1,9 +1,16 @@
+import { useId, useState } from "react";
+import { DepthChart } from "@/components/DepthChart";
+import { depthChart } from "@/lib/depth-chart";
 import { useNavigate, useParams } from "react-router-dom";
-import { usePosition, usePositionHistory } from "@/services/makers";
+import {
+  usePosition,
+  usePositionHistory,
+  usePositionDepth,
+} from "@/services/makers";
 import { useTrades } from "@/services/explorer";
 import { slug } from "@/services/pools";
 import { Crumbs } from "@/components/Crumbs";
-import { strategyDetail } from "@/lib/strategy";
+import { strategyDetail, rangeDescription } from "@/lib/strategy";
 
 import styles from "./explorer.module.css";
 
@@ -12,24 +19,41 @@ export function StrategyPage() {
   const { strategyHash } = useParams();
   const position = usePosition(strategyHash);
   const history = usePositionHistory(strategyHash);
+  const depth = usePositionDepth(position.data);
+  const [hoverFrac, setHoverFrac] = useState<number | null>(null);
+  const rangeHint = useId();
   const settlements = useTrades(
     strategyHash
       ? { status: "confirmed", strategy_hash: strategyHash }
       : undefined,
   );
-  const notice = position.isError
-    ? "Couldn’t load this strategy"
-    : history.isError
-      ? "Price history unavailable"
-      : position.isPending
-        ? "Loading strategy…"
-        : "";
   const sd = strategyDetail(
     position.data,
     history.data,
     settlements.data?.items ?? [],
-    notice,
   );
+  const [baseSymbol = "", quoteSymbol = ""] = (position.data?.pair ?? "").split(
+    /\s*\/\s*/,
+  );
+  const chart = {
+    ...depthChart({
+      depth: position.isError || depth.isError ? undefined : depth.data,
+      baseSymbol,
+      quoteSymbol,
+      hoverFrac,
+    }),
+    axisTitle: `Cumulative ${baseSymbol || "base token"} in · marginal price (${quoteSymbol || "quote"} per ${baseSymbol || "base"})`,
+  };
+
+  const notice = position.isError
+    ? "Couldn’t load this strategy"
+    : depth.isError
+      ? "Couldn’t load strategy depth"
+      : position.isPending || depth.isPending
+        ? "Loading strategy depth…"
+        : !chart.aggPath
+          ? "No executable liquidity for this strategy"
+          : undefined;
 
   return (
     <div className={styles.rootFramed}>
@@ -38,7 +62,13 @@ export function StrategyPage() {
           <button
             type="button"
             className={styles.back}
-            onClick={() => navigate(-1)}
+            onClick={() => {
+              if (window.history.state?.idx > 0) {
+                navigate(-1);
+              } else {
+                navigate("/explorer", { replace: true });
+              }
+            }}
           >
             ←
           </button>
@@ -80,11 +110,24 @@ export function StrategyPage() {
           {sd.shape.map((k) => (
             <div
               key={k.label}
-              className={styles.statTight}
+              className={
+                k.label === "Range" ? styles.rangeStat : styles.statTight
+              }
+              tabIndex={k.label === "Range" ? 0 : undefined}
+              aria-describedby={k.label === "Range" ? rangeHint : undefined}
               style={{
                 backgroundImage: `linear-gradient(${k.sep}, ${k.sep})`,
               }}
             >
+              {k.label === "Range" && (
+                <span
+                  id={rangeHint}
+                  role="tooltip"
+                  className={styles.rangeTooltip}
+                >
+                  {rangeDescription(position.data)}
+                </span>
+              )}
               <div className={styles.statLabel}>{k.label}</div>
               <div className={styles.statValueXs}>{k.value}</div>
               <div className={styles.statTagRow}>
@@ -121,109 +164,15 @@ export function StrategyPage() {
         </div>
 
         <div className={styles.split}>
-          <section className={styles.curvePane}>
-            <div className={styles.curveHead}>
-              <span className={styles.curveTag}>Curve &amp; range</span>
-              <span className={styles.curveNote}>{sd.bandNote}</span>
-              <span className={styles.spacer} />
-              <span className={styles.curveMid}>mid {sd.mid}</span>
-            </div>
-            <svg
-              viewBox="0 0 640 300"
-              preserveAspectRatio="none"
-              className={styles.curveSvg}
-            >
-              {sd.showBand && (
-                <rect
-                  x="0"
-                  y={sd.bandY}
-                  width="640"
-                  height={sd.bandH}
-                  fill="#f4f9e4"
-                />
-              )}
-              {sd.showBounds && (
-                <line
-                  x1="0"
-                  y1={sd.bandY}
-                  x2="640"
-                  y2={sd.bandY}
-                  stroke="var(--green)"
-                  strokeWidth="1.4"
-                  strokeDasharray="5 5"
-                  vectorEffect="non-scaling-stroke"
-                />
-              )}
-              {sd.showBounds && (
-                <line
-                  x1="0"
-                  y1={sd.bandY2}
-                  x2="640"
-                  y2={sd.bandY2}
-                  stroke="var(--green)"
-                  strokeWidth="1.4"
-                  strokeDasharray="5 5"
-                  vectorEffect="non-scaling-stroke"
-                />
-              )}
-              <line
-                x1="0"
-                y1="150"
-                x2="640"
-                y2="150"
-                stroke="var(--line)"
-                strokeWidth="1"
-                vectorEffect="non-scaling-stroke"
-              />
-              <line
-                x1="0"
-                y1="60"
-                x2="640"
-                y2="60"
-                stroke="var(--surface-alt)"
-                strokeWidth="1"
-                vectorEffect="non-scaling-stroke"
-              />
-              <line
-                x1="0"
-                y1="240"
-                x2="640"
-                y2="240"
-                stroke="var(--surface-alt)"
-                strokeWidth="1"
-                vectorEffect="non-scaling-stroke"
-              />
-              {sd.lines.map((line, i) => (
-                <polyline
-                  key={i}
-                  points={line}
-                  fill="none"
-                  stroke="var(--ink)"
-                  strokeWidth="1.8"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                  vectorEffect="non-scaling-stroke"
-                />
-              ))}
-            </svg>
-            <div className={styles.spark}>
-              {sd.spark.map((b, i) => (
-                <span
-                  key={i}
-                  className={styles.sparkBar}
-                  style={{ height: b.h, background: b.bg }}
-                />
-              ))}
-            </div>
-            <div className={styles.curveAxis}>
-              <span>{sd.axisFrom}</span>
-              <span className={styles.curveAxisMid}>
-                {sd.tickLo} · {sd.tickHi}
-              </span>
-              <span>fills per day</span>
-              <span>{sd.axisTo}</span>
-            </div>
-          </section>
+          <DepthChart
+            data={chart}
+            title="Strategy depth"
+            liquidityLabel="Quoted depth"
+            legend="This position"
+            className={styles.curvePane}
+            onHoverChange={setHoverFrac}
+            notice={notice}
+          />
 
           <section data-scroll="1" className={styles.fillsPane}>
             <div className={styles.fillsHead}>

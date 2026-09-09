@@ -6,6 +6,7 @@ import {
   toMakerSettlement,
   toPosition,
 } from "../mappers/makers";
+import { toDepthCurve } from "../mappers/pool-detail";
 import { solventApi } from "./client";
 
 export const makersAdapter: MakersPort = {
@@ -27,6 +28,9 @@ export const makersAdapter: MakersPort = {
   },
   async position(hash) {
     return toPosition(await solventApi.position(hash));
+  },
+  async depth(hash, pair) {
+    return toDepthCurve(await solventApi.positionDepth(hash), pair);
   },
   async history(hash) {
     const history = await solventApi.positionHistory(hash);

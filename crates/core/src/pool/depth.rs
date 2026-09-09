@@ -1,36 +1,31 @@
-//! The pool depth read-surface: the combined executable liquidity of a pair, plotted like an order
-//! book the pool doesn't have. It reconstructs the book by handing the router's own machinery
-//! ([`select`] + [`solve`]) a sweep of trade sizes: each size's optimal split across every active
-//! maker is one point on the curve. No new curve math — depth is the split, plotted, not solved once.
+//! Executable pool and position depth, sampled from the router's capped liquidity frontier.
+//! Each point uses the same curve quotes, input fees and shared-wallet limits as a trade.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use alloy_primitives::{Address, B256, U256};
+use itertools::Itertools;
+
+use alloy_primitives::{Address, U256};
 
 use crate::asset::AssetManager;
 use crate::ledger::LedgerService;
-use crate::primitives::amount::format_units;
 use crate::primitives::pool::{DepthPoint, PoolDepth, Side};
 use crate::primitives::pricing::Ratio;
-use crate::primitives::registry::TokenPair;
-use crate::primitives::routing::RouteRequest;
-use crate::primitives::{IntentId, MakerId};
+use crate::primitives::registry::{MakerStrategy, Snapshot, TokenPair};
+use crate::primitives::StrategyHash;
 use crate::registry::SharedSnapshot;
-use crate::routing::{select, solve, Candidate, Split};
+use crate::routing::candidates::build_candidate;
+use crate::routing::waterfill::Liquidity;
+use crate::routing::{Candidate, Split};
 
-/// Places kept when rendering a human price string.
-const PRICE_DECIMALS: u8 = 6;
 /// The impact buckets the curve is anchored to (bps): 0.1% … 10%.
 const IMPACT_LADDER_BPS: [u64; 6] = [10, 50, 100, 200, 500, 1000];
 /// Bisection steps before a search gives up on tightening further.
 const BISECT_ITERS: usize = 48;
-/// The tip is priced at this fraction of capacity — small enough to sit at near-zero impact.
-const PROBE_DIVISOR: u64 = 1_000_000;
 /// A bisection stops once its bracket is within this fraction of its low end.
 const TOLERANCE_DIVISOR: u64 = 10_000;
 
-/// Serves `GET /pools/depth`. Composes the registry (which makers quote the pair), the ledger's
+/// Serves pool and position depth. Composes the registry (which makers quote the pair), the ledger's
 /// synced caps snapshot (each maker's executable cap net of holds, read lock-free with no RPC), and
 /// the asset manager (orientation + token decimals). Fully in-memory — the chain reads live in the
 /// ledger's sync tick.
@@ -60,28 +55,46 @@ impl DepthService {
         let snapshot = self.registry.load();
         // No active pool for this pair → no depth (404).
         snapshot.active_strategies_for_pair(*pair).next()?;
+        Some(self.depth_for(&snapshot, pair, side, None))
+    }
+
+    /// One position's executable depth, including its fees and synced caps. Known pair positions
+    /// without routable liquidity return an empty curve; unknown or non-pair strategies are absent.
+    pub fn position_depth(&self, hash: StrategyHash, side: Side) -> Option<PoolDepth> {
+        let snapshot = self.registry.load();
+        let strategy = snapshot.strategy_by_hash(hash)?;
+        let pair = strategy.pair()?;
+        Some(self.depth_for(&snapshot, &pair, side, Some(strategy)))
+    }
+
+    fn depth_for(
+        &self,
+        snapshot: &Snapshot,
+        pair: &TokenPair,
+        side: Side,
+        strategy: Option<&MakerStrategy>,
+    ) -> PoolDepth {
         let direction = self.direction(pair, side);
-        // `select` reads only the accounts it needs from the synced caps. `k = usize::MAX` keeps the
-        // whole book (candidates are amount-independent — no funnel here).
         let caps = self.ledger.snapshot();
-        let candidates = select(
-            &snapshot,
-            &caps,
-            &direction.request(U256::from(1u64)),
-            usize::MAX,
-        )
-        .chosen;
-        let axis_title = format!(
-            "Cumulative {} out vs price impact",
-            self.symbol(direction.token_out)
-        );
-        Some(
-            Sweep {
-                candidates: &candidates,
-                direction,
+        let candidates: Vec<_> = match strategy {
+            Some(strategy) => {
+                build_candidate(strategy, &caps, direction.token_in, direction.token_out)
+                    .into_iter()
+                    .collect()
             }
-            .curve(axis_title),
-        )
+            None => snapshot
+                .active_strategies_for_pair(*pair)
+                .filter_map(|strategy| {
+                    build_candidate(strategy, &caps, direction.token_in, direction.token_out)
+                })
+                .sorted_by_key(|candidate| candidate.key)
+                .collect(),
+        };
+        let axis_title = format!(
+            "Cumulative {} in vs price impact",
+            self.symbol(direction.token_in)
+        );
+        Sweep::new(&candidates, direction).curve(axis_title, strategy.is_some())
     }
 
     /// Which way round the pair trades for `side`, with the decimals each token renders at. `sell`
@@ -95,13 +108,9 @@ impl DepthService {
         Direction {
             token_in,
             token_out,
-            in_dec: self.decimals(token_in),
-            out_dec: self.decimals(token_out),
+            in_dec: self.assets.decimals(&token_in),
+            out_dec: self.assets.decimals(&token_out),
         }
-    }
-
-    fn decimals(&self, token: Address) -> u8 {
-        self.assets.token(&token).map_or(18, |token| token.decimals)
     }
 
     fn symbol(&self, token: Address) -> String {
@@ -122,224 +131,130 @@ struct Direction {
 }
 
 impl Direction {
-    /// The sweep is parameterized by **output**: `amount` is a target `token_out` amount. That makes
-    /// the book's deliverable capacity the natural x-axis scale and keeps the solve well-conditioned
-    /// — an exact-in size would have no bound when a maker's cap dwarfs its curve.
-    fn request(&self, output: U256) -> RouteRequest {
-        RouteRequest {
-            intent: IntentId(B256::ZERO),
-            token_in: self.token_in,
-            token_out: self.token_out,
-            amount: output,
-            exact_in: false,
-        }
-    }
-
     /// One rung: the split's size, what it buys, and how far its blended price sits below the tip.
     fn point(&self, split: &Split, best: &Ratio) -> DepthPoint {
         DepthPoint {
             trade_size: split.amount_in.to_string(),
             output: split.amount_out.to_string(),
-            effective_price: self.price(split.amount_out, split.amount_in),
+            effective_price: Ratio::new(split.amount_out, split.amount_in)
+                .map_or_else(|| "0".to_string(), |price| self.price(price)),
             impact_pct: impact_bps(split, best) as f64 / 100.0,
-            makers_used: split.legs.len() as u64,
+            makers_used: split.legs.iter().map(|leg| leg.maker).unique().count() as u64,
         }
     }
 
-    /// The human price `out/in` as a decimal string, floored to [`PRICE_DECIMALS`]. The two tokens'
-    /// decimals differ, so both sides scale to a common base first.
-    fn price(&self, output: U256, input: U256) -> String {
-        let numerator = output
-            .saturating_mul(pow10(self.in_dec))
-            .saturating_mul(pow10(PRICE_DECIMALS));
-        let denominator = input.saturating_mul(pow10(self.out_dec));
-        Ratio::new(numerator, denominator)
-            .and_then(|ratio| ratio.floor())
-            .map_or_else(
-                || "0".to_string(),
-                |scaled| format_units(scaled, PRICE_DECIMALS),
-            )
+    /// Scale the raw output/input ratio by the token decimals before display rounding.
+    fn price(&self, price: Ratio) -> String {
+        price.format_price(self.in_dec, self.out_dec)
     }
 }
 
-/// The book being swept: every active venue for one direction, solved at a target output.
+/// Every active venue for one direction, prepared once for a sweep of marginal prices.
 struct Sweep<'a> {
-    candidates: &'a [Candidate],
     direction: Direction,
+    liquidity: Liquidity<'a>,
 }
 
-impl Sweep<'_> {
-    /// Sweep the impact ladder from the tip. A book that can't price at all still answers — an
-    /// empty curve, not an absent one, since the pair does have an active pool.
-    fn curve(&self, axis_title: String) -> PoolDepth {
-        match self.tip() {
-            Some(tip) => PoolDepth {
-                axis_title,
-                best_price: self
-                    .direction
-                    .price(tip.split.amount_out, tip.split.amount_in),
-                points: self.ladder(&tip),
-            },
-            None => PoolDepth {
+impl<'a> Sweep<'a> {
+    fn new(candidates: &'a [Candidate], direction: Direction) -> Self {
+        Self {
+            direction,
+            liquidity: Liquidity::new(candidates),
+        }
+    }
+
+    fn curve(&self, axis_title: String, include_capacity: bool) -> PoolDepth {
+        let Some(best) = self.liquidity.best_price() else {
+            return PoolDepth {
                 axis_title,
                 best_price: "0".to_string(),
                 points: Vec::new(),
-            },
+            };
+        };
+        let ceiling = self.liquidity.at_price(&Ratio::zero());
+        let mut points = ceiling
+            .as_ref()
+            .map_or_else(Vec::new, |ceiling| self.ladder(&best, ceiling));
+        // A position can exhaust its wallet before reaching the first impact bucket.
+        if include_capacity && points.is_empty() {
+            points.extend(
+                ceiling
+                    .as_ref()
+                    .map(|split| self.direction.point(split, &best)),
+            );
+        }
+        PoolDepth {
+            axis_title,
+            best_price: self.direction.price(best),
+            points,
         }
     }
 
-    /// The curve's anchor: the split for a probe small enough to sit at near-zero impact, and the
-    /// price it quotes. An empty or unpriceable book has no tip.
-    fn tip(&self) -> Option<Tip> {
-        let capacity = self.capacity();
-        let probe = (capacity / U256::from(PROBE_DIVISOR)).max(U256::from(1u64));
-        let split = self.split(probe)?;
-        let price = Ratio::new(split.amount_out, split.amount_in)?;
-        Some(Tip {
-            split,
-            price,
-            capacity,
-            probe,
-        })
-    }
-
-    /// One rung per impact bucket, stopping at the first the book is too shallow to reach.
-    fn ladder(&self, tip: &Tip) -> Vec<DepthPoint> {
-        let ceiling = self.feasible_ceiling(tip);
+    fn ladder(&self, best: &Ratio, ceiling: &Split) -> Vec<DepthPoint> {
+        // Scale the price bracket to the actual pair, including its token decimals and fees.
+        let upper = best.doubled();
         let mut rungs: Vec<Split> = IMPACT_LADDER_BPS
             .into_iter()
-            .map_while(|target_bps| self.size_for_impact(&tip.price, target_bps, ceiling))
+            .map_while(|target_bps| self.size_for_impact(best, target_bps, ceiling, &upper))
             .collect();
-        // A coarse book lands several buckets on one size; keep the first so the curve always rises.
-        rungs.dedup_by(|later, earlier| later.amount_in <= earlier.amount_in);
-        rungs
+        rungs.sort_by_key(|split| split.amount_in);
+        rungs.dedup_by_key(|split| split.amount_in);
+        // Integer dust can have worse average execution than a larger fill. Keep the sampled
+        // frontier: discard a smaller rung when a later one offers more output at less impact.
+        let mut frontier: Vec<Split> = Vec::with_capacity(rungs.len());
+        for split in rungs {
+            while frontier.last().is_some_and(|previous| {
+                previous.amount_out <= split.amount_out
+                    && impact_bps(previous, best) > impact_bps(&split, best)
+            }) {
+                frontier.pop();
+            }
+            if frontier
+                .last()
+                .is_none_or(|previous| previous.amount_out < split.amount_out)
+            {
+                frontier.push(split);
+            }
+        }
+        frontier
             .iter()
-            .map(|split| self.direction.point(split, &tip.price))
+            .map(|split| self.direction.point(split, best))
             .collect()
     }
 
-    /// The largest output the book actually delivers. Caps bound the payout but the curves need not
-    /// attain them — an XYC's cap sits on its own asymptote, and a maker's shared wallet binds its
-    /// strategies together — so search for the ceiling rather than assume one, and every rung below
-    /// stays fillable.
-    fn feasible_ceiling(&self, tip: &Tip) -> U256 {
-        match self.fills(tip.capacity) {
-            true => tip.capacity,
-            false => {
-                Bracket::new(tip.probe, tip.capacity)
-                    .narrow(|output| self.fills(output))
-                    .lo
+    fn size_for_impact(
+        &self,
+        best: &Ratio,
+        target_bps: u64,
+        ceiling: &Split,
+        upper: &Ratio,
+    ) -> Option<Split> {
+        if impact_bps(ceiling, best) < target_bps {
+            return None;
+        }
+        let mut lo = Ratio::zero();
+        let mut hi = upper.clone();
+        let mut reached = ceiling.clone();
+        let mut below = U256::ZERO;
+        for _ in 0..BISECT_ITERS {
+            if reached.amount_in.saturating_sub(below)
+                <= (reached.amount_in / U256::from(TOLERANCE_DIVISOR)).max(U256::from(1))
+            {
+                break;
+            }
+            let level = lo.midpoint(&hi);
+            match self.liquidity.at_price(&level) {
+                Some(split) if impact_bps(&split, best) >= target_bps => {
+                    lo = level;
+                    reached = split;
+                }
+                split => {
+                    hi = level;
+                    below = split.map_or(U256::ZERO, |split| split.amount_in);
+                }
             }
         }
-    }
-
-    /// The smallest output whose blended price impact reaches `target_bps`, or `None` when even the
-    /// whole book stays under it. Impact is monotone in the output for a concave book, so `lo` never
-    /// reaches the bucket, `hi` always does, and `hi` converges onto the crossing.
-    fn size_for_impact(&self, best: &Ratio, target_bps: u64, ceiling: U256) -> Option<Split> {
-        let reaches = |output: U256| {
-            self.split(output)
-                .is_some_and(|split| impact_bps(&split, best) >= target_bps)
-        };
-        match reaches(ceiling) {
-            false => None,
-            true => self.split(
-                Bracket::new(U256::from(1u64), ceiling)
-                    .narrow(|output| !reaches(output))
-                    .hi,
-            ),
-        }
-    }
-
-    /// The book's deliverable output. A maker's strategies draw one shared wallet, so its several
-    /// candidates cannot each pay out their own cap — the maker contributes at most that wallet.
-    fn capacity(&self) -> U256 {
-        let mut by_maker: BTreeMap<MakerId, MakerCap> = BTreeMap::new();
-        for candidate in self.candidates {
-            let maker = by_maker
-                .entry(candidate.key.maker)
-                .or_insert_with(|| MakerCap::new(candidate.wallet_cap));
-            maker.legs = maker.legs.saturating_add(candidate.cap_out);
-        }
-        by_maker.values().fold(U256::ZERO, |sum, maker| {
-            sum.saturating_add(maker.deliverable())
-        })
-    }
-
-    /// The optimal split delivering exactly `output`, or `None` when the book cannot reach it.
-    fn split(&self, output: U256) -> Option<Split> {
-        solve(self.candidates, &self.direction.request(output), None)
-    }
-
-    fn fills(&self, output: U256) -> bool {
-        self.split(output).is_some()
-    }
-}
-
-/// The curve's anchor, plus the sweep scale it was measured against.
-struct Tip {
-    split: Split,
-    price: Ratio,
-    capacity: U256,
-    probe: U256,
-}
-
-/// One maker's two output ceilings: the wallet its strategies share, and what its legs could each
-/// deliver alone.
-struct MakerCap {
-    wallet: U256,
-    legs: U256,
-}
-
-impl MakerCap {
-    fn new(wallet: U256) -> Self {
-        Self {
-            wallet,
-            legs: U256::ZERO,
-        }
-    }
-
-    fn deliverable(&self) -> U256 {
-        self.wallet.min(self.legs)
-    }
-}
-
-/// A bisection bracket over trade sizes.
-struct Bracket {
-    lo: U256,
-    hi: U256,
-}
-
-impl Bracket {
-    fn new(lo: U256, hi: U256) -> Self {
-        Self { lo, hi }
-    }
-
-    /// Bisect until tight, raising `lo` onto every midpoint that `holds` and lowering `hi` onto
-    /// every one that doesn't.
-    fn narrow(mut self, mut holds: impl FnMut(U256) -> bool) -> Self {
-        let mut remaining = BISECT_ITERS;
-        while remaining > 0 && !self.is_tight() {
-            remaining -= 1;
-            let mid = self.midpoint();
-            match holds(mid) {
-                true => self.lo = mid,
-                false => self.hi = mid,
-            }
-        }
-        self
-    }
-
-    /// Within [`TOLERANCE_DIVISOR`] of the low end. The ladder is plotted, not settled, so wei-exact
-    /// rungs would buy nothing but solver calls; the one-wei floor keeps tiny brackets terminating.
-    fn is_tight(&self) -> bool {
-        self.hi.saturating_sub(self.lo)
-            <= (self.lo / U256::from(TOLERANCE_DIVISOR)).max(U256::from(1u64))
-    }
-
-    fn midpoint(&self) -> U256 {
-        self.lo
-            .saturating_add(self.hi.saturating_sub(self.lo) / U256::from(2u64))
+        Some(reached)
     }
 }
 
@@ -347,16 +262,30 @@ impl Bracket {
 /// tip by definition — it moved nothing.
 fn impact_bps(split: &Split, best: &Ratio) -> u64 {
     Ratio::new(split.amount_out, split.amount_in)
+        .filter(|effective| effective < best)
         .map_or(0, |effective| effective.rel_diff_bps(best))
-}
-
-fn pow10(n: u8) -> U256 {
-    U256::from(10u64).pow(U256::from(n))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::primitives::{routing::RouteRequest, IntentId};
+    use crate::routing::select;
+    use alloy_primitives::B256;
+
+    impl Direction {
+        /// Exact-out requests rank candidate venues without requiring an unbounded input probe.
+        fn request(&self, output: U256) -> RouteRequest {
+            RouteRequest {
+                intent: IntentId(B256::ZERO),
+                token_in: self.token_in,
+                token_out: self.token_out,
+                amount: output,
+                exact_in: false,
+            }
+        }
+    }
+
     use crate::deps::ledger::{
         BudgetSource, BudgetSourceError, Clock, LedgerStore, LedgerStoreError,
     };
@@ -367,9 +296,223 @@ mod tests {
         Curve, CurveSpec, MakerStrategy, PeggedParams, Snapshot, StrategyKey,
     };
     use crate::primitives::{MakerId, ReservationId, StrategyHash};
+    use std::collections::BTreeMap;
 
     fn addr(n: u8) -> Address {
         Address::from([n; 20])
+    }
+
+    #[cfg(feature = "quote-metrics")]
+    #[tokio::test]
+    async fn depth_quote_work_stays_bounded_with_shared_positions() {
+        use crate::routing::{quote_calls, reset_quote_calls};
+
+        for count in [1, 5] {
+            for pegged_curve in [false, true] {
+                let strategies = (3..3 + count)
+                    .map(|hash| {
+                        let curve = if pegged_curve {
+                            pegged(hash, e(100, 18), e(300_000, 6), 1)
+                        } else {
+                            concentrated(hash, e(100, 18), e(300_000, 6), 5_000)
+                        };
+                        for_maker(with_fee(curve, 3_000_000), 3)
+                    })
+                    .collect();
+                let book = Fixture::new(strategies)
+                    .wallet(3, USDC, e(600_000, 6))
+                    .wallet(3, WETH, e(200, 18))
+                    .build()
+                    .await;
+                for side in [Side::Sell, Side::Buy] {
+                    reset_quote_calls();
+                    let start = std::time::Instant::now();
+                    let depth = book.depth.depth(&pair(), side).unwrap();
+                    let calls = quote_calls();
+                    eprintln!(
+                        "positions={count} pegged={pegged_curve} {side:?}: {:?}, {calls} quotes",
+                        start.elapsed()
+                    );
+                    assert!(!depth.points.is_empty());
+                    assert_rising(&depth);
+                    assert!(
+                        calls <= 1_000 * u64::from(count),
+                        "{count} positions, pegged={pegged_curve}, {side:?}: {calls} curve calls"
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn coarse_reserves_use_marginal_price_instead_of_a_rounded_probe() {
+        let book = Fixture::new(vec![xyc(3, U256::from(3), U256::from(1000))])
+            .tokens(vec![
+                meta(USDC, "USDC", 0, true),
+                meta(WETH, "WETH", 0, false),
+            ])
+            .build()
+            .await;
+        let depth = book.sell();
+        assert_eq!(depth.best_price, "333.333333");
+        assert!(!depth.points.is_empty());
+        assert_rising(&depth);
+        for point in depth.points {
+            let effective: f64 = point.effective_price.parse().unwrap();
+            let expected = (1.0 - effective / (1000.0 / 3.0)) * 100.0;
+            assert!((point.impact_pct - expected).abs() < 0.02);
+        }
+    }
+
+    #[tokio::test]
+    async fn position_depth_keeps_caps_smaller_than_one_input_unit() {
+        let target = xyc(3, U256::from(3), U256::from(1000));
+        let hash = target.key.strategy_hash;
+        let book = Fixture::new(vec![target])
+            .wallet(3, USDC, U256::from(10))
+            .build()
+            .await;
+        let depth = book.depth.position_depth(hash, Side::Sell).unwrap();
+        assert_eq!(depth.points.len(), 1);
+        assert_eq!(depth.points[0].trade_size, "1");
+        assert_eq!(depth.points[0].output, "10");
+    }
+
+    #[tokio::test]
+    async fn depth_points_match_router_with_fees_and_shared_wallets() {
+        use crate::routing::solve;
+
+        let book = Fixture::new(vec![
+            with_fee(xyc(3, e(100, 18), e(310_000, 6)), 1_000_000),
+            for_maker(
+                with_fee(concentrated(4, e(100, 18), e(300_000, 6), 5_000), 3_000_000),
+                3,
+            ),
+            for_maker(
+                with_fee(pegged(5, e(100, 18), e(300_000, 6), 2), 2_000_000),
+                3,
+            ),
+            with_fee(pegged(6, e(100, 18), e(300_000, 6), 1), 100_000),
+        ])
+        .wallet(3, USDC, e(400_000, 6))
+        .wallet(3, WETH, e(130, 18))
+        .build()
+        .await;
+        for side in [Side::Sell, Side::Buy] {
+            let direction = book.depth.direction(&pair(), side);
+            let snapshot = book.registry.load();
+            let caps = book.ledger.snapshot();
+            let candidates = select(
+                &snapshot,
+                &caps,
+                &direction.request(U256::from(1)),
+                usize::MAX,
+            )
+            .chosen;
+            let depth = book.depth.depth(&pair(), side).unwrap();
+            assert!(!depth.points.is_empty());
+            assert_rising(&depth);
+            for point in depth.points {
+                let output = point.output.parse::<U256>().unwrap();
+                let input = point.trade_size.parse::<U256>().unwrap();
+                let routed = solve(&candidates, &direction.request(output), None).unwrap();
+                let tolerance = (routed.amount_in / U256::from(10_000)).max(U256::from(1));
+                assert!(
+                    input.abs_diff(routed.amount_in) <= tolerance,
+                    "{side:?}: depth input {input}, routed input {} for output {output}",
+                    routed.amount_in
+                );
+                assert_eq!(routed.amount_out, output);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn coarse_depth_discards_dominated_dust_points() {
+        let book = Fixture::new(vec![xyc(3, U256::from(1000), U256::from(1000))])
+            .tokens(vec![
+                meta(USDC, "USDC", 0, true),
+                meta(WETH, "WETH", 0, false),
+            ])
+            .build()
+            .await;
+        let depth = book.sell();
+        assert!(!depth.points.is_empty());
+        assert_rising(&depth);
+    }
+
+    #[tokio::test]
+    async fn empty_venues_do_not_anchor_depth_prices() {
+        let book = Fixture::new(vec![
+            xyc(3, U256::from(1), U256::from(1)),
+            xyc(4, U256::from(1000), U256::from(100)),
+        ])
+        .tokens(vec![
+            meta(USDC, "USDC", 0, true),
+            meta(WETH, "WETH", 0, false),
+        ])
+        .build()
+        .await;
+        assert_eq!(book.sell().best_price, "0.1");
+    }
+
+    #[tokio::test]
+    async fn multiple_positions_count_as_one_maker() {
+        let book = Fixture::new(vec![
+            xyc(3, e(100, 18), e(300_000, 6)),
+            for_maker(xyc(4, e(100, 18), e(300_000, 6)), 3),
+        ])
+        .build()
+        .await;
+        let depth = book.sell();
+        assert!(!depth.points.is_empty());
+        assert!(depth.points.iter().all(|point| point.makers_used == 1));
+    }
+
+    #[test]
+    fn displayed_prices_cover_decimal_and_u256_boundaries() {
+        for (in_dec, out_dec, expected) in [
+            (0, 18, "0.000000000000000001".to_string()),
+            (255, 0, format!("1{}", "0".repeat(255))),
+            (0, 255, format!("0.{}1", "0".repeat(254))),
+        ] {
+            let direction = Direction {
+                token_in: addr(WETH),
+                token_out: addr(USDC),
+                in_dec,
+                out_dec,
+            };
+            assert_eq!(direction.price(Ratio::from(U256::from(1))), expected);
+        }
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(32))]
+        #[test]
+        fn sampled_depth_is_order_independent_and_respects_a_shared_wallet(
+            x in 1u64..1_000_000,
+            y in 2u64..1_000_000,
+            wallet in 1u64..1_000_000,
+            fee in 0u32..10_000_000,
+        ) {
+            let direction = Direction { token_in: addr(WETH), token_out: addr(USDC), in_dec: 0, out_dec: 0 };
+            let cap = U256::from(y.min(wallet));
+            let mut candidates: Vec<_> = (3..5).map(|hash| {
+                let strategy = for_maker(xyc(hash, U256::from(x), U256::from(y)), 3);
+                Candidate::new(strategy.key, direction.token_in, direction.token_out, cap, U256::from(wallet),
+                    crate::registry::CurvePool::from_curve(&Curve::Xyc, direction.token_in, direction.token_out,
+                        U256::from(x + u64::from(hash)), U256::from(y)), vec![fee])
+            }).collect();
+            let first = Sweep::new(&candidates, direction).curve("input".to_string(), true);
+            assert_rising(&first);
+            for point in &first.points {
+                proptest::prop_assert!(point.output.parse::<U256>().unwrap() <= U256::from(wallet));
+                proptest::prop_assert_eq!(point.makers_used, 1);
+            }
+            candidates.reverse();
+            let reversed = Sweep::new(&candidates, direction).curve("input".to_string(), true);
+            proptest::prop_assert_eq!(serde_json::to_value(first).unwrap(), serde_json::to_value(reversed).unwrap());
+        }
     }
 
     fn meta(n: u8, symbol: &str, decimals: u8, stable: bool) -> TokenMeta {
@@ -801,6 +944,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn position_depth_excludes_same_maker_siblings_and_other_makers() {
+        let strategies = [
+            with_fee(xyc(3, e(100, 18), e(300_000, 6)), 3_000_000),
+            concentrated(3, e(100, 18), e(300_000, 6), 5_000),
+            pegged(3, e(100, 18), e(300_000, 6), 2),
+        ];
+        for target in strategies {
+            let hash = target.key.strategy_hash;
+            let isolated = Fixture::new(vec![target.clone()]).build().await;
+            let shared = Fixture::new(vec![
+                target,
+                for_maker(xyc(4, e(200, 18), e(620_000, 6)), 3),
+                xyc(5, e(300, 18), e(900_000, 6)),
+            ])
+            .build()
+            .await;
+
+            for side in [Side::Sell, Side::Buy] {
+                let expected = isolated.depth.depth(&pair(), side).unwrap();
+                let actual = shared.depth.position_depth(hash, side).unwrap();
+                assert!(!actual.points.is_empty());
+                assert!(actual.points.iter().all(|point| point.makers_used == 1));
+                assert_eq!(
+                    serde_json::to_value(actual).unwrap(),
+                    serde_json::to_value(expected).unwrap(),
+                    "position depth must match its isolated fee-adjusted curve"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn position_depth_retains_wallet_caps_in_both_directions() {
+        let target = xyc(3, e(100, 18), e(300_000, 6));
+        let hash = target.key.strategy_hash;
+        let open = Fixture::new(vec![target.clone()]).build().await;
+        let capped = Fixture::new(vec![
+            target,
+            for_maker(xyc(4, e(200, 18), e(600_000, 6)), 3),
+        ])
+        .wallet(3, USDC, e(10_000, 6))
+        .wallet(3, WETH, e(5, 18))
+        .build()
+        .await;
+
+        for side in [Side::Sell, Side::Buy] {
+            let cap = match side {
+                Side::Sell => e(10_000, 6),
+                Side::Buy => e(5, 18),
+            };
+            let depth = capped.depth.position_depth(hash, side).unwrap();
+            let unconstrained = open.depth.position_depth(hash, side).unwrap();
+            assert!(!depth.points.is_empty());
+            assert_rising(&depth);
+            assert!(depth.points.len() < unconstrained.points.len());
+            for point in depth.points {
+                assert!(point.output.parse::<U256>().unwrap() <= cap);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn position_depth_samples_capacity_below_the_first_impact_bucket() {
+        let target = xyc(3, e(100, 18), e(300_000, 6));
+        let hash = target.key.strategy_hash;
+        let wallet = e(100, 6);
+        let book = Fixture::new(vec![target])
+            .wallet(3, USDC, wallet)
+            .build()
+            .await;
+
+        let depth = book.depth.position_depth(hash, Side::Sell).unwrap();
+        assert_eq!(depth.points.len(), 1);
+        let point = &depth.points[0];
+        let output = point.output.parse::<U256>().unwrap();
+        assert_eq!(output, wallet, "the wallet cap is fully executable");
+        assert!(point.trade_size.parse::<U256>().unwrap() > U256::ZERO);
+        assert!(point.effective_price.parse::<f64>().unwrap() > 0.0);
+        assert!(point.impact_pct < 0.1);
+        assert_eq!(point.makers_used, 1);
+        assert!(book.sell().points.is_empty(), "pool output stays unchanged");
+    }
+
+    #[tokio::test]
+    async fn position_depth_never_borrows_liquidity_for_an_unavailable_position() {
+        let book = Fixture::new(vec![
+            xyc(3, e(100, 18), e(300_000, 6)),
+            for_maker(docked(4, e(200, 18), e(600_000, 6)), 3),
+            for_maker(unpriceable(5), 3),
+            xyc(6, e(100, 18), e(300_000, 6)),
+        ])
+        .wallet(6, USDC, U256::ZERO)
+        .wallet(6, WETH, U256::ZERO)
+        .build()
+        .await;
+
+        for side in [Side::Sell, Side::Buy] {
+            assert!(book
+                .depth
+                .position_depth(StrategyHash(B256::ZERO), side)
+                .is_none());
+            for hash in [4, 5, 6] {
+                let depth = book
+                    .depth
+                    .position_depth(StrategyHash(B256::from([hash; 32])), side)
+                    .unwrap();
+                assert!(depth.points.is_empty());
+                assert_eq!(depth.best_price, "0");
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn shared_wallet_maker_still_yields_a_ladder() {
         // One maker, two deep strategies, one wallet: each strategy's cap is that whole wallet, so
         // summing caps counts a payout the maker can only make once.
@@ -837,6 +1093,52 @@ mod tests {
         let depth = book.sell();
         assert!(!depth.points.is_empty(), "a deep book is not zero depth");
         assert_rising(&depth);
+    }
+
+    #[tokio::test]
+    async fn aggregate_overflow_does_not_hide_representable_depth() {
+        let reserve_in = U256::from(1);
+        let reserve_out = U256::from(1) << 255;
+        let strategies = (3..8)
+            .map(|hash| xyc(hash, reserve_in, reserve_out))
+            .collect();
+        let depth = service(strategies, U256::from(1) << 254)
+            .await
+            .depth(&pair(), Side::Sell)
+            .unwrap();
+
+        assert!(!depth.points.is_empty(), "{depth:?}");
+        assert_rising(&depth);
+        assert_eq!(
+            depth.points.last().unwrap().output.parse::<U256>().unwrap(),
+            U256::MAX
+        );
+    }
+
+    #[tokio::test]
+    async fn aggregate_input_overflow_does_not_hide_representable_depth() {
+        let reserve_in = U256::from(1) << 254;
+        let reserve_out = U256::from(2);
+        let strategies = (3..8)
+            .map(|hash| xyc(hash, reserve_in, reserve_out))
+            .collect();
+        let depth = service(strategies, U256::from(1))
+            .await
+            .depth(&pair(), Side::Sell)
+            .unwrap();
+
+        assert!(!depth.points.is_empty(), "{depth:?}");
+        assert_rising(&depth);
+        assert_eq!(
+            depth
+                .points
+                .last()
+                .unwrap()
+                .trade_size
+                .parse::<U256>()
+                .unwrap(),
+            U256::from(3) << 254
+        );
     }
 
     #[tokio::test]

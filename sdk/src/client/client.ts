@@ -49,6 +49,8 @@ export type MakerQuery = NonNullable<operations["maker_dashboard"]["parameters"]
 export type MakerTradesQuery = NonNullable<operations["maker_trades"]["parameters"]["query"]>;
 export type TradesQuery = NonNullable<operations["trades"]["parameters"]["query"]>;
 export type ActivityQuery = NonNullable<operations["activity"]["parameters"]["query"]>;
+export type PoolDepthQuery = NonNullable<operations["pool_depth"]["parameters"]["query"]>;
+export type PositionDepthQuery = NonNullable<operations["position_depth"]["parameters"]["query"]>;
 type Query = Record<string, string | number | boolean | undefined>;
 
 /** The typed read/write client over the Solvent API. Every method throws {@link SolventApiError}
@@ -58,7 +60,7 @@ export interface SolventClient {
   assets(query?: { supported?: boolean }): Promise<List<Asset>>;
   pools(): Promise<List<Pool>>;
   poolDetail(query: { base: string; quote: string }): Promise<PoolDetail>;
-  poolDepth(query: { base: string; quote: string }): Promise<PoolDepth>;
+  poolDepth(query: PoolDepthQuery): Promise<PoolDepth>;
   quote(body: QuoteRequest): Promise<QuoteResponse>;
   swap(body: SwapRequest): Promise<SwapResponse>;
   trades(query?: TradesQuery): Promise<List<Trade>>;
@@ -71,6 +73,7 @@ export interface SolventClient {
   makerTrades(maker: string, query?: MakerTradesQuery): Promise<List<MakerTrade>>;
   makerPositions(maker: string, query?: MakerQuery): Promise<List<Position>>;
   position(hash: string): Promise<Position>;
+  positionDepth(hash: string, query?: PositionDepthQuery): Promise<PoolDepth>;
   positionHistory(hash: string): Promise<PositionHistory>;
   balances(wallet: string): Promise<List<TokenBalance>>;
   pairs(query?: { search?: string; wallet?: string }): Promise<List<PairInfo>>;
@@ -139,6 +142,7 @@ export function createSolventClient(config: SolventClientConfig): SolventClient 
     makerTrades: (maker, query) => get<List<MakerTrade>>(`/v1/makers/${maker}/trades`, query),
     makerPositions: (maker, query) => get<List<Position>>(`/v1/makers/${maker}/positions`, query),
     position: (hash) => get<Position>(`/v1/positions/${hash}`),
+    positionDepth: (hash, query) => get<PoolDepth>(`/v1/positions/${hash}/depth`, query),
     positionHistory: (hash) => get<PositionHistory>(`/v1/positions/${hash}/history`),
     balances: (wallet) => get<List<TokenBalance>>(`/v1/wallets/${wallet}/balances`),
     pairs: (query) => get<List<PairInfo>>("/v1/pairs", query),

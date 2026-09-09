@@ -1,4 +1,4 @@
-import type { MakerPeriod } from "@/data/makers";
+import type { MakerPeriod, Position } from "@/data/makers";
 import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { isMissingRecord, LIVE_QUERY_OPTIONS } from "./live";
 import { useServices } from "./context";
@@ -93,4 +93,15 @@ export function useMakerSettlements(
 
 export function usePositionHistory(hash: string | undefined) {
   return useMakerRead("history", hash, useServices().makers.history);
+}
+
+export function usePositionDepth(position: Position | undefined) {
+  const { makers } = useServices();
+  return useQuery({
+    ...LIVE_QUERY_OPTIONS,
+    queryKey: ["makers", "depth", position?.hash],
+    queryFn: position
+      ? () => makers.depth(position.hash, position.ref)
+      : skipToken,
+  });
 }
