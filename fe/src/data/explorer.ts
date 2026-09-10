@@ -1,6 +1,8 @@
 export interface TokenQuantity {
   symbol: string;
   display: string;
+  net?: string;
+  logoUri?: string | null;
 }
 
 export interface TradeStage {
@@ -18,6 +20,7 @@ export interface TradeSource {
 }
 
 export interface TradeRecord {
+  flow: "same-chain" | "cross-chain";
   signaturePresent: boolean | null;
   id: string;
   status: string;

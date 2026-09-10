@@ -1,6 +1,18 @@
 import type { ExplorerPort } from "@/ports/explorer";
-import { toActivity, toStats, toTrade } from "../mappers/explorer";
-import { solventApi } from "./client";
+import { SolventApiError } from "@solvent/sdk/client";
+import {
+  toActivity,
+  toCrossChainTrade,
+  toStats,
+  toTrade,
+} from "../mappers/explorer";
+import { toAsset } from "../mappers/asset";
+import {
+  baseApi,
+  crossChainApi,
+  crossChainOriginApi,
+  solventApi,
+} from "./client";
 
 const KINDS: Record<string, string> = {
   register: "shipped",
@@ -20,7 +32,37 @@ export const explorerAdapter: ExplorerPort = {
     return { items: page.items.map(toTrade), nextCursor: page.next_cursor };
   },
   async trade(id) {
-    return toTrade(await solventApi.tradeDetail(id));
+    try {
+      return toTrade(await solventApi.tradeDetail(id));
+    } catch (error) {
+      if (
+        !(error instanceof SolventApiError) ||
+        ![400, 404].includes(error.status)
+      )
+        throw error;
+      const [
+        order,
+        originAssets,
+        originConfig,
+        destinationAssets,
+        destinationConfig,
+      ] = await Promise.all([
+        crossChainApi.order(id),
+        crossChainOriginApi.assets(),
+        crossChainOriginApi.config(),
+        baseApi.assets(),
+        baseApi.config(),
+      ]);
+      return toCrossChainTrade(
+        order,
+        originAssets.items.map((asset) =>
+          toAsset(asset, originConfig.networks[0] ?? "Unknown"),
+        ),
+        destinationAssets.items.map((asset) =>
+          toAsset(asset, destinationConfig.networks[0] ?? "Unknown"),
+        ),
+      );
+    }
   },
   async activity(filter, cursor) {
     // The Aqua feed records maker events; it does not publish resolver events.
