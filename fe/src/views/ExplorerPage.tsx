@@ -1,13 +1,26 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { activityRow, explorerStats, tradeRow } from "@/lib/explorer";
+import type { ObservedOrder } from "@/data/explorer";
+import {
+  activityRow,
+  explorerStats,
+  orderFlow,
+  orderRow,
+  tradeRow,
+} from "@/lib/explorer";
 import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
-import { useActivity, useExplorerStats, useTrades } from "@/services/explorer";
+import { useAssets } from "@/services/assets";
+import {
+  useActivity,
+  useExplorerStats,
+  useObservedOrders,
+  useTrades,
+} from "@/services/explorer";
 import { usePools } from "@/services/pools";
 import { useApp } from "@/state";
 import styles from "./explorer.module.css";
 
-const TABS = ["Trades", "Activity"];
+const TABS = ["Trades", "Activity", "Order feed"];
 
 const DROP_OPTIONS = {
   xpType: ["All types", "pull", "push", "dock", "register"],
@@ -239,7 +252,20 @@ export function ExplorerPage() {
   const { state, set } = useApp();
   const pools = usePools();
   const stats = useExplorerStats();
+  const observed = useObservedOrders();
+  const assets = useAssets();
+  // The order log stores addresses; the catalog is what turns them into something readable.
+  const tokenOf = (address: string) => {
+    const asset = assets.find(
+      (a) => a.address.toLowerCase() === address.toLowerCase(),
+    );
+    return {
+      symbol: asset?.symbol ?? `${address.slice(0, 6)}…`,
+      decimals: asset?.decimals ?? 18,
+    };
+  };
   const isTrades = state.xpTab === "Trades";
+  const isOrderFeed = state.xpTab === "Order feed";
   const pairs = [...new Set(pools.map((pool) => pool.pair.replace(/\s/g, "")))];
   const pair = pools.find(
     (pool) => pool.pair.replace(/\s/g, "") === state.xpPair,
@@ -308,7 +334,7 @@ export function ExplorerPage() {
           ))}
         </div>
         <div className={styles.drops}>
-          {isTrades ? (
+          {isOrderFeed ? null : isTrades ? (
             <>
               <FilterDrop dkey="xpStatus" options={DROP_OPTIONS.xpStatus} />
               <FilterDrop dkey="xpPair" options={["All pairs", ...pairs]} />
@@ -321,7 +347,9 @@ export function ExplorerPage() {
           )}
         </div>
       </div>
-      {isTrades ? (
+      {isOrderFeed ? (
+        <OrderFeedList orders={observed.data} tokenOf={tokenOf} />
+      ) : isTrades ? (
         state.xpPair === "All pairs" || pair ? (
           <TradeList key={JSON.stringify(filter)} filter={filter} />
         ) : (
@@ -329,6 +357,62 @@ export function ExplorerPage() {
         )
       ) : (
         <ActivityList filter={activityFilter} />
+      )}
+    </div>
+  );
+}
+
+/** The order feed as a peer of the trade and activity lists: everything the resolver was shown,
+ *  what it would have cost us, and why most of it went nowhere. */
+function OrderFeedList({
+  orders,
+  tokenOf,
+}: {
+  orders: ObservedOrder[] | undefined;
+  tokenOf: (address: string) => { symbol: string; decimals: number };
+}) {
+  const flow = orderFlow(orders);
+  const rows = (orders ?? []).map((order) => orderRow(order, tokenOf));
+  return (
+    <div data-scroll="1" className={styles.list} aria-label="Order feed">
+      {rows.length === 0 ? (
+        <p className={styles.emptyNote}>
+          No orders seen yet. The feed records every order it is shown,
+          including the ones this resolver cannot settle.
+        </p>
+      ) : (
+        <>
+          <div className={styles.orderSummary}>
+            {flow.seen} seen · {flow.admitted} admitted ({flow.admittedPct}) ·{" "}
+            {flow.dropped} refused
+          </div>
+          <div className={styles.orderHeadRow} aria-hidden="true">
+            <span>Pair</span>
+            <span>Taker pays</span>
+            <span>Order wants</span>
+            <span>Our sourcing cost</span>
+            <span>Source</span>
+            <span>State</span>
+          </div>
+          {rows.map((row) => (
+            <div key={row.id} className={styles.orderRow}>
+              <span className={styles.tradePair}>
+                <span className={styles.tradePairName}>{row.pair}</span>
+                <span className={styles.tradeBlk}>{row.hashLabel}</span>
+              </span>
+              <span className={styles.orderNum}>{row.input}</span>
+              <span className={styles.orderNum}>{row.asked}</span>
+              <span className={styles.orderNum}>{row.best}</span>
+              <span className={styles.orderSource}>{row.source}</span>
+              <span className={styles.tradeStatusCell}>
+                <span className={styles.statusPill} style={row.stateStyle}>
+                  {row.state}
+                </span>
+                <span className={styles.tradeTx}>{row.detail}</span>
+              </span>
+            </div>
+          ))}
+        </>
       )}
     </div>
   );

@@ -1,8 +1,10 @@
+import { formatUnits } from "viem";
 import type {
   ActivityRecord,
   ExplorerStats,
   TokenQuantity,
   TradeRecord,
+  ObservedOrder,
 } from "@/data/explorer";
 
 const STATUS_TONE: Record<string, { background: string; color: string }> = {
@@ -19,11 +21,34 @@ export function shortHash(value: string | null): string {
   return value ? `${value.slice(0, 8)}…${value.slice(-6)}` : "—";
 }
 
+/** A raw base-unit integer as a human amount. The order log stores base units; the catalog knows
+ *  the decimals, so the caller passes them in — printing 105064501461243592704 beside "WETH" is
+ *  not a smaller error than printing the wrong number. */
+function amountText(raw: string, decimals: number): string {
+  const scaled = Number(formatUnits(BigInt(raw), decimals));
+  if (!Number.isFinite(scaled)) return raw;
+  return scaled.toLocaleString(undefined, { maximumFractionDigits: 6 });
+}
+
 export function tokenText(quantity: TokenQuantity): string {
   const amount = Number(quantity.display).toLocaleString("en-US", {
     maximumSignificantDigits: 12,
   });
   return `${amount} ${quantity.symbol}`;
+}
+
+/** The venue an order came from, as a reader would name it. */
+function sourceLabel(source: string): string {
+  if (source === "uniswapx") return "UniswapX";
+  if (source === "solvent") return "Solvent API";
+  return source;
+}
+
+/** Why a trade earned nothing. When routing priced the delivery, say what it would have cost —
+ *  "declined" alone gives the reader no way to tell a near miss from an empty book. */
+function declineTag(trade: TradeRecord): string {
+  if (!trade.indicativeInput) return `not earned — ${trade.status}`;
+  return `not earned — ${trade.status} · sourcing ${tokenText(trade.indicativeInput)} vs ${tokenText(trade.input)} paid`;
 }
 
 function timestamp(at: number | null): string {
@@ -208,12 +233,77 @@ export function tradeDetail(trade: TradeRecord) {
       },
       { label: "Deadline", value: timestamp(trade.deadlineAt) },
       { label: "Signature", value: trade.signaturePresent ? "Provided" : "—" },
+      { label: "Source", value: sourceLabel(trade.source) },
+      {
+        label: "Sourcing cost",
+        value: trade.indicativeInput ? tokenText(trade.indicativeInput) : "—",
+      },
     ],
     profit: trade.surplus ? tokenText(trade.surplus) : "—",
     profitTag: ["declined", "failed"].includes(trade.status)
-      ? `not earned — ${trade.status}`
+      ? declineTag(trade)
       : "route estimate · net of estimated gas",
     empty: trade.legs.length === 0,
     emptyText: "No maker legs recorded for this order.",
+  };
+}
+
+/** One observed order as a row, in the same shape `tradeRow` produces: a pair, the flow through
+ *  it, the numbers that decide it, and a state pill. */
+export function orderRow(
+  order: ObservedOrder,
+  tokenOf: (address: string) => { symbol: string; decimals: number },
+) {
+  const tin = tokenOf(order.tokenIn);
+  const tout = tokenOf(order.tokenOut ?? "");
+  const asked = order.requiredOut
+    ? `${amountText(order.requiredOut, tout.decimals)} ${tout.symbol}`
+    : "—";
+  const best = order.indicativeIn
+    ? `${amountText(order.indicativeIn, tin.decimals)} ${tin.symbol}`
+    : "not priced";
+  return {
+    id: order.orderHash,
+    pair: `${tin.symbol}/${tout.symbol}`,
+    hashLabel: shortHash(order.orderHash),
+    source: sourceLabel(order.source),
+    input: `${amountText(order.amountIn, tin.decimals)} ${tin.symbol}`,
+    asked,
+    best,
+    state: order.verdict === "admitted" ? "admitted" : "refused",
+    detail: order.reason ?? "priced",
+    stateStyle:
+      order.verdict === "admitted"
+        ? { background: "var(--lime-wash)", color: "var(--lime-ink)" }
+        : { background: "var(--surface)", color: "var(--muted)" },
+  };
+}
+
+/** Order flow at a glance: how much the feed showed us, and why most of it was refused.
+ *
+ *  Deliberately an aggregate. The refused orders are the bulk of the feed and individually
+ *  uninteresting — what matters is which rule refused them and how often, since that is the list
+ *  of things standing between the resolver and more flow. */
+export function orderFlow(orders: ObservedOrder[] | undefined) {
+  const seen = orders?.length ?? 0;
+  const admitted = orders?.filter((o) => o.verdict === "admitted").length ?? 0;
+  const byReason = new Map<string, number>();
+  for (const order of orders ?? []) {
+    if (order.verdict === "admitted") continue;
+    const reason = order.reason ?? "refused";
+    byReason.set(reason, (byReason.get(reason) ?? 0) + 1);
+  }
+  return {
+    seen,
+    admitted,
+    dropped: seen - admitted,
+    admittedPct: seen === 0 ? "—" : `${((admitted / seen) * 100).toFixed(1)}%`,
+    reasons: [...byReason.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([reason, count]) => ({
+        reason,
+        count,
+        sharePct: seen === 0 ? 0 : (count / seen) * 100,
+      })),
   };
 }

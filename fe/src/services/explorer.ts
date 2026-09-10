@@ -59,3 +59,13 @@ export function tradeProblem(error: unknown): string {
   if (isMissingTrade(error)) return "Trade not found.";
   return "Couldn’t load this trade. Try again.";
 }
+
+/** Every order the feed showed us — the denominator behind the trade list. */
+export function useObservedOrders() {
+  const { explorer } = useServices();
+  return useQuery({
+    ...LIVE_QUERY_OPTIONS,
+    queryKey: ["observed-orders"],
+    queryFn: () => explorer.orders(200),
+  });
+}

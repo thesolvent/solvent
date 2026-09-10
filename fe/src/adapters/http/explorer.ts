@@ -1,5 +1,10 @@
 import type { ExplorerPort } from "@/ports/explorer";
-import { toActivity, toStats, toTrade } from "../mappers/explorer";
+import {
+  toActivity,
+  toObservedOrder,
+  toStats,
+  toTrade,
+} from "../mappers/explorer";
 import { solventApi } from "./client";
 
 const KINDS: Record<string, string> = {
@@ -18,6 +23,10 @@ export const explorerAdapter: ExplorerPort = {
       limit: PAGE_SIZE,
     });
     return { items: page.items.map(toTrade), nextCursor: page.next_cursor };
+  },
+  async orders(limit = 50) {
+    const page = await solventApi.orders({ limit });
+    return page.items.map(toObservedOrder);
   },
   async trade(id) {
     return toTrade(await solventApi.tradeDetail(id));
