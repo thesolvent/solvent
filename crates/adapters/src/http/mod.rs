@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod crosschain_internal;
+pub mod crosschain_proxy;
 mod depth;
 pub mod dto;
 pub mod error;
@@ -13,6 +14,7 @@ pub mod primitives;
 pub mod state;
 
 pub use crosschain_internal::crosschain_internal_router;
+pub use crosschain_proxy::crosschain_proxy_router;
 pub use depth::DepthReader;
 
 use std::time::Duration;
