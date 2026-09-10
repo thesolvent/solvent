@@ -68,5 +68,6 @@ export function toCrossChainQuote(
     makersSourced: makers.size,
     amountOutRaw,
     expiresAt: api.expires_at_unix * 1_000,
+    crossChain: api,
   };
 }

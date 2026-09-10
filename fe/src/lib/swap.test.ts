@@ -67,13 +67,17 @@ describe("pair constraints", () => {
 
   it("keeps direct swaps on one network and unlocks remote outputs for SolventX", () => {
     const multiNetwork = [
-      asset("WETH", ["WETH/USDC"], [], "Ethereum"),
+      asset("WETH", [], [], "Ethereum"),
+      asset("WETH", ["WETH/USDC"], [], "Base"),
       asset("USDC", ["WETH/USDC"], [], "Base"),
     ];
 
     expect(choices(multiNetwork, "to", "WETH")).toEqual([]);
     expect(choices(multiNetwork, "to", "WETH", true)).toEqual([
-      multiNetwork[1],
+      multiNetwork[2],
+    ]);
+    expect(choices(multiNetwork, "from", "WETH", true)).toEqual([
+      multiNetwork[0],
     ]);
   });
 });
@@ -103,7 +107,8 @@ describe("settling the legs", () => {
 
   it("clears a remote destination when returning to Solvent", () => {
     const multiNetwork = [
-      asset("WETH", ["WETH/USDC"], [], "Ethereum"),
+      asset("WETH", [], [], "Ethereum"),
+      asset("WETH", ["WETH/USDC"], [], "Base"),
       asset("USDC", ["WETH/USDC"], [], "Base"),
     ];
 
@@ -115,9 +120,10 @@ describe("settling the legs", () => {
   });
 
   it("keeps equal symbols on different chains as distinct legs", () => {
-    const ethereumWeth = asset("WETH", ["WETH/USDC"], [], "Ethereum");
+    const ethereumWeth = asset("WETH", [], [], "Ethereum");
+    const baseWeth = asset("WETH", ["WETH/USDC"], [], "Base");
     const baseUsdc = asset("USDC", ["WETH/USDC"], [], "Base");
-    const assets = [ethereumWeth, baseUsdc];
+    const assets = [ethereumWeth, baseWeth, baseUsdc];
 
     expect(
       settleLegs(assets, assetKey(ethereumWeth), assetKey(baseUsdc), true),

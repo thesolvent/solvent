@@ -331,30 +331,39 @@ describe("SwapPage", () => {
     ).toHaveTextContent("E");
   });
 
-  it("loads both catalogs in SolventX and selects the Base copy of a symbol", async () => {
+  it("loads both catalogs in SolventX and selects an output on Base", async () => {
     useAppStore.setState({ productMode: "SolventX" });
+    const baseWeth = {
+      ...ASSETS[0],
+      chainId: 31338,
+      address: "0xbase-weth" as `0x${string}`,
+      net: "Base",
+    };
     const baseUsdc = {
       ...ASSETS[1],
       chainId: 31338,
       address: "0xbase-usdc" as `0x${string}`,
       net: "Base",
     };
-    const list = vi.fn().mockResolvedValue([...ASSETS, baseUsdc]);
+    const list = vi
+      .fn()
+      .mockResolvedValue([
+        { ...ASSETS[0], pairs: [] },
+        { ...ASSETS[1], pairs: [] },
+        baseWeth,
+        baseUsdc,
+      ]);
     renderWithServices(<SwapPage />, {
       assets: { list },
       swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
     });
 
     await waitFor(() => expect(list).toHaveBeenCalledWith(true));
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: /WETH WETH token on Ethereum/,
-      }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Select ▾" }));
     fireEvent.click(screen.getByRole("button", { name: /USDC USDC · Base/ }));
 
     expect(screen.getByLabelText("USDC token on Base")).toBeInTheDocument();
-    expect(useAppStore.getState().fromToken).toBe("31338:0xbase-usdc");
+    expect(useAppStore.getState().toToken).toBe("31338:0xbase-usdc");
   });
 
   it("puts the server's reason on the button and stops the trade", async () => {

@@ -6,12 +6,18 @@ const api = vi.hoisted(() => ({
   sameChain: { quote: vi.fn() },
   origin: { config: vi.fn(), assets: vi.fn() },
   destination: { config: vi.fn(), assets: vi.fn(), quote: vi.fn() },
-  crossChain: { quote: vi.fn() },
+  crossChain: { quote: vi.fn(), draft: vi.fn(), submitDirect: vi.fn() },
 }));
 const sdk = vi.hoisted(() => ({
   createSwapClient: vi.fn(),
   createIntent: vi.fn(),
   submit: vi.fn(),
+}));
+const compact = vi.hoisted(() => ({
+  balance: vi.fn(),
+  approve: vi.fn(),
+  deposit: vi.fn(),
+  sign: vi.fn(),
 }));
 vi.mock("./client", () => ({
   solventApi: api.sameChain,
@@ -21,6 +27,12 @@ vi.mock("./client", () => ({
 }));
 vi.mock("@solvent/sdk/swap", () => ({
   createSwapClient: sdk.createSwapClient,
+}));
+vi.mock("@solvent/sdk/cross-chain", () => ({
+  compactBalance: compact.balance,
+  approveCompact: compact.approve,
+  depositCompact: compact.deposit,
+  signCompactMandate: compact.sign,
 }));
 
 const from = {
@@ -64,6 +76,10 @@ beforeEach(() => {
   sdk.createSwapClient.mockReturnValue({ createIntent: sdk.createIntent });
   sdk.createIntent.mockReturnValue({ submit: sdk.submit });
   sdk.submit.mockResolvedValue({ trade_id: "trade", status: "submitted" });
+  compact.balance.mockResolvedValue(0n);
+  compact.approve.mockResolvedValue("0xapproval");
+  compact.deposit.mockResolvedValue("0xdeposit");
+  compact.sign.mockResolvedValue("0xsponsor");
 });
 
 describe("swap HTTP adapter invariants", () => {
@@ -193,6 +209,128 @@ describe("swap HTTP adapter invariants", () => {
       priceImpact: "0.08%",
       amountOutRaw: 11_990_504n,
       makersSourced: 1,
+    });
+  });
+
+  it("deposits into Compact, signs the mandate, and submits the direct order", async () => {
+    const originLink = {
+      ...from,
+      address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      symbol: "LINK",
+      decimals: 18,
+      price: 12,
+    } satisfies Asset;
+    const baseUsdc = {
+      ...from,
+      chainId: 31338,
+      address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      net: "Base",
+    } satisfies Asset;
+    const aggregate = {
+      id: "0x01",
+      amount_in: "0xde0b6b3a7640000",
+      amount_out: "0xb6f5e8",
+      bridge_fee: "0x00",
+      expires_at_unix: 1_900_000_000,
+      origin: { sources: [] },
+      destination: { sources: [] },
+    } as never;
+    const priced: Quote = {
+      ...quote,
+      tokenIn: originLink.address,
+      tokenOut: baseUsdc.address,
+      amountInRaw: 1_000_000_000_000_000_000n,
+      amountOutRaw: 11_990_504n,
+      expiresAt: 1_900_000_000_000,
+      crossChain: aggregate,
+    };
+    const sponsor = "0x3333333333333333333333333333333333333333";
+    api.crossChain.draft.mockResolvedValue({
+      compact: "0x4444444444444444444444444444444444444444",
+      order: { compact_id: "0x09", origin_chain_id: 31337 },
+      commitment: {
+        arbiter: "0x5555555555555555555555555555555555555555",
+        sponsor,
+        nonce: "0x06",
+        expires: 1_900_000_900,
+        lock_tag: "0x0102030405060708090a0b0c",
+        token: originLink.address,
+        amount: "0xde0b6b3a7640000",
+        mandate: {
+          order_id: "0x07",
+          destination_chain_id: 31338,
+          destination_settler: "0x6666666666666666666666666666666666666666",
+          fill_proof_verifier: "0x7777777777777777777777777777777777777777",
+          output_token: baseUsdc.address,
+          minimum_output_amount: "0xb6f5e8",
+          recipient: sponsor,
+          fill_deadline: 1_900_000_000,
+          exclusive_filler: "0x8888888888888888888888888888888888888888",
+          route_kind: 0,
+        },
+      },
+    });
+    api.crossChain.submitDirect.mockResolvedValue({
+      order_id: "0x07",
+      state: "destination_pending",
+    });
+    const publicClient = {};
+    const walletClient = {};
+
+    const { swapAdapter } = await import("./swap");
+    await expect(
+      swapAdapter
+        .createIntent(
+          {
+            from: originLink,
+            to: baseUsdc,
+            amount: "1",
+            quote: priced,
+            swapper: sponsor,
+            slippagePct: 0.5,
+          },
+          { publicClient, walletClient } as never,
+        )
+        .submit(),
+    ).resolves.toEqual({
+      tradeId: "0x07",
+      status: "destination_pending",
+    });
+
+    const draftRequest = api.crossChain.draft.mock.calls[0]?.[0];
+    expect(draftRequest).toMatchObject({
+      quote: aggregate,
+      sponsor,
+      recipient: sponsor,
+      compact_expires_unix: 1_900_000_900,
+    });
+    expect(compact.approve).toHaveBeenCalledWith(
+      publicClient,
+      walletClient,
+      expect.objectContaining({
+        token: originLink.address,
+        amount: 1_000_000_000_000_000_000n,
+        sponsor,
+      }),
+    );
+    expect(compact.deposit).toHaveBeenCalledWith(
+      publicClient,
+      walletClient,
+      expect.objectContaining({
+        token: originLink.address,
+        amount: 1_000_000_000_000_000_000n,
+        sponsor,
+      }),
+    );
+    expect(compact.sign).toHaveBeenCalledWith(
+      walletClient,
+      "0x4444444444444444444444444444444444444444",
+      31337,
+      expect.objectContaining({ sponsor, amount: 1_000_000_000_000_000_000n }),
+    );
+    expect(api.crossChain.submitDirect).toHaveBeenCalledWith({
+      draft: draftRequest,
+      sponsor_signature: "0xsponsor",
     });
   });
 

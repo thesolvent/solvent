@@ -52,6 +52,13 @@ function counterparts(asset: Asset | undefined): string[] {
   });
 }
 
+function remoteRepresentation(assets: Asset[], source: Asset | undefined) {
+  return assets.find(
+    (asset) =>
+      asset.chainId !== source?.chainId && asset.symbol === source?.symbol,
+  );
+}
+
 /**
  * What the picker may offer for one leg.
  *
@@ -64,20 +71,42 @@ export function choices(
   from: string,
   crossChain = false,
 ): Asset[] {
-  if (leg === "from") return assets.filter((asset) => asset.pairs.length > 0);
+  if (leg === "from") {
+    if (!crossChain) return assets.filter((asset) => asset.pairs.length > 0);
+    const originChain = assets[0]?.chainId;
+    return assets.filter(
+      (asset) =>
+        asset.chainId === originChain &&
+        remoteRepresentation(assets, asset)?.pairs.length,
+    );
+  }
   const source = selectedAsset(assets, from);
-  const allowed = new Set(counterparts(source));
+  const quoteSource = crossChain
+    ? remoteRepresentation(assets, source)
+    : source;
+  const allowed = new Set(counterparts(quoteSource));
   const sourceNetwork = source?.net;
   return assets.filter(
     (asset) =>
       allowed.has(asset.symbol) &&
-      (crossChain || !sourceNetwork || asset.net === sourceNetwork),
+      (crossChain
+        ? asset.chainId === quoteSource?.chainId
+        : !sourceNetwork || asset.net === sourceNetwork),
   );
 }
 
 /** The first asset this deployment can quote from. */
 function firstSource(assets: Asset[]): string | undefined {
   return assets.find((asset) => asset.pairs.length > 0)?.symbol;
+}
+
+function firstCrossChainSource(assets: Asset[]): string | undefined {
+  const originChain = assets[0]?.chainId;
+  return assets.find(
+    (asset) =>
+      asset.chainId === originChain &&
+      remoteRepresentation(assets, asset)?.pairs.length,
+  )?.symbol;
 }
 
 export interface Legs {
@@ -99,15 +128,25 @@ export function settleLegs(
 ): Legs | null {
   if (!assets.length) return null;
   const source = selectedAsset(assets, fromToken);
+  const quoteSource = crossChain
+    ? remoteRepresentation(assets, source)
+    : source;
   const settledSource =
-    source && source.pairs.length > 0 ? fromToken : firstSource(assets);
+    source && quoteSource?.pairs.length
+      ? fromToken
+      : crossChain
+        ? firstCrossChainSource(assets)
+        : firstSource(assets);
   if (!settledSource) return null;
   if (settledSource !== fromToken)
     return { fromToken: settledSource, toToken: "" };
   if (!toToken) return null;
   const settledAsset = selectedAsset(assets, settledSource);
+  const settledQuoteAsset = crossChain
+    ? remoteRepresentation(assets, settledAsset)
+    : settledAsset;
   const destination = selectedAsset(assets, toToken);
-  const compatible = counterparts(settledAsset).includes(
+  const compatible = counterparts(settledQuoteAsset).includes(
     destination?.symbol ?? "",
   );
   const sourceNetwork = settledAsset?.net;
@@ -116,7 +155,15 @@ export function settleLegs(
     !sourceNetwork ||
     !destinationNetwork ||
     sourceNetwork === destinationNetwork;
-  if (compatible && (crossChain || sameNetwork)) return null;
+  const expectedDestinationChain = crossChain
+    ? settledQuoteAsset?.chainId
+    : destination?.chainId;
+  if (
+    compatible &&
+    destination?.chainId === expectedDestinationChain &&
+    (crossChain || sameNetwork)
+  )
+    return null;
   return { fromToken: settledSource, toToken: "" };
 }
 

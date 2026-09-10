@@ -531,6 +531,8 @@ export type Quote = {
   amountOutRaw: bigint;
   /** When the server stops honouring this price, as epoch milliseconds. */
   expiresAt: number;
+  /** Full settlement terms retained only for SolventX submission. */
+  crossChain?: import("@solvent/sdk/cross-chain").AggregateQuote;
 };
 
 export type DepthCurve = {
