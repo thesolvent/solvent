@@ -148,7 +148,7 @@ fn verify_cosignature(order: &V2DutchOrder, cosigners: &[Address]) -> Option<()>
 
 #[cfg(test)]
 mod tests {
-    use super::super::builder::{OrderSpec, SignedOrderBuilder};
+    use super::super::builder::{sign65, OrderSpec, SignedOrderBuilder};
     use super::super::codec::V2DutchOrder;
     use super::*;
     use alloy::primitives::{address, Bytes};
@@ -190,12 +190,36 @@ mod tests {
         (raw, normalizer)
     }
 
-    /// Re-encode a cosigned order after `mutate` has tampered with it, leaving the cosignature as
-    /// it was — exactly what an order forged downstream of the cosigner looks like.
+    /// An order the trusted cosigner really did cosign, with `mutate` applied first.
+    ///
+    /// Re-cosigning is the whole point: almost every field feeds the order hash or the cosigner
+    /// digest, so mutating one and keeping the old signature makes the signature check reject the
+    /// order whatever else is wrong with it — and a test named after some other rule would pass
+    /// with that rule deleted.
     fn tampered(mutate: impl FnOnce(&mut V2DutchOrder)) -> RawOrder {
+        reencoded(mutate, Recosign::Yes)
+    }
+
+    /// An order altered downstream of the cosigner: the fields move, the cosignature does not.
+    fn forged(mutate: impl FnOnce(&mut V2DutchOrder)) -> RawOrder {
+        reencoded(mutate, Recosign::No)
+    }
+
+    enum Recosign {
+        Yes,
+        No,
+    }
+
+    fn reencoded(mutate: impl FnOnce(&mut V2DutchOrder), recosign: Recosign) -> RawOrder {
         let (raw, _) = fixture();
         let mut order = V2DutchOrder::abi_decode(&raw.payload).expect("decode");
         mutate(&mut order);
+        if let Recosign::Yes = recosign {
+            // Blanked first, as the builder does, so the digest is over the order without it.
+            order.cosignature = Bytes::new();
+            let hash = order_hash(&order);
+            order.cosignature = sign65(&key(0x22), cosign_digest(&order, hash));
+        }
         RawOrder::new(
             ProtocolId::UniswapXV2,
             ChainId(1),
@@ -255,9 +279,10 @@ mod tests {
 
     #[test]
     fn rejects_a_tampered_cosigner_payload() {
-        // Moving the decay after cosigning invalidates the recovered signer.
-        rejects(&tampered(|o| {
-            o.cosignerData.decayEndTime = U256::from(9999u64)
+        // The exclusive filler is in the cosigner's digest and in no other rule, so only the
+        // signature check can object to it moving.
+        rejects(&forged(|o| {
+            o.cosignerData.exclusiveFiller = Address::repeat_byte(0xAB)
         }));
     }
 
