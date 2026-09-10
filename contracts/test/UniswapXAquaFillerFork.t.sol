@@ -4,7 +4,6 @@ pragma solidity 0.8.30;
 import { ISwapVM } from "@1inch/swap-vm/src/interfaces/ISwapVM.sol";
 import { V2DutchOrderReactor } from "uniswapx/reactors/V2DutchOrderReactor.sol";
 import { SignedOrder } from "uniswapx/base/ReactorStructs.sol";
-import { IReactor } from "uniswapx/interfaces/IReactor.sol";
 import { IPermit2 } from "permit2/src/interfaces/IPermit2.sol";
 
 import { UniswapXAquaFiller } from "../src/UniswapXAquaFiller.sol";
@@ -48,10 +47,10 @@ contract UniswapXAquaFillerForkTest is UniswapXAquaFillerHarness {
         SignedOrder memory signed = _signOrder(3100 ether, _outputs(tokenB, 1 ether, swapper));
 
         UniswapXAquaFiller.SourceSwap[] memory sources = new UniswapXAquaFiller.SourceSwap[](1);
-        sources[0] = _source(order, tokenA, tokenB, 1 ether, 3100 ether);
+        sources[0] = _source(_userFillContext(signed), order, tokenA, tokenB, 1 ether, 3100 ether);
 
         _mintSwapper(3100 ether);
-        filler.fill(IReactor(address(reactor)), signed, sources);
+        filler.fill(signed, sources);
 
         assertEq(tokenB.balanceOf(swapper), 1 ether, "swapper paid by the real mainnet reactor");
         assertEq(tokenB.balanceOf(address(filler)), 0, "no output inventory");
