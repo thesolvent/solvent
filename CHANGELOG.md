@@ -250,6 +250,39 @@ the project is pre-1.0 and evolving.
     each side (a backend test vs `ApiDoc::openapi()`, and the SDK's `codegen:check` vs the generated
     types), so a renamed Rust field surfaces as a compile/gate failure, never a runtime one.
 
+  - **Live UniswapX order feed** — `OrdersApiClient` polls the public Orders API (unauthenticated,
+    no pagination, `limit` clamped at 50) and `HostedFeed` alternates two scopes — the open book and
+    orders reserved to this filler — over one request budget. Point `orders_api_url` at a local
+    mirror to replay recorded pages offline; omit it to leave the feed off and take orders only from
+    `POST /v1/swap`. Until now the ingest pipeline was built and connected to nothing.
+  - **`Admission`** — the intake gate: supported chains, a token allow-list, an output-leg cap, and
+    rejections for native-ETH legs (the reactor pays those from its own pre-funded balance, which an
+    ERC-20 filler cannot source) and for outputs spanning several tokens. The dedup cache is bounded
+    as well as expiring, and is consulted after those rules rather than before.
+  - **Order validation in `UniswapXV2Normalizer`** — now stateful, holding the reactor it fills for
+    and the cosigner keys it trusts. Recovers and pins the cosignature (the reactor checks only that
+    a signature matches the order's own `cosigner` field, so pinning the identity is ours to do),
+    pins the reactor, requires `deadline >= decayEndTime`, bounds the cosigner's overrides, and
+    refuses any order carrying an `additionalValidationContract` — an arbitrary contract the reactor
+    would call inside our fill, able to burn unbounded gas or revert on state a simulation cannot
+    reproduce.
+  - **`DecisionService`** — holds fed orders and re-prices each one every tick until it becomes
+    fillable, its deadline passes, or somebody else takes it. Re-pricing is in-memory curve maths and
+    free; committing is not, and the write path assumes a single attempt per order in three separate
+    places (trade dedup on the order hash, a reservation id that stays claimed after voiding, and
+    per-intent idempotent submission) — so the loop evaluates many times and acts once, after which
+    the order leaves the service. `standing()` separates an expired order from one merely barred by
+    another filler's window, which lapses.
+  - **`Intent::required_output(filler, at)`** — what the settler will actually demand: every output
+    leg summed at one instant, each raised by the exclusivity toll when the window belongs to someone
+    else. `None` for a strict window (`overrideBps == 0`), which bars everyone else at any price.
+  - **Real-order test corpus** — four captured mainnet Dutch V2 orders covering native output,
+    multi-output, decaying input and both exclusivity states, each carrying the `orderHash` Uniswap
+    published so the `V2DutchOrderLib` hash port is checked against their arithmetic. Plus an
+    end-to-end suite driving the whole loop — Orders API stand-in, production client, validation,
+    the loop declining while unaffordable, then filling against a source-deployed reactor and Aqua,
+    through to reconciliation. Ticks are driven by hand, so the waiting is an assertion, not a sleep.
+
 ### Added — frontend (`fe/`, React + Vite)
 - **Live Makers and strategy details** — connect the original dashboard and strategy panels to
   address-based reads, rolling maker periods, confirmed-order fill share and submission-to-confirmation
@@ -316,6 +349,9 @@ the project is pre-1.0 and evolving.
     or 24.2+; frontend and SDK runtime requirements are unchanged.
 
 ### Changed — backend (`crates/`)
+- **`Intent` is built from a named `IntentParts`** rather than eleven positional arguments, two of
+  which were adjacent bare addresses (`swapper` and `settler`) that no test would catch transposed.
+  It also now carries `swapper`: without it, feed-driven fills produce no trade rows.
 - **Trade responses expose stored price impact** for Explorer list and detail. OpenAPI and SDK types
   carry the optional value; the existing `deadline_block` field is documented as Unix seconds.
 - **Pools carry `tvl_change_24h_pct`** — the value-weighted 24h move of what the pool holds,
@@ -325,6 +361,25 @@ the project is pre-1.0 and evolving.
   not the same as nothing being deliverable.
 
 ### Fixed — backend (`crates/`)
+- **Dutch decay rounded the wrong quantity.** `AmountCurve::amount_at` rounded the resolved amount;
+  `DutchDecayLib` floors the *distance travelled* and then adds or subtracts it. Identical on a
+  falling curve, one wei out on a rising one — and a wei short is a fill the reactor refuses. Both
+  directions now floor the delta, which retired the `Rounding` enum: once they agree it held a single
+  value. A `u128` transcription of `linearDecay` serves as an independent differential oracle.
+- **Only the first output leg was sourced.** An order paying the swapper and an interface fee
+  recipient in the same token had the rest discovered on chain — after every maker leg had been
+  bought and paid for in gas.
+- **The exclusivity toll rounded on the aggregate.** `ExclusivityLib` iterates the resolved outputs
+  and applies `mulDivUp` to each, so the round-up happens once per leg; rounding the sum instead
+  under-sources by up to one wei per extra leg. Same revert, same point in the fill.
+- **The order-feed config shipped inert.** Every new key sat below the last `[[price_symbols]]`
+  header, and TOML scopes bare keys to the table above them — so the keys were parsed as fields of
+  that entry and discarded, `orders_api_url` read as absent, and the feed, ingest and decision loop
+  never started with nothing logged. `PriceSymbol` now refuses unknown fields, so the same mistake
+  fails the parse instead.
+- **The no-op telemetry macros discarded their arguments**, making a variable that is only ever
+  logged read as unused — so the crate was warning-clean only under whichever feature set enabled
+  `tracing`, and any per-crate `-D warnings` job failed while the workspace one passed.
 - **Trade surplus uses the input token's decimals and USD price.** Exact-out routing records expected
   retained-input profit, net of estimated gas. Formatting it as output token units made DAI→USDC
   profit appear a trillion times too large; the amount and valuation now use the actual denomination.
@@ -340,7 +395,7 @@ the project is pre-1.0 and evolving.
 - **Depth bisection stops on a relative tolerance** — converging to the last wei cost ~40 further
   rounds of curve math for precision no caller can observe.
 
-_Next: S4 — makers and strategy reads, then the create-position wizard._
+_Next: Aqua swap-vm v1.0.2 parity, then contract hardening._
 
 ## [0.1.0] — 2026-08-28
 

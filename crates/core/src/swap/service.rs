@@ -440,7 +440,9 @@ mod tests {
     };
     use crate::primitives::asset::{TokenList, TokenMeta};
     use crate::primitives::execution::{ExecHandle, ExecStatus, SimVerdict, TrackedFill};
-    use crate::primitives::ingest::{AmountCurve, IntentInput, IntentOutput, ProtocolId};
+    use crate::primitives::ingest::{
+        AmountCurve, Exclusivity, IntentInput, IntentOutput, ProtocolId,
+    };
     use crate::primitives::ledger::{AccountKey, Reservation};
     use crate::primitives::registry::{Curve, CurveSpec, MakerStrategy, Snapshot, StrategyKey};
     use crate::primitives::trade::TradeInfo;
@@ -455,6 +457,41 @@ mod tests {
     }
     fn e(n: u64, dec: u32) -> U256 {
         U256::from(n) * U256::from(10u64).pow(U256::from(dec))
+    }
+
+    /// What we source has to be what the settler will collect, and inside another filler's window
+    /// that is the tolled figure. Sourcing face value there buys from every maker and then reverts,
+    /// so the toll belongs on the write path, not only in the decision that got us here.
+    #[test]
+    fn sourcing_inside_another_fillers_window_includes_the_toll() {
+        let us = addr(0x7A);
+        let them = addr(0x3B);
+        let face = e(3_000, 6);
+        let mut order = intent(1, addr(0x99), e(1, 18), face);
+        order.exclusivity = Some(Exclusivity::new(them, 1_000, 100));
+
+        let tolled = face * U256::from(10_100u64) / U256::from(10_000u64);
+        assert_eq!(
+            swap_amounts(&order, us, 500)
+                .expect("fillable at a price")
+                .min_out,
+            tolled,
+            "inside their window"
+        );
+        assert_eq!(
+            swap_amounts(&order, us, 1_001)
+                .expect("the window lapsed")
+                .min_out,
+            face,
+            "once the window lapses"
+        );
+        assert_eq!(
+            swap_amounts(&order, them, 500)
+                .expect("the holder fills at face value")
+                .min_out,
+            face,
+            "when the window is the filler's own"
+        );
     }
 
     /// An exact-out intent: pay up to `amount_in` WETH, deliver `min_out` USDC to `taker`.
