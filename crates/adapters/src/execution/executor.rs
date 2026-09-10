@@ -129,19 +129,43 @@ impl Execution for WalletkitExecutor {
             .await
             .map_err(engine)?
         else {
-            return Ok(None);
+            return self
+                .store
+                .terminal(IntentId(handle.0))
+                .await
+                .map_err(engine);
         };
         let id: HandleId = serde_json::from_slice(&bytes).map_err(engine)?;
         // Read the full handle, not just the status: the mined hash lives in `broadcasts` (its last
         // entry survives an RBF bump), and the settlement reader keys off it.
         let tracked = self.wallet.handle(id).await.map_err(engine)?;
-        Ok(tracked.map(|h| {
-            let mined = h.broadcasts.last().copied().unwrap_or_default();
-            to_exec_status(h.status, mined)
-        }))
+        match tracked {
+            Some(h) => Ok(Some(to_exec_status(
+                h.status,
+                h.broadcasts.last().copied().unwrap_or_default(),
+            ))),
+            None => self
+                .store
+                .terminal(IntentId(handle.0))
+                .await
+                .map_err(engine),
+        }
     }
 
     async fn forget(&self, intent: IntentId) -> Result<(), ExecutionError> {
+        if let Some(bytes) = self.store.handle(intent).await.map_err(engine)? {
+            let id: HandleId = serde_json::from_slice(&bytes).map_err(engine)?;
+            if let Some(handle) = self.wallet.handle(id).await.map_err(engine)? {
+                let status = to_exec_status(
+                    handle.status,
+                    handle.broadcasts.last().copied().unwrap_or_default(),
+                );
+                self.store
+                    .record_terminal(intent, &status)
+                    .await
+                    .map_err(engine)?;
+            }
+        }
         self.store.untrack(intent).await.map_err(engine)
     }
 
