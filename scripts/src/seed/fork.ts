@@ -102,11 +102,6 @@ async function main(): Promise<void> {
             if (funded.has(sym)) continue;
             funded.add(sym);
             const t = TOKENS[sym];
-            const slot = await pub.request({
-                method: "eth_getStorageAt" as never,
-                params: [t.address, "0x0", "latest"] as never,
-            }).then(() => null).catch(() => null);
-            void slot;
             const key = (await import("viem")).keccak256(
                 (await import("viem")).encodeAbiParameters(
                     [{ type: "address" }, { type: "uint256" }],

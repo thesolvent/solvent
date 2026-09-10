@@ -283,6 +283,28 @@ the project is pre-1.0 and evolving.
     the loop declining while unaffordable, then filling against a source-deployed reactor and Aqua,
     through to reconciliation. Ticks are driven by hand, so the waiting is an assertion, not a sleep.
 
+  - **Registry watcher start block and scan span** (`registry_start_block`, `registry_scan_span`) —
+    the watcher can begin at the Aqua deployment instead of genesis, in chunks a node will actually
+    serve. Both were hardcoded, which made a cold sync against mainnet thousands of `getLogs` calls
+    over history that cannot hold an event, at a span dense enough to exceed a node's log cap.
+  - **Deployed-router pricing parity** (`crates/core/tests/mainnet_fork_parity.rs`) — real mainnet
+    strategies with their real Aqua balances, checked against the amounts the deployed SwapVM
+    router returns for them. The oracle is the production contract rather than another transcription
+    of it, so a divergence fails a test instead of reverting a fill. Strategies carrying the
+    unimplemented Aqua protocol fee are asserted to be *declined* rather than priced: skipping that
+    instruction over-quotes by up to 0.025% and the reactor refuses an amount we cannot source.
+  - **Mainnet-fork profile for the maker seeder** (`scripts/src/seed/fork.ts`) — ships positions
+    through the same SDK path a real maker uses, funding real tokens instead of minting DevTokens,
+    with per-position prices so a deliberately mispriced maker can be shipped on purpose. Handles two
+    mainnet quirks the devnet tokens never exercise: UNI rejects an allowance above `uint96`, and
+    USDT reverts on changing a non-zero allowance.
+
+  - **Readiness reflects the order feed** (`GET /readyz`) — `503` once the feed has been unreachable
+    past its silence budget, `200` otherwise. `/healthz` stays a liveness constant: a stale feed
+    should drain traffic and page someone, not restart a process whose problem is upstream. The
+    health type existed but was read by nothing, so the failure it was written for — a filler that
+    sees no orders while looking healthy — was live.
+
 ### Added — frontend (`fe/`, React + Vite)
 - **Live Makers and strategy details** — connect the original dashboard and strategy panels to
   address-based reads, rolling maker periods, confirmed-order fill share and submission-to-confirmation
@@ -361,11 +383,29 @@ the project is pre-1.0 and evolving.
   not the same as nothing being deliverable.
 
 ### Fixed — backend (`crates/`)
+- **Cosigner amount overrides were unasserted.** They replace the swapper-signed start amounts, and
+  the captured corpus carries them, but nothing failed if they were ignored: the synthetic builder
+  only ever emits zero overrides, and the corpus tests asserted hashes and shape rather than
+  amounts. Ignoring them under-sources by 0.22% on one captured order — a revert after every maker
+  leg is bought — and overstates receipts by 0.18% on another, which prices a losing trade as
+  profitable.
+- **The taker's input as the routing max-in bound was unasserted.** Replacing it with `U256::MAX`
+  passed the whole suite; the only coverage was the no-makers case. It is the check that stops the
+  decision loop filling an order that costs more to source than the swapper pays.
+- **Four order shapes the reactor reverts on were accepted**: a decay window that does not advance
+  (`EndTimeBeforeStartTime`), an input that falls or an output that rises (`IncorrectAmounts`), and
+  a cosignature whose recovery byte is 0/1 rather than 27/28 — `ecrecover` yields the zero address
+  and the reactor rejects it, but `Signature::from_raw` normalises it and we accepted the order.
+- **A feed whose first poll never succeeded reported healthy forever.** Readiness now measures from
+  the first attempt when nothing has ever succeeded.
+- **The native-currency admission rule had no effective test** — the three that appeared to cover it
+  were all satisfied by the token allow-list instead, since the zero address is never admitted.
 - **Dutch decay rounded the wrong quantity.** `AmountCurve::amount_at` rounded the resolved amount;
-  `DutchDecayLib` floors the *distance travelled* and then adds or subtracts it. Identical on a
-  falling curve, one wei out on a rising one — and a wei short is a fill the reactor refuses. Both
-  directions now floor the delta, which retired the `Rounding` enum: once they agree it held a single
-  value. A `u128` transcription of `linearDecay` serves as an independent differential oracle.
+  `DutchDecayLib.decay` rounds the *distance travelled* and then adds or subtracts it — `mulDivDown`
+  when falling, `mulDivUp` when rising, so both directions move against the filler. One wei out
+  otherwise, and a wei short is a fill the reactor refuses. The `u128` differential oracle mirrors
+  both branches, with its vectors pinned from the `contracts/lib/UniswapX` submodule the fill E2E
+  source-deploys.
 - **Only the first output leg was sourced.** An order paying the swapper and an interface fee
   recipient in the same token had the rest discovered on chain — after every maker leg had been
   bought and paid for in gas.
