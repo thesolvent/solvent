@@ -19,7 +19,7 @@ use solvent_core::trade::TradeService;
 use solvent_core::valuation::Valuation;
 
 use crate::chain::ChainHead;
-use crate::ingest::uniswapx::{ServerCosigner, UniswapXV2Normalizer};
+use crate::ingest::uniswapx::{FeedHealth, ServerCosigner, UniswapXV2Normalizer};
 
 /// Feature flags the FE reads at bootstrap. `earn` / `send_buy` are always off in the MVP.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -84,4 +84,7 @@ pub struct AppState {
     pub valuation: Arc<Valuation>,
     /// Records each served quote, for maker uptime / latency / fill-share analytics.
     pub quote_log: Arc<dyn QuoteLog>,
+    /// Liveness of the order feed, when one is configured. `None` means the resolver takes orders
+    /// only from its own submit path, so there is no feed to be stale.
+    pub feed_health: Option<Arc<FeedHealth>>,
 }

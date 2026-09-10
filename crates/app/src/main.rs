@@ -368,6 +368,7 @@ async fn main() -> Result<(), StartupError> {
     // The live order feed. Orders are off-chain messages until someone fills them, so polling the
     // Orders API is the only way to see one. Left off when no endpoint is configured, in which case
     // the resolver takes orders solely from its own submit path.
+    let mut feed_health_handle: Option<Arc<FeedHealth>> = None;
     if let Some(orders_api_url) = config.orders_api_url.clone() {
         let feed_normalizer: Arc<dyn Normalizer> = Arc::new(UniswapXV2Normalizer::new(
             config.reactor,
@@ -408,6 +409,7 @@ async fn main() -> Result<(), StartupError> {
         let feed_health = Arc::new(FeedHealth::new(Duration::from_secs(
             config.feed_silence_secs,
         )));
+        feed_health_handle = Some(Arc::clone(&feed_health));
         // Orders already assigned to us are polled apart from the wider book: the exclusivity
         // window is seconds long and discovery must not queue behind a page of everything else.
         let feed: Arc<dyn OrderFeed> = Arc::new(HostedFeed::new(
@@ -441,12 +443,16 @@ async fn main() -> Result<(), StartupError> {
                 max_tracked: config.max_tracked_intents,
             },
         ));
+        // Not `supervise`d: the loop owns the receiving half of the intent channel, which cannot be
+        // handed to a restart. What matters is that its ending is loud — otherwise the channel
+        // fills, ingest blocks on a full send, and the process keeps polling while filling nothing.
         tokio::spawn(async move {
             let ticks = futures::stream::unfold((), |()| async {
                 tokio::time::sleep(DECISION_TICK).await;
                 Some(((), ()))
             });
             decision.run(rx, Box::pin(ticks)).await;
+            tracing::error!("decision loop ended; no order will be filled until restart");
         });
         tracing::info!("order feed polling every {}ms", config.order_poll_ms);
     }
@@ -475,6 +481,7 @@ async fn main() -> Result<(), StartupError> {
         registry_store,
         valuation,
         quote_log,
+        feed_health: feed_health_handle,
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;

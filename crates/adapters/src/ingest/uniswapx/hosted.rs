@@ -18,7 +18,7 @@ use solvent_core::deps::ingest::OrderFeed;
 use solvent_core::primitives::ingest::RawOrder;
 use solvent_core::primitives::ChainId;
 
-use tracing::{debug, warn};
+use solvent_core::obs::{debug, warn};
 
 use super::orders_api::{OrdersApiClient, OrdersApiError, Scope};
 
@@ -35,6 +35,8 @@ const DEFAULT_SILENCE_BUDGET: Duration = Duration::from_secs(300);
 #[derive(Debug)]
 pub struct FeedHealth {
     last_success: AtomicU64,
+    /// When the feed first tried and failed, so a never-successful feed can still go stale.
+    first_attempt: AtomicU64,
     consecutive_failures: AtomicU64,
     refused: AtomicU64,
     silence_budget_secs: u64,
@@ -44,6 +46,7 @@ impl FeedHealth {
     pub fn new(silence_budget: Duration) -> FeedHealth {
         FeedHealth {
             last_success: AtomicU64::new(0),
+            first_attempt: AtomicU64::new(0),
             consecutive_failures: AtomicU64::new(0),
             refused: AtomicU64::new(0),
             silence_budget_secs: silence_budget.as_secs(),
@@ -57,8 +60,13 @@ impl FeedHealth {
         self.refused.store(0, Ordering::Relaxed);
     }
 
-    fn record_failure(&self, refused: bool) {
+    pub(crate) fn record_failure(&self, now: u64, refused: bool) {
         self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
+        // The first attempt anchors the silence budget when no poll has ever succeeded; without it
+        // a feed whose very first poll fails has no `last_success` to go stale from.
+        let _ = self
+            .first_attempt
+            .compare_exchange(0, now, Ordering::Relaxed, Ordering::Relaxed);
         if refused {
             self.refused.fetch_add(1, Ordering::Relaxed);
         }
@@ -70,9 +78,17 @@ impl FeedHealth {
         if self.refused.load(Ordering::Relaxed) > 0 {
             return false;
         }
-        let last = self.last_success.load(Ordering::Relaxed);
-        // Before the first poll lands there is nothing to have gone stale.
-        last == 0 || now.saturating_sub(last) <= self.silence_budget_secs
+        // A feed that has never succeeded is measured from its first attempt, not treated as
+        // healthy forever: "we have not managed to reach the endpoint yet" is the same outage as
+        // "we stopped being able to", and is the more likely one at boot.
+        let since = match self.last_success.load(Ordering::Relaxed) {
+            0 => match self.first_attempt.load(Ordering::Relaxed) {
+                0 => return true, // nothing attempted yet
+                first => first,
+            },
+            last => last,
+        };
+        now.saturating_sub(since) <= self.silence_budget_secs
     }
 
     pub fn consecutive_failures(&self) -> u64 {
@@ -170,12 +186,12 @@ async fn poll_once(
                 .collect()
         }
         Err(OrdersApiError::Refused) => {
-            health.record_failure(true);
+            health.record_failure(now_unix(), true);
             warn!("orders feed refused by the endpoint; the order stream is down");
             Vec::new()
         }
         Err(e) => {
-            health.record_failure(false);
+            health.record_failure(now_unix(), false);
             debug!("orders feed poll failed: {}", e);
             Vec::new()
         }
@@ -221,7 +237,7 @@ mod tests {
     fn a_refusal_fails_readiness_at_once() {
         let health = FeedHealth::new(Duration::from_secs(3_600));
         health.record_success(1_000);
-        health.record_failure(true);
+        health.record_failure(1_001, true);
         assert!(!health.is_live(1_001));
     }
 
@@ -229,16 +245,31 @@ mod tests {
     fn a_transient_failure_does_not_fail_readiness_on_its_own() {
         let health = FeedHealth::new(Duration::from_secs(60));
         health.record_success(1_000);
-        health.record_failure(false);
+        health.record_failure(1_005, false);
         assert!(health.is_live(1_010));
         assert_eq!(health.consecutive_failures(), 1);
+    }
+
+    /// A feed whose very first poll never lands is down, not pending. Measuring from the first
+    /// attempt is what separates "we have not reached the endpoint yet" from "nothing to report" —
+    /// without it a broken feed reports healthy for the life of the process.
+    #[test]
+    fn a_feed_that_never_succeeds_goes_stale_from_its_first_attempt() {
+        let health = FeedHealth::new(Duration::from_secs(60));
+        assert!(health.is_live(1_000), "nothing attempted yet");
+        health.record_failure(1_000, false);
+        assert!(health.is_live(1_050), "inside the silence budget");
+        assert!(
+            !health.is_live(1_061),
+            "past it, with no success ever recorded"
+        );
     }
 
     #[test]
     fn a_success_clears_earlier_failures() {
         let health = FeedHealth::new(Duration::from_secs(60));
-        health.record_failure(true);
-        health.record_failure(false);
+        health.record_failure(1_000, true);
+        health.record_failure(1_001, false);
         health.record_success(2_000);
         assert_eq!(health.consecutive_failures(), 0);
         assert!(health.is_live(2_001));
