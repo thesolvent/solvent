@@ -320,7 +320,13 @@ async fn main() -> Result<(), StartupError> {
         settlement,
         Arc::clone(&ledger),
     ));
-    let fill_builder: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(config.app_address));
+    // One builder per protocol we can actually fill. 1inch is ingested for observation only (see
+    // below) and deliberately has no entry here, so its intents decline in `SwapService` rather
+    // than being handed to UniswapX's builder.
+    let fill_builders: BTreeMap<ProtocolId, Arc<dyn FillBuilder>> = BTreeMap::from([(
+        ProtocolId::UniswapXV2,
+        Arc::new(UniswapXFillBuilder::new(config.app_address)) as Arc<dyn FillBuilder>,
+    )]);
     let reconcile = Arc::new(ReconcileService::new(
         Arc::clone(&execution),
         Arc::clone(&trade_store),
@@ -332,7 +338,7 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&ledger),
         Arc::clone(&trade_store),
         Arc::clone(&execution),
-        fill_builder,
+        fill_builders,
         Arc::clone(&leg_cost),
         Arc::new(SystemClock),
         SwapConfig {

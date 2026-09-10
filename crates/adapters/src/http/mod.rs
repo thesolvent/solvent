@@ -157,7 +157,7 @@ mod tests {
     use solvent_core::primitives::execution::{
         ExecHandle, ExecStatus, FillTx, SimVerdict, TrackedFill,
     };
-    use solvent_core::primitives::ingest::Intent;
+    use solvent_core::primitives::ingest::{Intent, ProtocolId};
     use solvent_core::primitives::ledger::{AccountKey, Reservation, ReservationSource};
     use solvent_core::primitives::registry::TokenPair;
     use solvent_core::primitives::registry::{AquaEvent, EventCursor, EventExt, Snapshot};
@@ -538,7 +538,10 @@ mod tests {
             Arc::clone(&ledger),
             Arc::clone(&trades),
             execution,
-            Arc::new(FakeFill),
+            BTreeMap::from([(
+                ProtocolId::UniswapXV2,
+                Arc::new(FakeFill) as Arc<dyn FillBuilder>,
+            )]),
             Arc::clone(&leg_cost),
             Arc::new(SystemClock),
             SwapConfig {
