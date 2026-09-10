@@ -84,24 +84,6 @@
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.24);
 }
 
-.productEyebrow,
-.productFoot {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--on-dark-faint);
-}
-
-.productEyebrow {
-  padding: 14px 18px 10px;
-}
-
-.productFoot {
-  padding: 12px 18px;
-  border-top: 1px solid var(--dark-line);
-}
-
 .productOption {
   width: 100%;
   min-height: 88px;
@@ -133,6 +115,7 @@
 .productMark {
   width: 28px;
   height: 28px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -166,15 +149,6 @@
   color: var(--on-dark-dim);
   font-size: 12.5px;
   line-height: 1.35;
-}
-
-.productStatus {
-  align-self: center;
-  color: var(--lime);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
 }
 
 .nav {

@@ -58,22 +58,18 @@ export function Header() {
         </button>
         {productsOpen && (
           <div className={styles.productMenu} role="menu" aria-label="Product">
-            <div className={styles.productEyebrow}>Product</div>
             <ProductOption
               mode="Solvent"
               active={productMode === "Solvent"}
-              description="Intent swaps and Aqua pools. One signature, the resolver finds the fill."
+              description="Same-chain intent swaps, powered by Aqua."
               onSelect={selectProduct}
             />
             <ProductOption
               mode="SolventX"
               active={productMode === "SolventX"}
-              description="Cross-chain swaps with coordinated execution across networks."
+              description="Cross-chain intent swaps, built on Aqua + Compact + CCTP + CCIP"
               onSelect={selectProduct}
             />
-            <div className={styles.productFoot}>
-              Same account, same balances
-            </div>
           </div>
         )}
       </div>
@@ -166,7 +162,6 @@ function ProductOption({
         <span className={styles.productName}>{mode}</span>
         <span className={styles.productDescription}>{description}</span>
       </span>
-      <span className={styles.productStatus}>{active ? "Active" : ""}</span>
     </button>
   );
 }

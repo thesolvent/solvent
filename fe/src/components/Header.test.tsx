@@ -20,6 +20,18 @@ it("keeps the selected product active across the application shell", () => {
   renderWithServices(<Header />);
 
   fireEvent.click(screen.getByRole("button", { name: "Solvent" }));
+  expect(screen.queryByText("Product")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText("Same account, same balances"),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByText("Same-chain intent swaps, powered by Aqua."),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "Cross-chain intent swaps, built on Aqua + Compact + CCTP + CCIP",
+    ),
+  ).toBeInTheDocument();
   const solventX = screen.getByRole("menuitemradio", { name: /SolventX/ });
   expect(solventX).toHaveAttribute("aria-checked", "false");
 
