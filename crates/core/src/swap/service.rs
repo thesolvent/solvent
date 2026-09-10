@@ -90,7 +90,10 @@ impl SwapService {
     ) -> Result<SwapOutcome, SolventError> {
         let now = self.clock.now_unix();
         let Some(amounts) = swap_amounts(&intent, self.config.filler, now) else {
-            return self.declined(trade_id, &intent, taker, now, prices).await;
+            // No single delivery to source, so there is no cost to quote either.
+            return self
+                .declined(trade_id, &intent, taker, now, prices, None)
+                .await;
         };
 
         let snapshot = self.registry.load();
@@ -106,7 +109,7 @@ impl SwapService {
         let per_leg_cost = self.leg_cost.for_request(&request).await;
         // The taker's input is the max-in bound: a plan that can't source the output within it (net
         // of gas) is unprofitable, so the router declines.
-        let Some(plan) = route(
+        let routed = route(
             &snapshot,
             &caps,
             &request,
@@ -114,8 +117,13 @@ impl SwapService {
             &self.config.routing,
             per_leg_cost,
             None,
-        ) else {
-            return self.declined(trade_id, &intent, taker, now, prices).await;
+        );
+        let Some(plan) = routed.plan else {
+            // `indicative` is what sourcing would have cost: the account of the decline, and the
+            // only number that distinguishes "priced out by a hair" from "no liquidity at all".
+            return self
+                .declined(trade_id, &intent, taker, now, prices, routed.indicative)
+                .await;
         };
 
         // Persist first (dedup on the order hash); only a newly-recorded order reserves and fills.
@@ -128,6 +136,7 @@ impl SwapService {
             now,
             TradeStatus::Quoted,
             &prices,
+            routed.indicative,
         );
         let created = self
             .trades
@@ -250,6 +259,7 @@ impl SwapService {
         taker: Address,
         now: u64,
         prices: TradePrices,
+        indicative_in: Option<U256>,
     ) -> Result<SwapOutcome, SolventError> {
         let delivery = intent.required_output(self.config.filler, now);
         let amounts = SwapAmounts {
@@ -267,6 +277,7 @@ impl SwapService {
             now,
             TradeStatus::Declined,
             &prices,
+            indicative_in,
         );
         let created = self
             .trades
@@ -311,9 +322,12 @@ impl SwapService {
         now: u64,
         status: TradeStatus,
         prices: &TradePrices,
+        indicative_amount_in: Option<U256>,
     ) -> Trade {
         Trade {
             id,
+            indicative_amount_in,
+            source: intent.source,
             order_hash: intent.id,
             taker,
             token_in: amounts.token_in,
@@ -422,6 +436,7 @@ fn reached(now: u64, stages: &[TradeStatus]) -> Vec<TradeAttempt> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::primitives::ingest::OrderSource;
     use std::collections::BTreeMap;
     use std::sync::Mutex;
 
@@ -1020,6 +1035,8 @@ mod tests {
         let order = intent(7, addr(9), e(2, 18), e(3000, 6));
         // A crash between create and reserve strands the trade at Quoted, never reserved or filled.
         let stuck = Trade {
+            indicative_amount_in: None,
+            source: OrderSource::UniswapX,
             id: tid(),
             order_hash: order.id,
             taker: addr(9),

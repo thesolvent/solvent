@@ -2,4 +2,4 @@
 
 pub mod service;
 
-pub use service::{DecisionConfig, DecisionService};
+pub use service::{DecisionConfig, DecisionDeps, DecisionService};

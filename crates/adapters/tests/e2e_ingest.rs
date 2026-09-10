@@ -110,7 +110,9 @@ async fn e2e_self_hosted_order_fills_on_chain() {
         amount: output,
         exact_in: false,
     };
-    let plan = route(&snap, &caps, &req, input, &cfg, U256::ZERO, None).expect("a routable plan");
+    let plan = route(&snap, &caps, &req, input, &cfg, U256::ZERO, None)
+        .plan
+        .expect("a routable plan");
     let sources: Vec<ReservationSource> = plan
         .legs
         .iter()

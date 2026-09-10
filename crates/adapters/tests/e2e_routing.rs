@@ -185,6 +185,7 @@ async fn e2e_routed_plan_is_always_reservable() {
     };
     // A generous max-in bound: this test checks reservability, not the profit gate.
     let plan = route(&snap, &caps, &req, U256::MAX, &cfg, U256::ZERO, None)
+        .plan
         .expect("router produces a plan for an interior trade");
     assert!(!plan.legs.is_empty());
 
@@ -232,7 +233,9 @@ async fn e2e_router_declines_beyond_caps() {
         exact_in: false,
     };
     assert!(
-        route(&snap, &caps, &req, U256::MAX, &cfg, U256::ZERO, None).is_none(),
+        route(&snap, &caps, &req, U256::MAX, &cfg, U256::ZERO, None)
+            .plan
+            .is_none(),
         "the router declines a trade beyond the book's capped capacity"
     );
 }

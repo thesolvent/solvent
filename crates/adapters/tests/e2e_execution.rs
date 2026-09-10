@@ -121,7 +121,9 @@ async fn reserve_order(
         amount: output,
         exact_in: false,
     };
-    let plan = route(&snap, &caps, &req, input, &cfg, U256::ZERO, None).expect("a routable plan");
+    let plan = route(&snap, &caps, &req, input, &cfg, U256::ZERO, None)
+        .plan
+        .expect("a routable plan");
     let sources: Vec<ReservationSource> = plan
         .legs
         .iter()

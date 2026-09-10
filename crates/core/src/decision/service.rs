@@ -20,6 +20,7 @@ use tokio::sync::mpsc;
 use ulid::Ulid;
 
 use crate::deps::ledger::Clock;
+use crate::deps::order_log::OrderLog;
 use crate::ledger::LedgerService;
 use crate::obs::{debug, info, warn};
 use crate::primitives::ingest::{Delivery, Intent};
@@ -62,26 +63,33 @@ pub struct DecisionService {
     valuation: Arc<Valuation>,
     clock: Arc<dyn Clock>,
     config: DecisionConfig,
+    order_log: Option<Arc<dyn OrderLog>>,
+}
+
+/// The loop's collaborators, named at the construction site rather than passed positionally —
+/// several are `Arc<dyn _>` and transposing two of them would compile.
+pub struct DecisionDeps {
+    pub registry: Arc<SharedSnapshot>,
+    pub ledger: Arc<LedgerService>,
+    pub swap: Arc<SwapService>,
+    pub leg_cost: Arc<LegCostResolver>,
+    pub valuation: Arc<Valuation>,
+    pub clock: Arc<dyn Clock>,
+    /// Records what routing would have cost each held order. `None` leaves the log off.
+    pub order_log: Option<Arc<dyn OrderLog>>,
 }
 
 impl DecisionService {
-    pub fn new(
-        registry: Arc<SharedSnapshot>,
-        ledger: Arc<LedgerService>,
-        swap: Arc<SwapService>,
-        leg_cost: Arc<LegCostResolver>,
-        valuation: Arc<Valuation>,
-        clock: Arc<dyn Clock>,
-        config: DecisionConfig,
-    ) -> DecisionService {
+    pub fn new(deps: DecisionDeps, config: DecisionConfig) -> DecisionService {
         DecisionService {
-            registry,
-            ledger,
-            swap,
-            leg_cost,
-            valuation,
-            clock,
+            registry: deps.registry,
+            ledger: deps.ledger,
+            swap: deps.swap,
+            leg_cost: deps.leg_cost,
+            valuation: deps.valuation,
+            clock: deps.clock,
             config,
+            order_log: deps.order_log,
         }
     }
 
@@ -166,7 +174,12 @@ impl DecisionService {
             per_leg_cost,
             None,
         );
-        match plan {
+        // Record what sourcing costs whichever way the gate goes: for a held order this is the
+        // only account of how far off it is.
+        if let (Some(log), Some(indicative)) = (self.order_log.as_ref(), plan.indicative) {
+            let _ = log.record_quote(intent.id, &indicative.to_string()).await;
+        }
+        match plan.plan {
             Some(_) => Verdict::Fill,
             None => Verdict::Wait,
         }

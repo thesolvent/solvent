@@ -37,12 +37,38 @@ pub async fn resolve_leg_cost(
     ))
 }
 
+/// What routing found: the plan when it clears the taker's bound, and what the delivery would have
+/// cost either way.
+///
+/// `plan` is still the whole profitability verdict — `None` means decline. `indicative` is kept
+/// separately because the cost is computed before the bound is applied and is the only thing that
+/// explains *why* a decline happened; discarding it leaves a declined trade with no legs and no
+/// account of itself.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct Routed {
+    pub plan: Option<RoutePlan>,
+    /// The cost of sourcing the delivery, gas included, in the spread token: `amount_in + gas` for
+    /// exact-out, and the net output for exact-in. `None` when no split exists at all — no
+    /// candidate had capacity, so there is no cost to quote.
+    pub indicative: Option<U256>,
+}
+
+impl Routed {
+    /// Nothing was routable: no candidates, or none with capacity.
+    fn nothing() -> Routed {
+        Routed {
+            plan: None,
+            indicative: None,
+        }
+    }
+}
+
 /// Route `request`: rank candidates ([`select`]), solve the gas-sparse split
 /// ([`solve_sparse`]), and gate on the taker's bound — `min_out` for exact-in, `max_in` for
 /// exact-out. `per_leg_cost` is the resolved per-leg gas in the spread token (output for
-/// exact-in, input for exact-out); `warm` is the last λ for this pair. Returns `None` when
-/// there is no profitable, reservable route — the spread is a checked subtraction, so a bound
-/// the split can't beat declines the plan.
+/// exact-in, input for exact-out); `warm` is the last λ for this pair. A bound the split cannot
+/// beat yields no plan, but still reports what the split would have cost.
 pub fn route(
     snapshot: &Snapshot,
     caps: &AvailableSnapshot,
@@ -51,15 +77,17 @@ pub fn route(
     config: &RoutingConfig,
     per_leg_cost: U256,
     warm: Option<&Ratio>,
-) -> Option<RoutePlan> {
+) -> Routed {
     let selection = select(snapshot, caps, request, config.max_candidates);
-    let split = solve_sparse(
+    let Some(split) = solve_sparse(
         &selection.chosen,
         request,
         per_leg_cost,
         config.max_legs,
         warm,
-    )?;
+    ) else {
+        return Routed::nothing();
+    };
     // Certificate diagnostic: a dropped pool whose (conservatively-estimated) spot marginal
     // exceeds the optimum's water level λ* signals the funnel `k` was likely too small.
     if selection
@@ -68,18 +96,26 @@ pub fn route(
     {
         warn!(intent = %request.intent, "routing funnel too small: an omitted pool's spot exceeds the optimum's marginal price");
     }
+    // What the delivery costs before the bound is consulted — reported whichever way the gate goes.
+    let indicative = match request.exact_in {
+        true => split.net_output(per_leg_cost),
+        false => split.gross_input(per_leg_cost),
+    };
     // The resolver's spread over the taker's bound, both directions charging gas.
     let expected_profit = match request.exact_in {
-        true => split.net_output(per_leg_cost).checked_sub(bound)?, // net output clears `min_out`
-        false => bound.checked_sub(split.gross_input(per_leg_cost))?, // input + gas stays under `max_in`
+        true => indicative.checked_sub(bound), // net output clears `min_out`
+        false => bound.checked_sub(indicative), // input + gas stays under `max_in`
     };
     let price_impact_pct = price_impact_pct(&selection.chosen, split.amount_in, split.amount_out);
-    Some(RoutePlan {
-        intent: request.intent,
-        legs: split.legs,
-        expected_profit,
-        price_impact_pct,
-    })
+    Routed {
+        plan: expected_profit.map(|expected_profit| RoutePlan {
+            intent: request.intent,
+            legs: split.legs,
+            expected_profit,
+            price_impact_pct,
+        }),
+        indicative: Some(indicative),
+    }
 }
 
 #[cfg(test)]
@@ -158,6 +194,7 @@ mod tests {
             U256::ZERO,
             None,
         )
+        .plan
         .unwrap();
         assert_eq!(plan.legs.len(), 1);
         assert!(plan.expected_profit > U256::ZERO);
@@ -171,6 +208,7 @@ mod tests {
             U256::ZERO,
             None
         )
+        .plan
         .is_none());
     }
 
@@ -189,6 +227,7 @@ mod tests {
             U256::ZERO,
             None,
         )
+        .plan
         .unwrap();
         assert!(plan.expected_profit > U256::ZERO);
         // The same max_in, but per-leg gas that swallows the surplus, declines the route.
@@ -201,6 +240,7 @@ mod tests {
             U256::from(150u64),
             None
         )
+        .plan
         .is_none());
     }
 
