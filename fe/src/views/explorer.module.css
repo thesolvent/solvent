@@ -280,6 +280,17 @@
   text-overflow: ellipsis;
 }
 
+.crossChainFlow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: clamp(15px, 1.35vw, 20px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+
 .statValueXs {
   composes: statValueSm;
   font-size: clamp(14px, 1.25vw, 18px);

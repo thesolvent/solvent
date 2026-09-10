@@ -142,47 +142,8 @@
   box-shadow: 0 2px 10px rgba(11, 11, 11, 0.07);
 }
 
-.assetButton:has(.assetIdentity) {
+.assetButton:has([data-asset-identity]) {
   width: auto;
-}
-
-.assetIdentity {
-  display: flex;
-  align-items: center;
-  flex: none;
-}
-
-.tokenIcon,
-.chainIcon {
-  width: 26px;
-  height: 26px;
-  border: 2px solid var(--paper);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 1;
-}
-
-.tokenIcon {
-  background: var(--line-faint);
-  color: var(--text-strong);
-}
-
-.tokenIcon img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.chainIcon {
-  margin-left: -6px;
-  background: var(--lime);
-  color: var(--ink);
-  position: relative;
 }
 
 .assetSymbol {

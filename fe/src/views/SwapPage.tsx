@@ -21,31 +21,11 @@ import { useQuote } from "@/services/quote";
 import { useSubmitSwap } from "@/services/swap";
 import { chain } from "@/adapters/wallet/config";
 import { useApp } from "@/state";
+import { AssetIdentity } from "@/components/AssetIdentity";
 
 import styles from "./SwapPage.module.css";
 
 const SWAP_TABS = ["Swap"];
-
-function AssetIdentity({ asset }: { asset: Asset | undefined }) {
-  if (!asset) return null;
-  return (
-    <span
-      className={styles.assetIdentity}
-      aria-label={`${asset.symbol} token on ${asset.net}`}
-    >
-      <span className={styles.tokenIcon} aria-hidden="true">
-        {asset.logoUri ? (
-          <img src={asset.logoUri} alt="" />
-        ) : (
-          asset.symbol.slice(0, 2)
-        )}
-      </span>
-      <span className={styles.chainIcon} aria-hidden="true">
-        {asset.net.slice(0, 1)}
-      </span>
-    </span>
-  );
-}
 
 export function SwapPage() {
   const { state, set, config } = useApp();

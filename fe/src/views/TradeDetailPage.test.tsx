@@ -232,4 +232,37 @@ describe("Trade detail navigation", () => {
       await screen.findByRole("link", { name: "Return to trade" }),
     ).toBeInTheDocument();
   });
+
+  it("identifies both tokens and networks in a SolventX trade summary", async () => {
+    const trade = {
+      ...toTrade(detail),
+      flow: "cross-chain" as const,
+      input: {
+        symbol: "LINK",
+        display: "1",
+        net: "Chain A",
+      },
+      output: {
+        symbol: "USDC",
+        display: "11.466663",
+        net: "Base",
+      },
+    };
+    renderWithServices(
+      routes(),
+      {
+        explorer: { trade: vi.fn().mockResolvedValue(trade) },
+        system: { config: vi.fn().mockResolvedValue({}) },
+      },
+      `/explorer/trades/${detail.id}`,
+    );
+
+    expect(
+      await screen.findByLabelText("LINK token on Chain A"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("USDC token on Base")).toBeInTheDocument();
+    expect(
+      screen.queryByText("1 LINK → 11.466663 USDC"),
+    ).not.toBeInTheDocument();
+  });
 });

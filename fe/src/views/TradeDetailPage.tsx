@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { tradeProblem, useTrade } from "@/services/explorer";
 import { useConfig } from "@/services/system";
 import { Crumbs } from "@/components/Crumbs";
+import { AssetIdentity } from "@/components/AssetIdentity";
 import { explorerUrl, tradeDetail } from "@/lib/explorer";
 import { useAppActions } from "@/state";
 import { TradeLifecycle } from "./TradeLifecycle";
@@ -106,9 +107,34 @@ export function TradeDetailPage() {
             }}
           >
             <div className={styles.statLabel}>{stat.label}</div>
-            <div className={styles.statValueSm} title={stat.value}>
-              {stat.value}
-            </div>
+            {trade.flow === "cross-chain" && stat.label === "In → out" ? (
+              <div className={styles.crossChainFlow} title={stat.value}>
+                <span>{trade.input.display}</span>
+                <AssetIdentity
+                  asset={
+                    trade.input.net
+                      ? { ...trade.input, net: trade.input.net }
+                      : undefined
+                  }
+                />
+                <span aria-hidden="true">→</span>
+                <span>
+                  {trade.status === "confirmed" ? "" : "min. "}
+                  {trade.output.display}
+                </span>
+                <AssetIdentity
+                  asset={
+                    trade.output.net
+                      ? { ...trade.output, net: trade.output.net }
+                      : undefined
+                  }
+                />
+              </div>
+            ) : (
+              <div className={styles.statValueSm} title={stat.value}>
+                {stat.value}
+              </div>
+            )}
           </div>
         ))}
       </div>
