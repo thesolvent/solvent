@@ -86,7 +86,7 @@ The proxy exposes only:
 - `POST /v1/cross-chain/quote`;
 - `POST /v1/cross-chain/orders`;
 - `GET /v1/cross-chain/orders/{id}`;
-- `GET /v1/openapi.json` and `/healthz`.
+- `GET /v1/x/openapi.json` and `/healthz` (`/v1/openapi.json` remains a compatibility alias).
 
 The browser never receives an operator key. `@solvent/sdk/cross-chain` prepares Compact deposits and
 typed signatures, talks only to the proxy, and polls durable order state. `needs_reconcile` is not a
