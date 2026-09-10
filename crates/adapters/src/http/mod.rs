@@ -4,6 +4,7 @@
 //! business logic lives in core services.
 
 pub mod app;
+pub mod crosschain_internal;
 mod depth;
 pub mod dto;
 pub mod error;
@@ -11,6 +12,7 @@ pub mod openapi;
 pub mod primitives;
 pub mod state;
 
+pub use crosschain_internal::crosschain_internal_router;
 pub use depth::DepthReader;
 
 use std::time::Duration;
