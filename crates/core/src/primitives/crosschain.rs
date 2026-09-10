@@ -9,7 +9,7 @@ use crate::primitives::{
 };
 
 /// Repayment mechanism selected for an aggregate quote.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CrossChainRoute {
     Direct,
@@ -17,7 +17,19 @@ pub enum CrossChainRoute {
 }
 
 /// Irreversible operations are named so a chain service can enforce a contract allow-list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    utoipa::ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteCommand {
     Deliver,
@@ -28,11 +40,14 @@ pub enum RemoteCommand {
 }
 
 /// One pre-authorized call. Its debug representation deliberately omits calldata.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct PreparedStep {
     pub command: RemoteCommand,
+    #[schema(value_type = String)]
     pub target: Address,
+    #[schema(value_type = String)]
     pub value: U256,
+    #[schema(value_type = String)]
     pub calldata: Bytes,
 }
 
@@ -49,9 +64,11 @@ impl core::fmt::Debug for PreparedStep {
 }
 
 /// Calls staged on exactly one chain before capital is committed.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ChainExecutionPlan {
+    #[schema(value_type = String)]
     pub aggregate_id: AggregateQuoteId,
+    #[schema(value_type = u64)]
     pub chain_id: ChainId,
     pub steps: Vec<PreparedStep>,
 }
@@ -68,7 +85,7 @@ impl core::fmt::Debug for ChainExecutionPlan {
 }
 
 /// The responsibility of a chain-local quote.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LegRole {
     Origin,
@@ -90,16 +107,24 @@ pub struct LegQuoteRequest {
 }
 
 /// A chain-local promise used by the proxy to assemble an end-to-end quote.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LegQuote {
+    #[schema(value_type = String)]
     pub quote_id: B256,
+    #[schema(value_type = String)]
     pub request_id: B256,
     pub role: LegRole,
+    #[schema(value_type = u64)]
     pub local_chain: ChainId,
+    #[schema(value_type = u64)]
     pub remote_chain: ChainId,
+    #[schema(value_type = String)]
     pub input_token: Address,
+    #[schema(value_type = String)]
     pub output_token: Address,
+    #[schema(value_type = String)]
     pub amount_in: U256,
+    #[schema(value_type = String)]
     pub amount_out: U256,
     pub route: CrossChainRoute,
     pub block_number: u64,
@@ -109,13 +134,17 @@ pub struct LegQuote {
 }
 
 /// The immutable quote accepted by the client and prepared on both chains.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AggregateQuote {
+    #[schema(value_type = String)]
     pub id: AggregateQuoteId,
     pub origin: LegQuote,
     pub destination: LegQuote,
+    #[schema(value_type = String)]
     pub amount_in: U256,
+    #[schema(value_type = String)]
     pub amount_out: U256,
+    #[schema(value_type = String)]
     pub bridge_fee: U256,
     pub cctp_finality_threshold: Option<u32>,
     pub expires_at_unix: u64,
@@ -186,7 +215,7 @@ impl Preparation {
 }
 
 /// Durable proxy state. The linear states make the next safe action explicit after a restart.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SagaState {
     Quoted,
@@ -236,21 +265,27 @@ impl SagaState {
 }
 
 /// Evidence for an idempotent remote command. Payload bytes and signatures remain chain-local.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct StepEvidence {
+    #[schema(value_type = String)]
     pub command_id: CrossChainStepId,
+    #[schema(value_type = Option<String>)]
     pub transaction_hash: Option<B256>,
     pub block_number: Option<u64>,
+    #[schema(value_type = Option<String>)]
     pub message_id: Option<B256>,
 }
 
 /// The proxy's recoverable record for one end-to-end order.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CrossChainSaga {
+    #[schema(value_type = String)]
     pub order_id: CrossChainOrderId,
     pub quote: AggregateQuote,
     pub state: SagaState,
+    #[schema(value_type = Option<String>)]
     pub origin_prepare: Option<PrepareToken>,
+    #[schema(value_type = Option<String>)]
     pub destination_prepare: Option<PrepareToken>,
     pub destination: Option<StepEvidence>,
     pub fill_proof: Option<StepEvidence>,

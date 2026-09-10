@@ -11,11 +11,15 @@ use super::account::AccountKey;
 /// One maker-capital source a reservation draws on: `amount` of `token` pulled from a specific
 /// strategy — settled by exactly one Aqua `pull`. Each source holds capacity at both ceilings, the
 /// shared wallet and the strategy virtual.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ReservationSource {
+    #[schema(value_type = String)]
     pub maker: MakerId,
+    #[schema(value_type = String)]
     pub strategy_hash: StrategyHash,
+    #[schema(value_type = String)]
     pub token: Address,
+    #[schema(value_type = String)]
     pub amount: U256,
 }
 

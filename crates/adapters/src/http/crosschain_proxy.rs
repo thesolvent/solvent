@@ -14,6 +14,7 @@ use solvent_core::primitives::crosschain::{
     AggregateQuote, ChainExecutionPlan, CrossChainRoute, CrossChainSaga, LegQuoteRequest, LegRole,
 };
 use solvent_core::primitives::{ChainId, CrossChainOrderId, SolventError};
+use utoipa::OpenApi;
 
 #[derive(Clone)]
 struct ProxyState {
@@ -24,42 +25,71 @@ struct ProxyState {
 pub fn crosschain_proxy_router(proxy: Arc<CrossChainProxy>, clock: Arc<dyn Clock>) -> Router {
     let state = ProxyState { proxy, clock };
     Router::new()
+        .merge(documentation_routes())
         .route("/healthz", get(healthz))
-        .route("/v1/openapi.json", get(openapi))
         .route("/v1/cross-chain/quote", post(quote))
         .route("/v1/cross-chain/orders", post(create_order))
         .route("/v1/cross-chain/orders/{id}", get(order))
         .with_state(state)
 }
 
-#[derive(Debug, Deserialize)]
+fn documentation_routes<S>() -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    Router::new()
+        .route("/v1/x/openapi.json", get(openapi))
+        .route("/v1/openapi.json", get(openapi))
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct CrossChainQuoteRequest {
+    #[schema(value_type = String)]
     pub request_id: B256,
     pub origin_chain_id: u64,
     pub destination_chain_id: u64,
+    #[schema(value_type = String)]
     pub origin_token_in: Address,
+    #[schema(value_type = String)]
     pub origin_token_out: Address,
+    #[schema(value_type = String)]
     pub destination_token_in: Address,
+    #[schema(value_type = String)]
     pub destination_token_out: Address,
+    #[schema(value_type = String)]
     pub amount_in: U256,
+    #[schema(value_type = String)]
     pub destination_amount_in: U256,
     pub deadline_unix: u64,
     pub route: CrossChainRoute,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct CreateCrossChainOrderRequest {
+    #[schema(value_type = String)]
     pub order_id: CrossChainOrderId,
     pub quote: AggregateQuote,
     pub origin_plan: ChainExecutionPlan,
     pub destination_plan: ChainExecutionPlan,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct CrossChainOrderResponse {
     pub order: CrossChainSaga,
 }
 
+/// Join the independently authoritative origin and destination quotes.
+#[utoipa::path(
+    post,
+    path = "/v1/cross-chain/quote",
+    tag = "cross-chain",
+    request_body = CrossChainQuoteRequest,
+    responses(
+        (status = 200, description = "Aggregate quote accepted by both chain services", body = AggregateQuote),
+        (status = 400, description = "Invalid route, chain pair, or amount", body = ErrorBody),
+        (status = 502, description = "A chain service is unavailable", body = ErrorBody),
+    )
+)]
 async fn quote(
     State(state): State<ProxyState>,
     Json(request): Json<CrossChainQuoteRequest>,
@@ -102,6 +132,18 @@ async fn quote(
         .map_err(proxy_error)
 }
 
+/// Validate both execution plans, prepare capital on each chain, and start the durable saga.
+#[utoipa::path(
+    post,
+    path = "/v1/cross-chain/orders",
+    tag = "cross-chain",
+    request_body = CreateCrossChainOrderRequest,
+    responses(
+        (status = 200, description = "Cross-chain order created or idempotently recovered", body = CrossChainOrderResponse),
+        (status = 400, description = "Quote or execution plan is invalid", body = ErrorBody),
+        (status = 502, description = "A chain service or saga store is unavailable", body = ErrorBody),
+    )
+)]
 async fn create_order(
     State(state): State<ProxyState>,
     Json(request): Json<CreateCrossChainOrderRequest>,
@@ -120,6 +162,20 @@ async fn create_order(
         .map_err(proxy_error)
 }
 
+/// Return the last durable state recorded for a cross-chain order.
+#[utoipa::path(
+    get,
+    path = "/v1/cross-chain/orders/{id}",
+    tag = "cross-chain",
+    params(
+        ("id" = String, Path, description = "32-byte cross-chain order identifier")
+    ),
+    responses(
+        (status = 200, description = "Current durable order state", body = CrossChainOrderResponse),
+        (status = 400, description = "Malformed or unknown order identifier", body = ErrorBody),
+        (status = 502, description = "The saga store is unavailable", body = ErrorBody),
+    )
+)]
 async fn order(
     State(state): State<ProxyState>,
     Path(order_id): Path<CrossChainOrderId>,
@@ -132,7 +188,7 @@ async fn order(
         .map_err(proxy_error)
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 struct ErrorBody {
     error: String,
 }
@@ -162,14 +218,62 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
-async fn openapi() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "openapi": "3.1.0",
-        "info": { "title": "Solvent Cross-Chain Proxy API", "version": "0.1.0" },
-        "paths": {
-            "/v1/cross-chain/quote": { "post": { "summary": "Join origin and destination Solvent quotes" } },
-            "/v1/cross-chain/orders": { "post": { "summary": "Prepare and start a cross-chain order" } },
-            "/v1/cross-chain/orders/{id}": { "get": { "summary": "Read durable cross-chain order state" } }
-        }
-    }))
+#[derive(OpenApi)]
+#[openapi(
+    info(title = "Solvent Cross-Chain Proxy API", version = "0.1.0"),
+    paths(quote, create_order, order),
+    components(schemas(
+        CrossChainQuoteRequest,
+        CreateCrossChainOrderRequest,
+        CrossChainOrderResponse,
+        ErrorBody,
+        CrossChainRoute,
+        LegRole,
+        solvent_core::primitives::crosschain::RemoteCommand,
+        solvent_core::primitives::crosschain::PreparedStep,
+        ChainExecutionPlan,
+        solvent_core::primitives::ledger::ReservationSource,
+        solvent_core::primitives::crosschain::LegQuote,
+        AggregateQuote,
+        solvent_core::primitives::crosschain::SagaState,
+        solvent_core::primitives::crosschain::StepEvidence,
+        CrossChainSaga,
+    ))
+)]
+pub struct CrossChainApiDoc;
+
+async fn openapi() -> Json<utoipa::openapi::OpenApi> {
+    Json(CrossChainApiDoc::openapi())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use axum::body::{to_bytes, Body};
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn crosschain_openapi_is_served_on_canonical_and_legacy_paths() {
+        let canonical = document("/v1/x/openapi.json").await;
+        let legacy = document("/v1/openapi.json").await;
+
+        assert_eq!(canonical, legacy);
+        assert_eq!(canonical["openapi"], "3.1.0");
+        assert!(canonical["paths"]["/v1/cross-chain/quote"]["post"].is_object());
+        assert!(canonical["paths"]["/v1/cross-chain/orders"]["post"].is_object());
+        assert!(canonical["paths"]["/v1/cross-chain/orders/{id}"]["get"].is_object());
+        assert!(canonical["components"]["schemas"]["CrossChainSaga"].is_object());
+    }
+
+    async fn document(path: &str) -> serde_json::Value {
+        let response = documentation_routes::<()>()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
 }
