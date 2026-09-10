@@ -47,10 +47,16 @@ export function choices(
   assets: Asset[],
   leg: "from" | "to",
   from: string,
+  crossChain = false,
 ): Asset[] {
   if (leg === "from") return assets.filter((asset) => asset.pairs.length > 0);
   const allowed = new Set(counterparts(assets, from));
-  return assets.filter((asset) => allowed.has(asset.symbol));
+  const sourceNetwork = assets.find((asset) => asset.symbol === from)?.net;
+  return assets.filter(
+    (asset) =>
+      allowed.has(asset.symbol) &&
+      (crossChain || !sourceNetwork || asset.net === sourceNetwork),
+  );
 }
 
 /** The first asset this deployment can quote from. */
@@ -73,6 +79,7 @@ export function settleLegs(
   assets: Asset[],
   fromToken: string,
   toToken: string,
+  crossChain = false,
 ): Legs | null {
   if (!assets.length) return null;
   const source = assets.find(
@@ -82,8 +89,19 @@ export function settleLegs(
   if (!settledSource) return null;
   if (settledSource !== fromToken)
     return { fromToken: settledSource, toToken: "" };
-  if (!toToken || counterparts(assets, settledSource).includes(toToken))
-    return null;
+  if (!toToken) return null;
+  const compatible = counterparts(assets, settledSource).includes(toToken);
+  const sourceNetwork = assets.find(
+    (asset) => asset.symbol === settledSource,
+  )?.net;
+  const destinationNetwork = assets.find(
+    (asset) => asset.symbol === toToken,
+  )?.net;
+  const sameNetwork =
+    !sourceNetwork ||
+    !destinationNetwork ||
+    sourceNetwork === destinationNetwork;
+  if (compatible && (crossChain || sameNetwork)) return null;
   return { fromToken: settledSource, toToken: "" };
 }
 

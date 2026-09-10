@@ -26,6 +26,7 @@ const SWAP_TABS = ["Swap"];
 
 export function SwapPage() {
   const { state, set, config } = useApp();
+  const crossChain = state.productMode === "SolventX";
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
@@ -35,9 +36,14 @@ export function SwapPage() {
   const to = bySymbol(state.toToken);
 
   useEffect(() => {
-    const settled = settleLegs(assets, state.fromToken, state.toToken);
+    const settled = settleLegs(
+      assets,
+      state.fromToken,
+      state.toToken,
+      crossChain,
+    );
     if (settled) set(settled);
-  }, [assets, state.fromToken, state.toToken, set]);
+  }, [assets, crossChain, state.fromToken, state.toToken, set]);
 
   const typed = state.amount;
   const hasAmount = typed.trim() !== "";
@@ -105,17 +111,20 @@ export function SwapPage() {
 
   const matches = useMemo(() => {
     const q = state.pQuery.trim().toLowerCase();
-    return choices(assets, state.picker ?? "from", state.fromToken).filter(
-      (t) => {
-        const okQ =
-          !q ||
-          t.symbol.toLowerCase().includes(q) ||
-          t.name.toLowerCase().includes(q);
-        const okTag = state.pTag === ANY_TAG || t.tags.indexOf(state.pTag) > -1;
-        const okNet = state.pNet === ANY_NETWORK || t.net === state.pNet;
-        return okQ && okTag && okNet;
-      },
-    );
+    return choices(
+      assets,
+      state.picker ?? "from",
+      state.fromToken,
+      crossChain,
+    ).filter((t) => {
+      const okQ =
+        !q ||
+        t.symbol.toLowerCase().includes(q) ||
+        t.name.toLowerCase().includes(q);
+      const okTag = state.pTag === ANY_TAG || t.tags.indexOf(state.pTag) > -1;
+      const okNet = state.pNet === ANY_NETWORK || t.net === state.pNet;
+      return okQ && okTag && okNet;
+    });
   }, [
     assets,
     state.picker,
@@ -123,6 +132,7 @@ export function SwapPage() {
     state.pQuery,
     state.pTag,
     state.pNet,
+    crossChain,
   ]);
 
   useEffect(() => {
@@ -375,25 +385,27 @@ export function SwapPage() {
               </div>
             </div>
 
-            <div className={styles.netCol}>
-              <div className={styles.netHead}>Network</div>
-              {networkOptions(assets).map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  className={
-                    n === state.pNet ? styles.netRowActive : styles.netRow
-                  }
-                  onClick={() => set({ pNet: n })}
-                >
-                  <span className={styles.netDot} />
-                  <span className={styles.netLabel}>{n}</span>
-                  <span className={styles.netMark}>
-                    {n === state.pNet ? "✓" : ""}
-                  </span>
-                </button>
-              ))}
-            </div>
+            {crossChain && (
+              <div className={styles.netCol}>
+                <div className={styles.netHead}>Network</div>
+                {networkOptions(assets).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    className={
+                      n === state.pNet ? styles.netRowActive : styles.netRow
+                    }
+                    onClick={() => set({ pNet: n })}
+                  >
+                    <span className={styles.netDot} />
+                    <span className={styles.netLabel}>{n}</span>
+                    <span className={styles.netMark}>
+                      {n === state.pNet ? "✓" : ""}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </section>

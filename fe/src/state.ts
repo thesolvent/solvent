@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 
 export type Page = "Home" | "Swap" | "Pools" | "Makers" | "Explorer" | "Docs";
+export type ProductMode = "Solvent" | "SolventX";
 
 /** Explorer strategy selector — identifies a maker's curve on a pair. */
 export type StratSel = { maker: string; curve: string; pair: string };
@@ -27,6 +28,7 @@ export type CreateSpan = "7d" | "3m" | "All";
 
 export type AppState = {
   page: Page | null;
+  productMode: ProductMode;
   trail: Crumb[];
 
   swapTab: string;
@@ -181,6 +183,7 @@ export const INITIAL_CREATE_POSITION_STATE: CreatePositionState = {
 
 export const INITIAL_STATE: AppState = {
   page: null,
+  productMode: "Solvent",
   trail: [],
 
   ...INITIAL_SWAP_STATE,

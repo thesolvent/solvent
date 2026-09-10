@@ -62,6 +62,18 @@ describe("pair constraints", () => {
       "WETH",
     ]);
   });
+
+  it("keeps direct swaps on one network and unlocks remote outputs for SolventX", () => {
+    const multiNetwork = [
+      asset("WETH", ["WETH/USDC"], [], "Ethereum"),
+      asset("USDC", ["WETH/USDC"], [], "Base"),
+    ];
+
+    expect(choices(multiNetwork, "to", "WETH")).toEqual([]);
+    expect(choices(multiNetwork, "to", "WETH", true)).toEqual([
+      multiNetwork[1],
+    ]);
+  });
 });
 
 describe("settling the legs", () => {
@@ -85,6 +97,19 @@ describe("settling the legs", () => {
 
   it("waits for the assets rather than guessing", () => {
     expect(settleLegs([], "ETH", "SOL")).toBeNull();
+  });
+
+  it("clears a remote destination when returning to Solvent", () => {
+    const multiNetwork = [
+      asset("WETH", ["WETH/USDC"], [], "Ethereum"),
+      asset("USDC", ["WETH/USDC"], [], "Base"),
+    ];
+
+    expect(settleLegs(multiNetwork, "WETH", "USDC", true)).toBeNull();
+    expect(settleLegs(multiNetwork, "WETH", "USDC")).toEqual({
+      fromToken: "WETH",
+      toToken: "",
+    });
   });
 });
 
