@@ -120,7 +120,7 @@ async fn main() -> Result<(), StartupError> {
     let registry = Arc::new(SharedSnapshot::default());
     let chain_config = ChainConfig::new(
         ChainId(config.chain_id),
-        0,
+        config.registry_start_block,
         SCAN_OVERLAP_BLOCKS,
         BLOCK_TIME_SECS,
     );
@@ -128,7 +128,7 @@ async fn main() -> Result<(), StartupError> {
         Arc::new(provider.clone()),
         config.aqua_address,
         config.app_address,
-        None,
+        config.registry_scan_span,
     ));
     let registry_sync = Arc::new(RegistrySync::new(
         &chain_config,

@@ -73,6 +73,16 @@ pub struct Config {
     /// Path to the tx engine's durable state (redb), so in-flight fills survive a restart.
     #[serde(default = "default_wallet_state_db")]
     pub wallet_state_db: String,
+    /// Block the registry watcher starts scanning from — the Aqua deployment, since no strategy can
+    /// exist before it. Left at zero it re-scans the whole chain on a cold store, which on mainnet
+    /// is thousands of `getLogs` calls over blocks that cannot contain an event.
+    #[serde(default)]
+    pub registry_start_block: u64,
+    /// Blocks per `getLogs` request when the watcher scans. Nodes cap a response at a fixed number
+    /// of logs, and Aqua is dense enough on mainnet that the indexer's default span exceeds it.
+    /// Unset leaves the indexer's own default.
+    #[serde(default)]
+    pub registry_scan_span: Option<u64>,
 
     /// Root of the Orders API the live feed polls, or a local mirror serving the same shape. Unset
     /// leaves the feed off and the resolver takes orders only from its own submit endpoint.

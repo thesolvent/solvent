@@ -50,6 +50,11 @@ decay_window_secs = 60     # the cosigner's decay window applied to each order
 # and reconciles them rather than losing track. Point it at a persistent volume in production.
 wallet_state_db = "walletkit.redb"
 
+# Block the registry watcher starts from. Set it to the Aqua deployment block: no strategy can
+# exist before it, and scanning from genesis is thousands of getLogs calls over empty history.
+registry_start_block = 0
+registry_scan_span   = 2000   # blocks per getLogs; lower it if the node caps the log count
+
 # The live order feed. UniswapX orders are off-chain signed messages until someone fills them —
 # there is no mempool or event to watch — so polling the Orders API is the only way to see one.
 # Omit `orders_api_url` to leave the feed off; the resolver then takes orders only from its own
