@@ -347,6 +347,44 @@ mod tests {
         assert_eq!(got[0].id, IntentId(B256::from([1u8; 32])));
     }
 
+    /// The native-currency rule, isolated. Both other native tests are also satisfied by the token
+    /// allow-list, so deleting this rule breaks neither: here the zero address is *admitted* by the
+    /// allow-list, leaving the native check as the only thing that can decline the order.
+    #[tokio::test]
+    async fn drops_a_native_leg_even_when_the_zero_address_is_admitted() {
+        let mut norms: BTreeMap<ProtocolId, Arc<dyn Normalizer>> = BTreeMap::new();
+        let native_out = intent_with(1, ChainId(1), 2000, 5, 5, vec![Address::ZERO]);
+        let mut native_in = intent(2, ChainId(1), 2000, 5, 5);
+        native_in.input = IntentInput::new(Address::ZERO, AmountCurve::scalar(U256::from(5u64)));
+        let ok = intent_with(3, ChainId(1), 2000, 5, 5, vec![addr(2)]);
+        norms.insert(
+            ProtocolId::UniswapXV2,
+            Arc::new(MapNorm(HashMap::from([
+                (Bytes::from(vec![1]), native_out),
+                (Bytes::from(vec![2]), native_in),
+                (Bytes::from(vec![3]), ok),
+            ]))),
+        );
+        let admits_zero = Admission {
+            tokens: BTreeSet::from([Address::ZERO, addr(1), addr(2)]),
+            ..admission()
+        };
+        let p = IngestPipeline::new(
+            norms,
+            Duration::from_secs(60),
+            1024,
+            Arc::new(FixedClock(1000)),
+            admits_zero,
+        );
+        let got = drain(&p, vec![feed(vec![raw(1), raw(2), raw(3)])]).await;
+        assert_eq!(
+            got.len(),
+            1,
+            "both native legs decline, the ERC20 order does not"
+        );
+        assert_eq!(got[0].id, IntentId(B256::from([3u8; 32])));
+    }
+
     #[tokio::test]
     async fn drops_a_native_input_leg() {
         let mut native_in = intent(1, ChainId(1), 2000, 5, 5);

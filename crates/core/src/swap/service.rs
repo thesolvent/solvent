@@ -917,6 +917,53 @@ mod tests {
         assert_eq!(out.status, TradeStatus::Declined);
     }
 
+    /// The taker's input is the max-in bound, and it is the only thing standing between the
+    /// decision loop and filling at a loss. `unroutable_order_is_declined` covers "no makers at
+    /// all"; this covers the case that actually costs money — makers exist, the route is perfectly
+    /// sourceable, and it simply costs more than the swapper is paying.
+    ///
+    /// The pool is 100 WETH / 300,000 USDC, so delivering 3,000 USDC costs ~1.0101 WETH on the
+    /// constant-product curve. One input either side of that flips the verdict.
+    #[tokio::test]
+    async fn an_order_costing_more_than_the_taker_pays_is_declined() {
+        let pool = || vec![xyc(3, e(100, 18), e(300_000, 6))];
+        let deliver = e(3_000, 6);
+
+        let h = harness(pool(), SimVerdict::Ok).await;
+        let too_little = h
+            .swap
+            .submit(
+                intent(1, addr(9), e(1, 18), deliver),
+                addr(9),
+                tid(),
+                TradePrices::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            too_little.status,
+            TradeStatus::Declined,
+            "1 WETH cannot buy 3,000 USDC from this pool"
+        );
+
+        let h = harness(pool(), SimVerdict::Ok).await;
+        let enough = h
+            .swap
+            .submit(
+                intent(2, addr(9), e(2, 18), deliver),
+                addr(9),
+                tid(),
+                TradePrices::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            enough.status,
+            TradeStatus::Submitted,
+            "2 WETH comfortably covers the same delivery"
+        );
+    }
+
     #[tokio::test]
     async fn unroutable_order_is_declined() {
         // No makers ⇒ no route.

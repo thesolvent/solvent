@@ -70,6 +70,65 @@ fn normalizer() -> UniswapXV2Normalizer {
     UniswapXV2Normalizer::new(REACTOR, vec![COSIGNER])
 }
 
+/// The cosigner's amount overrides replace the swapper-signed start amounts (`_updateWithCosignerAmounts`).
+/// Values pinned from the captured orders' own `cosignerData`; at `decayStartTime` the curve reads its
+/// start, so this asserts the override reached the curve rather than the base amount.
+///
+/// Ignoring overrides is silent and expensive in both directions: on `0x81af23f6…` we would source
+/// 0.22% under what the reactor demands and revert after buying from every maker, and on
+/// `0x32a1b3e5…` we would believe the swapper pays us 0.18% more than they will, pricing a losing
+/// trade as profitable.
+#[test]
+fn cosigner_amount_overrides_replace_the_signed_start_amounts() {
+    /// `(orderHash prefix, decayStartTime, expected input start, expected first output start)`
+    const EXPECTED: [(&str, u64, &str, &str); 3] = [
+        // output overridden, input not
+        (
+            "0x81af23f6",
+            1_788_958_523,
+            "5000000000000000000",
+            "4999128587430880256",
+        ),
+        // input overridden downward, output left to its base
+        (
+            "0x32a1b3e5",
+            1_788_956_361,
+            "95341960122870460000000000",
+            "353020000",
+        ),
+        // multi-output: first leg overridden, second deferred to its base
+        (
+            "0xa5e903b8",
+            1_788_954_802,
+            "3500000000",
+            "1394911686135858059",
+        ),
+    ];
+
+    let normalizer = normalizer();
+    let orders = corpus();
+    let mut checked = 0;
+    for (prefix, decay_start, want_in, want_out) in EXPECTED {
+        let order = orders
+            .iter()
+            .find(|o| o.order_hash.starts_with(prefix))
+            .unwrap_or_else(|| panic!("corpus still carries {prefix}"));
+        let intent = normalizer.normalize(&order.raw()).expect("normalizes");
+        assert_eq!(
+            intent.input.curve.amount_at(decay_start).to_string(),
+            want_in,
+            "{prefix} input start"
+        );
+        assert_eq!(
+            intent.outputs[0].curve.amount_at(decay_start).to_string(),
+            want_out,
+            "{prefix} first output start"
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 3, "every override-bearing order was asserted");
+}
+
 /// Our `V2DutchOrderLib.hash` port against the hash Uniswap's own service published, for every
 /// captured order. A single generated fixture cannot catch a field we mis-encode only when it is
 /// populated; a live set spanning multi-output and decaying-input orders can.
