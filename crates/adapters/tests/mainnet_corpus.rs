@@ -19,7 +19,7 @@ use solvent_adapters::ingest::uniswapx::{OrdersApiClient, Scope, UniswapXV2Norma
 use solvent_core::deps::ingest::{Normalizer, OrderFeed};
 use solvent_core::deps::ledger::Clock;
 use solvent_core::ingest::{Admission, IngestPipeline};
-use solvent_core::primitives::ingest::{Intent, ProtocolId, RawOrder};
+use solvent_core::primitives::ingest::{Intent, OrderSource, ProtocolId, RawOrder};
 use solvent_core::primitives::{ChainId, IntentId};
 use tokio::sync::mpsc;
 
@@ -51,6 +51,7 @@ impl LiveOrder {
             Bytes::from_str(&self.encoded_order).expect("captured order is hex"),
             Bytes::from_str(&self.signature).expect("captured signature is hex"),
             self.created_at,
+            OrderSource::UniswapX,
         )
     }
 
@@ -288,6 +289,7 @@ async fn admission_declines_native_legs_from_the_live_corpus() {
             // output count while the native rule is under test.
             max_outputs: 8,
         },
+        None,
     );
 
     let admitted = drain(&pipeline, orders.iter().map(|o| o.raw()).collect()).await;

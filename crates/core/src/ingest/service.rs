@@ -15,7 +15,8 @@ use tokio::sync::mpsc;
 
 use crate::deps::ingest::{Normalizer, OrderFeed};
 use crate::deps::ledger::Clock;
-use crate::obs::debug;
+use crate::deps::order_log::{OrderLog, OrderObserved, OrderVerdict};
+use crate::obs::{debug, warn};
 use crate::primitives::ingest::{Intent, ProtocolId, RawOrder};
 use crate::primitives::{ChainId, IntentId};
 
@@ -43,6 +44,8 @@ pub struct IngestPipeline {
     dedup: Cache<IntentId, ()>,
     clock: Arc<dyn Clock>,
     admission: Admission,
+    /// Records every order and its verdict. `None` leaves the observation log off.
+    order_log: Option<Arc<dyn OrderLog>>,
 }
 
 impl IngestPipeline {
@@ -52,6 +55,7 @@ impl IngestPipeline {
         dedup_capacity: u64,
         clock: Arc<dyn Clock>,
         admission: Admission,
+        order_log: Option<Arc<dyn OrderLog>>,
     ) -> IngestPipeline {
         IngestPipeline {
             normalizers,
@@ -63,6 +67,7 @@ impl IngestPipeline {
                 .build(),
             clock,
             admission,
+            order_log,
         }
     }
 
@@ -74,7 +79,7 @@ impl IngestPipeline {
         }
         let mut merged = select_all(feeds.iter().map(|f| f.stream()));
         while let Some(raw) = merged.next().await {
-            let Some(intent) = self.process(raw) else {
+            let Some(intent) = self.process(raw).await else {
                 continue;
             };
             if out.send(intent).await.is_err() {
@@ -84,7 +89,7 @@ impl IngestPipeline {
     }
 
     /// Normalize, admit, and dedup one raw order. `None` when it is dropped (reason logged).
-    fn process(&self, raw: RawOrder) -> Option<Intent> {
+    async fn process(&self, raw: RawOrder) -> Option<Intent> {
         let Some(normalizer) = self.normalizers.get(&raw.protocol) else {
             debug!("ingest drop: no normalizer for {:?}", raw.protocol);
             return None;
@@ -96,40 +101,64 @@ impl IngestPipeline {
                 return None;
             }
         };
-        if !self.is_admissible(&intent) {
-            return None;
-        }
+        // Deduped before the log so one order is observed once, not once per poll.
         if self.dedup.get(&intent.id).is_some() {
             debug!("ingest drop {}: duplicate", intent.id);
             return None;
         }
         self.dedup.insert(intent.id, ());
-        Some(intent)
+
+        let refusal = self.refusal(&intent);
+        if let Some(reason) = refusal {
+            debug!("ingest drop {}: {}", intent.id, reason);
+        }
+        self.observe(&intent, refusal).await;
+        match refusal {
+            Some(_) => None,
+            None => Some(intent),
+        }
+    }
+
+    /// Record the order and its verdict. Telemetry only: a log failure must not lose an order the
+    /// resolver would otherwise fill.
+    async fn observe(&self, intent: &Intent, refusal: Option<&'static str>) {
+        let Some(log) = self.order_log.as_ref() else {
+            return;
+        };
+        let observed = OrderObserved {
+            intent,
+            source: intent.source,
+            verdict: match refusal {
+                Some(reason) => OrderVerdict::Dropped(reason),
+                None => OrderVerdict::Admitted,
+            },
+            seen_at: self.clock.now_unix(),
+        };
+        if let Err(e) = log.record(&observed).await {
+            warn!("order log failed for {}: {}", intent.id, e);
+        }
     }
 
     /// The protocol-agnostic edge checks: on a supported chain, still live, asking for real amounts.
     /// On-chain concerns (cosignature, exact fillability) are enforced later by the reactor.
-    fn is_admissible(&self, intent: &Intent) -> bool {
+    /// `None` admits; `Some(rule)` names the check that refused, for the log and the operator.
+    fn refusal(&self, intent: &Intent) -> Option<&'static str> {
         let now = self.clock.now_unix();
         if !self
             .admission
             .supported_chains
             .contains(&intent.origin_chain)
         {
-            debug!("ingest drop {}: unsupported chain", intent.id);
-            return false;
+            return Some("unsupported chain");
         }
         if intent.deadline <= now {
-            debug!("ingest drop {}: expired", intent.id);
-            return false;
+            return Some("expired");
         }
         if intent.outputs.is_empty() {
-            debug!("ingest drop {}: no outputs", intent.id);
-            return false;
+            return Some("no outputs");
         }
         if intent.outputs.len() > self.admission.max_outputs {
-            debug!("ingest drop {}: too many outputs", intent.id);
-            return false;
+            return Some("too many outputs");
         }
         // The zero address is the settlement layer's native-currency sentinel, and the filler
         // settles ERC20 only: the reactor would pay a native output out of its own balance, which
@@ -137,15 +166,13 @@ impl IngestPipeline {
         if intent.outputs.iter().any(|o| o.token == Address::ZERO)
             || intent.input.token == Address::ZERO
         {
-            debug!("ingest drop {}: native currency leg", intent.id);
-            return false;
+            return Some("native currency leg");
         }
         // Legs in different tokens would each need their own route and reservation, succeeding or
         // unwinding together. No live order is shaped that way, so this declines rather than
         // sourcing one token and meeting the rest on chain.
         if intent.delivery(now).is_none() {
-            debug!("ingest drop {}: outputs span several tokens", intent.id);
-            return false;
+            return Some("outputs span several tokens");
         }
         let tokens_allowed = self.admission.tokens.contains(&intent.input.token)
             && intent
@@ -153,22 +180,19 @@ impl IngestPipeline {
                 .iter()
                 .all(|o| self.admission.tokens.contains(&o.token));
         if !tokens_allowed {
-            debug!("ingest drop {}: token not admitted", intent.id);
-            return false;
+            return Some("token not admitted");
         }
         if intent.input.curve.amount_at(now).is_zero() {
-            debug!("ingest drop {}: zero input", intent.id);
-            return false;
+            return Some("zero input");
         }
         if intent
             .outputs
             .iter()
             .any(|o| o.curve.amount_at(now).is_zero())
         {
-            debug!("ingest drop {}: zero output", intent.id);
-            return false;
+            return Some("zero output");
         }
-        true
+        None
     }
 }
 
@@ -181,6 +205,7 @@ mod tests {
 
     use super::*;
     use crate::deps::ingest::NormalizeError;
+    use crate::primitives::ingest::OrderSource;
     use crate::primitives::ingest::{AmountCurve, IntentInput, IntentOutput, IntentParts};
 
     fn addr(n: u8) -> Address {
@@ -235,6 +260,7 @@ mod tests {
             Bytes::from(vec![tag]),
             Bytes::new(),
             0,
+            OrderSource::UniswapX,
         )
     }
 
@@ -276,6 +302,7 @@ mod tests {
             1024,
             Arc::new(FixedClock(1000)),
             admission(),
+            None,
         )
     }
 
@@ -350,6 +377,74 @@ mod tests {
     /// The native-currency rule, isolated. Both other native tests are also satisfied by the token
     /// allow-list, so deleting this rule breaks neither: here the zero address is *admitted* by the
     /// allow-list, leaving the native check as the only thing that can decline the order.
+    /// The observation log is the denominator for everything the resolver reports about reach, so
+    /// an order that never reaches the loop still has to be recorded — with the rule that refused
+    /// it. Nothing else in the suite notices if the pipeline stops logging.
+    #[tokio::test]
+    async fn every_order_is_logged_with_its_verdict() {
+        #[derive(Default)]
+        struct Spy(std::sync::Mutex<Vec<(IntentId, String, Option<String>)>>);
+        #[async_trait::async_trait]
+        impl crate::deps::order_log::OrderLog for Spy {
+            async fn record(
+                &self,
+                order: &crate::deps::order_log::OrderObserved<'_>,
+            ) -> Result<(), crate::deps::order_log::OrderLogError> {
+                self.0.lock().expect("spy").push((
+                    order.intent.id,
+                    order.verdict.as_str().to_string(),
+                    order.verdict.reason().map(str::to_string),
+                ));
+                Ok(())
+            }
+            async fn record_quote(
+                &self,
+                _order: IntentId,
+                _indicative_in: &str,
+            ) -> Result<(), crate::deps::order_log::OrderLogError> {
+                Ok(())
+            }
+        }
+
+        let spy = Arc::new(Spy::default());
+        let mut norms: BTreeMap<ProtocolId, Arc<dyn Normalizer>> = BTreeMap::new();
+        norms.insert(
+            ProtocolId::UniswapXV2,
+            Arc::new(MapNorm(HashMap::from([
+                (
+                    Bytes::from(vec![1]),
+                    intent_with(1, ChainId(1), 2000, 5, 5, vec![addr(8)]),
+                ),
+                (
+                    Bytes::from(vec![2]),
+                    intent_with(2, ChainId(1), 2000, 5, 5, vec![addr(2)]),
+                ),
+            ]))),
+        );
+        let p = IngestPipeline::new(
+            norms,
+            Duration::from_secs(60),
+            1024,
+            Arc::new(FixedClock(1000)),
+            admission(),
+            Some(Arc::clone(&spy) as Arc<dyn crate::deps::order_log::OrderLog>),
+        );
+        let got = drain(&p, vec![feed(vec![raw(1), raw(2)])]).await;
+        assert_eq!(got.len(), 1, "only the listed token is admitted");
+
+        let seen = spy.0.lock().expect("spy").clone();
+        assert_eq!(
+            seen.len(),
+            2,
+            "the refused order is logged too, not just the admitted one"
+        );
+        let refused = seen
+            .iter()
+            .find(|(_, verdict, _)| verdict == "dropped")
+            .expect("the refusal is recorded");
+        assert_eq!(refused.2.as_deref(), Some("token not admitted"));
+    }
+
     #[tokio::test]
     async fn drops_a_native_leg_even_when_the_zero_address_is_admitted() {
         let mut norms: BTreeMap<ProtocolId, Arc<dyn Normalizer>> = BTreeMap::new();
@@ -375,6 +470,7 @@ mod tests {
             1024,
             Arc::new(FixedClock(1000)),
             admits_zero,
+            None,
         );
         let got = drain(&p, vec![feed(vec![raw(1), raw(2), raw(3)])]).await;
         assert_eq!(
@@ -404,6 +500,7 @@ mod tests {
             1024,
             Arc::new(FixedClock(1000)),
             admission(),
+            None,
         );
         assert!(drain(&no_norms, vec![feed(vec![raw(1)])]).await.is_empty());
 

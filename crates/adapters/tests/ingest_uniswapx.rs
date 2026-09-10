@@ -9,7 +9,9 @@ use alloy::primitives::{address, Address, Bytes, B256, U256};
 use alloy::signers::local::PrivateKeySigner;
 use solvent_adapters::ingest::uniswapx::{OrderSpec, SignedOrderBuilder, UniswapXV2Normalizer};
 use solvent_core::deps::ingest::{NormalizeError, Normalizer};
-use solvent_core::primitives::ingest::{AmountCurve, Exclusivity, ProtocolId, RawOrder};
+use solvent_core::primitives::ingest::{
+    AmountCurve, Exclusivity, OrderSource, ProtocolId, RawOrder,
+};
 use solvent_core::primitives::ChainId;
 
 const PERMIT2: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
@@ -112,6 +114,7 @@ fn rejects_a_malformed_payload() {
         Bytes::from_static(&[1, 2, 3]),
         Bytes::new(),
         0,
+        OrderSource::UniswapX,
     );
     let normalizer = UniswapXV2Normalizer::new(REACTOR, vec![key(0x22).address()]);
     assert!(matches!(
