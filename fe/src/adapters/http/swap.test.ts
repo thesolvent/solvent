@@ -10,6 +10,7 @@ vi.mock("@solvent/sdk/swap", () => ({
 }));
 
 const from = {
+  chainId: 31337,
   address: "0x1111111111111111111111111111111111111111",
   symbol: "USDC",
   name: "USD Coin",
@@ -21,6 +22,7 @@ const from = {
   pairs: ["USDC/WETH"],
 } satisfies Asset;
 const to = {
+  chainId: 31337,
   address: "0x2222222222222222222222222222222222222222",
   symbol: "WETH",
   name: "Wrapped Ether",

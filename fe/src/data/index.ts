@@ -501,9 +501,12 @@ export const DASH = "—";
  * cannot be asked for without both, so they are required here rather than optional.
  */
 export type Asset = {
+  chainId: number;
   address: `0x${string}`;
   symbol: string;
   name: string;
+  /** Token artwork from the configured token list; the UI falls back to initials when absent. */
+  logoUri?: string | null;
   decimals: number;
   price: number;
   /** Signed 24h move, already formatted. */

@@ -4,6 +4,21 @@ import type { Asset, Quote } from "@/data";
 export const ANY_TAG = "All";
 export const ANY_NETWORK = "All networks";
 
+/** Chain-qualified identity keeps the same token symbol on two networks selectable. */
+export function assetKey(asset: Asset): string {
+  return `${asset.chainId}:${asset.address.toLowerCase()}`;
+}
+
+/** Accept legacy symbol state while moving explicit picker choices to chain-qualified keys. */
+export function selectedAsset(
+  assets: Asset[],
+  selection: string,
+): Asset | undefined {
+  return assets.find(
+    (asset) => assetKey(asset) === selection || asset.symbol === selection,
+  );
+}
+
 function options(anyLabel: string, values: string[]): string[] {
   return [anyLabel, ...[...new Set(values)].sort()];
 }
@@ -29,8 +44,8 @@ export function networkOptions(assets: Asset[]): string[] {
 }
 
 /** Symbols quotable against `symbol`, read off the pairs it reports being part of. */
-function counterparts(assets: Asset[], symbol: string): string[] {
-  const asset = assets.find((candidate) => candidate.symbol === symbol);
+function counterparts(asset: Asset | undefined): string[] {
+  const symbol = asset?.symbol ?? "";
   return (asset?.pairs ?? []).flatMap((pair) => {
     const legs = pair.split("/");
     return legs.includes(symbol) ? legs.filter((leg) => leg !== symbol) : [];
@@ -50,8 +65,9 @@ export function choices(
   crossChain = false,
 ): Asset[] {
   if (leg === "from") return assets.filter((asset) => asset.pairs.length > 0);
-  const allowed = new Set(counterparts(assets, from));
-  const sourceNetwork = assets.find((asset) => asset.symbol === from)?.net;
+  const source = selectedAsset(assets, from);
+  const allowed = new Set(counterparts(source));
+  const sourceNetwork = source?.net;
   return assets.filter(
     (asset) =>
       allowed.has(asset.symbol) &&
@@ -82,21 +98,20 @@ export function settleLegs(
   crossChain = false,
 ): Legs | null {
   if (!assets.length) return null;
-  const source = assets.find(
-    (asset) => asset.symbol === fromToken && asset.pairs.length > 0,
-  )?.symbol;
-  const settledSource = source ?? firstSource(assets);
+  const source = selectedAsset(assets, fromToken);
+  const settledSource =
+    source && source.pairs.length > 0 ? fromToken : firstSource(assets);
   if (!settledSource) return null;
   if (settledSource !== fromToken)
     return { fromToken: settledSource, toToken: "" };
   if (!toToken) return null;
-  const compatible = counterparts(assets, settledSource).includes(toToken);
-  const sourceNetwork = assets.find(
-    (asset) => asset.symbol === settledSource,
-  )?.net;
-  const destinationNetwork = assets.find(
-    (asset) => asset.symbol === toToken,
-  )?.net;
+  const settledAsset = selectedAsset(assets, settledSource);
+  const destination = selectedAsset(assets, toToken);
+  const compatible = counterparts(settledAsset).includes(
+    destination?.symbol ?? "",
+  );
+  const sourceNetwork = settledAsset?.net;
+  const destinationNetwork = destination?.net;
   const sameNetwork =
     !sourceNetwork ||
     !destinationNetwork ||

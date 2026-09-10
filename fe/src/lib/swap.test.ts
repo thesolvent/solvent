@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Asset, Quote } from "@/data";
 
 import {
+  assetKey,
   choices,
   networkOptions,
   settleLegs,
@@ -17,6 +18,7 @@ function asset(
   net = "Ethereum",
 ): Asset {
   return {
+    chainId: net === "Base" ? 31338 : 31337,
     address: `0x${symbol}`,
     symbol,
     name: symbol,
@@ -110,6 +112,16 @@ describe("settling the legs", () => {
       fromToken: "WETH",
       toToken: "",
     });
+  });
+
+  it("keeps equal symbols on different chains as distinct legs", () => {
+    const ethereumWeth = asset("WETH", ["WETH/USDC"], [], "Ethereum");
+    const baseUsdc = asset("USDC", ["WETH/USDC"], [], "Base");
+    const assets = [ethereumWeth, baseUsdc];
+
+    expect(
+      settleLegs(assets, assetKey(ethereumWeth), assetKey(baseUsdc), true),
+    ).toBeNull();
   });
 });
 

@@ -72,12 +72,20 @@ export function useQuote(
   const quotable =
     from !== undefined &&
     to !== undefined &&
-    from.address.toLowerCase() !== to.address.toLowerCase() &&
+    (from.chainId !== to.chainId ||
+      from.address.toLowerCase() !== to.address.toLowerCase()) &&
     inputProblem === undefined &&
     settled !== "";
 
   const { data, isFetching, error, failureReason } = useQuery({
-    queryKey: ["quote", from?.address, to?.address, settled],
+    queryKey: [
+      "quote",
+      from?.chainId,
+      from?.address,
+      to?.chainId,
+      to?.address,
+      settled,
+    ],
     queryFn: quotable
       ? () => swap.quote({ from, to, amount: settled })
       : skipToken,

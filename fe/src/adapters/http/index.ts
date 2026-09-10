@@ -9,7 +9,7 @@ import { toPool } from "../mappers/pool";
 import { toDepthCurve, toPoolRoster } from "../mappers/pool-detail";
 import { swapAdapter } from "./swap";
 import { positionsAdapter } from "./positions";
-import { solventApi } from "./client";
+import { baseApi, solventApi } from "./client";
 import { explorerAdapter } from "./explorer";
 import { faucetAdapter } from "./faucet";
 
@@ -32,13 +32,24 @@ const pools: PoolsPort = {
 
 const assets: AssetsPort = {
   // A deployment names the chain it serves, so config is read alongside the assets themselves.
-  async list() {
+  async list(includeCrossChain = false) {
     const [served, config] = await Promise.all([
       solventApi.assets(),
       solventApi.config(),
     ]);
     const network = config.networks[0] ?? "Unknown";
-    return served.items.map((asset) => toAsset(asset, network));
+    const primary = served.items.map((asset) => toAsset(asset, network));
+    if (!includeCrossChain) return primary;
+
+    const [baseServed, baseConfig] = await Promise.all([
+      baseApi.assets(),
+      baseApi.config(),
+    ]);
+    const baseNetwork = baseConfig.networks[0] ?? "Unknown";
+    return [
+      ...primary,
+      ...baseServed.items.map((asset) => toAsset(asset, baseNetwork)),
+    ];
   },
 };
 

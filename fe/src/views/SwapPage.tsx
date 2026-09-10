@@ -3,13 +3,15 @@ import { useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAccount, useSwitchChain } from "wagmi";
 
-import { DASH } from "@/data";
+import { DASH, type Asset } from "@/data";
 import { fit, money } from "@/lib/format";
 import {
   ANY_NETWORK,
   ANY_TAG,
+  assetKey,
   choices,
   networkOptions,
+  selectedAsset,
   settleLegs,
   swapAction,
   tagOptions,
@@ -24,16 +26,36 @@ import styles from "./SwapPage.module.css";
 
 const SWAP_TABS = ["Swap"];
 
+function AssetIdentity({ asset }: { asset: Asset | undefined }) {
+  if (!asset) return null;
+  return (
+    <span
+      className={styles.assetIdentity}
+      aria-label={`${asset.symbol} token on ${asset.net}`}
+    >
+      <span className={styles.tokenIcon} aria-hidden="true">
+        {asset.logoUri ? (
+          <img src={asset.logoUri} alt="" />
+        ) : (
+          asset.symbol.slice(0, 2)
+        )}
+      </span>
+      <span className={styles.chainIcon} aria-hidden="true">
+        {asset.net.slice(0, 1)}
+      </span>
+    </span>
+  );
+}
+
 export function SwapPage() {
   const { state, set, config } = useApp();
   const crossChain = state.productMode === "SolventX";
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
-  const assets = useAssets();
-  const bySymbol = (symbol: string) => assets.find((a) => a.symbol === symbol);
-  const from = bySymbol(state.fromToken);
-  const to = bySymbol(state.toToken);
+  const assets = useAssets(crossChain);
+  const from = selectedAsset(assets, state.fromToken);
+  const to = selectedAsset(assets, state.toToken);
 
   useEffect(() => {
     const settled = settleLegs(
@@ -71,6 +93,11 @@ export function SwapPage() {
   const { isConnected, chainId } = useAccount();
   const { openConnectModal } = useConnectModal();
   const { switchChain } = useSwitchChain();
+  const walletNetwork =
+    isConnected && chainId !== undefined
+      ? (assets.find((asset) => asset.chainId === chainId)?.net ??
+        (chainId === chain.id ? chain.name : `Chain ${chainId}`))
+      : undefined;
   const submission = useSubmitSwap(
     {
       from,
@@ -146,17 +173,23 @@ export function SwapPage() {
 
   // Picking the asset already on the other leg swaps the two rather than
   // leaving both legs on the same token.
-  const choose = (sym: string) => {
+  const choose = (asset: Asset) => {
+    const selected = assetKey(asset);
+    const other = selectedAsset(
+      assets,
+      state.picker === "from" ? state.toToken : state.fromToken,
+    );
+    const sameAsset = other && assetKey(other) === selected;
     if (state.picker === "from") {
       set({
-        fromToken: sym,
-        toToken: state.toToken === sym ? state.fromToken : state.toToken,
+        fromToken: selected,
+        toToken: sameAsset ? state.fromToken : state.toToken,
         picker: null,
       });
     } else {
       set({
-        toToken: sym,
-        fromToken: state.fromToken === sym ? state.toToken : state.fromToken,
+        toToken: selected,
+        fromToken: sameAsset ? state.toToken : state.fromToken,
         picker: null,
       });
     }
@@ -174,8 +207,24 @@ export function SwapPage() {
             ))}
           </div>
           <div className={styles.headActions}>
-            <button type="button" className={styles.iconButton}>
-              <span className={styles.iconGlyph} />
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label={
+                walletNetwork
+                  ? `Connected network: ${walletNetwork}`
+                  : "Wallet network not connected"
+              }
+              title={walletNetwork}
+            >
+              <span
+                className={
+                  walletNetwork ? styles.networkGlyph : styles.iconGlyph
+                }
+                aria-hidden="true"
+              >
+                {walletNetwork?.slice(0, 1).toUpperCase()}
+              </span>
             </button>
             <button type="button" className={styles.moreButton}>
               ···
@@ -189,12 +238,10 @@ export function SwapPage() {
             className={styles.assetButton}
             onClick={() => set({ picker: "from", pQuery: "" })}
           >
-            <span className={styles.assetChip}>
-              {state.fromToken.slice(0, 2)}
-            </span>
             <span className={styles.assetSymbol}>
-              {state.fromToken || "Select"}
+              {from?.symbol || "Select"}
             </span>
+            <AssetIdentity asset={from} />
             <span className={styles.assetCaret}>▾</span>
           </button>
           <div className={styles.amountCol}>
@@ -239,12 +286,8 @@ export function SwapPage() {
             className={styles.assetButton}
             onClick={() => set({ picker: "to", pQuery: "" })}
           >
-            <span className={styles.assetChip}>
-              {state.toToken.slice(0, 2)}
-            </span>
-            <span className={styles.assetSymbol}>
-              {state.toToken || "Select"}
-            </span>
+            <span className={styles.assetSymbol}>{to?.symbol || "Select"}</span>
+            <AssetIdentity asset={to} />
             <span className={styles.assetCaret}>▾</span>
           </button>
           <div className={styles.amountCol}>
@@ -332,19 +375,22 @@ export function SwapPage() {
 
               <div data-scroll="1" className={styles.tokenList}>
                 {matches.map((t) => {
+                  const selected = selectedAsset(
+                    assets,
+                    state.picker === "from" ? state.fromToken : state.toToken,
+                  );
                   const active =
-                    (state.picker === "from"
-                      ? state.fromToken
-                      : state.toToken) === t.symbol;
+                    selected !== undefined &&
+                    assetKey(selected) === assetKey(t);
                   const down = t.change.charAt(0) === "-";
                   return (
                     <button
-                      key={t.symbol}
+                      key={assetKey(t)}
                       type="button"
                       className={
                         active ? styles.tokenRowActive : styles.tokenRow
                       }
-                      onClick={() => choose(t.symbol)}
+                      onClick={() => choose(t)}
                     >
                       <span className={styles.tokenChip}>
                         {t.symbol.slice(0, 2)}
