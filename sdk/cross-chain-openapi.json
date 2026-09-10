@@ -112,6 +112,58 @@
         }
       }
     },
+    "/v1/cross-chain/orders/{id}/advance": {
+      "post": {
+        "tags": [
+          "cross-chain"
+        ],
+        "summary": "Advance one durable cross-chain saga transition.",
+        "operationId": "advance",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "32-byte cross-chain order identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saga after at most one advancement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrossChainOrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or unknown order identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A chain service or saga store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/cross-chain/quote": {
       "post": {
         "tags": [
