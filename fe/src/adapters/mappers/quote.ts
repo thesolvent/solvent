@@ -1,7 +1,8 @@
 import type { QuoteResponse } from "@solvent/sdk/client";
+import type { AggregateQuote } from "@solvent/sdk/cross-chain";
 import { formatUnits } from "viem";
 
-import type { Quote } from "@/data";
+import { DASH, type Asset, type Quote } from "@/data";
 
 /** Small outputs need more places to say anything; large ones read as noise with them. */
 function trimmed(amount: string): string {
@@ -32,5 +33,40 @@ export function toQuote(
     makersSourced: api.makers_sourced,
     amountOutRaw: BigInt(api.amount_out.raw),
     expiresAt: Date.parse(api.expires_at),
+  };
+}
+
+/** Present an aggregate cross-chain promise in the same slots as a same-chain quote. */
+export function toCrossChainQuote(
+  api: AggregateQuote,
+  from: Asset,
+  to: Asset,
+  amountInRaw: bigint,
+): Quote {
+  const amountOutRaw = BigInt(api.amount_out);
+  const amountOutUnits = formatUnits(amountOutRaw, to.decimals);
+  const amountInUsd =
+    Number(formatUnits(amountInRaw, from.decimals)) * from.price;
+  const amountOutUsd = Number(amountOutUnits) * to.price;
+  const priceImpact =
+    amountInUsd > 0
+      ? `${Math.max(0, ((amountInUsd - amountOutUsd) / amountInUsd) * 100).toFixed(2)}%`
+      : DASH;
+  const makers = new Set(
+    [...api.origin.sources, ...api.destination.sources].map((source) =>
+      source.maker.toLowerCase(),
+    ),
+  );
+
+  return {
+    tokenIn: from.address,
+    tokenOut: to.address,
+    amountInRaw,
+    amountOut: trimmed(amountOutUnits),
+    amountOutUsd,
+    priceImpact,
+    makersSourced: makers.size,
+    amountOutRaw,
+    expiresAt: api.expires_at_unix * 1_000,
   };
 }
