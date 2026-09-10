@@ -176,39 +176,45 @@ impl Intent {
     /// or all unwind. Declining is honest; sourcing one of them and discovering the rest on chain
     /// is not.
     pub fn delivery(&self, at: u64) -> Option<Delivery> {
-        let token = self.outputs.first()?.token;
-        self.outputs
-            .iter()
-            .try_fold(U256::ZERO, |total, output| {
-                (output.token == token).then(|| total.saturating_add(output.curve.amount_at(at)))
-            })
-            .map(|amount| Delivery { token, amount })
+        self.fold_legs(at, Some)
     }
 
     /// What `filler` must actually deliver at `at`: the delivery, raised by the exclusivity toll when
     /// the window belongs to someone else.
     ///
-    /// Mirrors `ExclusivityLib._handleExclusiveOverride`. Rounding is up, as the contract's
-    /// `mulDivUp` is — a wei short is an approval the reactor refuses. `None` when there is no single
-    /// delivery, or when the window is strict (`override_bps == 0`) and not ours, since then nobody
-    /// else may fill at any price.
+    /// Mirrors `ExclusivityLib._handleExclusiveOverride`, which iterates the resolved outputs and
+    /// applies `mulDivUp` to **each** — so the toll is taken per leg and the rounding-up happens
+    /// once per leg, not once on the sum. `Σceil(aᵢ·k) ≥ ceil(Σaᵢ·k)`, and any shortfall is an
+    /// amount the reactor refuses after every maker leg has already been bought. `None` when there
+    /// is no single delivery, or when the window is strict (`override_bps == 0`) and not ours,
+    /// since then nobody else may fill at any price.
     pub fn required_output(&self, filler: Address, at: u64) -> Option<Delivery> {
-        let delivery = self.delivery(at)?;
-        let Some(exclusivity) = self.exclusivity else {
-            return Some(delivery);
+        let scale = match self.exclusivity {
+            None => return self.delivery(at),
+            Some(exclusivity) if exclusivity.grants_rights_to(filler, at) => {
+                return self.delivery(at)
+            }
+            Some(exclusivity) if exclusivity.override_bps == 0 => return None,
+            Some(exclusivity) => U256::from(BPS + u64::from(exclusivity.override_bps)),
         };
-        if exclusivity.grants_rights_to(filler, at) {
-            return Some(delivery);
-        }
-        if exclusivity.override_bps == 0 {
-            return None;
-        }
-        let scale = U256::from(BPS + u64::from(exclusivity.override_bps));
-        let amount = delivery
-            .amount
-            .checked_mul(scale)?
-            .div_ceil(U256::from(BPS));
-        Some(Delivery { amount, ..delivery })
+        self.fold_legs(at, |amount| {
+            Some(amount.checked_mul(scale)?.div_ceil(U256::from(BPS)))
+        })
+    }
+
+    /// Sum the output legs at `at`, passing each through `per_leg` first. `None` unless every leg
+    /// pays the same token and every `per_leg` yields a value.
+    fn fold_legs(&self, at: u64, per_leg: impl Fn(U256) -> Option<U256>) -> Option<Delivery> {
+        let token = self.outputs.first()?.token;
+        self.outputs
+            .iter()
+            .try_fold(U256::ZERO, |total, output| {
+                (output.token == token)
+                    .then(|| per_leg(output.curve.amount_at(at)))
+                    .flatten()
+                    .map(|amount| total.saturating_add(amount))
+            })
+            .map(|amount| Delivery { token, amount })
     }
 
     pub fn new(parts: IntentParts) -> Intent {
@@ -330,6 +336,30 @@ mod tests {
                 .expect("fillable")
                 .amount,
             U256::from(2u64)
+        );
+    }
+
+    /// `ExclusivityLib` scales each resolved output, so the round-up happens once per leg. Rounding
+    /// the sum instead under-sources by up to one wei per extra leg — enough for the reactor to
+    /// refuse the fill after every maker leg has been bought.
+    #[test]
+    fn the_toll_rounds_up_per_leg_not_on_the_sum() {
+        let legs = [4_539_448_776_366_754_703u64, 1_190_396_360_377_453_094];
+        let mut order = intent(legs.iter().map(|&a| output(2, a)).collect());
+        order.exclusivity = Some(Exclusivity::new(addr(3), 100, 100));
+
+        let toll = |a: u64| (U256::from(a) * U256::from(10_100u64)).div_ceil(U256::from(10_000u64));
+        let per_leg = toll(legs[0]) + toll(legs[1]);
+        let on_the_sum =
+            (U256::from(legs[0] + legs[1]) * U256::from(10_100u64)).div_ceil(U256::from(10_000u64));
+        assert_eq!(per_leg, on_the_sum + U256::ONE, "the two differ here");
+
+        assert_eq!(
+            order
+                .required_output(addr(US), 50)
+                .expect("fillable")
+                .amount,
+            per_leg
         );
     }
 
