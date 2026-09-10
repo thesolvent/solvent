@@ -69,6 +69,11 @@ feed_silence_secs = 300    # unreachable for longer than this and readiness turn
 # the identity is ours to do. This is Uniswap's operational key, identical on mainnet and Sepolia.
 expected_cosigners = ["0x4449Cd34d1eb1FEDCF02A1Be3834FfDe8E6A6180"]
 
+# Observation-only: 1inch Limit Order Protocol orders, seen and quote-priced alongside UniswapX's
+# but never filled (no FillBuilder exists for this protocol yet). Requires ONEINCH_API_KEY in the
+# environment; omit `oneinch_orderbook_url` to leave this feed off.
+# oneinch_orderbook_url = "https://api.1inch.dev/orderbook/v4.1"
+
 # Tokens the resolver will touch on either side. Empty falls back to the token list. Restricting to
 # tokens a maker has actually shipped costs no reach — nothing else is fillable — and it excludes
 # fee-on-transfer, rebasing, and blocklisting tokens, each of which delivers less than the reactor

@@ -1,3 +1,4 @@
-//! Ingest adapters: per-protocol normalizers (and, later, order feeds).
+//! Ingest adapters: per-protocol normalizers and order feeds.
 
+pub mod oneinch;
 pub mod uniswapx;

@@ -41,6 +41,7 @@ export function tokenText(quantity: TokenQuantity): string {
 function sourceLabel(source: string): string {
   if (source === "uniswapx") return "UniswapX";
   if (source === "solvent") return "Solvent API";
+  if (source === "oneinch") return "1inch";
   return source;
 }
 

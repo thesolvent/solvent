@@ -122,6 +122,12 @@ pub struct Config {
     /// once however many polls return it.
     #[serde(default = "default_dedup_ttl_secs")]
     pub dedup_ttl_secs: u64,
+
+    /// Root of 1inch's Orderbook API, or unset to leave this feed off. Observation-only: seen and
+    /// quote-priced like any other order, never filled — there is no `FillBuilder` for this
+    /// protocol. Requires `ONEINCH_API_KEY` in the environment when set.
+    #[serde(default)]
+    pub oneinch_orderbook_url: Option<String>,
 }
 
 /// One Binance price symbol and the tokens whose USD price it feeds.

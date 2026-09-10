@@ -17,6 +17,7 @@ use solvent_adapters::chain::ChainHead;
 use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
+use solvent_adapters::ingest::oneinch::{OneInchApiClient, OneInchFeed, OneInchNormalizer};
 use solvent_adapters::ingest::uniswapx::{
     FeedHealth, HostedFeed, OrdersApiClient, Scope, ServerCosigner, UniswapXFillBuilder,
     UniswapXV2Normalizer,
@@ -389,8 +390,33 @@ async fn main() -> Result<(), StartupError> {
                 .collect(),
             false => config.admitted_tokens.iter().copied().collect(),
         };
+        let mut normalizers: BTreeMap<ProtocolId, Arc<dyn Normalizer>> =
+            BTreeMap::from([(ProtocolId::UniswapXV2, feed_normalizer)]);
+        // Observation-only: 1inch orders are seen, admitted/dropped, and quote-priced exactly like
+        // UniswapX's, but there is no `FillBuilder` for this protocol yet, so none is ever
+        // submitted as a trade. Left off when unconfigured.
+        let mut extra_feeds: Vec<Arc<dyn OrderFeed>> = Vec::new();
+        if let Some(oneinch_url) = config.oneinch_orderbook_url.clone() {
+            let oneinch_key = std::env::var("ONEINCH_API_KEY")
+                .map_err(|_| StartupError::MissingSecret("ONEINCH_API_KEY"))?;
+            normalizers.insert(ProtocolId::OneInchLimitOrder, Arc::new(OneInchNormalizer));
+            let oneinch_client = Arc::new(
+                OneInchApiClient::new(oneinch_url, ChainId(config.chain_id), oneinch_key)
+                    .map_err(|e| StartupError::OrdersFeed(e.to_string()))?,
+            );
+            let oneinch_health = Arc::new(FeedHealth::new(Duration::from_secs(
+                config.feed_silence_secs,
+            )));
+            let oneinch_feed: Arc<dyn OrderFeed> = Arc::new(OneInchFeed::new(
+                oneinch_client,
+                ChainId(config.chain_id),
+                Duration::from_millis(config.order_poll_ms),
+                oneinch_health,
+            ));
+            extra_feeds.push(oneinch_feed);
+        }
         let pipeline = Arc::new(IngestPipeline::new(
-            BTreeMap::from([(ProtocolId::UniswapXV2, feed_normalizer)]),
+            normalizers,
             Duration::from_secs(config.dedup_ttl_secs),
             config.dedup_capacity,
             Arc::new(SystemClock),
@@ -423,12 +449,14 @@ async fn main() -> Result<(), StartupError> {
             Arc::clone(&feed_health),
         ));
 
+        let mut feeds: Vec<Arc<dyn OrderFeed>> = vec![feed];
+        feeds.extend(extra_feeds);
         let (tx, rx) = tokio::sync::mpsc::channel::<Intent>(INTENT_CHANNEL_CAPACITY);
         tokio::spawn(supervise("ingest", move || {
             let pipeline = Arc::clone(&pipeline);
-            let feed = Arc::clone(&feed);
+            let feeds = feeds.clone();
             let tx = tx.clone();
-            async move { pipeline.run(vec![feed], tx).await }
+            async move { pipeline.run(feeds, tx).await }
         }));
 
         // Re-price every held order once per block: that is how often the state a decision rests on

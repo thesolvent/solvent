@@ -304,6 +304,15 @@ the project is pre-1.0 and evolving.
     should drain traffic and page someone, not restart a process whose problem is upstream. The
     health type existed but was read by nothing, so the failure it was written for — a filler that
     sees no orders while looking healthy — was live.
+  - **1inch Limit Order Protocol feed, observation-only** — `OneInchFeed`/`OneInchNormalizer` poll
+    1inch's Orderbook API and normalize plain, `ALLOW_MULTIPLE_FILLS`, and `FeeTaker`-gated orders
+    into the same `Intent` pipeline UniswapX orders use, so they are admitted or dropped and
+    quote-priced the same way. No `FillBuilder` exists for this protocol, so nothing from this feed
+    is ever submitted — it exists to see the venue's real flow and know what sourcing it would have
+    cost. An order whose amount depends on unrecovered extension bytecode (a predicate, a runtime
+    amount calculator, Permit2) is treated as malformed and never logged, the same as an
+    unparseable UniswapX order. Off by default; set `oneinch_orderbook_url` and `ONEINCH_API_KEY`
+    to enable.
 
 ### Added — frontend (`fe/`, React + Vite)
 - **Live Makers and strategy details** — connect the original dashboard and strategy panels to

@@ -18,6 +18,8 @@ pub enum OrderSource {
     UniswapX,
     /// Submitted straight to this resolver by a taker.
     Solvent,
+    /// Polled from 1inch's Orderbook API.
+    OneInch,
 }
 
 impl OrderSource {
@@ -26,6 +28,7 @@ impl OrderSource {
         match self {
             OrderSource::UniswapX => "uniswapx",
             OrderSource::Solvent => "solvent",
+            OrderSource::OneInch => "oneinch",
         }
     }
 }
