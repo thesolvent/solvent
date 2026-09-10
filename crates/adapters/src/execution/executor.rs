@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use alloy::primitives::{B256, U256};
+use alloy::primitives::B256;
 use async_trait::async_trait;
 use walletkit::core::deps::SubmissionOpts;
 use walletkit::core::wallet::{HandleId, SimOutcome, TxIntent, TxStatus};
@@ -53,7 +53,7 @@ fn fill_to_intent(fill: &FillTx) -> TxIntent {
         fill.chain_id,
         fill.filler_owner,
         fill.filler,
-        U256::ZERO,
+        fill.value,
         fill.calldata.clone(),
     )
 }
