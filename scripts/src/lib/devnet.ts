@@ -4,13 +4,13 @@ import {
     SolventNetworkError,
 } from "@solvent/sdk/client";
 import {
+    defineChain,
     isAddressEqual,
     parseAbi,
     type Account,
     type Address,
     type Hex,
 } from "viem";
-import { anvil } from "viem/chains";
 import { readManifest } from "./manifest.ts";
 
 import {
@@ -28,11 +28,17 @@ export type Devnet = Awaited<ReturnType<typeof connectDevnet>>;
 export async function connectDevnet() {
     const manifest = readManifest();
     const rpcUrl = process.env.SOLVENT_RPC_URL ?? "http://127.0.0.1:8545";
+    const chain = defineChain({
+        id: manifest.chain_id,
+        name: `Solvent Devnet ${manifest.chain_id}`,
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+        rpcUrls: { default: { http: [rpcUrl] } },
+    });
     const api = createSolventClient({
         baseUrl: process.env.SOLVENT_API_URL ?? "http://127.0.0.1:8080",
     });
     const publicClient = createPublicClient({
-        chain: anvil,
+        chain,
         transport: http(rpcUrl),
         pollingInterval: 1_000,
     });
@@ -42,12 +48,10 @@ export async function connectDevnet() {
         api.assets(),
         publicClient.getCode({ address: manifest.reactor as Address }),
     ]);
-    if (
-        [manifest.chain_id, config.chain_id, rpcChain].some(
-            (id) => id !== anvil.id,
-        )
-    )
-        throw new Error("Seeding requires Solvent Devnet (chain 31337)");
+    if ([config.chain_id, rpcChain].some((id) => id !== manifest.chain_id))
+        throw new Error(
+            "API, RPC, and deployment manifest use different chains",
+        );
     if (
         !code ||
         code === "0x" ||
@@ -83,7 +87,7 @@ export async function connectDevnet() {
     function wallet(account: Account) {
         const client = createWalletClient({
             account,
-            chain: anvil,
+            chain,
             transport: http(rpcUrl),
         });
         return {
@@ -113,7 +117,7 @@ export async function connectDevnet() {
         confirm,
         testClient: createTestClient({
             mode: "anvil",
-            chain: anvil,
+            chain,
             transport: http(rpcUrl),
         }),
     };

@@ -22,7 +22,10 @@ import { REPO_ROOT } from "../lib/manifest.ts";
 import { createSwapClient } from "../lib/node-runtime.ts";
 import { PAIRS } from "./pairs.ts";
 
-const REPORT_PATH = resolve(REPO_ROOT, "devnet/generated/review-trades.json");
+const REPORT_PATH = resolve(
+    REPO_ROOT,
+    process.env.SOLVENT_TRADE_REPORT ?? "devnet/generated/review-trades.json",
+);
 const TRADE_SIZES_USD = [1_000, 1_250, 1_500];
 const TRADE_COUNT = PAIRS.length * TRADE_SIZES_USD.length;
 const TERMINAL = new Set(["confirmed", "declined", "failed"]);
