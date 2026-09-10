@@ -73,6 +73,22 @@ pub struct Config {
     /// Path to the tx engine's durable state (redb), so in-flight fills survive a restart.
     #[serde(default = "default_wallet_state_db")]
     pub wallet_state_db: String,
+    /// Optional private listener and allow-listed contracts for cross-chain coordination.
+    #[serde(default)]
+    pub crosschain: Option<CrossChainConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CrossChainConfig {
+    pub bind_addr: SocketAddr,
+    #[serde(default)]
+    pub destination_app: Address,
+    #[serde(default)]
+    pub origin_settler: Address,
+    #[serde(default)]
+    pub proof_outbox: Address,
+    #[serde(default = "default_crosschain_quote_ttl_secs")]
+    pub quote_ttl_secs: u64,
 }
 
 /// One Binance price symbol and the tokens whose USD price it feeds.
@@ -158,6 +174,9 @@ fn default_decay_secs() -> u64 {
 }
 fn default_wallet_state_db() -> String {
     "walletkit.redb".to_string()
+}
+fn default_crosschain_quote_ttl_secs() -> u64 {
+    30
 }
 
 /// Read and parse the token list JSON at `path`.

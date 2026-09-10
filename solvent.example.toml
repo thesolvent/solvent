@@ -50,6 +50,16 @@ decay_window_secs = 60     # the cosigner's decay window applied to each order
 # and reconciles them rather than losing track. Point it at a persistent volume in production.
 wallet_state_db = "walletkit.redb"
 
+# Enable this block on each chain-local process that participates in a configured cross-chain pair.
+# Expose this listener only to the proxy (normally behind mTLS); SOLVENT_INTERNAL_TOKEN supplies
+# the application-level Bearer credential. Set only the contracts deployed on this process's chain.
+# [crosschain]
+# bind_addr = "127.0.0.1:9080"
+# destination_app = "0x0000000000000000000000000000000000000000"
+# origin_settler = "0x0000000000000000000000000000000000000000"
+# proof_outbox = "0x0000000000000000000000000000000000000000"
+# quote_ttl_secs = 30
+
 # Binance symbol -> the tokens it prices. Devnet tokens sit at mainnet addresses, so mainnet
 # symbols apply. Stables quoted against USDT read ~1; USDT itself has no pair and stays gas-free.
 [[price_symbols]]
