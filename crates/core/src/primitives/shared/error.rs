@@ -6,6 +6,11 @@ use thiserror::Error;
 
 use crate::deps::asset::PairPriceHistorySourceError;
 use crate::deps::balances::BalancesOracleError;
+use crate::deps::crosschain::{
+    CctpAttestationError, CctpCompletionError, LegQuoteStoreError, LegQuoterError,
+    PreparationStoreError, RemoteSolventError, SagaStoreError, StepMaterializerError,
+    StepStoreError,
+};
 use crate::deps::execution::{ExecutionError, SettlementError, SimError};
 use crate::deps::ingest::{FillBuilderError, NormalizeError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
@@ -18,6 +23,26 @@ use crate::primitives::ledger::LedgerError;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum SolventError {
+    #[error("cross-chain quote: {0}")]
+    LegQuote(#[from] LegQuoterError),
+    #[error("cross-chain quote store: {0}")]
+    LegQuoteStore(#[from] LegQuoteStoreError),
+    #[error("cross-chain preparation store: {0}")]
+    PreparationStore(#[from] PreparationStoreError),
+    #[error("cross-chain saga store: {0}")]
+    SagaStore(#[from] SagaStoreError),
+    #[error("cross-chain step store: {0}")]
+    StepStore(#[from] StepStoreError),
+    #[error("cross-chain step materializer: {0}")]
+    StepMaterializer(#[from] StepMaterializerError),
+    #[error("CCTP attestation: {0}")]
+    CctpAttestation(#[from] CctpAttestationError),
+    #[error("CCTP completion: {0}")]
+    CctpCompletion(#[from] CctpCompletionError),
+    #[error("remote Solvent: {0}")]
+    RemoteSolvent(#[from] RemoteSolventError),
+    #[error("invalid cross-chain request: {0}")]
+    InvalidCrossChain(String),
     /// Reading historical market prices failed.
     #[error("pair price history: {0}")]
     PairPriceHistory(#[from] PairPriceHistorySourceError),

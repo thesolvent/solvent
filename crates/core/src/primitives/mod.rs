@@ -3,6 +3,7 @@
 
 pub mod amount;
 pub mod asset;
+pub mod crosschain;
 pub mod execution;
 pub mod ingest;
 pub mod ledger;
@@ -16,6 +17,7 @@ pub mod shared;
 pub mod trade;
 
 pub use shared::{
-    Bps, ChainConfig, ChainId, FillId, IntentId, LeaseId, MakerId, ReservationId, SolventError,
-    StrategyHash, SystemConfig, Usd, UsdPrice,
+    AggregateQuoteId, Bps, ChainConfig, ChainId, CrossChainOrderId, CrossChainStepId, FillId,
+    IntentId, LeaseId, MakerId, PrepareToken, ReservationId, SolventError, StrategyHash,
+    SystemConfig, Usd, UsdPrice,
 };
