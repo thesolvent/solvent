@@ -9,16 +9,21 @@ use alloy::sol;
 use alloy::sol_types::SolValue;
 use async_trait::async_trait;
 use solvent_adapters::ledger::SqliteLedgerStore;
-use solvent_adapters::rebate::{FillerRebateCallBuilder, SqliteRebateStore};
+use solvent_adapters::rebate::{
+    FillerRebateCallBuilder, SqliteRebateAccrualSource, SqliteRebateStore,
+};
 use solvent_core::deps::execution::{ExecutionAuthorizer, ExecutionAuthorizerError};
-use solvent_core::deps::rebate::{RebateCallBuilder, RebateStore, RebateStoreError};
+use solvent_core::deps::rebate::{
+    RebateAccrualSource, RebateCallBuilder, RebateStore, RebateStoreError,
+};
 use solvent_core::primitives::execution::{ExecutionAuthorization, PolicySignature};
 use solvent_core::primitives::rebate::{
-    RebateAccrual, RebateAllocation, RebateBatch, RebateBatchState, RebatePlan,
+    RebateAccrual, RebateAllocation, RebateBatch, RebateBatchState, RebateExecutedEvent,
+    RebatePlan, RebateSettlement,
 };
 use solvent_core::primitives::registry::{MakerStrategy, StrategyKey, TokenPair};
 use solvent_core::primitives::trade::TradeId;
-use solvent_core::primitives::{MakerId, RebateBatchId, ReservationId, StrategyHash};
+use solvent_core::primitives::{ChainId, MakerId, RebateBatchId, ReservationId, StrategyHash};
 use sqlx::sqlite::SqlitePoolOptions;
 use ulid::Ulid;
 
@@ -72,6 +77,7 @@ fn accrual(amount_in: u64) -> RebateAccrual {
         U256::from(amount_in),
         U256::from(9u64),
         U256::from(10u64),
+        1,
     )
 }
 
@@ -158,10 +164,184 @@ async fn restart_preserves_one_idempotent_batch_and_exact_executable_calldata() 
             U256::from(1u64),
             U256::from(1u64),
             U256::from(1u64),
+            2,
         ),
     );
     assert!(matches!(
         restarted.save(&different_id).await,
         Err(RebateStoreError::Conflict(hash)) if hash == strategy().strategy_hash
     ));
+}
+
+#[tokio::test]
+async fn execution_marker_closes_the_batch_and_cursor_never_rewinds() {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("open in-memory sqlite");
+    SqliteLedgerStore::new(pool.clone())
+        .migrate()
+        .await
+        .expect("migrate schema");
+    let store = SqliteRebateStore::new(pool.clone());
+    let batch = ready_batch().await;
+    store.save(&batch).await.unwrap();
+    let RebateBatchState::Ready(execution) = &batch.state else {
+        panic!("fixture must be ready");
+    };
+    let plan = execution.plan.as_ref();
+    let event = RebateExecutedEvent::new(
+        plan.batch_id,
+        plan.strategy.strategy_hash,
+        token(9),
+        plan.strategy.maker,
+        plan.token_in,
+        plan.token_out,
+        plan.amount_in,
+        plan.amount_out,
+        plan.maker_rebate,
+        B256::from([8; 32]),
+        120,
+        3,
+    );
+    let settlement = RebateSettlement::new(plan.clone(), execution.reservation, event, 1_000);
+
+    store.begin_settlement(&settlement).await.unwrap();
+    let replay = RebateSettlement::new(
+        plan.clone(),
+        execution.reservation,
+        settlement.event.clone(),
+        1_001,
+    );
+    store.begin_settlement(&replay).await.unwrap();
+    assert_eq!(store.pending_settlements().await.unwrap(), vec![settlement]);
+
+    store.finish_settlement(batch.id).await.unwrap();
+    store.finish_settlement(batch.id).await.unwrap();
+    assert!(store.open_batches().await.unwrap().is_empty());
+    assert!(store.pending_settlements().await.unwrap().is_empty());
+    let status: (String,) =
+        sqlx::query_as("SELECT status FROM rebate_settlement WHERE batch_id = ?")
+            .bind(batch.id.0.to_vec())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status.0, "executed");
+
+    let chain = ChainId(31337);
+    assert_eq!(store.scan_cursor(chain).await.unwrap(), None);
+    store.save_scan_cursor(chain, 120).await.unwrap();
+    store.save_scan_cursor(chain, 100).await.unwrap();
+    assert_eq!(store.scan_cursor(chain).await.unwrap(), Some(120));
+}
+
+#[tokio::test]
+async fn confirmed_trade_projection_is_idempotent_and_uses_canonical_token_weight() {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("open in-memory sqlite");
+    SqliteLedgerStore::new(pool.clone())
+        .migrate()
+        .await
+        .expect("migrate schema");
+    let trade_id = TradeId(Ulid::from_parts(4, 1));
+    sqlx::query(
+        "INSERT INTO trade
+         (id, order_hash, taker, token_in, token_out, amount_in, min_amount_out,
+          status, status_rank, deadline_block, block_number, created_at, settled_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', 5, 100, 42, 1, 2)",
+    )
+    .bind(trade_id.to_string())
+    .bind(B256::from([1; 32]).to_vec())
+    .bind(token(8).to_vec())
+    .bind(token(5).to_vec())
+    .bind(token(4).to_vec())
+    .bind("12")
+    .bind("34")
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO trade_leg
+         (trade_id, idx, maker, strategy_hash, amount_in, amount_out)
+         VALUES (?, 0, ?, ?, '12', '34')",
+    )
+    .bind(trade_id.to_string())
+    .bind(strategy().maker.0.to_vec())
+    .bind(strategy().strategy_hash.0.to_vec())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let source = SqliteRebateAccrualSource::new(pool.clone(), strategy().app);
+
+    let pending = source.pending(10).await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].allocation_weight, U256::from(34u64));
+    assert_eq!(pending[0].confirmed_block, 42);
+
+    let batch = RebateBatch::new(
+        RebateBatchId(B256::from([2; 32])),
+        TokenPair::new(token(4), token(5)),
+        pending[0].clone(),
+    );
+    SqliteRebateStore::new(pool.clone())
+        .save(&batch)
+        .await
+        .unwrap();
+    assert!(source.pending(10).await.unwrap().is_empty());
+
+    let deferred_trade_id = TradeId(Ulid::from_parts(5, 1));
+    sqlx::query(
+        "INSERT INTO trade
+         (id, order_hash, taker, token_in, token_out, amount_in, min_amount_out,
+          status, status_rank, deadline_block, block_number, created_at, settled_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', 5, 100, 43, 2, 3)",
+    )
+    .bind(deferred_trade_id.to_string())
+    .bind(B256::from([2; 32]).to_vec())
+    .bind(token(8).to_vec())
+    .bind(token(5).to_vec())
+    .bind(token(4).to_vec())
+    .bind("13")
+    .bind("35")
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO trade_leg
+         (trade_id, idx, maker, strategy_hash, amount_in, amount_out)
+         VALUES (?, 0, ?, ?, '13', '35')",
+    )
+    .bind(deferred_trade_id.to_string())
+    .bind(strategy().maker.0.to_vec())
+    .bind(strategy().strategy_hash.0.to_vec())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE rebate_batch SET state = 'ready' WHERE id = ?")
+        .bind(batch.id.0.to_vec())
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(source.pending(10).await.unwrap().is_empty());
+
+    SqliteRebateStore::new(pool.clone())
+        .close(batch.id)
+        .await
+        .unwrap();
+    let deferred = source.pending(10).await.unwrap();
+    assert_eq!(deferred.len(), 1);
+    assert_eq!(deferred[0].trade_id, deferred_trade_id);
+
+    sqlx::query(
+        "UPDATE trade SET status = 'submitted', status_rank = 4, settled_at = NULL WHERE id = ?",
+    )
+    .bind(trade_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(source.has_unsettled(&strategy()).await.unwrap());
 }

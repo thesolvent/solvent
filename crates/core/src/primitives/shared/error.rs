@@ -10,7 +10,10 @@ use crate::deps::execution::{ExecutionAuthorizerError, ExecutionError, Settlemen
 use crate::deps::ingest::{FillBuilderError, NormalizeError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
 use crate::deps::maker_metrics::MakerMetricsError;
-use crate::deps::rebate::{RebateCallBuilderError, RebateMarketBookError, RebateStoreError};
+use crate::deps::rebate::{
+    RebateAccrualSourceError, RebateCallBuilderError, RebateChainSourceError,
+    RebateMarketBookError, RebateStoreError,
+};
 use crate::deps::registry::{BlockTimesError, ChainSourceError, StoreError};
 use crate::deps::routing::GasPriceError;
 use crate::deps::trade::TradeStoreError;
@@ -50,6 +53,12 @@ pub enum SolventError {
     /// The durable rebate batch store failed.
     #[error("rebate store: {0}")]
     RebateStore(#[from] RebateStoreError),
+    /// Reading confirmed fills awaiting rebate accrual failed.
+    #[error("rebate accrual source: {0}")]
+    RebateAccrualSource(#[from] RebateAccrualSourceError),
+    /// Reading mined rebate execution events failed.
+    #[error("rebate chain source: {0}")]
+    RebateChainSource(#[from] RebateChainSourceError),
     /// A fresh executable market book was unavailable.
     #[error("rebate market: {0}")]
     RebateMarketBook(#[from] RebateMarketBookError),

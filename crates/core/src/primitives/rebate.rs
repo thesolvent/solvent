@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 
 use crate::primitives::execution::{ExecutionAuthorization, PolicySignature};
 use crate::primitives::pricing::Ratio;
@@ -20,6 +20,8 @@ pub struct RebateAccrual {
     pub token_out: Address,
     pub amount_in: U256,
     pub amount_out: U256,
+    /// Block containing the confirmed fill; policy waits until the registry has indexed it.
+    pub confirmed_block: u64,
     /// Canonical-token weight for this trade's proportional share of the maker rebate.
     pub allocation_weight: U256,
 }
@@ -34,6 +36,7 @@ impl RebateAccrual {
         amount_in: U256,
         amount_out: U256,
         allocation_weight: U256,
+        confirmed_block: u64,
     ) -> Self {
         Self {
             trade_id,
@@ -42,7 +45,85 @@ impl RebateAccrual {
             token_out,
             amount_in,
             amount_out,
+            confirmed_block,
             allocation_weight,
+        }
+    }
+}
+
+/// One mined filler event proving a public rebate execution completed on chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RebateExecutedEvent {
+    pub batch_id: RebateBatchId,
+    pub strategy_hash: crate::primitives::StrategyHash,
+    pub executor: Address,
+    pub maker: crate::primitives::MakerId,
+    pub token_in: Address,
+    pub token_out: Address,
+    pub amount_in: U256,
+    pub amount_out: U256,
+    pub maker_rebate: U256,
+    pub tx_hash: B256,
+    pub block_number: u64,
+    pub log_index: u64,
+}
+
+impl RebateExecutedEvent {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        batch_id: RebateBatchId,
+        strategy_hash: crate::primitives::StrategyHash,
+        executor: Address,
+        maker: crate::primitives::MakerId,
+        token_in: Address,
+        token_out: Address,
+        amount_in: U256,
+        amount_out: U256,
+        maker_rebate: U256,
+        tx_hash: B256,
+        block_number: u64,
+        log_index: u64,
+    ) -> Self {
+        Self {
+            batch_id,
+            strategy_hash,
+            executor,
+            maker,
+            token_in,
+            token_out,
+            amount_in,
+            amount_out,
+            maker_rebate,
+            tx_hash,
+            block_number,
+            log_index,
+        }
+    }
+}
+
+/// Crash-recoverable record written before the rebate reservation is posted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RebateSettlement {
+    pub plan: Box<RebatePlan>,
+    pub reservation: ReservationId,
+    pub event: RebateExecutedEvent,
+    pub executed_at: u64,
+}
+
+impl RebateSettlement {
+    pub fn new(
+        plan: RebatePlan,
+        reservation: ReservationId,
+        event: RebateExecutedEvent,
+        executed_at: u64,
+    ) -> Self {
+        Self {
+            plan: Box::new(plan),
+            reservation,
+            event,
+            executed_at,
         }
     }
 }

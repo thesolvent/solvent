@@ -21,7 +21,9 @@ use solvent_adapters::http::{self};
 use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
-use solvent_adapters::rebate::{FillerRebateCallBuilder, SqliteRebateStore};
+use solvent_adapters::rebate::{
+    AlloyRebateChainSource, FillerRebateCallBuilder, SqliteRebateAccrualSource, SqliteRebateStore,
+};
 use solvent_adapters::registry::{AlloyBlockTimes, AlloyChainSource, SqliteStore};
 use solvent_adapters::routing::{BinanceFeed, BinanceHistory, GasPoller, MarketCache};
 use solvent_adapters::trade::SqliteTradeStore;
@@ -34,19 +36,23 @@ use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ledger::BudgetSource;
 use solvent_core::deps::maker_metrics::MakerMetricsStore;
 use solvent_core::deps::quote_log::QuoteLog;
-use solvent_core::deps::rebate::RebateMarketBook;
+use solvent_core::deps::rebate::{
+    RebateAccrualSource, RebateChainSource, RebateMarketBook, RebateStore,
+};
 use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::routing::{GasPrice, PriceOracle};
 use solvent_core::deps::trade::TradeStore;
 use solvent_core::execution::ExecutionService;
 use solvent_core::ledger::LedgerService;
 use solvent_core::maker::MakerService;
+use solvent_core::obs::{info, warn};
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
 use solvent_core::rebate::{
     RebateMarketData, RebatePolicy, RebatePolicyConfig, RebateService, RebateServiceConfig,
+    RebateWorker, RebateWorkerConfig,
 };
 use solvent_core::reconcile::ReconcileService;
 use solvent_core::registry::{RegistrySync, SharedSnapshot};
@@ -330,6 +336,7 @@ async fn main() -> Result<(), StartupError> {
         settlement,
         Arc::clone(&ledger),
     ));
+    let rebate_store: Arc<dyn RebateStore> = Arc::new(SqliteRebateStore::new(pool.clone()));
     let rebates = Arc::new(RebateService::new(
         RebatePolicy::new(RebatePolicyConfig::new(
             config.rebate.deviation_threshold_bps,
@@ -337,7 +344,7 @@ async fn main() -> Result<(), StartupError> {
         )),
         Arc::clone(&ledger),
         Arc::clone(&strategy_guard),
-        Arc::new(SqliteRebateStore::new(pool.clone())),
+        Arc::clone(&rebate_store),
         Arc::new(FillerRebateCallBuilder::new(
             taker_credential,
             Arc::clone(&authorizer),
@@ -350,6 +357,31 @@ async fn main() -> Result<(), StartupError> {
         ),
     ));
     rebates.recover().await?;
+    let rebate_accruals: Arc<dyn RebateAccrualSource> = Arc::new(SqliteRebateAccrualSource::new(
+        pool.clone(),
+        config.app_address,
+    ));
+    let rebate_chain: Arc<dyn RebateChainSource> = Arc::new(AlloyRebateChainSource::new(
+        Arc::new(provider.clone()),
+        config.filler,
+        None,
+    ));
+    let rebate_worker = Arc::new(RebateWorker::new(
+        Arc::clone(&rebates),
+        rebate_accruals,
+        rebate_chain,
+        rebate_store,
+        Arc::clone(&registry_store),
+        Arc::clone(&registry),
+        Arc::clone(&ledger),
+        Arc::new(SystemClock),
+        RebateWorkerConfig::new(
+            ChainId(config.chain_id),
+            config.rebate.start_block,
+            config.rebate.authorization_ttl_blocks,
+            config.reservation_ttl_secs,
+        ),
+    ));
     let fill_builder: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(
         config.app_address,
         taker_credential,
@@ -397,8 +429,14 @@ async fn main() -> Result<(), StartupError> {
             BUDGET_POLL_INTERVAL,
         )
     }));
+    let reconcile_head = head.clone();
     tokio::spawn(supervise("reconcile", move || {
-        run_reconcile(Arc::clone(&reconcile), RECONCILE_INTERVAL)
+        run_reconcile(
+            Arc::clone(&reconcile),
+            Arc::clone(&rebate_worker),
+            reconcile_head.clone(),
+            RECONCILE_INTERVAL,
+        )
     }));
 
     let trades = Arc::new(TradeService::new(
@@ -513,7 +551,12 @@ async fn run_ledger_sync(
 
 /// Drive in-flight fills to settlement and sweep orphaned holds on an interval; a failed tick is
 /// logged and retried next tick.
-async fn run_reconcile(reconcile: Arc<ReconcileService>, interval: Duration) {
+async fn run_reconcile(
+    reconcile: Arc<ReconcileService>,
+    rebates: Arc<RebateWorker>,
+    head: ChainHead,
+    interval: Duration,
+) {
     let mut ticker = tokio::time::interval(interval);
     loop {
         ticker.tick().await;
@@ -527,6 +570,24 @@ async fn run_reconcile(reconcile: Arc<ReconcileService>, interval: Duration) {
             }
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "reconcile tick failed; retrying next tick"),
+        }
+        match rebates.tick(head.latest()).await {
+            Ok(report)
+                if report.accrued > 0
+                    || report.evaluated > 0
+                    || report.settled > 0
+                    || report.expired > 0 =>
+            {
+                info!(
+                    accrued = report.accrued,
+                    evaluated = report.evaluated,
+                    settled = report.settled,
+                    expired = report.expired,
+                    "rebate tick"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => warn!(error = %e, "rebate tick failed; retrying next tick"),
         }
     }
 }

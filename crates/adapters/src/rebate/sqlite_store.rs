@@ -10,11 +10,12 @@ use serde::{Deserialize, Serialize};
 use solvent_core::deps::rebate::{RebateStore, RebateStoreError};
 use solvent_core::primitives::execution::{ExecutionAuthorization, ExecutionKind, PolicySignature};
 use solvent_core::primitives::rebate::{
-    RebateAccrual, RebateAllocation, RebateBatch, RebateBatchState, RebateExecution, RebatePlan,
+    RebateAccrual, RebateAllocation, RebateBatch, RebateBatchState, RebateExecutedEvent,
+    RebateExecution, RebatePlan, RebateSettlement,
 };
 use solvent_core::primitives::registry::{StrategyKey, TokenPair};
 use solvent_core::primitives::trade::TradeId;
-use solvent_core::primitives::{MakerId, RebateBatchId, ReservationId, StrategyHash};
+use solvent_core::primitives::{ChainId, MakerId, RebateBatchId, ReservationId, StrategyHash};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::execution::filler::{executeRebateCall, Authorization, Order};
@@ -163,6 +164,125 @@ impl RebateStore for SqliteRebateStore {
         .await
         .map_err(db)?;
         Ok(())
+    }
+
+    async fn scan_cursor(&self, chain: ChainId) -> Result<Option<u64>, RebateStoreError> {
+        let value: Option<(i64,)> =
+            sqlx::query_as("SELECT block_number FROM rebate_scan_cursor WHERE chain = ?")
+                .bind(i64_of(chain.0)?)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(db)?;
+        value
+            .map(|(block,)| u64_of(block, "rebate scan block"))
+            .transpose()
+    }
+
+    async fn save_scan_cursor(
+        &self,
+        chain: ChainId,
+        block_number: u64,
+    ) -> Result<(), RebateStoreError> {
+        sqlx::query(
+            "INSERT INTO rebate_scan_cursor (chain, block_number) VALUES (?, ?)
+             ON CONFLICT (chain) DO UPDATE SET block_number = excluded.block_number
+             WHERE rebate_scan_cursor.block_number <= excluded.block_number",
+        )
+        .bind(i64_of(chain.0)?)
+        .bind(i64_of(block_number)?)
+        .execute(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(())
+    }
+
+    async fn begin_settlement(
+        &self,
+        settlement: &RebateSettlement,
+    ) -> Result<(), RebateStoreError> {
+        let payload = serde_json::to_string(&StoredSettlement::from(settlement)).map_err(db)?;
+        sqlx::query(
+            "INSERT INTO rebate_settlement (batch_id, status, payload)
+             VALUES (?, 'settling', ?) ON CONFLICT DO NOTHING",
+        )
+        .bind(settlement.plan.batch_id.0.to_vec())
+        .bind(&payload)
+        .execute(&self.pool)
+        .await
+        .map_err(db)?;
+        let stored: Option<(String,)> =
+            sqlx::query_as("SELECT payload FROM rebate_settlement WHERE batch_id = ?")
+                .bind(settlement.plan.batch_id.0.to_vec())
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(db)?;
+        let exact = stored
+            .map(|(stored,)| serde_json::from_str::<StoredSettlement>(&stored).map_err(db))
+            .transpose()?
+            .map(StoredSettlement::into_domain)
+            .transpose()?
+            .is_some_and(|stored| {
+                stored.plan == settlement.plan
+                    && stored.reservation == settlement.reservation
+                    && stored.event == settlement.event
+            });
+        match exact {
+            true => Ok(()),
+            false => Err(RebateStoreError::Conflict(
+                settlement.plan.strategy.strategy_hash,
+            )),
+        }
+    }
+
+    async fn pending_settlements(&self) -> Result<Vec<RebateSettlement>, RebateStoreError> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT payload FROM rebate_settlement WHERE status = 'settling' ORDER BY batch_id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+        rows.into_iter()
+            .map(|(payload,)| {
+                serde_json::from_str::<StoredSettlement>(&payload)
+                    .map_err(db)?
+                    .into_domain()
+            })
+            .collect()
+    }
+
+    async fn finish_settlement(&self, id: RebateBatchId) -> Result<(), RebateStoreError> {
+        let mut transaction = self.pool.begin().await.map_err(db)?;
+        let updated = sqlx::query(
+            "UPDATE rebate_settlement SET status = 'executed'
+             WHERE batch_id = ? AND status = 'settling'",
+        )
+        .bind(id.0.to_vec())
+        .execute(&mut *transaction)
+        .await
+        .map_err(db)?
+        .rows_affected();
+        if updated == 0 {
+            let status: Option<(String,)> =
+                sqlx::query_as("SELECT status FROM rebate_settlement WHERE batch_id = ?")
+                    .bind(id.0.to_vec())
+                    .fetch_optional(&mut *transaction)
+                    .await
+                    .map_err(db)?;
+            if !status.is_some_and(|(status,)| status == "executed") {
+                return Err(RebateStoreError::Db(
+                    "rebate settlement does not exist".to_string(),
+                ));
+            }
+        }
+        sqlx::query(
+            "UPDATE rebate_batch
+             SET state = 'closed', state_payload = NULL, is_open = 0 WHERE id = ?",
+        )
+        .bind(id.0.to_vec())
+        .execute(&mut *transaction)
+        .await
+        .map_err(db)?;
+        transaction.commit().await.map_err(db)
     }
 }
 
@@ -523,6 +643,7 @@ struct StoredAccrual {
     amount_in: U256,
     amount_out: U256,
     allocation_weight: U256,
+    confirmed_block: u64,
 }
 
 impl StoredAccrual {
@@ -539,6 +660,7 @@ impl StoredAccrual {
             self.amount_in,
             self.amount_out,
             self.allocation_weight,
+            self.confirmed_block,
         ))
     }
 }
@@ -555,6 +677,91 @@ impl From<&RebateAccrual> for StoredAccrual {
             amount_in: value.amount_in,
             amount_out: value.amount_out,
             allocation_weight: value.allocation_weight,
+            confirmed_block: value.confirmed_block,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredSettlement {
+    plan: StoredPlan,
+    reservation: B256,
+    event: StoredExecutedEvent,
+    executed_at: u64,
+}
+
+impl StoredSettlement {
+    fn into_domain(self) -> Result<RebateSettlement, RebateStoreError> {
+        Ok(RebateSettlement::new(
+            self.plan.into_domain()?,
+            ReservationId(self.reservation),
+            self.event.into_domain(),
+            self.executed_at,
+        ))
+    }
+}
+
+impl From<&RebateSettlement> for StoredSettlement {
+    fn from(value: &RebateSettlement) -> Self {
+        Self {
+            plan: StoredPlan::from(value.plan.as_ref()),
+            reservation: value.reservation.0,
+            event: StoredExecutedEvent::from(&value.event),
+            executed_at: value.executed_at,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredExecutedEvent {
+    batch_id: B256,
+    strategy_hash: B256,
+    executor: Address,
+    maker: Address,
+    token_in: Address,
+    token_out: Address,
+    amount_in: U256,
+    amount_out: U256,
+    maker_rebate: U256,
+    tx_hash: B256,
+    block_number: u64,
+    log_index: u64,
+}
+
+impl StoredExecutedEvent {
+    fn into_domain(self) -> RebateExecutedEvent {
+        RebateExecutedEvent::new(
+            RebateBatchId(self.batch_id),
+            StrategyHash(self.strategy_hash),
+            self.executor,
+            MakerId(self.maker),
+            self.token_in,
+            self.token_out,
+            self.amount_in,
+            self.amount_out,
+            self.maker_rebate,
+            self.tx_hash,
+            self.block_number,
+            self.log_index,
+        )
+    }
+}
+
+impl From<&RebateExecutedEvent> for StoredExecutedEvent {
+    fn from(value: &RebateExecutedEvent) -> Self {
+        Self {
+            batch_id: value.batch_id.0,
+            strategy_hash: value.strategy_hash.0,
+            executor: value.executor,
+            maker: value.maker.0,
+            token_in: value.token_in,
+            token_out: value.token_out,
+            amount_in: value.amount_in,
+            amount_out: value.amount_out,
+            maker_rebate: value.maker_rebate,
+            tx_hash: value.tx_hash,
+            block_number: value.block_number,
+            log_index: value.log_index,
         }
     }
 }
@@ -567,6 +774,14 @@ fn b256(bytes: &[u8], field: &str) -> Result<B256, RebateStoreError> {
 fn address(bytes: &[u8], field: &str) -> Result<Address, RebateStoreError> {
     Address::try_from(bytes)
         .map_err(|_| RebateStoreError::Db(format!("{field} must contain 20 bytes")))
+}
+
+fn i64_of(value: u64) -> Result<i64, RebateStoreError> {
+    i64::try_from(value).map_err(|_| db(format!("value {value} exceeds i64")))
+}
+
+fn u64_of(value: i64, field: &str) -> Result<u64, RebateStoreError> {
+    u64::try_from(value).map_err(|_| db(format!("{field} cannot be negative")))
 }
 
 fn db(error: impl std::fmt::Display) -> RebateStoreError {

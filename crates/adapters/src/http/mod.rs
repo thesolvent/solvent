@@ -232,6 +232,34 @@ mod tests {
         async fn close(&self, _: RebateBatchId) -> Result<(), RebateStoreError> {
             Ok(())
         }
+        async fn scan_cursor(
+            &self,
+            _: solvent_core::primitives::ChainId,
+        ) -> Result<Option<u64>, RebateStoreError> {
+            Ok(None)
+        }
+        async fn save_scan_cursor(
+            &self,
+            _: solvent_core::primitives::ChainId,
+            _: u64,
+        ) -> Result<(), RebateStoreError> {
+            Ok(())
+        }
+        async fn begin_settlement(
+            &self,
+            _: &solvent_core::primitives::rebate::RebateSettlement,
+        ) -> Result<(), RebateStoreError> {
+            Ok(())
+        }
+        async fn pending_settlements(
+            &self,
+        ) -> Result<Vec<solvent_core::primitives::rebate::RebateSettlement>, RebateStoreError>
+        {
+            Ok(Vec::new())
+        }
+        async fn finish_settlement(&self, _: RebateBatchId) -> Result<(), RebateStoreError> {
+            Ok(())
+        }
     }
 
     #[async_trait::async_trait]

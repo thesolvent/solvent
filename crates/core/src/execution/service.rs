@@ -61,11 +61,10 @@ impl ExecutionService {
     }
 
     /// Advance the tx engine, then settle every tracked fill that reached a terminal state: on
-    /// `Confirmed`, post the actual amounts the fill pulled (read from its own settlement) and drop
-    /// the tracking; on failure, void and drop. Returns the fills that reached a terminal state so
-    /// the caller can settle the trade lifecycle. A reservation a redelivery already settled is a
-    /// no-op, so this is safe to call repeatedly — and after a restart it recovers the durably
-    /// tracked fills through this same path.
+    /// `Confirmed`, post the actual amounts the fill pulled (read from its own settlement); on
+    /// failure, void. Returns the fills that reached a terminal state so the caller can durably
+    /// settle the trade before removing its execution tracking. A reservation a redelivery already
+    /// settled is a no-op, so this is safe to call repeatedly after a restart.
     pub async fn reconcile(&self) -> Result<Vec<Settled>, SolventError> {
         self.execution.tick().await?;
 
@@ -95,13 +94,18 @@ impl ExecutionService {
                 }
                 ExecStatus::Pending => continue,
             };
-            self.execution.forget(f.intent).await?;
             settled.push(Settled {
                 intent: f.intent,
                 outcome,
             });
         }
         Ok(settled)
+    }
+
+    /// Remove a terminal fill only after its matching trade transition is durable.
+    pub async fn forget(&self, intent: crate::primitives::IntentId) -> Result<(), SolventError> {
+        self.execution.forget(intent).await?;
+        Ok(())
     }
 
     /// Reverse a posted fill a chain reorg rolled back — the compensating ledger transition. The
@@ -398,6 +402,8 @@ mod tests {
                 ..
             }]
         ));
+        assert_eq!(svc.pending().await.unwrap(), 1);
+        svc.forget(intent).await.unwrap();
         assert_eq!(svc.pending().await.unwrap(), 0);
         // 60 consumed, the 40 remainder returned to available.
         assert_eq!(led.available(&wallet_account()), U256::from(940u64));
@@ -429,6 +435,8 @@ mod tests {
                 ..
             }]
         ));
+        assert_eq!(svc.pending().await.unwrap(), 1);
+        svc.forget(intent).await.unwrap();
         assert_eq!(svc.pending().await.unwrap(), 0);
         assert_eq!(
             led.available(&wallet_account()),
@@ -453,6 +461,7 @@ mod tests {
         );
         svc.fill(pending(intent, rid)).await.unwrap();
         svc.reconcile().await.unwrap();
+        svc.forget(intent).await.unwrap();
         assert_eq!(
             led.available(&wallet_account()),
             U256::from(900u64),
@@ -504,8 +513,10 @@ mod tests {
         // A concurrent path already posted this reservation.
         led.post(rid, &[U256::from(100u64)]).await.unwrap();
 
-        // reconcile sees Confirmed and tries to post again -> WrongState -> swallowed, not an error.
+        // reconcile sees Confirmed and treats the terminal ledger state as an idempotent replay.
         svc.reconcile().await.unwrap();
+        assert_eq!(svc.pending().await.unwrap(), 1);
+        svc.forget(intent).await.unwrap();
         assert_eq!(svc.pending().await.unwrap(), 0);
     }
 
@@ -530,6 +541,8 @@ mod tests {
         exec.tracked.lock().unwrap().insert(intent, rid);
 
         svc.reconcile().await.unwrap();
+        assert_eq!(svc.pending().await.unwrap(), 1);
+        svc.forget(intent).await.unwrap();
         assert_eq!(svc.pending().await.unwrap(), 0);
         assert_eq!(
             exec.submits.load(Ordering::Relaxed),

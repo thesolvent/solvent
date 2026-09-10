@@ -10,7 +10,9 @@ use arc_swap::ArcSwap;
 use tokio::sync::Mutex;
 
 use crate::deps::ledger::{BudgetSource, Clock, LedgerStore};
-use crate::primitives::ledger::{AccountKey, Ledger, Reservation, ReservationSource};
+use crate::primitives::ledger::{
+    AccountKey, Ledger, Reservation, ReservationSource, ReservationState,
+};
 use crate::primitives::registry::Snapshot;
 use crate::primitives::{IntentId, RebateBatchId, ReservationId, SolventError};
 
@@ -132,14 +134,13 @@ impl LedgerService {
         Ok(())
     }
 
-    /// The sources of `id` as durably held, or `None` if unknown — the authoritative per-source
-    /// amounts read back from the ledger, so a settlement is matched against what was actually held
-    /// rather than what a caller re-supplies.
+    /// The sources of a pending `id`, or `None` once it is absent or terminal.
     pub async fn reservation_sources(&self, id: ReservationId) -> Option<Vec<ReservationSource>> {
         self.ledger
             .lock()
             .await
             .reservation(&id)
+            .filter(|reservation| reservation.state == ReservationState::Pending)
             .map(|r| r.sources.clone())
     }
 

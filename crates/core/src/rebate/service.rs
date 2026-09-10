@@ -15,8 +15,8 @@ use crate::primitives::execution::ExecutionKind;
 use crate::primitives::ledger::{LedgerError, ReservationSource};
 use crate::primitives::pricing::Ratio;
 use crate::primitives::rebate::{
-    RebateAccrual, RebateAssessment, RebateBatch, RebateBatchState, RebateExecution,
-    RebateMinimums, RebateRequirements,
+    RebateAccrual, RebateAssessment, RebateBatch, RebateBatchState, RebateExecutedEvent,
+    RebateExecution, RebateMinimums, RebateRequirements, RebateSettlement,
 };
 use crate::primitives::registry::{MakerStrategy, StrategyKey, TokenPair};
 use crate::primitives::{RebateBatchId, ReservationId, SolventError};
@@ -107,6 +107,25 @@ impl RebateService {
 
     /// Rebuild open batches and routing guards after the ledger has recovered its durable holds.
     pub async fn recover(&self) -> Result<(), SolventError> {
+        for settlement in self.store.pending_settlements().await? {
+            validate_settlement(&settlement)?;
+            self.guards.guard(settlement.plan.strategy).await;
+            if self
+                .ledger
+                .reservation_sources(settlement.reservation)
+                .await
+                .is_some()
+            {
+                self.ledger
+                    .post(settlement.reservation, &[settlement.event.amount_out])
+                    .await?;
+            }
+            self.store
+                .finish_settlement(settlement.plan.batch_id)
+                .await?;
+            self.guards.unguard(&settlement.plan.strategy);
+        }
+
         let mut recovered = BTreeMap::new();
         for mut batch in self.store.open_batches().await? {
             validate_batch(&batch)?;
@@ -118,8 +137,10 @@ impl RebateService {
             }
 
             match &batch.state {
-                RebateBatchState::Accumulating => self.guards.unguard(&batch.strategy),
-                RebateBatchState::Guarded => self.guards.guard(batch.strategy).await,
+                RebateBatchState::Accumulating | RebateBatchState::Guarded => {
+                    // A restart invalidates the market freshness proof that allowed quoting.
+                    self.guards.guard(batch.strategy).await;
+                }
                 RebateBatchState::Ready(execution) => {
                     self.guards.guard(batch.strategy).await;
                     if self
@@ -128,8 +149,10 @@ impl RebateService {
                         .await
                         .is_none()
                     {
-                        batch.state = RebateBatchState::Guarded;
-                        self.store.save(&batch).await?;
+                        return Err(RebateError::InvalidExecution(
+                            "ready work has no inventory reservation",
+                        )
+                        .into());
                     }
                 }
                 RebateBatchState::Preparing { reservation, .. }
@@ -164,6 +187,13 @@ impl RebateService {
             }
             if batch.pair != TokenPair::new(accrual.token_in, accrual.token_out) {
                 return Err(RebateError::InvalidAccrual("strategy pair changed").into());
+            }
+            if matches!(batch.state, RebateBatchState::Ready(_)) {
+                // Published calldata stays executable until its deadline; retain the same hold.
+                return Err(RebateError::InvalidExecution(
+                    "confirmed fill arrived while public work is executable",
+                )
+                .into());
             }
             let was_accumulating = matches!(batch.state, RebateBatchState::Accumulating);
             self.guards.guard(accrual.strategy).await;
@@ -325,6 +355,12 @@ impl RebateService {
         let Some(batch) = batches.get_mut(strategy) else {
             return Ok(false);
         };
+        if matches!(batch.state, RebateBatchState::Ready(_)) {
+            return Err(RebateError::InvalidExecution(
+                "public work must expire before its batch is discarded",
+            )
+            .into());
+        }
         if let Some(reservation) = active_reservation(&batch.state) {
             batch.state = RebateBatchState::Invalidating { reservation };
             self.store.save(batch).await?;
@@ -334,6 +370,86 @@ impl RebateService {
         batches.remove(strategy);
         self.guards.unguard(strategy);
         Ok(true)
+    }
+
+    /// Reconcile a mined filler event against the exact signed plan before consuming its hold.
+    pub async fn settle(
+        &self,
+        event: RebateExecutedEvent,
+        executed_at: u64,
+    ) -> Result<bool, SolventError> {
+        let mut batches = self.batches.lock().await;
+        let Some(strategy) = batches
+            .iter()
+            .find_map(|(strategy, batch)| (batch.id == event.batch_id).then_some(*strategy))
+        else {
+            return Ok(false);
+        };
+        let batch = batches.get(&strategy).ok_or(RebateError::InvalidExecution(
+            "batch disappeared during settlement",
+        ))?;
+        let RebateBatchState::Ready(execution) = &batch.state else {
+            return Err(
+                RebateError::InvalidExecution("mined event does not identify ready work").into(),
+            );
+        };
+        validate_execution_event(&event, execution)?;
+        let settlement = RebateSettlement::new(
+            *execution.plan.clone(),
+            execution.reservation,
+            event,
+            executed_at,
+        );
+        self.store.begin_settlement(&settlement).await?;
+        if self
+            .ledger
+            .reservation_sources(settlement.reservation)
+            .await
+            .is_some()
+        {
+            self.ledger
+                .post(settlement.reservation, &[settlement.event.amount_out])
+                .await?;
+        }
+        self.store.finish_settlement(batch.id).await?;
+        batches.remove(&strategy);
+        self.guards.unguard(&strategy);
+        Ok(true)
+    }
+
+    /// Expire public work only after its entire deadline block has been scanned for executions.
+    pub async fn expire_ready(
+        &self,
+        strategy: &StrategyKey,
+        safe_scanned_block: u64,
+    ) -> Result<bool, SolventError> {
+        let mut batches = self.batches.lock().await;
+        let Some(batch) = batches.get_mut(strategy) else {
+            return Ok(false);
+        };
+        let RebateBatchState::Ready(execution) = &batch.state else {
+            return Ok(false);
+        };
+        if safe_scanned_block <= execution.authorization.deadline_block {
+            return Ok(false);
+        }
+        let reservation = execution.reservation;
+        let mut next = batch.clone();
+        next.state = RebateBatchState::Invalidating { reservation };
+        self.store.save(&next).await?;
+        *batch = next.clone();
+        if self.ledger.reservation_sources(reservation).await.is_some() {
+            self.ledger.expire(reservation).await?;
+        }
+        next.state = RebateBatchState::Guarded;
+        self.store.save(&next).await?;
+        *batch = next;
+        Ok(true)
+    }
+
+    /// A stable snapshot for the worker; policy decisions remain serialized by service methods.
+    pub async fn open_batches(&self) -> Vec<RebateBatch> {
+        self.batches.lock().await.values().cloned().collect()
     }
 
     /// Ready work is cloned from the immutable persisted payload; reads never mint a new nonce or
@@ -553,9 +669,58 @@ fn validate_accrual(accrual: &RebateAccrual) -> Result<(), RebateError> {
     if accrual.amount_in.is_zero()
         || accrual.amount_out.is_zero()
         || accrual.allocation_weight.is_zero()
+        || accrual.confirmed_block == 0
     {
         return Err(RebateError::InvalidAccrual(
-            "amounts and allocation weight must be non-zero",
+            "amounts, allocation weight, and confirmed block must be non-zero",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_execution_event(
+    event: &RebateExecutedEvent,
+    execution: &RebateExecution,
+) -> Result<(), RebateError> {
+    let plan = execution.plan.as_ref();
+    if event.batch_id != plan.batch_id
+        || event.strategy_hash != plan.strategy.strategy_hash
+        || event.maker != plan.strategy.maker
+        || event.token_in != plan.token_in
+        || event.token_out != plan.token_out
+        || event.amount_in != plan.amount_in
+        || event.amount_out != plan.amount_out
+        || event.maker_rebate != plan.maker_rebate
+        || event.executor.is_zero()
+        || event.tx_hash.is_zero()
+        || event.block_number == 0
+        || event.block_number > execution.authorization.deadline_block
+    {
+        return Err(RebateError::InvalidExecution(
+            "event does not match the signed plan",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_settlement(settlement: &RebateSettlement) -> Result<(), RebateError> {
+    let event = &settlement.event;
+    let plan = settlement.plan.as_ref();
+    if settlement.reservation.0.is_zero()
+        || event.batch_id != plan.batch_id
+        || event.strategy_hash != plan.strategy.strategy_hash
+        || event.maker != plan.strategy.maker
+        || event.token_in != plan.token_in
+        || event.token_out != plan.token_out
+        || event.amount_in != plan.amount_in
+        || event.amount_out != plan.amount_out
+        || event.maker_rebate != plan.maker_rebate
+        || event.executor.is_zero()
+        || event.tx_hash.is_zero()
+        || event.block_number == 0
+    {
+        return Err(RebateError::InvalidExecution(
+            "persisted settlement does not match its plan",
         ));
     }
     Ok(())
@@ -577,7 +742,7 @@ fn batch_id(accrual: &RebateAccrual) -> RebateBatchId {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{Address, B256, U256};
+    use alloy_primitives::{Address, Bytes, B256, U256};
     use async_trait::async_trait;
     use ulid::Ulid;
 
@@ -588,8 +753,13 @@ mod tests {
     };
     use crate::deps::rebate::{RebateCallBuilderError, RebateMarketBookError, RebateStoreError};
     use crate::deps::routing::{GasPrice, GasPriceError};
-    use crate::primitives::ledger::Reservation;
-    use crate::primitives::rebate::{RebateExecution, RebatePlan};
+    use crate::primitives::execution::{
+        ExecutionAuthorization, PolicySignature, RebateAuthorization,
+    };
+    use crate::primitives::ledger::{Reservation, ReservationSource};
+    use crate::primitives::rebate::{
+        RebateAllocation, RebateExecutedEvent, RebateExecution, RebatePlan,
+    };
     use crate::primitives::registry::MakerStrategy;
     use crate::primitives::trade::TradeId;
     use crate::primitives::{MakerId, StrategyHash};
@@ -604,7 +774,7 @@ mod tests {
             &self,
             _account: &crate::primitives::ledger::AccountKey,
         ) -> Result<U256, BudgetSourceError> {
-            Ok(U256::ZERO)
+            Ok(U256::MAX)
         }
     }
 
@@ -662,6 +832,36 @@ mod tests {
         async fn close(&self, _id: RebateBatchId) -> Result<(), RebateStoreError> {
             Ok(())
         }
+
+        async fn scan_cursor(
+            &self,
+            _chain: crate::primitives::ChainId,
+        ) -> Result<Option<u64>, RebateStoreError> {
+            Ok(None)
+        }
+
+        async fn save_scan_cursor(
+            &self,
+            _chain: crate::primitives::ChainId,
+            _block_number: u64,
+        ) -> Result<(), RebateStoreError> {
+            Ok(())
+        }
+
+        async fn begin_settlement(
+            &self,
+            _settlement: &RebateSettlement,
+        ) -> Result<(), RebateStoreError> {
+            Ok(())
+        }
+
+        async fn pending_settlements(&self) -> Result<Vec<RebateSettlement>, RebateStoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn finish_settlement(&self, _id: RebateBatchId) -> Result<(), RebateStoreError> {
+            Ok(())
+        }
     }
 
     #[async_trait]
@@ -677,6 +877,36 @@ mod tests {
         async fn close(&self, _id: RebateBatchId) -> Result<(), RebateStoreError> {
             Ok(())
         }
+
+        async fn scan_cursor(
+            &self,
+            _chain: crate::primitives::ChainId,
+        ) -> Result<Option<u64>, RebateStoreError> {
+            Ok(None)
+        }
+
+        async fn save_scan_cursor(
+            &self,
+            _chain: crate::primitives::ChainId,
+            _block_number: u64,
+        ) -> Result<(), RebateStoreError> {
+            Ok(())
+        }
+
+        async fn begin_settlement(
+            &self,
+            _settlement: &RebateSettlement,
+        ) -> Result<(), RebateStoreError> {
+            Ok(())
+        }
+
+        async fn pending_settlements(&self) -> Result<Vec<RebateSettlement>, RebateStoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn finish_settlement(&self, _id: RebateBatchId) -> Result<(), RebateStoreError> {
+            Ok(())
+        }
     }
 
     #[async_trait]
@@ -690,6 +920,36 @@ mod tests {
         }
 
         async fn close(&self, _id: RebateBatchId) -> Result<(), RebateStoreError> {
+            Err(RebateStoreError::Db("unavailable".to_string()))
+        }
+
+        async fn scan_cursor(
+            &self,
+            _chain: crate::primitives::ChainId,
+        ) -> Result<Option<u64>, RebateStoreError> {
+            Err(RebateStoreError::Db("unavailable".to_string()))
+        }
+
+        async fn save_scan_cursor(
+            &self,
+            _chain: crate::primitives::ChainId,
+            _block_number: u64,
+        ) -> Result<(), RebateStoreError> {
+            Err(RebateStoreError::Db("unavailable".to_string()))
+        }
+
+        async fn begin_settlement(
+            &self,
+            _settlement: &RebateSettlement,
+        ) -> Result<(), RebateStoreError> {
+            Err(RebateStoreError::Db("unavailable".to_string()))
+        }
+
+        async fn pending_settlements(&self) -> Result<Vec<RebateSettlement>, RebateStoreError> {
+            Err(RebateStoreError::Db("unavailable".to_string()))
+        }
+
+        async fn finish_settlement(&self, _id: RebateBatchId) -> Result<(), RebateStoreError> {
             Err(RebateStoreError::Db("unavailable".to_string()))
         }
     }
@@ -747,6 +1007,7 @@ mod tests {
             U256::from(amount_in),
             U256::from(9u64),
             U256::from(10u64),
+            1,
         )
     }
 
@@ -779,6 +1040,93 @@ mod tests {
             RebateMarketData::new(Arc::new(EmptyStore), Arc::new(EmptyStore), assets),
             RebateServiceConfig::new(Address::ZERO, 1, 1),
         )
+    }
+
+    async fn ready_service(
+        deadline_block: u64,
+    ) -> (RebateService, RebateBatch, RebateExecutedEvent) {
+        let service = service(Arc::new(StrategyGuard::default()));
+        let original = accrual(10);
+        let id = batch_id(&original);
+        let reservation = ReservationId(B256::from([7; 32]));
+        let plan = RebatePlan::new(
+            id,
+            original.strategy,
+            original.token_in,
+            original.token_out,
+            U256::from(11u64),
+            U256::from(9u64),
+            U256::from(3u64),
+            U256::ONE,
+            U256::ONE,
+            U256::ONE,
+            100,
+            vec![RebateAllocation::new(original.trade_id, U256::ONE)],
+        );
+        let authorization = ExecutionAuthorization::rebate(RebateAuthorization {
+            nonce: U256::ONE,
+            context_hash: id.0,
+            strategy_hash: original.strategy.strategy_hash,
+            maker: original.strategy.maker,
+            token_in: plan.token_in,
+            token_out: plan.token_out,
+            amount_out: plan.amount_out,
+            amount_in_limit: plan.amount_in,
+            rebate_amount: plan.maker_rebate,
+            deadline_block,
+        });
+        let execution = RebateExecution::new(
+            plan.clone(),
+            reservation,
+            authorization,
+            Bytes::from_static(&[1]),
+            PolicySignature::new(Bytes::from(vec![2; 65])),
+            Bytes::from_static(&[3]),
+            900,
+        );
+        let batch = RebateBatch::from_parts(
+            id,
+            original.strategy,
+            TokenPair::new(original.token_in, original.token_out),
+            BTreeMap::from([(original.trade_id, original)]),
+            RebateBatchState::Ready(Box::new(execution)),
+        );
+        service
+            .ledger
+            .reserve_rebate(
+                reservation,
+                id,
+                vec![ReservationSource {
+                    maker: plan.strategy.maker,
+                    strategy_hash: plan.strategy.strategy_hash,
+                    token: plan.token_out,
+                    amount: plan.amount_out,
+                }],
+                60,
+            )
+            .await
+            .unwrap();
+        service.guards.guard(batch.strategy).await;
+        service
+            .batches
+            .lock()
+            .await
+            .insert(batch.strategy, batch.clone());
+        let event = RebateExecutedEvent::new(
+            id,
+            plan.strategy.strategy_hash,
+            Address::from([8; 20]),
+            plan.strategy.maker,
+            plan.token_in,
+            plan.token_out,
+            plan.amount_in,
+            plan.amount_out,
+            plan.maker_rebate,
+            B256::from([9; 32]),
+            deadline_block,
+            1,
+        );
+        (service, batch, event)
     }
 
     #[tokio::test]
@@ -867,5 +1215,40 @@ mod tests {
 
         assert!(matches!(error, SolventError::RebateStore(_)));
         assert!(!guards.is_guarded(&strategy_key()));
+    }
+
+    #[tokio::test]
+    async fn mined_execution_posts_the_hold_and_closes_the_batch() {
+        let (service, batch, event) = ready_service(100).await;
+
+        assert!(service.settle(event.clone(), 1_000).await.unwrap());
+        assert!(service.open_batches().await.is_empty());
+        assert!(!service.guards.is_guarded(&batch.strategy));
+        assert!(service
+            .ledger
+            .reservation_sources(match batch.state {
+                RebateBatchState::Ready(execution) => execution.reservation,
+                _ => panic!("fixture must be ready"),
+            })
+            .await
+            .is_none());
+        assert!(!service.settle(event, 1_001).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn ready_work_expires_only_after_its_deadline_block_was_scanned() {
+        let (service, batch, _event) = ready_service(100).await;
+
+        assert!(matches!(
+            service.discard(&batch.strategy).await,
+            Err(SolventError::Rebate(RebateError::InvalidExecution(_)))
+        ));
+        assert!(!service.expire_ready(&batch.strategy, 100).await.unwrap());
+        assert!(service.expire_ready(&batch.strategy, 101).await.unwrap());
+        assert!(service.guards.is_guarded(&batch.strategy));
+        assert!(matches!(
+            service.open_batches().await[0].state,
+            RebateBatchState::Guarded
+        ));
     }
 }

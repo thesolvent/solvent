@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::primitives::rebate::RebateBatch;
-use crate::primitives::{RebateBatchId, StrategyHash};
+use crate::primitives::rebate::{RebateBatch, RebateSettlement};
+use crate::primitives::{ChainId, RebateBatchId, StrategyHash};
 
 #[async_trait]
 pub trait RebateStore: Send + Sync {
@@ -17,6 +17,26 @@ pub trait RebateStore: Send + Sync {
 
     /// Close a batch without erasing its accrual history.
     async fn close(&self, id: RebateBatchId) -> Result<(), RebateStoreError>;
+
+    /// Last block fully scanned for filler rebate executions on this chain.
+    async fn scan_cursor(&self, chain: ChainId) -> Result<Option<u64>, RebateStoreError>;
+
+    /// Advance the execution-log cursor after every event through this block is reconciled.
+    async fn save_scan_cursor(
+        &self,
+        chain: ChainId,
+        block_number: u64,
+    ) -> Result<(), RebateStoreError>;
+
+    /// Persist an execution before consuming its inventory reservation.
+    async fn begin_settlement(&self, settlement: &RebateSettlement)
+        -> Result<(), RebateStoreError>;
+
+    /// Settlements interrupted after their on-chain event was observed.
+    async fn pending_settlements(&self) -> Result<Vec<RebateSettlement>, RebateStoreError>;
+
+    /// Atomically retain executed history and close its open batch.
+    async fn finish_settlement(&self, id: RebateBatchId) -> Result<(), RebateStoreError>;
 }
 
 #[derive(Debug, Error)]

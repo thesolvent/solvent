@@ -86,6 +86,8 @@ pub struct PriceSymbol {
 
 #[derive(Debug, Deserialize)]
 pub struct RebateConfig {
+    #[serde(default)]
+    pub start_block: u64,
     #[serde(default = "default_rebate_deviation_bps")]
     pub deviation_threshold_bps: u64,
     #[serde(default = "default_rebate_gas_safety_bps")]
@@ -94,15 +96,19 @@ pub struct RebateConfig {
     pub gas_units: u64,
     #[serde(default = "default_rebate_market_max_age_secs")]
     pub market_max_age_secs: u64,
+    #[serde(default = "default_rebate_authorization_ttl_blocks")]
+    pub authorization_ttl_blocks: u64,
 }
 
 impl Default for RebateConfig {
     fn default() -> Self {
         Self {
+            start_block: 0,
             deviation_threshold_bps: default_rebate_deviation_bps(),
             gas_safety_bps: default_rebate_gas_safety_bps(),
             gas_units: default_rebate_gas_units(),
             market_max_age_secs: default_rebate_market_max_age_secs(),
+            authorization_ttl_blocks: default_rebate_authorization_ttl_blocks(),
         }
     }
 }
@@ -197,6 +203,9 @@ fn default_rebate_gas_units() -> u64 {
 }
 fn default_rebate_market_max_age_secs() -> u64 {
     10
+}
+fn default_rebate_authorization_ttl_blocks() -> u64 {
+    30
 }
 
 /// Read and parse the token list JSON at `path`.

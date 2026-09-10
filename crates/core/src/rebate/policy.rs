@@ -24,6 +24,8 @@ pub enum RebateError {
     InvalidAccrual(&'static str),
     #[error("rebate input does not match strategy {0}")]
     StrategyMismatch(crate::primitives::StrategyHash),
+    #[error("rebate execution is invalid: {0}")]
+    InvalidExecution(&'static str),
     #[error("market pair does not match the strategy")]
     MarketPairMismatch,
     #[error("rebate economics are missing for input token {0}")]
@@ -394,6 +396,7 @@ mod tests {
                     units(10),
                     units(10),
                     U256::from(n),
+                    1,
                 )
             })
             .collect()
