@@ -6,6 +6,7 @@
 pub mod aqua;
 pub mod balances;
 pub mod chain;
+pub mod crosschain;
 pub mod erc20;
 pub mod events;
 pub mod execution;
