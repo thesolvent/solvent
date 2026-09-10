@@ -115,7 +115,12 @@ pub struct Config {
 }
 
 /// One Binance price symbol and the tokens whose USD price it feeds.
+///
+/// Unknown fields are refused because TOML scopes bare keys to the table header above them: a
+/// top-level key written below `[[price_symbols]]` becomes a field of that entry, and without this
+/// it would be accepted and discarded, disabling whatever it configured with nothing logged.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PriceSymbol {
     pub symbol: String,
     pub tokens: Vec<Address>,
@@ -260,4 +265,38 @@ pub enum StartupError {
     Db(#[from] sqlx::Error),
     #[error(transparent)]
     Solvent(#[from] SolventError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shipped example is the template every deployment copies, so a key in the wrong TOML
+    /// scope ships the feature off everywhere. Every value here also equals its `serde` default,
+    /// which is why this asserts placement in the parsed tree rather than the loaded values.
+    #[test]
+    fn the_example_config_puts_every_feed_key_at_the_root() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../solvent.example.toml");
+        let raw = config::Config::builder()
+            .add_source(config::File::with_name(path))
+            .build()
+            .expect("the shipped example is valid TOML");
+        for key in [
+            "order_type",
+            "order_poll_ms",
+            "feed_silence_secs",
+            "expected_cosigners",
+            "admitted_tokens",
+            "max_outputs",
+            "dedup_ttl_secs",
+            "dedup_capacity",
+            "max_tracked_intents",
+        ] {
+            assert!(
+                raw.get::<config::Value>(key).is_ok(),
+                "{key} is not at the root of the example config"
+            );
+        }
+        Config::load(path).expect("the shipped example deserializes");
+    }
 }
