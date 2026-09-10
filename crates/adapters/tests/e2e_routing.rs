@@ -24,7 +24,7 @@ use solvent_core::{
         IntentId, ReservationId,
     },
     registry::SharedSnapshot,
-    routing::route,
+    routing::{route, GuardSnapshot, RoutingBook},
 };
 use sqlx::SqlitePool;
 use tempfile::TempDir;
@@ -184,8 +184,15 @@ async fn e2e_routed_plan_is_always_reservable() {
         exact_in: false,
     };
     // A generous max-in bound: this test checks reservability, not the profit gate.
-    let plan = route(&snap, &caps, &req, U256::MAX, &cfg, U256::ZERO, None)
-        .expect("router produces a plan for an interior trade");
+    let plan = route(
+        RoutingBook::new(&snap, &caps, &GuardSnapshot::default()),
+        &req,
+        U256::MAX,
+        &cfg,
+        U256::ZERO,
+        None,
+    )
+    .expect("router produces a plan for an interior trade");
     assert!(!plan.legs.is_empty());
 
     let sources = sources_of(&plan);
@@ -232,7 +239,15 @@ async fn e2e_router_declines_beyond_caps() {
         exact_in: false,
     };
     assert!(
-        route(&snap, &caps, &req, U256::MAX, &cfg, U256::ZERO, None).is_none(),
+        route(
+            RoutingBook::new(&snap, &caps, &GuardSnapshot::default()),
+            &req,
+            U256::MAX,
+            &cfg,
+            U256::ZERO,
+            None
+        )
+        .is_none(),
         "the router declines a trade beyond the book's capped capacity"
     );
 }

@@ -17,7 +17,7 @@ export interface TxRequest {
 export interface Positions {
     /** ERC-20 approve letting the Aqua contract pull `amount` of `token`. */
     approve(p: { token: Address; amount: bigint }): TxRequest;
-    /** Ship a strategy: deposit `amounts` backing `strategy` (a `Strategy.build().order`). */
+    /** Ship a strategy: deposit `amounts` backing a protected `Strategy.build()` order. */
     ship(p: {
         strategy: Hex;
         amounts: readonly { token: Address; amount: bigint }[];

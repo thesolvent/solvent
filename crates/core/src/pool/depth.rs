@@ -16,7 +16,7 @@ use crate::primitives::StrategyHash;
 use crate::registry::SharedSnapshot;
 use crate::routing::candidates::build_candidate;
 use crate::routing::waterfill::Liquidity;
-use crate::routing::{Candidate, Split};
+use crate::routing::{Candidate, GuardSnapshot, Split, StrategyGuard};
 
 /// The impact buckets the curve is anchored to (bps): 0.1% … 10%.
 const IMPACT_LADDER_BPS: [u64; 6] = [10, 50, 100, 200, 500, 1000];
@@ -32,6 +32,7 @@ const TOLERANCE_DIVISOR: u64 = 10_000;
 pub struct DepthService {
     registry: Arc<SharedSnapshot>,
     ledger: Arc<LedgerService>,
+    guards: Arc<StrategyGuard>,
     assets: Arc<AssetManager>,
 }
 
@@ -39,11 +40,13 @@ impl DepthService {
     pub fn new(
         registry: Arc<SharedSnapshot>,
         ledger: Arc<LedgerService>,
+        guards: Arc<StrategyGuard>,
         assets: Arc<AssetManager>,
     ) -> Self {
         Self {
             registry,
             ledger,
+            guards,
             assets,
         }
     }
@@ -55,7 +58,8 @@ impl DepthService {
         let snapshot = self.registry.load();
         // No active pool for this pair → no depth (404).
         snapshot.active_strategies_for_pair(*pair).next()?;
-        Some(self.depth_for(&snapshot, pair, side, None))
+        let guards = self.guards.snapshot();
+        Some(self.depth_for(&snapshot, &guards, pair, side, None))
     }
 
     /// One position's executable depth, including its fees and synced caps. Known pair positions
@@ -64,12 +68,14 @@ impl DepthService {
         let snapshot = self.registry.load();
         let strategy = snapshot.strategy_by_hash(hash)?;
         let pair = strategy.pair()?;
-        Some(self.depth_for(&snapshot, &pair, side, Some(strategy)))
+        let guards = self.guards.snapshot();
+        Some(self.depth_for(&snapshot, &guards, &pair, side, Some(strategy)))
     }
 
     fn depth_for(
         &self,
         snapshot: &Snapshot,
+        guards: &GuardSnapshot,
         pair: &TokenPair,
         side: Side,
         strategy: Option<&MakerStrategy>,
@@ -77,13 +83,15 @@ impl DepthService {
         let direction = self.direction(pair, side);
         let caps = self.ledger.snapshot();
         let candidates: Vec<_> = match strategy {
-            Some(strategy) => {
+            Some(strategy) if !guards.is_guarded(&strategy.key) => {
                 build_candidate(strategy, &caps, direction.token_in, direction.token_out)
                     .into_iter()
                     .collect()
             }
+            Some(_) => Vec::new(),
             None => snapshot
                 .active_strategies_for_pair(*pair)
+                .filter(|strategy| !guards.is_guarded(&strategy.key))
                 .filter_map(|strategy| {
                     build_candidate(strategy, &caps, direction.token_in, direction.token_out)
                 })
@@ -270,7 +278,7 @@ fn impact_bps(split: &Split, best: &Ratio) -> u64 {
 mod tests {
     use super::*;
     use crate::primitives::{routing::RouteRequest, IntentId};
-    use crate::routing::select;
+    use crate::routing::{select, GuardSnapshot};
     use alloy_primitives::B256;
 
     impl Direction {
@@ -405,6 +413,7 @@ mod tests {
             let candidates = select(
                 &snapshot,
                 &caps,
+                &GuardSnapshot::default(),
                 &direction.request(U256::from(1)),
                 usize::MAX,
             )
@@ -765,10 +774,17 @@ mod tests {
                 source,
                 Arc::new(FixedClock),
             ));
+            let guards = Arc::new(StrategyGuard::default());
             Harness {
-                depth: DepthService::new(Arc::clone(&registry), Arc::clone(&ledger), assets),
+                depth: DepthService::new(
+                    Arc::clone(&registry),
+                    Arc::clone(&ledger),
+                    Arc::clone(&guards),
+                    assets,
+                ),
                 registry,
                 ledger,
+                guards,
             }
         }
     }
@@ -778,6 +794,7 @@ mod tests {
         depth: DepthService,
         registry: Arc<SharedSnapshot>,
         ledger: Arc<LedgerService>,
+        guards: Arc<StrategyGuard>,
     }
 
     impl Harness {
@@ -941,6 +958,26 @@ mod tests {
             "no priceable liquidity → no points"
         );
         assert_eq!(depth.best_price, "0");
+    }
+
+    #[tokio::test]
+    async fn guarded_position_is_omitted_from_pool_and_position_depth() {
+        let target = xyc(3, e(100, 18), e(300_000, 6));
+        let key = target.key;
+        let book = Fixture::new(vec![target]).build().await;
+        assert!(!book.sell().points.is_empty());
+
+        book.guards.guard(key).await;
+
+        let pool = book.sell();
+        assert!(pool.points.is_empty());
+        assert_eq!(pool.best_price, "0");
+        let position = book
+            .depth
+            .position_depth(key.strategy_hash, Side::Sell)
+            .unwrap();
+        assert!(position.points.is_empty());
+        assert_eq!(position.best_price, "0");
     }
 
     #[tokio::test]

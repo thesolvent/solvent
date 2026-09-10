@@ -120,10 +120,13 @@ filler = "${manifest.filler}"
 reactor = "${manifest.reactor}"
 permit2 = "${manifest.permit2}"
 confirmations = 1
-reservation_ttl_secs = 60
+reservation_ttl_secs = 120
 decay_window_secs = 60
 
 wallet_state_db = "devnet/generated/walletkit.redb"
+
+[rebate]
+authorization_ttl_blocks = 90
 
 ${feeds}`;
 }
@@ -139,6 +142,7 @@ function main(): void {
     ENV_OUT,
     `# Signing keys the server reads from the environment. Anvil dev accounts — devnet only.\n` +
       `export SOLVENT_SIGNER_KEY=${DEPLOYER_KEY}\n` +
+      `export SOLVENT_POLICY_SIGNER_KEY=${DEPLOYER_KEY}\n` +
       `export SOLVENT_COSIGNER_KEY=${COSIGNER_KEY}\n`,
   );
 

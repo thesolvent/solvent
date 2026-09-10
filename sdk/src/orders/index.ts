@@ -18,11 +18,14 @@ import {
     type TypedDataDomain,
 } from "viem";
 import {
+    assertFutureDeadline,
     assertDistinctAddresses,
     InputValidationError,
     validatedAddress,
     validatedUint,
 } from "../validation";
+
+export { assertFutureDeadline } from "../validation";
 
 /** Upstream is ethers-typed; convert amounts at this boundary. */
 const big = (amount: bigint) => BigNumber.from(amount.toString());
@@ -146,26 +149,6 @@ export function buildSwapOrder(
         },
         deadline: checkedTerms.deadline,
     };
-}
-
-export function assertFutureDeadline(
-    deadline: number,
-    now = Math.floor(Date.now() / 1_000),
-): void {
-    if (!Number.isSafeInteger(deadline) || deadline <= 0) {
-        throw new InputValidationError(
-            "deadline",
-            "invalid_integer",
-            "Deadline must be a positive integer in Unix seconds",
-        );
-    }
-    if (deadline <= now) {
-        throw new InputValidationError(
-            "deadline",
-            "expired",
-            "Swap order expired",
-        );
-    }
 }
 
 function validateSwapOrder(

@@ -6,13 +6,19 @@ use thiserror::Error;
 
 use crate::deps::asset::PairPriceHistorySourceError;
 use crate::deps::balances::BalancesOracleError;
-use crate::deps::execution::{ExecutionError, SettlementError, SimError};
+use crate::deps::execution::{ExecutionAuthorizerError, ExecutionError, SettlementError, SimError};
 use crate::deps::ingest::{FillBuilderError, NormalizeError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
 use crate::deps::maker_metrics::MakerMetricsError;
+use crate::deps::rebate::{
+    RebateAccrualSourceError, RebateCallBuilderError, RebateChainSourceError,
+    RebateMarketBookError, RebateStoreError,
+};
 use crate::deps::registry::{BlockTimesError, ChainSourceError, StoreError};
+use crate::deps::routing::GasPriceError;
 use crate::deps::trade::TradeStoreError;
 use crate::primitives::ledger::LedgerError;
+use crate::rebate::RebateError;
 
 /// The error every fallible Solvent API returns.
 #[derive(Debug, Error)]
@@ -41,6 +47,27 @@ pub enum SolventError {
     /// The ledger store failed.
     #[error("ledger store: {0}")]
     LedgerStore(#[from] LedgerStoreError),
+    /// Rebate accrual or policy evaluation failed.
+    #[error("rebate: {0}")]
+    Rebate(#[from] RebateError),
+    /// The durable rebate batch store failed.
+    #[error("rebate store: {0}")]
+    RebateStore(#[from] RebateStoreError),
+    /// Reading confirmed fills awaiting rebate accrual failed.
+    #[error("rebate accrual source: {0}")]
+    RebateAccrualSource(#[from] RebateAccrualSourceError),
+    /// Reading mined rebate execution events failed.
+    #[error("rebate chain source: {0}")]
+    RebateChainSource(#[from] RebateChainSourceError),
+    /// A fresh executable market book was unavailable.
+    #[error("rebate market: {0}")]
+    RebateMarketBook(#[from] RebateMarketBookError),
+    /// Building signed public rebate calldata failed.
+    #[error("rebate call builder: {0}")]
+    RebateCallBuilder(#[from] RebateCallBuilderError),
+    /// Reading the current gas price for a rebate failed.
+    #[error("gas price: {0}")]
+    GasPrice(#[from] GasPriceError),
     /// Reading a settleable budget failed.
     #[error("budget source: {0}")]
     BudgetSource(#[from] BudgetSourceError),
@@ -50,6 +77,9 @@ pub enum SolventError {
     /// The tx engine failed to submit or track a fill.
     #[error("execution: {0}")]
     Execution(#[from] ExecutionError),
+    /// Signing a maker-execution policy failed.
+    #[error("execution authorizer: {0}")]
+    ExecutionAuthorizer(#[from] ExecutionAuthorizerError),
     /// The simulation engine failed to evaluate a fill.
     #[error("simulation: {0}")]
     Sim(#[from] SimError),

@@ -8,4 +8,4 @@ pub mod reservation;
 
 pub use account::AccountKey;
 pub use engine::{Ledger, LedgerError};
-pub use reservation::{Reservation, ReservationSource, ReservationState};
+pub use reservation::{Reservation, ReservationOwner, ReservationSource, ReservationState};

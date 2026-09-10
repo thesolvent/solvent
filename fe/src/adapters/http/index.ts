@@ -12,6 +12,7 @@ import { positionsAdapter } from "./positions";
 import { solventApi } from "./client";
 import { explorerAdapter } from "./explorer";
 import { faucetAdapter } from "./faucet";
+import { rebatesAdapter } from "./rebates";
 
 const pools: PoolsPort = {
   async list() {
@@ -54,6 +55,7 @@ export const httpServices: Services = {
   assets,
   pools,
   positions: positionsAdapter,
+  rebates: rebatesAdapter,
   swap: swapAdapter,
   system,
 };

@@ -1,15 +1,12 @@
 [profile.default]
 solc = "0.8.30"
 optimizer = true
-optimizer_runs = 10_000_000
+optimizer_runs = 10_000
 via_ir = true
 src = "src"
 test = "test"
 script = "script"
 libs = ["lib"]
-# The full AquaSwapVMRouter exceeds the EIP-170 runtime-code limit by design; the devnet deploy runs
-# in forge's own EVM, so raise its limit to match the live chain (anvil --disable-code-size-limit).
-code_size_limit = 100_000
 # DeployDevnet writes the address manifest under ./deployments.
 fs_permissions = [{ access = "write", path = "./deployments" }]
 

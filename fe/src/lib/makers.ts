@@ -292,6 +292,7 @@ export function makerView(
     positions: Position[];
     inventory: InventoryAsset[];
     settlements: MakerSettlement[];
+    rebateCount: number;
     notice: string | undefined;
   },
 ) {
@@ -337,6 +338,7 @@ export function makerView(
       { key: "Positions", label: "Positions" },
       { key: "Assets", label: "Assets" },
       { key: "Settlements", label: "Settlements" },
+      { key: "Rebates", label: "Rebates" },
     ],
     tabNote:
       data.notice ??
@@ -344,7 +346,9 @@ export function makerView(
         ? `${numberText(d?.activePositions)} active · ${span}`
         : state.mkTab === "Assets"
           ? `${data.inventory.length} tokens committed`
-          : `${numberText(d?.fills)} fills · ${span}`),
+          : state.mkTab === "Settlements"
+            ? `${numberText(d?.fills)} fills · ${span}`
+            : `${data.rebateCount} recent rebates`),
     positions: data.positions.map((p) => positionRow(p, span)),
     assets: data.inventory.map((asset, i) =>
       assetRow(asset, state.mkAsset === i),

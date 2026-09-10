@@ -1,13 +1,27 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { useAccount, useSwitchChain } from "wagmi";
+import { Pagination } from "@/components/Pagination";
+import { RebateList } from "@/components/RebateList";
+import { useLoadedPagination } from "@/components/useLoadedPagination";
+import { chain } from "@/adapters/wallet/config";
 import { activityRow, explorerStats, tradeRow } from "@/lib/explorer";
+import { loadedPageLabel } from "@/lib/pagination";
 import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
+import { useAssets } from "@/services/assets";
 import { useActivity, useExplorerStats, useTrades } from "@/services/explorer";
 import { usePools } from "@/services/pools";
+import {
+  useActiveRebatePages,
+  useExecuteRebate,
+  useRebates,
+} from "@/services/rebates";
+import type { RebateExplorerStatus } from "@/state";
 import { useApp } from "@/state";
 import styles from "./explorer.module.css";
 
-const TABS = ["Trades", "Activity"];
+const TABS = ["Trades", "Activity", "Rebates"];
 
 const DROP_OPTIONS = {
   xpType: ["All types", "pull", "push", "dock", "register"],
@@ -24,6 +38,7 @@ const DROP_OPTIONS = {
     "failed",
   ],
   xpPair: ["All pairs"],
+  xpRebateStatus: ["Active", "Confirmed"],
 };
 type DropKey = keyof typeof DROP_OPTIONS;
 
@@ -74,6 +89,24 @@ function TradeList({ filter }: { filter: TradeFilter }) {
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
   const query = useTrades(filter, cursors.at(-1));
   const rows = query.data?.items.map(tradeRow) ?? [];
+  const page = cursors.length - 1;
+  const hasNextPage = Boolean(query.data?.nextCursor);
+  const first = page * 10 + 1;
+  const last = page * 10 + rows.length;
+  const pageLabel = rows.length
+    ? `Showing ${first}–${last}${hasNextPage ? "" : ` of ${last}`} trades`
+    : "No trades on this page";
+
+  function selectPage(nextPage: number) {
+    if (nextPage < page) {
+      setCursors((previous) => previous.slice(0, nextPage + 1));
+      return;
+    }
+    if (nextPage === page + 1 && query.data?.nextCursor) {
+      setCursors((previous) => [...previous, query.data.nextCursor]);
+    }
+  }
+
   return (
     <>
       <div data-scroll="1" className={styles.list} aria-busy={query.isFetching}>
@@ -127,40 +160,26 @@ function TradeList({ filter }: { filter: TradeFilter }) {
           </Link>
         ))}
       </div>
-      <div className={styles.footBar}>
-        <button
-          type="button"
-          className={styles.footButton}
-          disabled={cursors.length === 1 || query.isFetching}
-          onClick={() => setCursors((previous) => previous.slice(0, -1))}
-        >
-          ← Prev
-        </button>
-        <span className={styles.footNote}>
-          Page {cursors.length} · {rows.length} shown
-        </span>
-        <button
-          type="button"
-          className={styles.footButton}
-          disabled={
-            !query.data?.nextCursor || query.isFetching || query.isError
-          }
-          onClick={() => {
-            if (query.data?.nextCursor)
-              setCursors((previous) => [...previous, query.data.nextCursor]);
-          }}
-        >
-          Next →
-        </button>
-      </div>
+      <Pagination
+        label={pageLabel}
+        page={page}
+        pageCount={cursors.length + Number(hasNextPage)}
+        disabled={query.isFetching || query.isError}
+        onPage={selectPage}
+      />
     </>
   );
 }
 
 function ActivityList({ filter }: { filter: ActivityFilter }) {
   const query = useActivity(filter);
-  const rows =
-    query.data?.pages.flatMap((page) => page.items).map(activityRow) ?? [];
+  const pages = query.data?.pages.map(({ items }) => items) ?? [];
+  const pagination = useLoadedPagination(
+    pages,
+    Boolean(query.hasNextPage),
+    async () => !(await query.fetchNextPage()).isError,
+  );
+  const rows = pagination.items.map(activityRow);
   return (
     <>
       <div data-scroll="1" className={styles.list} aria-busy={query.isFetching}>
@@ -182,7 +201,7 @@ function ActivityList({ filter }: { filter: ActivityFilter }) {
         {!query.isPending && !query.isError && rows.length === 0 && (
           <p className={styles.emptyNote}>
             {query.hasNextPage
-              ? "No matching events loaded. Load more to search older events."
+              ? "No matching events on this page. Continue to an older page."
               : "No activity matches these filters."}
           </p>
         )}
@@ -217,21 +236,81 @@ function ActivityList({ filter }: { filter: ActivityFilter }) {
           </Link>
         ))}
       </div>
-      <div className={styles.footBar}>
-        <span className={styles.liveTag}>
-          <span className={styles.livePulse} />
-          <span>live · {rows.length} events loaded</span>
-        </span>
-        <button
-          type="button"
-          className={styles.footButton}
-          disabled={!query.hasNextPage || query.isFetching}
-          onClick={() => void query.fetchNextPage()}
-        >
-          Load more
-        </button>
-      </div>
+      <Pagination
+        label={loadedPageLabel(
+          pages,
+          pagination.page,
+          Boolean(query.hasNextPage),
+          "events",
+        )}
+        page={pagination.page}
+        pageCount={pagination.pageCount}
+        disabled={query.isFetching || query.isError}
+        onPage={(page) => void pagination.select(page)}
+      />
     </>
+  );
+}
+
+function ExplorerRebates({
+  currentBlock,
+  status,
+}: {
+  currentBlock?: number;
+  status: RebateExplorerStatus;
+}) {
+  const assets = useAssets();
+  const active = status === "Active";
+  const query = useRebates({ status: active ? "ready" : "executed" });
+  const continuity = useActiveRebatePages(
+    active ? query.data : undefined,
+    query.dataUpdatedAt,
+  );
+  const execution = useExecuteRebate();
+  const { isConnected, chainId } = useAccount();
+  const { openConnectModal } = useConnectModal();
+  const { switchChain } = useSwitchChain();
+  const wrongChain = isConnected && chainId !== chain.id;
+
+  function execute(id: string) {
+    if (!isConnected) return openConnectModal?.();
+    if (wrongChain) return switchChain({ chainId: chain.id });
+    execution.execute(id);
+  }
+
+  return (
+    <RebateList
+      assets={assets}
+      pages={
+        active
+          ? continuity.pages
+          : (query.data?.pages.map(({ items }) => items) ?? [])
+      }
+      pending={query.isPending}
+      fetching={query.isFetching}
+      error={query.isError}
+      hasMore={Boolean(query.hasNextPage)}
+      onRetry={() => void query.refetch()}
+      onLoadMore={async () => !(await query.fetchNextPage()).isError}
+      action={
+        active
+          ? {
+              availableIds: continuity.availableIds,
+              label: !isConnected
+                ? "Connect"
+                : wrongChain
+                  ? "Switch network"
+                  : "Earn",
+              onExecute: execute,
+              pendingId: execution.pendingId,
+              completedId: execution.completedId,
+              failedId: execution.failedId,
+              problem: execution.problem,
+            }
+          : undefined
+      }
+      currentBlock={currentBlock}
+    />
   );
 }
 
@@ -240,6 +319,7 @@ export function ExplorerPage() {
   const pools = usePools();
   const stats = useExplorerStats();
   const isTrades = state.xpTab === "Trades";
+  const isActivity = state.xpTab === "Activity";
   const pairs = [...new Set(pools.map((pool) => pool.pair.replace(/\s/g, "")))];
   const pair = pools.find(
     (pool) => pool.pair.replace(/\s/g, "") === state.xpPair,
@@ -258,14 +338,16 @@ export function ExplorerPage() {
         <div className={styles.headTitle}>
           <div className={styles.eyebrow}>Explorer</div>
           <div className={styles.titleLg}>
-            {isTrades ? "Trades" : "Protocol activity"}
+            {isTrades ? "Trades" : isActivity ? "Protocol activity" : "Rebates"}
           </div>
         </div>
         <span className={styles.limeSquare} />
         <p className={styles.pageDesc}>
           {isTrades
             ? "Every intent through Solvent: pair, in → out, makers sourced, status, price impact and tx."
-            : "Aqua-level events: makers registering strategies, pushing and pulling balance, and docking positions."}
+            : isActivity
+              ? "Aqua-level events: makers registering strategies, pushing and pulling balance, and docking positions."
+              : "Protected strategies share profitable price restoration between their maker and executor."}
         </p>
       </div>
       <div className={styles.stats5}>
@@ -313,11 +395,16 @@ export function ExplorerPage() {
               <FilterDrop dkey="xpStatus" options={DROP_OPTIONS.xpStatus} />
               <FilterDrop dkey="xpPair" options={["All pairs", ...pairs]} />
             </>
-          ) : (
+          ) : isActivity ? (
             <>
               <FilterDrop dkey="xpType" options={DROP_OPTIONS.xpType} />
               <FilterDrop dkey="xpEnt" options={DROP_OPTIONS.xpEnt} />
             </>
+          ) : (
+            <FilterDrop
+              dkey="xpRebateStatus"
+              options={DROP_OPTIONS.xpRebateStatus}
+            />
           )}
         </div>
       </div>
@@ -327,8 +414,17 @@ export function ExplorerPage() {
         ) : (
           <p className={styles.emptyNote}>Selected pair is unavailable.</p>
         )
+      ) : isActivity ? (
+        <ActivityList
+          key={JSON.stringify(activityFilter)}
+          filter={activityFilter}
+        />
       ) : (
-        <ActivityList filter={activityFilter} />
+        <ExplorerRebates
+          key={state.xpRebateStatus}
+          currentBlock={stats.data?.blockHeight}
+          status={state.xpRebateStatus}
+        />
       )}
     </div>
   );

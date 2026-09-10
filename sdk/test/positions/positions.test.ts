@@ -9,12 +9,13 @@ import type { Address } from "../../src/index";
 const AQUA = "0x9999999999999999999999999999999999999999" as Address;
 const APP = "0x8888888888888888888888888888888888888888" as Address;
 const MAKER = "0x1111111111111111111111111111111111111111" as Address;
+const CREDENTIAL = "0x6666666666666666666666666666666666666666" as Address;
 const WETH = "0x2222222222222222222222222222222222222222" as Address;
 const USDC = "0x3333333333333333333333333333333333333333" as Address;
 
 const lower = (s: unknown) => String(s).toLowerCase();
 const pos = positions({ aqua: AQUA, app: APP });
-const built = Strategy.fullRange().build(MAKER);
+const built = Strategy.fullRange().build(MAKER, CREDENTIAL);
 
 describe("positions.approve", () => {
   it("encodes ERC-20 approve to the token, spender = aqua", () => {

@@ -10,14 +10,20 @@ use std::time::Duration;
 
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::signers::local::PrivateKeySigner;
+use alloy::sol;
 use solvent_adapters::balances::AlloyBalancesOracle;
 use solvent_adapters::chain::ChainHead;
-use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
+use solvent_adapters::execution::{
+    AquaSettlementReader, LocalPolicySigner, SqliteFillStore, WalletkitExecutor,
+};
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
 use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
+use solvent_adapters::rebate::{
+    AlloyRebateChainSource, FillerRebateCallBuilder, SqliteRebateAccrualSource, SqliteRebateStore,
+};
 use solvent_adapters::registry::{AlloyBlockTimes, AlloyChainSource, SqliteStore};
 use solvent_adapters::routing::{BinanceFeed, BinanceHistory, GasPoller, MarketCache};
 use solvent_adapters::trade::SqliteTradeStore;
@@ -25,23 +31,32 @@ use solvent_core::asset::{AssetManager, PairHistoryService};
 use solvent_core::balances::BalancesService;
 use solvent_core::deps::asset::PairPriceHistorySource;
 use solvent_core::deps::balances::BalancesOracle;
+use solvent_core::deps::execution::ExecutionAuthorizer;
 use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ledger::BudgetSource;
 use solvent_core::deps::maker_metrics::MakerMetricsStore;
 use solvent_core::deps::quote_log::QuoteLog;
+use solvent_core::deps::rebate::{
+    RebateAccrualSource, RebateChainSource, RebateMarketBook, RebateStore,
+};
 use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::routing::{GasPrice, PriceOracle};
 use solvent_core::deps::trade::TradeStore;
 use solvent_core::execution::ExecutionService;
 use solvent_core::ledger::LedgerService;
 use solvent_core::maker::MakerService;
+use solvent_core::obs::{info, warn};
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
+use solvent_core::rebate::{
+    RebateMarketData, RebatePolicy, RebatePolicyConfig, RebateService, RebateServiceConfig,
+    RebateWorker, RebateWorkerConfig,
+};
 use solvent_core::reconcile::ReconcileService;
 use solvent_core::registry::{RegistrySync, SharedSnapshot};
-use solvent_core::routing::LegCostResolver;
+use solvent_core::routing::{LegCostResolver, StrategyGuard};
 use solvent_core::swap::{SwapConfig, SwapService};
 use solvent_core::trade::TradeService;
 use solvent_core::valuation::Valuation;
@@ -53,6 +68,13 @@ use walletkit::core::deps::SubmissionOpts;
 use walletkit::Wallet;
 
 use crate::config::{load_token_list, Config, StartupError};
+
+sol! {
+    #[sol(rpc)]
+    interface FillerConfiguration {
+        function TAKER_CREDENTIAL() external view returns (address);
+    }
+}
 
 /// How often the background poller refreshes the cached chain head.
 const BLOCK_POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -86,6 +108,11 @@ async fn main() -> Result<(), StartupError> {
         .parse()
         .map_err(|e| StartupError::RpcUrl(format!("{e}")))?;
     let provider = ProviderBuilder::new().connect_http(rpc).erased();
+    let taker_credential = FillerConfiguration::new(config.filler, provider.clone())
+        .TAKER_CREDENTIAL()
+        .call()
+        .await
+        .map_err(|error| StartupError::FillerConfiguration(error.to_string()))?;
     let (head, poller) = ChainHead::new(provider.clone(), BLOCK_POLL_INTERVAL);
     tokio::spawn(poller);
 
@@ -165,7 +192,8 @@ async fn main() -> Result<(), StartupError> {
         .run(),
     );
     let gas: Arc<dyn GasPrice> = market.clone();
-    let oracle: Arc<dyn PriceOracle> = market;
+    let oracle: Arc<dyn PriceOracle> = market.clone();
+    let rebate_market: Arc<dyn RebateMarketBook> = market;
     let valuation = Arc::new(Valuation::new(Arc::clone(&oracle)));
     let history_source: Arc<dyn PairPriceHistorySource> = Arc::new(
         BinanceHistory::new(
@@ -178,7 +206,7 @@ async fn main() -> Result<(), StartupError> {
     let pair_history = Arc::new(PairHistoryService::new(history_source));
     // One per-leg gas resolver shared by both routing paths — quote and swap price gas the same way.
     let leg_cost = Arc::new(LegCostResolver::new(
-        gas,
+        Arc::clone(&gas),
         oracle,
         Arc::clone(&assets),
         config.native_token,
@@ -218,14 +246,17 @@ async fn main() -> Result<(), StartupError> {
         Arc::new(SystemClock),
         ChainId(config.chain_id),
     ));
+    let strategy_guard = Arc::new(StrategyGuard::default());
     let depth = Arc::new(DepthService::new(
         Arc::clone(&registry),
         Arc::clone(&ledger),
+        Arc::clone(&strategy_guard),
         Arc::clone(&assets),
     ));
     let quote = Arc::new(QuoteService::new(
         Arc::clone(&registry),
         Arc::clone(&ledger),
+        Arc::clone(&strategy_guard),
         Arc::clone(&assets),
         RoutingConfig::new(MAX_CANDIDATES, MAX_LEGS, config.gas_units_per_leg),
         Arc::new(SystemClock),
@@ -239,6 +270,8 @@ async fn main() -> Result<(), StartupError> {
         .map_err(|_| StartupError::MissingSecret("SOLVENT_COSIGNER_KEY"))?;
     let filler_key = std::env::var("SOLVENT_SIGNER_KEY")
         .map_err(|_| StartupError::MissingSecret("SOLVENT_SIGNER_KEY"))?;
+    let policy_signer_key = std::env::var("SOLVENT_POLICY_SIGNER_KEY")
+        .map_err(|_| StartupError::MissingSecret("SOLVENT_POLICY_SIGNER_KEY"))?;
     let cosigner_signer: PrivateKeySigner = cosigner_key
         .parse()
         .map_err(|_| StartupError::Key("SOLVENT_COSIGNER_KEY is not a valid private key".into()))?;
@@ -257,6 +290,14 @@ async fn main() -> Result<(), StartupError> {
         .address();
     let filler_signer = LocalSigner::from_private_key(&filler_key)
         .map_err(|_| StartupError::Key("SOLVENT_SIGNER_KEY is not a valid private key".into()))?;
+    let policy_signer = policy_signer_key.parse::<PrivateKeySigner>().map_err(|_| {
+        StartupError::Key("SOLVENT_POLICY_SIGNER_KEY is not a valid private key".into())
+    })?;
+    let authorizer: Arc<dyn ExecutionAuthorizer> = Arc::new(LocalPolicySigner::new(
+        config.chain_id,
+        config.filler,
+        policy_signer,
+    ));
     let policy = DefaultPolicyEngine::new(
         vec![Box::new(AllowAll)],
         Arc::new(walletkit::adapters::SystemClock),
@@ -295,7 +336,57 @@ async fn main() -> Result<(), StartupError> {
         settlement,
         Arc::clone(&ledger),
     ));
-    let fill_builder: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(config.app_address));
+    let rebate_store: Arc<dyn RebateStore> = Arc::new(SqliteRebateStore::new(pool.clone()));
+    let rebates = Arc::new(RebateService::new(
+        RebatePolicy::new(RebatePolicyConfig::new(
+            config.rebate.deviation_threshold_bps,
+            config.rebate.gas_safety_bps,
+        )),
+        Arc::clone(&ledger),
+        Arc::clone(&strategy_guard),
+        Arc::clone(&rebate_store),
+        Arc::new(FillerRebateCallBuilder::new(
+            taker_credential,
+            Arc::clone(&authorizer),
+        )),
+        RebateMarketData::new(rebate_market, gas, Arc::clone(&assets)),
+        RebateServiceConfig::new(
+            config.native_token,
+            config.rebate.gas_units,
+            config.rebate.market_max_age_secs,
+        ),
+    ));
+    rebates.recover().await?;
+    let rebate_accruals: Arc<dyn RebateAccrualSource> = Arc::new(SqliteRebateAccrualSource::new(
+        pool.clone(),
+        config.app_address,
+    ));
+    let rebate_chain: Arc<dyn RebateChainSource> = Arc::new(AlloyRebateChainSource::new(
+        Arc::new(provider.clone()),
+        config.filler,
+        None,
+    ));
+    let rebate_worker = Arc::new(RebateWorker::new(
+        Arc::clone(&rebates),
+        rebate_accruals,
+        rebate_chain,
+        rebate_store,
+        Arc::clone(&registry_store),
+        Arc::clone(&registry),
+        Arc::clone(&ledger),
+        Arc::new(SystemClock),
+        RebateWorkerConfig::new(
+            ChainId(config.chain_id),
+            config.rebate.start_block,
+            config.rebate.authorization_ttl_blocks,
+            config.reservation_ttl_secs,
+        ),
+    ));
+    let fill_builder: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(
+        config.app_address,
+        taker_credential,
+        authorizer,
+    ));
     let reconcile = Arc::new(ReconcileService::new(
         Arc::clone(&execution),
         Arc::clone(&trade_store),
@@ -305,6 +396,7 @@ async fn main() -> Result<(), StartupError> {
     let swap = Arc::new(SwapService::new(
         Arc::clone(&registry),
         Arc::clone(&ledger),
+        Arc::clone(&strategy_guard),
         Arc::clone(&trade_store),
         Arc::clone(&execution),
         fill_builder,
@@ -337,8 +429,14 @@ async fn main() -> Result<(), StartupError> {
             BUDGET_POLL_INTERVAL,
         )
     }));
+    let reconcile_head = head.clone();
     tokio::spawn(supervise("reconcile", move || {
-        run_reconcile(Arc::clone(&reconcile), RECONCILE_INTERVAL)
+        run_reconcile(
+            Arc::clone(&reconcile),
+            Arc::clone(&rebate_worker),
+            reconcile_head.clone(),
+            RECONCILE_INTERVAL,
+        )
     }));
 
     let trades = Arc::new(TradeService::new(
@@ -348,7 +446,7 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&registry),
     ));
     let state = AppState {
-        config: Arc::new(config.app_config(cosigner.address())),
+        config: Arc::new(config.app_config(cosigner.address(), taker_credential)),
         head,
         assets,
         pair_history,
@@ -358,6 +456,7 @@ async fn main() -> Result<(), StartupError> {
         makers,
         quote,
         swap,
+        rebates,
         cosigner,
         trades,
         registry: Arc::clone(&registry),
@@ -452,7 +551,12 @@ async fn run_ledger_sync(
 
 /// Drive in-flight fills to settlement and sweep orphaned holds on an interval; a failed tick is
 /// logged and retried next tick.
-async fn run_reconcile(reconcile: Arc<ReconcileService>, interval: Duration) {
+async fn run_reconcile(
+    reconcile: Arc<ReconcileService>,
+    rebates: Arc<RebateWorker>,
+    head: ChainHead,
+    interval: Duration,
+) {
     let mut ticker = tokio::time::interval(interval);
     loop {
         ticker.tick().await;
@@ -466,6 +570,24 @@ async fn run_reconcile(reconcile: Arc<ReconcileService>, interval: Duration) {
             }
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "reconcile tick failed; retrying next tick"),
+        }
+        match rebates.tick(head.latest()).await {
+            Ok(report)
+                if report.accrued > 0
+                    || report.evaluated > 0
+                    || report.settled > 0
+                    || report.expired > 0 =>
+            {
+                info!(
+                    accrued = report.accrued,
+                    evaluated = report.evaluated,
+                    settled = report.settled,
+                    expired = report.expired,
+                    "rebate tick"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => warn!(error = %e, "rebate tick failed; retrying next tick"),
         }
     }
 }

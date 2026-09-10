@@ -19,7 +19,7 @@ use crate::primitives::registry::{curve_label, CurveSpec, Snapshot, TokenPair};
 use crate::primitives::routing::{RouteLeg, RouteRequest, RoutingConfig};
 use crate::primitives::{IntentId, StrategyHash};
 use crate::registry::SharedSnapshot;
-use crate::routing::{price_impact_pct, select, solve_sparse, LegCostResolver};
+use crate::routing::{price_impact_pct, select, solve_sparse, LegCostResolver, StrategyGuard};
 use crate::valuation::Valuation;
 
 /// How far ahead a quote's advisory `expires_at` sits.
@@ -28,6 +28,7 @@ const QUOTE_TTL_SECS: u64 = 30;
 pub struct QuoteService {
     registry: Arc<SharedSnapshot>,
     ledger: Arc<LedgerService>,
+    guards: Arc<StrategyGuard>,
     assets: Arc<AssetManager>,
     config: RoutingConfig,
     clock: Arc<dyn Clock>,
@@ -36,9 +37,11 @@ pub struct QuoteService {
 }
 
 impl QuoteService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         registry: Arc<SharedSnapshot>,
         ledger: Arc<LedgerService>,
+        guards: Arc<StrategyGuard>,
         assets: Arc<AssetManager>,
         config: RoutingConfig,
         clock: Arc<dyn Clock>,
@@ -48,6 +51,7 @@ impl QuoteService {
         Self {
             registry,
             ledger,
+            guards,
             assets,
             config,
             clock,
@@ -75,10 +79,17 @@ impl QuoteService {
         };
         let snapshot = self.registry.load();
         let caps = self.ledger.snapshot();
+        let guards = self.guards.snapshot();
 
         // The same two steps the swap path runs: funnel, then the gas-aware split. `select` freezes
         // the caps; `solve_sparse` splits under the per-leg gas cost, capped at `max_legs`.
-        let selection = select(&snapshot, &caps, &request, self.config.max_candidates);
+        let selection = select(
+            &snapshot,
+            &caps,
+            &guards,
+            &request,
+            self.config.max_candidates,
+        );
         let out_decimals = self.assets.decimals(&token_out);
         let per_leg_cost = self.leg_cost.for_request(&request).await;
         let split = solve_sparse(
@@ -342,6 +353,7 @@ mod tests {
         QuoteService::new(
             registry,
             ledger,
+            Arc::new(StrategyGuard::default()),
             assets,
             RoutingConfig::new(16, 4, 150_000),
             Arc::new(FixedClock),

@@ -2,7 +2,10 @@
 //! per protocol; the caller sends the returned calldata to that protocol's filler contract.
 
 use alloy_primitives::Bytes;
+use async_trait::async_trait;
 use thiserror::Error;
+
+use crate::deps::execution::ExecutionAuthorizerError;
 
 use crate::primitives::ingest::Intent;
 use crate::primitives::registry::Snapshot;
@@ -10,8 +13,9 @@ use crate::primitives::routing::RoutePlan;
 
 /// Builds the ABI-encoded fill calldata for a routed plan. `snapshot` resolves each leg's maker
 /// strategy (the on-chain order to source from).
+#[async_trait]
 pub trait FillBuilder: Send + Sync {
-    fn build(
+    async fn build(
         &self,
         intent: &Intent,
         plan: &RoutePlan,
@@ -30,4 +34,10 @@ pub enum FillBuilderError {
     MissingStrategy,
     #[error("a routed leg's shipped program did not decode")]
     UndecodableProgram,
+    #[error("a routed leg's maker does not match its shipped order")]
+    StrategyMakerMismatch,
+    #[error("a routed leg is not protected by the configured taker credential")]
+    UnprotectedStrategy,
+    #[error("a routed leg could not be policy-authorized: {0}")]
+    Authorization(#[from] ExecutionAuthorizerError),
 }

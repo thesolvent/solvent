@@ -1,4 +1,5 @@
 import {
+    AquaProgramBuilder,
     AquaPeggedAmmStrategy,
     AquaXYCAmmStrategy,
     Address as SdkAddress,
@@ -41,12 +42,12 @@ export interface BuiltStrategy {
 type SdkBuilder = AquaXYCAmmStrategy | AquaPeggedAmmStrategy;
 
 /** A maker strategy, built fluently to mirror the underlying `@1inch/swap-vm-sdk` builders.
- * Pick a curve, optionally add a fee, then `build(maker)`:
+ * Pick a curve, optionally add a fee, then `build(maker, takerCredential)`:
  *
  * ```ts
- * Strategy.concentrated({ base, quote, priceMin: "0.5", priceMax: "2" }).fee(30).build(maker);
- * Strategy.inRange({ base, quote, mid: "3000", halfWidthPct: 5 }).build(maker);
- * Strategy.pegged({ tokenA, tokenB, linearWidth }).build(maker);
+ * Strategy.concentrated({ base, quote, priceMin: "0.5", priceMax: "2" }).fee(30).build(maker, takerCredential);
+ * Strategy.inRange({ base, quote, mid: "3000", halfWidthPct: 5 }).build(maker, takerCredential);
+ * Strategy.pegged({ tokenA, tokenB, linearWidth }).build(maker, takerCredential);
  * ```
  *
  * Instances are immutable — `fee` and `salt` return a new `Strategy`. */
@@ -139,13 +140,17 @@ export class Strategy {
         return new Strategy(() => this.resolve().withSalt(salt), this.feeBps);
     }
 
-    /** Encode for `maker`: the program, its hash, and the order to ship. */
-    build(maker: Address): BuiltStrategy {
+    /** Encode a strategy that only the holder of `takerCredential` can execute. */
+    build(maker: Address, takerCredential: Address): BuiltStrategy {
         const checkedMaker = validatedAddress(maker, "maker");
+        const checkedCredential = validatedAddress(
+            takerCredential,
+            "taker credential",
+        );
         const base = this.resolve();
         const built =
             this.feeBps === undefined ? base : base.withFeeTokenIn(this.feeBps);
-        const program = built.build();
+        const program = protectProgram(built.build(), checkedCredential);
         const order = Order.new({
             maker: new SdkAddress(checkedMaker),
             traits: MakerTraits.default(),
@@ -158,6 +163,19 @@ export class Strategy {
             order: order.encode().toString() as Hex,
         };
     }
+}
+
+function protectProgram(
+    program: ReturnType<SdkBuilder["build"]>,
+    takerCredential: Address,
+) {
+    const protectedProgram = new AquaProgramBuilder().onlyTakerTokenBalanceNonZero({
+        token: new SdkAddress(takerCredential),
+    });
+    for (const instruction of AquaProgramBuilder.decode(program).getInstructions()) {
+        protectedProgram.add(instruction);
+    }
+    return protectedProgram.build();
 }
 
 function concentrate(

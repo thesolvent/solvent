@@ -80,6 +80,7 @@ services:
       MANIFEST_PATH: "/manifest/solvent-devnet.json"
       BIND_ADDR: "0.0.0.0:8080"
       COOLDOWN_SECS: "1"
+      DRIP_UNITS: "100000"
     ports:
       # 8080 on the host belongs to the Solvent server, so the faucet is published beside it.
       - "8081:8080"

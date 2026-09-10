@@ -9,6 +9,7 @@ pub mod makers;
 pub mod pairs;
 pub mod pools;
 pub mod positions;
+pub mod rebates;
 pub mod stats;
 pub mod swap;
 pub mod trades;

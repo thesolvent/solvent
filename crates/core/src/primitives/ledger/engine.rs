@@ -11,7 +11,7 @@ use thiserror::Error;
 use crate::primitives::ReservationId;
 
 use super::account::AccountKey;
-use super::reservation::{Reservation, ReservationSource, ReservationState};
+use super::reservation::{Reservation, ReservationOwner, ReservationSource, ReservationState};
 
 /// One account's two held compartments; `available` is derived from these and the fed budget.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -241,10 +241,14 @@ impl Ledger {
 
     /// The pending reservations whose TTL has elapsed as of `now` (unix seconds) — the sweep expires
     /// exactly these.
-    pub fn expired_as_of(&self, now: u64) -> Vec<ReservationId> {
+    pub fn expired_swaps_as_of(&self, now: u64) -> Vec<ReservationId> {
         self.reservations
             .values()
-            .filter(|r| r.state == ReservationState::Pending && r.expires_at <= now)
+            .filter(|r| {
+                r.state == ReservationState::Pending
+                    && r.expires_at <= now
+                    && matches!(r.owner, ReservationOwner::Swap(_))
+            })
             .map(|r| r.id)
             .collect()
     }
@@ -351,7 +355,7 @@ mod tests {
         }
     }
     fn reservation(id: u8, sources: Vec<ReservationSource>) -> Reservation {
-        Reservation::new(resv(id), IntentId(B256::from([id; 32])), sources, 0)
+        Reservation::for_swap(resv(id), IntentId(B256::from([id; 32])), sources, 0)
     }
     fn amt(n: u64) -> U256 {
         U256::from(n)

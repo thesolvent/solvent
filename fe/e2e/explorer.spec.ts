@@ -79,13 +79,11 @@ test("browses real trades and activity using server cursors and filters", async 
         url.searchParams.get("cursor") === activity.next_cursor
       );
     });
-    await page.getByRole("button", { name: "Load more" }).click();
+    await page.getByRole("button", { name: "Next →" }).click();
     const { result: next }: { result: List<ActivityEvent> } = await (
       await nextResponse
     ).json();
-    await expect(activityLinks).toHaveCount(
-      activity.items.length + next.items.length,
-    );
+    await expect(activityLinks).toHaveCount(next.items.length);
   }
   await page.screenshot({
     path: "test-results/explorer-activity.png",

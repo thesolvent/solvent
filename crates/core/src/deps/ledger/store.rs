@@ -36,6 +36,9 @@ pub trait LedgerStore: Send + Sync {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum LedgerStoreError {
+    /// The id exists with a terminal state or different immutable reservation body.
+    #[error("reservation {0} conflicts with the stored reservation")]
+    Conflict(ReservationId),
     /// The database call or a payload (de)serialization failed.
     #[error("db: {0}")]
     Db(String),
