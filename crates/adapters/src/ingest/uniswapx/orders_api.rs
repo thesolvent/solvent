@@ -19,7 +19,7 @@ use alloy::primitives::{Address, Bytes};
 use serde::Deserialize;
 use thiserror::Error;
 
-use solvent_core::primitives::ingest::{ProtocolId, RawOrder};
+use solvent_core::primitives::ingest::{OrderSource, ProtocolId, RawOrder};
 use solvent_core::primitives::ChainId;
 
 /// Identifies this filler to the API's edge. Absent or unfamiliar agents are refused with `403`.
@@ -136,6 +136,7 @@ impl OrderRecord {
             payload,
             signature,
             self.created_at,
+            OrderSource::UniswapX,
         ))
     }
 }

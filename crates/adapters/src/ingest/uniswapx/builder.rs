@@ -8,7 +8,7 @@ use alloy::primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy::signers::{local::PrivateKeySigner, SignerSync};
 use alloy::sol_types::{eip712_domain, SolValue};
 
-use solvent_core::primitives::ingest::{ProtocolId, RawOrder};
+use solvent_core::primitives::ingest::{OrderSource, ProtocolId, RawOrder};
 use solvent_core::primitives::ChainId;
 
 use super::codec::{
@@ -114,6 +114,7 @@ impl SignedOrderBuilder {
             Bytes::from(order.abi_encode()),
             signature,
             observed_at,
+            OrderSource::UniswapX,
         )
     }
 }

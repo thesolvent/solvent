@@ -5,6 +5,7 @@
 use alloy_primitives::{Address, Bytes, U256};
 
 use crate::primitives::ingest::curve::AmountCurve;
+use crate::primitives::ingest::raw::OrderSource;
 use crate::primitives::{ChainId, IntentId};
 
 /// Basis-point denominator, as the settlement contracts use it.
@@ -120,6 +121,8 @@ pub struct Intent {
     pub signature: Bytes,
     /// Arrival time; routing prices the curves at this instant.
     pub observed_at: u64,
+    /// Where the order reached us — the venue, not the protocol.
+    pub source: OrderSource,
 }
 
 /// The fields of an [`Intent`], named at the construction site. Deliberately exhaustive: a new
@@ -138,6 +141,7 @@ pub struct IntentParts {
     pub raw: Bytes,
     pub signature: Bytes,
     pub observed_at: u64,
+    pub source: OrderSource,
 }
 
 impl IntentParts {
@@ -163,6 +167,7 @@ impl IntentParts {
             raw: Bytes::new(),
             signature: Bytes::new(),
             observed_at: 0,
+            source: OrderSource::UniswapX,
         }
     }
 }
@@ -231,6 +236,7 @@ impl Intent {
             raw: parts.raw,
             signature: parts.signature,
             observed_at: parts.observed_at,
+            source: parts.source,
         }
     }
 }

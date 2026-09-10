@@ -131,6 +131,7 @@ impl Normalizer for UniswapXV2Normalizer {
             raw: raw.payload.clone(),
             signature: raw.signature.clone(),
             observed_at: raw.observed_at,
+            source: raw.source,
             ..IntentParts::new(
                 IntentId(order_hash(&order)),
                 ProtocolId::UniswapXV2,
@@ -175,6 +176,7 @@ mod tests {
     use alloy::primitives::{address, Bytes};
     use alloy::signers::local::PrivateKeySigner;
     use alloy::sol_types::SolValue;
+    use solvent_core::primitives::ingest::OrderSource;
     use solvent_core::primitives::ChainId;
 
     const PERMIT2: Address = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
@@ -247,6 +249,7 @@ mod tests {
             Bytes::from(order.abi_encode()),
             raw.signature.clone(),
             raw.observed_at,
+            OrderSource::UniswapX,
         )
     }
 
@@ -384,6 +387,7 @@ mod tests {
             Bytes::from(order.abi_encode()),
             raw.signature.clone(),
             raw.observed_at,
+            OrderSource::UniswapX,
         );
         assert!(matches!(
             normalizer.normalize(&forged),
