@@ -1,6 +1,10 @@
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useEffect, useRef, useState } from "react";
 
+import solventMarkActive from "@/assets/solvent-mark-active.svg";
+import solventMarkInactive from "@/assets/solvent-mark-inactive.svg";
+import solventXMarkActive from "@/assets/solventx-mark-active.svg";
+import solventXMarkInactive from "@/assets/solventx-mark-inactive.svg";
 import { NAV } from "@/data";
 import { useAppActions, type ProductMode } from "@/state";
 import { useAppSlice } from "@/store";
@@ -147,6 +151,14 @@ function ProductOption({
   description: string;
   onSelect: (mode: ProductMode) => void;
 }) {
+  const mark =
+    mode === "Solvent"
+      ? active
+        ? solventMarkActive
+        : solventMarkInactive
+      : active
+        ? solventXMarkActive
+        : solventXMarkInactive;
   return (
     <button
       type="button"
@@ -155,8 +167,8 @@ function ProductOption({
       className={active ? styles.productOptionActive : styles.productOption}
       onClick={() => onSelect(mode)}
     >
-      <span className={styles.productMark}>
-        {mode === "Solvent" ? "S" : "X"}
+      <span className={styles.productMark} aria-hidden="true">
+        <img src={mark} alt="" />
       </span>
       <span className={styles.productCopy}>
         <span className={styles.productName}>{mode}</span>
