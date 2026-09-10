@@ -30,6 +30,7 @@ pub fn crosschain_proxy_router(proxy: Arc<CrossChainProxy>, clock: Arc<dyn Clock
         .route("/v1/cross-chain/quote", post(quote))
         .route("/v1/cross-chain/orders", post(create_order))
         .route("/v1/cross-chain/orders/{id}", get(order))
+        .route("/v1/cross-chain/orders/{id}/advance", post(advance))
         .with_state(state)
 }
 
@@ -188,6 +189,32 @@ async fn order(
         .map_err(proxy_error)
 }
 
+/// Advance one durable cross-chain saga transition.
+#[utoipa::path(
+    post,
+    path = "/v1/cross-chain/orders/{id}/advance",
+    tag = "cross-chain",
+    params(
+        ("id" = String, Path, description = "32-byte cross-chain order identifier")
+    ),
+    responses(
+        (status = 200, description = "Saga after at most one advancement", body = CrossChainOrderResponse),
+        (status = 400, description = "Malformed or unknown order identifier", body = ErrorBody),
+        (status = 502, description = "A chain service or saga store is unavailable", body = ErrorBody),
+    )
+)]
+async fn advance(
+    State(state): State<ProxyState>,
+    Path(order_id): Path<CrossChainOrderId>,
+) -> Result<Json<CrossChainOrderResponse>, (StatusCode, Json<ErrorBody>)> {
+    state
+        .proxy
+        .advance(order_id)
+        .await
+        .map(|order| Json(CrossChainOrderResponse { order }))
+        .map_err(proxy_error)
+}
+
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 struct ErrorBody {
     error: String,
@@ -221,7 +248,7 @@ async fn healthz() -> &'static str {
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Solvent Cross-Chain Proxy API", version = "0.1.0"),
-    paths(quote, create_order, order),
+    paths(quote, create_order, order, advance),
     components(schemas(
         CrossChainQuoteRequest,
         CreateCrossChainOrderRequest,
@@ -264,6 +291,7 @@ mod tests {
         assert!(canonical["paths"]["/v1/cross-chain/quote"]["post"].is_object());
         assert!(canonical["paths"]["/v1/cross-chain/orders"]["post"].is_object());
         assert!(canonical["paths"]["/v1/cross-chain/orders/{id}"]["get"].is_object());
+        assert!(canonical["paths"]["/v1/cross-chain/orders/{id}/advance"]["post"].is_object());
         assert!(canonical["components"]["schemas"]["CrossChainSaga"].is_object());
     }
 
