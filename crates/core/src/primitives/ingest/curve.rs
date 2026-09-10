@@ -1,9 +1,9 @@
 //! The amount curve an intent carries on each side: a fixed amount, or a linear (Dutch) decay
-//! priced at a point in time. The decay reproduces `DutchDecayLib.linearDecay` exactly: the
-//! *travelled distance* floors (`mulDivDown` on `|start − end|`), and that floored delta is then
-//! added to or subtracted from `start`. Flooring the distance — rather than the resulting amount —
-//! is what makes both slope directions land in the swapper's favour, and interpolating the endpoint
-//! instead differs by one wei on a rising curve, which the reactor rejects.
+//! priced at a point in time. The decay reproduces `DutchDecayLib.decay` exactly: the *travelled
+//! distance* is rounded, then added to or subtracted from `start` — and the two branches round
+//! opposite ways, `mulDivDown` when falling and `mulDivUp` when rising. Both therefore move the
+//! amount in the swapper's favour. Rounding the same way in both directions is one wei out on a
+//! rising curve, which is the input side of an exact-output order.
 
 use alloy_primitives::U256;
 
@@ -67,9 +67,14 @@ impl AmountCurve {
                 .expect("end_time > start_time inside the open interval");
                 let rising = end >= start;
                 let magnitude = if rising { *end - *start } else { *start - *end };
-                let delta = (Ratio::from(magnitude) * frac)
-                    .floor()
-                    .expect("delta ≤ magnitude ≤ U256::MAX");
+                let travelled = Ratio::from(magnitude) * frac;
+                // `mulDivUp` rising, `mulDivDown` falling — the contract rounds the distance
+                // against the filler in both directions.
+                let delta = match rising {
+                    true => travelled.ceil(),
+                    false => travelled.floor(),
+                }
+                .expect("delta ≤ magnitude ≤ U256::MAX");
                 if rising {
                     *start + delta
                 } else {
@@ -127,12 +132,13 @@ mod tests {
         assert_eq!(window(1000, 0, 0, 3).amount_at(1), U256::from(667u64));
     }
 
-    /// A rising curve floors the same distance — `DutchDecayLib` uses `mulDivDown` on `|Δ|` in both
-    /// branches, so the amount rounds *down* here. Ceiling it (interpolating the endpoint) yields
-    /// 334 and is one wei over what the reactor computes.
+    /// A rising curve *ceils* the distance — `DutchDecayLib` uses `mulDivUp` on `|Δ|` in this
+    /// branch. Values pinned from the pinned `contracts/lib/UniswapX` submodule, the same code the
+    /// fill E2E source-deploys: flooring yields 333 and 29, one wei under the contract.
     #[test]
-    fn rising_curve_floors_the_distance() {
-        assert_eq!(window(0, 1000, 0, 3).amount_at(1), U256::from(333u64));
+    fn rising_curve_ceils_the_distance() {
+        assert_eq!(window(0, 1000, 0, 3).amount_at(1), U256::from(334u64));
+        assert_eq!(window(13, 997, 100, 160).amount_at(101), U256::from(30u64));
     }
 
     #[test]
@@ -159,6 +165,16 @@ mod tests {
         assert_eq!(c.amount_at(101), U256::from(9u64)); // t ≥ end_time
     }
 
+    /// `FixedPointMathLib.mulDivUp`, as `DutchDecayLib` uses it on the rising branch.
+    trait MulDivUp {
+        fn mul_div_up(self, n: u128, d: u128) -> u128;
+    }
+    impl MulDivUp for u128 {
+        fn mul_div_up(self, n: u128, d: u128) -> u128 {
+            (self * n).div_ceil(d)
+        }
+    }
+
     /// `DutchDecayLib.decay` transcribed independently in `u128`, as the differential oracle. The
     /// on-chain differential lives in the fork E2E; this catches the arithmetic drift cheaply.
     fn reference(start: u128, end: u128, start_time: u64, end_time: u64, t: u64) -> u128 {
@@ -175,7 +191,7 @@ mod tests {
         let duration = u128::from(end_time - start_time);
         match end < start {
             true => start - (start - end) * elapsed / duration,
-            false => start + (end - start) * elapsed / duration,
+            false => start + (end - start).mul_div_up(elapsed, duration),
         }
     }
 

@@ -5,7 +5,7 @@ somewhere else before it was written down.
 
 ---
 
-## 1. Rounding the distance, not the destination
+## 1. Rounding the distance, and which way each branch rounds
 
 A Dutch auction interpolates an amount between two points in time. The obvious implementation is a
 lerp:
@@ -15,56 +15,62 @@ amount(t) = start + (end − start) · (t − t₀) / (t₁ − t₀)
 ```
 
 With integers you must round somewhere, and the natural instinct is to round the *result*. That
-instinct is what the old `AmountCurve` encoded: a falling curve floored the answer, a rising curve
-ceiled it, on the theory that both should land "in the swapper's favour."
+instinct is what the original `AmountCurve` encoded: a falling curve floored the answer, a rising
+curve ceiled it, on the theory that both should land "in the swapper's favour."
 
-`DutchDecayLib` does something different:
+`DutchDecayLib` rounds the **distance travelled** instead, and — this is the part worth burning in —
+the two branches round *opposite ways*:
 
 ```solidity
 if (endAmount < startAmount) {
-    delta = -int256(uint256(startAmount - endAmount).mulDivDown(elapsed, duration));
+    decayedAmount = startAmount - (startAmount - endAmount).mulDivDown(elapsed, duration);
 } else {
-    delta =  int256(uint256(endAmount - startAmount).mulDivDown(elapsed, duration));
+    decayedAmount = startAmount + (endAmount - startAmount).mulDivUp(elapsed, duration);
 }
-return startAmount + delta;
 ```
 
-It computes the **distance travelled**, floors *that*, and applies it signed. Both branches use
-`mulDivDown`. So:
+- **Falling** — a floored distance subtracted from `start` leaves a *larger* remainder.
+- **Rising** — a ceiled distance added to `start` gives a *larger* total.
 
-- **Falling curve** — a floored distance subtracted from `start` leaves a *larger* remainder. The
-  amount effectively rounds **up**.
-- **Rising curve** — a floored distance added to `start` leaves a *smaller* total. The amount
-  rounds **down**.
-
-Both are in the swapper's favour, which is why the old comment's *intent* was right. But
-"round the amount up when falling, up when rising" and "floor the distance always" only coincide in
-one direction. On a rising curve they differ:
+Both move the amount against the filler, which is the invariant. Rounding the distance the *same*
+way in both directions is one wei out on a rising curve:
 
 ```
 0 → 1000 over [0, 3], at t = 1
-  floor the distance:  0 + floor(1000/3) = 0 + 333 = 333   ← the contract
-  ceil the amount:     ceil(1000/3)      = 334             ← what we computed
+  ceil the distance:   0 + ceil(1000/3)  = 334   ← the contract
+  floor the distance:  0 + floor(1000/3) = 333   ← one wei under
 ```
 
-One wei. On UniswapX a rising curve is the *input* side of an exact-output order — what the swapper
-pays and we receive. We were modelling ourselves as receiving one wei more than the reactor would
-actually transfer, on roughly 14% of live orders (7 of 50 sampled had a decaying input).
+On UniswapX a rising curve is the *input* side of an exact-output order — the reactor reverts
+`IncorrectAmounts` if an output rises — so this affects what we model ourselves as receiving, on the
+~6.6% of live orders with a decaying input.
 
-**The general lesson:** when porting on-chain arithmetic, port the *operations*, not the *intent*.
-"Rounds in the user's favour" is a property of the result; it is not an implementation. Two
-implementations with the same stated property can differ by a wei, and a wei is the difference
-between a fill and a revert.
+## The correction, and how it happened
 
-The secondary lesson is about how the bug survived: the old code had a `Rounding` enum carrying
-`Up`/`Down` per curve, and tests asserting each. The tests were *self-consistent* — they asserted
-the code did what the code intended. Nothing compared against the contract. A test that encodes your
-own model cannot detect that your model is wrong; only an independent oracle can. That is why the
-replacement test transcribes `linearDecay` separately in `u128` and sweeps both slopes across ~180
-points, rather than asserting hand-computed constants.
+**This article originally said the opposite** — that both branches use `mulDivDown` and a rising
+curve should floor. That was wrong, and the code was changed to match it, replacing correct
+behaviour with a one-wei error.
 
-Dropping the enum was the second-order win: once both directions floor the distance, the field
-carried no information. A parameter with exactly one correct value is a place for a future mistake.
+The source of the mistake: upstream `main` has since refactored `decay` into a signed `linearDecay`
+helper, and *that* version does floor both branches. It is not the code we fill against. The
+deployed V2 reactor, and the `contracts/lib/UniswapX` submodule this repo pins — the same code the
+fill E2E source-deploys — both use `mulDivUp` when rising. Verified by building the pinned library
+and calling it: `0 → 1000 over [0,3]` at `t=1` returns **334**.
+
+**The lesson, sharpened.** The original article already said the right thing — *"a test that encodes
+your own model cannot detect that your model is wrong; only an independent oracle can"* — and then
+the replacement test transcribed the **wrong version** of the contract into `u128` and swept 180
+points against it. A hand-written transcription is not an independent oracle; it is the same model
+written twice. It looked like the strongest evidence in the change and was defending the bug.
+
+An oracle is only independent if it comes from outside your own understanding: the deployed
+bytecode, the pinned submodule executed under `forge`, or values pinned from either. `mainnet_fork_parity.rs`
+does this correctly for SwapVM pricing — the expected amounts are what the deployed router returned.
+The same discipline was not applied to the one piece of arithmetic this change actually touched.
+
+And the version question is the other half: "port the operations, not the intent" is necessary but
+not sufficient. You have to port the operations *of the deployment you are talking to*, and pin the
+evidence to it.
 
 ---
 
