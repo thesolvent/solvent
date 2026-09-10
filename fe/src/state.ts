@@ -24,6 +24,7 @@ export type Snap = {
 
 export type Crumb = { snap: Snap; label: string };
 export type CreateSpan = "7d" | "3m" | "All";
+export type RebateExplorerStatus = "Active" | "Confirmed";
 
 export type AppState = {
   page: Page | null;
@@ -94,6 +95,7 @@ export type AppState = {
   xpEnt: string;
   xpStatus: string;
   xpPair: string;
+  xpRebateStatus: RebateExplorerStatus;
   xpOpen: string | null;
 };
 
@@ -220,6 +222,7 @@ export const INITIAL_STATE: AppState = {
   xpEnt: "All entities",
   xpStatus: "All status",
   xpPair: "All pairs",
+  xpRebateStatus: "Active",
   xpOpen: null,
 };
 

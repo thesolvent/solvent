@@ -120,10 +120,13 @@ filler = "${manifest.filler}"
 reactor = "${manifest.reactor}"
 permit2 = "${manifest.permit2}"
 confirmations = 1
-reservation_ttl_secs = 60
+reservation_ttl_secs = 120
 decay_window_secs = 60
 
 wallet_state_db = "devnet/generated/walletkit.redb"
+
+[rebate]
+authorization_ttl_blocks = 90
 
 ${feeds}`;
 }

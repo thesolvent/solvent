@@ -230,7 +230,7 @@
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
   gap: 34px;
-  padding: 26px 28px 40px;
+  padding: 26px 28px 0;
 }
 
 .filtersTitle {
@@ -563,70 +563,4 @@
   font-weight: 300;
   letter-spacing: -0.03em;
   white-space: nowrap;
-}
-
-/* ---------- Pagination ---------- */
-
-.pager {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 18px 0 0;
-  border-top: 1px solid var(--line);
-  margin-top: 16px;
-}
-
-.pagerLabel {
-  font-size: 13.5px;
-  color: var(--text-muted);
-}
-
-.pagerControls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.pagerStep {
-  border: 1px solid var(--line);
-  background: var(--paper);
-  padding: 9px 18px;
-  font-size: 13.5px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-  transition:
-    background 130ms ease,
-    border-color 130ms ease;
-}
-
-.pagerStep:hover {
-  border-color: var(--ink);
-}
-
-.pagerNum {
-  width: 38px;
-  height: 38px;
-  font-size: 13.5px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-  transition:
-    background 130ms ease,
-    color 130ms ease;
-  border: 1px solid var(--line);
-  background: var(--paper);
-  color: var(--ink);
-}
-
-.pagerNum:hover {
-  border-color: var(--ink);
-}
-
-.pagerNumActive {
-  composes: pagerNum;
-  border-color: var(--ink);
-  background: var(--ink);
-  color: var(--paper);
 }

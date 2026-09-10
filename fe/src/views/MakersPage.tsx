@@ -1,7 +1,11 @@
-import { useEffect, useRef } from "react";
 import { useAccount } from "wagmi";
+import { Pagination } from "@/components/Pagination";
+import { RebateList } from "@/components/RebateList";
+import { useLoadedPagination } from "@/components/useLoadedPagination";
 import { slug, usePools } from "@/services/pools";
+import { useAssets } from "@/services/assets";
 import { PERIODS, SPANS, makerView } from "@/lib/makers";
+import { loadedPageLabel } from "@/lib/pagination";
 import {
   useMakers,
   useMakerDashboard,
@@ -10,6 +14,7 @@ import {
   useMakerSettlements,
 } from "@/services/makers";
 import { useManagePosition } from "@/services/positions";
+import { useRebates } from "@/services/rebates";
 import { useApp } from "@/state";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -65,31 +70,26 @@ export function MakersPage() {
   const creationPair = positions.data?.[0]?.pair ?? pools[0]?.pair;
   const inventory = useMakerInventory(address, period);
   const settlements = useMakerSettlements(address, period);
-  const settlementList = useRef<HTMLDivElement>(null);
-  const {
-    hasNextPage,
-    isFetching,
-    isError,
-    fetchNextPage,
-    data: pages,
-  } = settlements;
-  useEffect(() => {
-    const list = settlementList.current;
-    if (!list || !hasNextPage || isFetching || isError) return;
-    const fillViewport = () => {
-      if (list.scrollHeight <= list.clientHeight + 100) void fetchNextPage();
-    };
-    const observer = new ResizeObserver(fillViewport);
-    observer.observe(list);
-    fillViewport();
-    return () => observer.disconnect();
-  }, [state.mkTab, hasNextPage, isFetching, isError, fetchNextPage, pages]);
+  const assets = useAssets();
+  const rebates = useRebates(
+    address ? { maker: address, status: "executed" } : undefined,
+  );
+  const settlementPages =
+    settlements.data?.pages.map(({ items }) => items) ?? [];
+  const settlementPagination = useLoadedPagination(
+    settlementPages,
+    Boolean(settlements.hasNextPage),
+    async () => !(await settlements.fetchNextPage()).isError,
+  );
+  const rebateRows = rebates.data?.pages.flatMap((page) => page.items) ?? [];
   const activeQuery =
     state.mkTab === "Positions"
       ? positions
       : state.mkTab === "Assets"
         ? inventory
-        : settlements;
+        : state.mkTab === "Settlements"
+          ? settlements
+          : rebates;
   const failed = roster.isError || dashboard.isError || activeQuery.isError;
   const notice = failed
     ? "Updates unavailable · retrying"
@@ -101,7 +101,8 @@ export function MakersPage() {
     dashboard: dashboard.data,
     positions: positions.data ?? [],
     inventory: inventory.data ?? [],
-    settlements: settlements.data?.pages.flatMap((page) => page.items) ?? [],
+    settlements: settlementPagination.items,
+    rebateCount: rebateRows.length,
     notice,
   });
 
@@ -241,65 +242,80 @@ export function MakersPage() {
           )}
 
           {mk.tab === "Settlements" && (
-            <div
-              ref={settlementList}
-              data-scroll="1"
-              className={styles.list}
-              onScroll={(event) => {
-                const list = event.currentTarget;
-                if (
-                  list.scrollHeight - list.scrollTop - list.clientHeight <
-                    100 &&
-                  settlements.hasNextPage &&
-                  !settlements.isFetching
-                ) {
-                  void settlements.fetchNextPage();
-                }
-              }}
-            >
-              {mk.settlements.map((t) => (
-                <button
-                  type="button"
-                  key={t.trade}
-                  className={styles.settleRow}
-                  onClick={() => {
-                    set({ xpStrat: null });
-                    navigate(`/explorer/trades/${encodeURIComponent(t.trade)}`);
-                  }}
-                >
-                  <span className={styles.settlePair}>
-                    <span className={styles.settlePairName}>{t.pair}</span>
-                    <span className={styles.settleBlk}>{t.blk}</span>
-                  </span>
-                  <span className={styles.settleFlow}>
-                    <span className={styles.settleIn}>{t.inn}</span>
-                    <span className={styles.settleArrow}>→</span>
-                    <span className={styles.settleOut}>{t.out}</span>
-                  </span>
-                  <span className={styles.settleCell}>
-                    <span className={styles.settleCellValue}>{t.fee}</span>
-                    <span className={styles.settleCellLabel}>fee</span>
-                  </span>
-                  <span className={styles.settleCell}>
-                    <span className={styles.settleCellValue}>{t.share}</span>
-                    <span className={styles.settleCellLabel}>of fill</span>
-                  </span>
-                  <span className={styles.settleStatusCell}>
-                    <span
-                      className={styles.settleStatus}
-                      style={{
-                        background: t.stBg,
-                        color: t.stFg,
-                      }}
-                    >
-                      {t.status}
+            <>
+              <div data-scroll="1" className={styles.list}>
+                {mk.settlements.map((t) => (
+                  <button
+                    type="button"
+                    key={t.trade}
+                    className={styles.settleRow}
+                    onClick={() => {
+                      set({ xpStrat: null });
+                      navigate(
+                        `/explorer/trades/${encodeURIComponent(t.trade)}`,
+                      );
+                    }}
+                  >
+                    <span className={styles.settlePair}>
+                      <span className={styles.settlePairName}>{t.pair}</span>
+                      <span className={styles.settleBlk}>{t.blk}</span>
                     </span>
-                    <span className={styles.settleTx}>{t.tx}</span>
-                  </span>
-                  <span className={styles.settleChevron}>›</span>
-                </button>
-              ))}
-            </div>
+                    <span className={styles.settleFlow}>
+                      <span className={styles.settleIn}>{t.inn}</span>
+                      <span className={styles.settleArrow}>→</span>
+                      <span className={styles.settleOut}>{t.out}</span>
+                    </span>
+                    <span className={styles.settleCell}>
+                      <span className={styles.settleCellValue}>{t.fee}</span>
+                      <span className={styles.settleCellLabel}>fee</span>
+                    </span>
+                    <span className={styles.settleCell}>
+                      <span className={styles.settleCellValue}>{t.share}</span>
+                      <span className={styles.settleCellLabel}>of fill</span>
+                    </span>
+                    <span className={styles.settleStatusCell}>
+                      <span
+                        className={styles.settleStatus}
+                        style={{
+                          background: t.stBg,
+                          color: t.stFg,
+                        }}
+                      >
+                        {t.status}
+                      </span>
+                      <span className={styles.settleTx}>{t.tx}</span>
+                    </span>
+                    <span className={styles.settleChevron}>›</span>
+                  </button>
+                ))}
+              </div>
+              <Pagination
+                label={loadedPageLabel(
+                  settlementPages,
+                  settlementPagination.page,
+                  Boolean(settlements.hasNextPage),
+                  "settlements",
+                )}
+                page={settlementPagination.page}
+                pageCount={settlementPagination.pageCount}
+                disabled={settlements.isFetching || settlements.isError}
+                onPage={(page) => void settlementPagination.select(page)}
+              />
+            </>
+          )}
+
+          {mk.tab === "Rebates" && (
+            <RebateList
+              key={`${address}:${period}`}
+              assets={assets}
+              pages={rebates.data?.pages.map(({ items }) => items) ?? []}
+              pending={rebates.isPending}
+              fetching={rebates.isFetching}
+              error={rebates.isError}
+              hasMore={Boolean(rebates.hasNextPage)}
+              onRetry={() => void rebates.refetch()}
+              onLoadMore={async () => !(await rebates.fetchNextPage()).isError}
+            />
           )}
 
           <div className={styles.insight}>

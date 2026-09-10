@@ -2,6 +2,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
 import type { Pool } from "@/data";
+import { Pagination } from "@/components/Pagination";
 
 import {
   aprOptions,
@@ -318,53 +319,12 @@ export function PoolsPage() {
             ))}
           </div>
 
-          <div className={styles.pager}>
-            <span className={styles.pagerLabel}>{pageLabel}</span>
-            <div className={styles.pagerControls}>
-              <button
-                type="button"
-                className={styles.pagerStep}
-                style={{
-                  opacity: state.poolPage === 0 ? 0.35 : 1,
-                }}
-                onClick={() =>
-                  set({
-                    poolPage: Math.max(0, state.poolPage - 1),
-                  })
-                }
-              >
-                ← Prev
-              </button>
-              {Array.from({ length: pageCount }, (_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  className={
-                    i === state.poolPage
-                      ? styles.pagerNumActive
-                      : styles.pagerNum
-                  }
-                  onClick={() => set({ poolPage: i })}
-                >
-                  {i + 1}
-                </button>
-              ))}
-              <button
-                type="button"
-                className={styles.pagerStep}
-                style={{
-                  opacity: state.poolPage >= pageCount - 1 ? 0.35 : 1,
-                }}
-                onClick={() =>
-                  set({
-                    poolPage: Math.min(pageCount - 1, state.poolPage + 1),
-                  })
-                }
-              >
-                Next →
-              </button>
-            </div>
-          </div>
+          <Pagination
+            label={pageLabel}
+            page={state.poolPage}
+            pageCount={pageCount}
+            onPage={(poolPage) => set({ poolPage })}
+          />
         </div>
       </div>
     </div>

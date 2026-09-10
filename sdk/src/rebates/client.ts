@@ -129,6 +129,8 @@ export function createRebateClient({
             submit() {
                 pending ??= execute().finally(() => {
                     pending = undefined;
+                    // Before broadcast, a retry must reload work that the server may have renewed.
+                    if (!transactionHash) plan = undefined;
                 });
                 return pending;
             },

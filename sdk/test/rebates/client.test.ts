@@ -121,4 +121,26 @@ describe("rebate intent", () => {
         expect(wallet.ensureAllowance).not.toHaveBeenCalled();
         expect(wallet.sendTransaction).not.toHaveBeenCalled();
     });
+
+    it("reloads authorization after an unbroadcast attempt fails", async () => {
+        const { api, rebates } = setup();
+        wallet.ensureAllowance
+            .mockRejectedValueOnce(new Error("Insufficient token balance"))
+            .mockResolvedValueOnce(undefined);
+        const intent = rebates.createIntent({
+            executor: EXECUTOR,
+            rebateId: REBATE_ID,
+        });
+
+        await expect(intent.submit()).rejects.toThrow(
+            "Insufficient token balance",
+        );
+        await expect(intent.submit()).resolves.toEqual({
+            rebateId: REBATE_ID,
+            transactionHash: "0xtransaction",
+        });
+
+        expect(api.rebateDetail).toHaveBeenCalledTimes(2);
+        expect(wallet.sendTransaction).toHaveBeenCalledOnce();
+    });
 });
