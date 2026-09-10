@@ -202,7 +202,9 @@ async fn drive(svc: &ExecutionService, h: &Harness) {
             .raw_request("anvil_mine".into(), (2u64,))
             .await
             .expect("anvil_mine");
-        svc.reconcile().await.expect("reconcile");
+        for fill in svc.reconcile().await.expect("reconcile") {
+            svc.forget(fill.intent).await.expect("forget settled fill");
+        }
     }
 }
 

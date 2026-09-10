@@ -19,8 +19,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
-          cache-dependency-path: contracts/yarn.lock
 
       # 1inch Aqua/SwapVM deps resolve via npm into node_modules/
       - run: yarn install --frozen-lockfile
