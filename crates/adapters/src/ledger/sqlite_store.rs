@@ -80,11 +80,15 @@ impl LedgerStore for SqliteLedgerStore {
         Ok(())
     }
 
+    async fn commit(&self, id: ReservationId) -> Result<(), LedgerStoreError> {
+        self.transition(id, "committed", "pending").await
+    }
+
     async fn post(&self, id: ReservationId, filled: &[U256]) -> Result<(), LedgerStoreError> {
         let filled = serde_json::to_string(filled).map_err(db)?;
         sqlx::query(
             "UPDATE ledger_reservation SET state = 'posted', filled = ?
-             WHERE id = ? AND state = 'pending'",
+             WHERE id = ? AND state IN ('pending', 'committed')",
         )
         .bind(filled)
         .bind(id.0.to_vec())
@@ -95,7 +99,15 @@ impl LedgerStore for SqliteLedgerStore {
     }
 
     async fn void(&self, id: ReservationId) -> Result<(), LedgerStoreError> {
-        self.transition(id, "voided", "pending").await
+        sqlx::query(
+            "UPDATE ledger_reservation SET state = 'voided'
+             WHERE id = ? AND state IN ('pending', 'committed')",
+        )
+        .bind(id.0.to_vec())
+        .execute(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(())
     }
 
     async fn expire(&self, id: ReservationId) -> Result<(), LedgerStoreError> {
@@ -107,23 +119,29 @@ impl LedgerStore for SqliteLedgerStore {
     }
 
     async fn open_reservations(&self) -> Result<Vec<Reservation>, LedgerStoreError> {
-        let rows: Vec<(Vec<u8>, Vec<u8>, String, i64)> = sqlx::query_as(
-            "SELECT id, intent, sources, expires_at FROM ledger_reservation
-             WHERE state = 'pending' ORDER BY id",
+        let rows: Vec<(Vec<u8>, Vec<u8>, String, String, i64)> = sqlx::query_as(
+            "SELECT id, intent, sources, state, expires_at FROM ledger_reservation
+             WHERE state IN ('pending', 'committed') ORDER BY id",
         )
         .fetch_all(&self.pool)
         .await
         .map_err(db)?;
 
         rows.into_iter()
-            .map(|(id, intent, sources, expires_at)| {
+            .map(|(id, intent, sources, state, expires_at)| {
                 let sources: Vec<ReservationSource> = serde_json::from_str(&sources).map_err(db)?;
-                Ok(Reservation::new(
+                let mut reservation = Reservation::new(
                     ReservationId(b256(&id)?),
                     IntentId(b256(&intent)?),
                     sources,
                     expires_at as u64,
-                ))
+                );
+                reservation.state = match state.as_str() {
+                    "pending" => solvent_core::primitives::ledger::ReservationState::Pending,
+                    "committed" => solvent_core::primitives::ledger::ReservationState::Committed,
+                    _ => return Err(LedgerStoreError::Db(format!("invalid open state {state}"))),
+                };
+                Ok(reservation)
             })
             .collect()
     }

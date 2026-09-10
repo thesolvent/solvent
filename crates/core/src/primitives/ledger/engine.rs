@@ -124,16 +124,31 @@ impl Ledger {
             let held = self.held.entry(account).or_default();
             held.pending = held.pending.saturating_add(requested);
         }
-        let mut reservation = reservation;
-        reservation.state = ReservationState::Pending;
         self.reservations.insert(reservation.id, reservation);
+    }
+
+    /// Protect a prepared hold from TTL expiry while retaining it in the pending compartment.
+    pub fn commit(&mut self, id: ReservationId) -> Result<(), LedgerError> {
+        let reservation = self.reservations.get(&id).ok_or(LedgerError::Unknown(id))?;
+        match reservation.state {
+            ReservationState::Pending => {
+                self.transition(id, ReservationState::Committed);
+                Ok(())
+            }
+            ReservationState::Committed => Ok(()),
+            state => Err(LedgerError::WrongState {
+                id,
+                found: state,
+                expected: ReservationState::Pending,
+            }),
+        }
     }
 
     /// Settle a pending reservation with the amount actually pulled per source (`filled[i] ≤
     /// sources[i].amount`): each hold moves `pending → consumed` and any unfilled remainder returns
     /// to available. The fills are recorded so a reorg can reverse exactly what was consumed.
     pub fn post(&mut self, id: ReservationId, filled: &[U256]) -> Result<(), LedgerError> {
-        let sources = self.pending_sources(id)?;
+        let sources = self.active_sources(id)?;
         if filled.len() != sources.len() {
             return Err(LedgerError::FillCountMismatch {
                 got: filled.len(),
@@ -165,13 +180,15 @@ impl Ledger {
     /// Release a lost auction / reverted fill: the pending holds return to available, ending
     /// `Voided`.
     pub fn void(&mut self, id: ReservationId) -> Result<(), LedgerError> {
-        self.release(id, ReservationState::Voided)
+        self.release_active(id, ReservationState::Voided)
     }
 
     /// Release an elapsed reservation: the pending holds return to available, ending `Expired`. The
     /// TTL sweep that decides *which* to expire lives in the service; this is the transition.
     pub fn expire(&mut self, id: ReservationId) -> Result<(), LedgerError> {
-        self.release(id, ReservationState::Expired)
+        let sources = self.pending_sources(id)?;
+        self.release_sources(id, &sources, ReservationState::Expired);
+        Ok(())
     }
 
     /// Reverse a posted settlement that a chain reorg rolled back: the consumed capital returns to
@@ -270,20 +287,43 @@ impl Ledger {
         Ok(reservation.sources.clone())
     }
 
-    fn release(
+    fn active_sources(&self, id: ReservationId) -> Result<Vec<ReservationSource>, LedgerError> {
+        let reservation = self.reservations.get(&id).ok_or(LedgerError::Unknown(id))?;
+        match reservation.state {
+            ReservationState::Pending | ReservationState::Committed => {
+                Ok(reservation.sources.clone())
+            }
+            state => Err(LedgerError::WrongState {
+                id,
+                found: state,
+                expected: ReservationState::Pending,
+            }),
+        }
+    }
+
+    fn release_active(
         &mut self,
         id: ReservationId,
         terminal: ReservationState,
     ) -> Result<(), LedgerError> {
-        let sources = self.pending_sources(id)?;
-        for source in &sources {
+        let sources = self.active_sources(id)?;
+        self.release_sources(id, &sources, terminal);
+        Ok(())
+    }
+
+    fn release_sources(
+        &mut self,
+        id: ReservationId,
+        sources: &[ReservationSource],
+        terminal: ReservationState,
+    ) {
+        for source in sources {
             for account in source.accounts() {
                 let held = self.held.entry(account).or_default();
                 held.pending = held.pending.saturating_sub(source.amount);
             }
         }
         self.transition(id, terminal);
-        Ok(())
     }
 
     fn require_state(
@@ -454,6 +494,21 @@ mod tests {
             assert_eq!(l.pending(&wallet(1, 3)), U256::ZERO);
             assert_eq!(l.reservation(&resv(1)).unwrap().state, terminal);
         }
+    }
+
+    #[test]
+    fn committed_reservation_survives_expiry_and_can_post() {
+        let mut ledger = funded();
+        ledger
+            .reserve(reservation(1, vec![source(1, 1, 3, 100_000)]))
+            .unwrap();
+        ledger.commit(resv(1)).unwrap();
+        assert!(ledger.expired_as_of(u64::MAX).is_empty());
+        ledger.post(resv(1), &[amt(100_000)]).unwrap();
+        assert_eq!(
+            ledger.reservation(&resv(1)).unwrap().state,
+            ReservationState::Posted
+        );
     }
 
     #[test]

@@ -14,6 +14,11 @@ pub trait LedgerStore: Send + Sync {
     /// (`= hash(intentId ‖ routePlanHash)`), so a duplicated command is a no-op.
     async fn reserve(&self, reservation: &Reservation) -> Result<(), LedgerStoreError>;
 
+    /// Protect a pending reservation from TTL expiry before an irreversible remote action.
+    async fn commit(&self, _id: ReservationId) -> Result<(), LedgerStoreError> {
+        Ok(())
+    }
+
     /// Record settlement: mark the reservation `Posted` and store the per-source fills. A no-op
     /// unless the reservation is currently `Pending`, so a replay does not re-post.
     async fn post(&self, id: ReservationId, filled: &[U256]) -> Result<(), LedgerStoreError>;

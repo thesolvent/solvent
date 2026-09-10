@@ -39,10 +39,12 @@ impl ReservationSource {
 /// The two-phase lifecycle of a reservation. `Pending` holds at both ceilings; a terminal state
 /// releases them (`Voided`/`Expired`) or consumes them (`Posted`). `ReorgOpen` is a posted
 /// settlement that a reorg rolled back — its consumption is reversed and reconcile re-decides it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ReservationState {
     Pending,
+    Committed,
     Posted,
     Voided,
     Expired,

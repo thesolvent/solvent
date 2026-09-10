@@ -81,6 +81,15 @@ impl LedgerService {
         Ok(())
     }
 
+    /// Protect a cross-chain hold from TTL expiry once both services have committed it.
+    pub async fn commit(&self, id: ReservationId) -> Result<(), SolventError> {
+        let mut ledger = self.ledger.lock().await;
+        self.store.commit(id).await?;
+        ledger.commit(id)?;
+        self.publish(&ledger);
+        Ok(())
+    }
+
     /// Release a lost auction / reverted fill.
     pub async fn void(&self, id: ReservationId) -> Result<(), SolventError> {
         let mut ledger = self.ledger.lock().await;
