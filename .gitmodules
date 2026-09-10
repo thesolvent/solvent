@@ -4,3 +4,9 @@
 [submodule "contracts/lib/the-compact"]
 	path = contracts/lib/the-compact
 	url = https://github.com/Uniswap/the-compact
+[submodule "contracts/lib/chainlink-ccip"]
+	path = contracts/lib/chainlink-ccip
+	url = https://github.com/smartcontractkit/chainlink-ccip
+[submodule "contracts/lib/evm-cctp-contracts"]
+	path = contracts/lib/evm-cctp-contracts
+	url = https://github.com/circlefin/evm-cctp-contracts

@@ -7,6 +7,10 @@ src = "src"
 test = "test"
 script = "script"
 libs = ["lib"]
+remappings = [
+    "@chainlink/contracts-ccip/=lib/chainlink-ccip/chains/evm/",
+    "@openzeppelin/contracts@5.0.2/=node_modules/@openzeppelin/contracts/",
+]
 # The full AquaSwapVMRouter exceeds the EIP-170 runtime-code limit by design; the devnet deploy runs
 # in forge's own EVM, so raise its limit to match the live chain (anvil --disable-code-size-limit).
 code_size_limit = 100_000

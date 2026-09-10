@@ -24,7 +24,9 @@ import {
     SolventCrossChainOrder,
     SolventMandate
 } from "../src/crosschain/CrossChainTypes.sol";
+import { ProofKind } from "../src/crosschain/ProofTypes.sol";
 import { IFillProofVerifier } from "../src/interfaces/IFillProofVerifier.sol";
+import { IProofOutbox } from "../src/interfaces/IProofOutbox.sol";
 import { IRepaymentProofVerifier } from "../src/interfaces/IRepaymentProofVerifier.sol";
 import { IWETH } from "../src/interfaces/IWETH.sol";
 import { IMessageTransmitterV2, ITokenMessengerV2 } from "../src/interfaces/ICctpV2.sol";
@@ -39,6 +41,15 @@ contract TestFillProofVerifier is IFillProofVerifier {
 contract TestRepaymentProofVerifier is IRepaymentProofVerifier {
     function verifyRepayment(bytes calldata proof) external pure returns (VerifiedRepayment memory) {
         return abi.decode(proof, (VerifiedRepayment));
+    }
+}
+
+contract DirectProofOutbox is IProofOutbox {
+    mapping(bytes32 orderId => bytes32 payloadHash) public payloads;
+
+    function record(bytes32 orderId, ProofKind kind, bytes calldata payload) external returns (bytes32 payloadHash) {
+        payloadHash = keccak256(abi.encode(uint8(1), kind, payload));
+        payloads[orderId] = payloadHash;
     }
 }
 
@@ -71,6 +82,7 @@ contract CrossChainDirectTest is Test {
     TheCompact internal compact;
     TestFillProofVerifier internal fillVerifier;
     TestRepaymentProofVerifier internal repaymentVerifier;
+    DirectProofOutbox internal proofOutbox;
     CompactOriginSettler internal originSettler;
     CrossChainAquaApp internal destinationApp;
     AlwaysOKAllocator internal allocator;
@@ -99,6 +111,7 @@ contract CrossChainDirectTest is Test {
         destinationToken = new DevToken("USD Coin", "USDC", 6);
         fillVerifier = new TestFillProofVerifier();
         repaymentVerifier = new TestRepaymentProofVerifier();
+        proofOutbox = new DirectProofOutbox();
 
         uint256 deployerNonce = vm.getNonce(address(this));
         address predictedOrigin = vm.computeCreateAddress(address(this), deployerNonce);
@@ -112,6 +125,7 @@ contract CrossChainDirectTest is Test {
             BASE_CHAIN_ID,
             predictedDestination,
             fillVerifier,
+            proofOutbox,
             CompactOriginSettler.RoutedConfig({
                 originUsdc: destinationToken,
                 swapRouter: ISwapVM(address(1)),
@@ -133,6 +147,7 @@ contract CrossChainDirectTest is Test {
             address(compact),
             address(wbtc),
             address(fillVerifier),
+            proofOutbox,
             repaymentVerifier,
             CrossChainAquaApp.CctpConfig({
                 usdc: destinationToken,

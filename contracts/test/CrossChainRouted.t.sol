@@ -28,8 +28,10 @@ import {
     SolventCrossChainOrder,
     SolventMandate
 } from "../src/crosschain/CrossChainTypes.sol";
+import { ProofKind } from "../src/crosschain/ProofTypes.sol";
 import { IMessageTransmitterV2, ITokenMessengerV2 } from "../src/interfaces/ICctpV2.sol";
 import { IFillProofVerifier } from "../src/interfaces/IFillProofVerifier.sol";
+import { IProofOutbox } from "../src/interfaces/IProofOutbox.sol";
 import { IRepaymentProofVerifier } from "../src/interfaces/IRepaymentProofVerifier.sol";
 import { IWETH } from "../src/interfaces/IWETH.sol";
 
@@ -46,6 +48,15 @@ contract RoutedFillProofVerifier is IFillProofVerifier {
 contract UnusedRepaymentProofVerifier is IRepaymentProofVerifier {
     function verifyRepayment(bytes calldata proof) external pure returns (VerifiedRepayment memory) {
         return abi.decode(proof, (VerifiedRepayment));
+    }
+}
+
+contract RoutedProofOutbox is IProofOutbox {
+    mapping(bytes32 orderId => bytes32 payloadHash) public payloads;
+
+    function record(bytes32 orderId, ProofKind kind, bytes calldata payload) external returns (bytes32 payloadHash) {
+        payloadHash = keccak256(abi.encode(uint8(1), kind, payload));
+        payloads[orderId] = payloadHash;
     }
 }
 
@@ -148,6 +159,7 @@ contract CrossChainRoutedTest is AquaStrategyBuilders {
     DevToken internal baseUsdc;
     RoutedFillProofVerifier internal fillVerifier;
     UnusedRepaymentProofVerifier internal repaymentVerifier;
+    RoutedProofOutbox internal proofOutbox;
     MockTokenMessengerV2 internal tokenMessenger;
     MockMessageTransmitterV2 internal messageTransmitter;
     CompactOriginSettler internal originSettler;
@@ -198,6 +210,7 @@ contract CrossChainRoutedTest is AquaStrategyBuilders {
         weth = new WETH();
         baseUsdc = new DevToken("Base USDC", "USDC", 18);
         repaymentVerifier = new UnusedRepaymentProofVerifier();
+        proofOutbox = new RoutedProofOutbox();
         messageTransmitter = new MockMessageTransmitterV2(IMintableToken(address(baseUsdc)));
 
         uint256 deployerNonce = vm.getNonce(address(this));
@@ -212,6 +225,7 @@ contract CrossChainRoutedTest is AquaStrategyBuilders {
             BASE_CHAIN_ID,
             predictedDestination,
             fillVerifier,
+            proofOutbox,
             CompactOriginSettler.RoutedConfig({
                 originUsdc: tokenB,
                 swapRouter: ISwapVM(address(swapVm)),
@@ -233,6 +247,7 @@ contract CrossChainRoutedTest is AquaStrategyBuilders {
             address(compact),
             address(tokenA),
             address(fillVerifier),
+            proofOutbox,
             repaymentVerifier,
             CrossChainAquaApp.CctpConfig({
                 usdc: baseUsdc,

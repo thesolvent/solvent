@@ -19,7 +19,10 @@ import {
     SolventMandate
 } from "./crosschain/CrossChainTypes.sol";
 import { CctpMessageLib } from "./crosschain/CctpMessageLib.sol";
+import { ProofKind } from "./crosschain/ProofTypes.sol";
 import { IMessageTransmitterV2 } from "./interfaces/ICctpV2.sol";
+import { IFillProofVerifier } from "./interfaces/IFillProofVerifier.sol";
+import { IProofOutbox } from "./interfaces/IProofOutbox.sol";
 import { IRepaymentProofVerifier } from "./interfaces/IRepaymentProofVerifier.sol";
 import { IWETH } from "./interfaces/IWETH.sol";
 
@@ -88,6 +91,7 @@ contract CrossChainAquaApp is AquaApp, EIP712, ReentrancyGuardTransient {
     address public immutable ORIGIN_COMPACT;
     address public immutable ORIGIN_TOKEN;
     address public immutable FILL_PROOF_VERIFIER;
+    IProofOutbox public immutable PROOF_OUTBOX;
     IRepaymentProofVerifier public immutable REPAYMENT_PROOF_VERIFIER;
     IERC20 private immutable USDC;
     IMessageTransmitterV2 private immutable MESSAGE_TRANSMITTER;
@@ -189,6 +193,7 @@ contract CrossChainAquaApp is AquaApp, EIP712, ReentrancyGuardTransient {
         address originCompact,
         address originToken,
         address fillProofVerifier,
+        IProofOutbox proofOutbox,
         IRepaymentProofVerifier repaymentProofVerifier,
         CctpConfig memory cctp
     )
@@ -198,10 +203,10 @@ contract CrossChainAquaApp is AquaApp, EIP712, ReentrancyGuardTransient {
         if (
             address(aqua) == address(0) || address(weth) == address(0) || originSettler == address(0)
                 || originCompact == address(0) || originToken == address(0) || fillProofVerifier == address(0)
-                || address(repaymentProofVerifier) == address(0) || address(cctp.usdc) == address(0)
-                || address(cctp.messageTransmitter) == address(0) || cctp.originTokenMessenger == bytes32(0)
-                || cctp.destinationTokenMessenger == address(0) || cctp.originUsdc == address(0)
-                || cctp.feeRecipient == address(0)
+                || address(proofOutbox) == address(0) || address(repaymentProofVerifier) == address(0)
+                || address(cctp.usdc) == address(0) || address(cctp.messageTransmitter) == address(0)
+                || cctp.originTokenMessenger == bytes32(0) || cctp.destinationTokenMessenger == address(0)
+                || cctp.originUsdc == address(0) || cctp.feeRecipient == address(0)
         ) {
             revert ZeroAddress();
         }
@@ -211,6 +216,7 @@ contract CrossChainAquaApp is AquaApp, EIP712, ReentrancyGuardTransient {
         ORIGIN_COMPACT = originCompact;
         ORIGIN_TOKEN = originToken;
         FILL_PROOF_VERIFIER = fillProofVerifier;
+        PROOF_OUTBOX = proofOutbox;
         REPAYMENT_PROOF_VERIFIER = repaymentProofVerifier;
         USDC = cctp.usdc;
         MESSAGE_TRANSMITTER = cctp.messageTransmitter;
@@ -332,6 +338,19 @@ contract CrossChainAquaApp is AquaApp, EIP712, ReentrancyGuardTransient {
         }
 
         bytes32 makerQuoteHash = _hashTypedDataV4(CrossChainHashLib.hashDirectQuote(quote));
+        _recordFill(
+            order,
+            orderId,
+            RouteKind.DirectMaker,
+            quote.maker,
+            quote.destinationStrategyHash,
+            quote.originStrategyHash,
+            quote.outputAmount,
+            ORIGIN_TOKEN,
+            quote.repaymentAmount,
+            0,
+            makerQuoteHash
+        );
         emit DirectOrderFilled(
             orderId,
             order.recipient,
@@ -392,6 +411,19 @@ contract CrossChainAquaApp is AquaApp, EIP712, ReentrancyGuardTransient {
         }
 
         bytes32 makerQuoteHash = _hashTypedDataV4(CrossChainHashLib.hashCreditQuote(quote));
+        _recordFill(
+            order,
+            orderId,
+            RouteKind.TwoMakerCredit,
+            quote.maker,
+            quote.destinationStrategyHash,
+            bytes32(0),
+            quote.outputAmount,
+            address(USDC),
+            quote.usdcDue,
+            quote.maxCctpFee,
+            makerQuoteHash
+        );
         emit CreditOrderFilled(
             orderId,
             order.recipient,
@@ -492,6 +524,42 @@ contract CrossChainAquaApp is AquaApp, EIP712, ReentrancyGuardTransient {
 
     function creditQuoteDigest(MakerCreditQuote calldata quote) external view returns (bytes32) {
         return _hashTypedDataV4(CrossChainHashLib.hashCreditQuote(quote));
+    }
+
+    function _recordFill(
+        SolventCrossChainOrder calldata order,
+        bytes32 orderId,
+        RouteKind routeKind,
+        address maker,
+        bytes32 destinationStrategyHash,
+        bytes32 originStrategyHash,
+        uint256 outputAmount,
+        address repaymentToken,
+        uint256 repaymentAmount,
+        uint256 maxCctpFee,
+        bytes32 makerQuoteHash
+    )
+        private
+    {
+        bytes32 fillId = keccak256(abi.encode(block.chainid, address(this), orderId, ProofKind.Fill));
+        IFillProofVerifier.VerifiedFill memory fill = IFillProofVerifier.VerifiedFill({
+            orderId: orderId,
+            routeKind: routeKind,
+            destinationChainId: block.chainid,
+            destinationApp: address(this),
+            recipient: order.recipient,
+            outputToken: order.outputToken,
+            outputAmount: outputAmount,
+            destinationMaker: maker,
+            destinationStrategyHash: destinationStrategyHash,
+            originStrategyHash: originStrategyHash,
+            repaymentToken: repaymentToken,
+            repaymentAmount: repaymentAmount,
+            maxCctpFee: maxCctpFee,
+            makerQuoteHash: makerQuoteHash,
+            fillId: fillId
+        });
+        PROOF_OUTBOX.record(orderId, ProofKind.Fill, abi.encode(fill));
     }
 
     function _validateOrder(SolventCrossChainOrder calldata order, RouteKind expectedRoute) private view {

@@ -13,8 +13,11 @@ import { Claim } from "the-compact/src/types/Claims.sol";
 
 import { CrossChainHashLib, RouteKind, SolventCrossChainOrder, SolventMandate } from "./crosschain/CrossChainTypes.sol";
 import { CctpMessageLib } from "./crosschain/CctpMessageLib.sol";
+import { ProofKind } from "./crosschain/ProofTypes.sol";
 import { ITokenMessengerV2 } from "./interfaces/ICctpV2.sol";
 import { IFillProofVerifier } from "./interfaces/IFillProofVerifier.sol";
+import { IProofOutbox } from "./interfaces/IProofOutbox.sol";
+import { IRepaymentProofVerifier } from "./interfaces/IRepaymentProofVerifier.sol";
 
 /// @title CompactOriginSettler
 /// @notice Claims a proven cross-chain order and atomically repays its origin-side maker.
@@ -45,6 +48,7 @@ contract CompactOriginSettler is ReentrancyGuardTransient {
     uint256 public immutable DESTINATION_CHAIN_ID;
     address public immutable DESTINATION_APP;
     IFillProofVerifier public immutable FILL_PROOF_VERIFIER;
+    IProofOutbox public immutable PROOF_OUTBOX;
     IERC20 private immutable ORIGIN_USDC;
     ISwapVM private immutable SWAP_ROUTER;
     ITokenMessengerV2 private immutable TOKEN_MESSENGER;
@@ -91,14 +95,15 @@ contract CompactOriginSettler is ReentrancyGuardTransient {
         uint256 destinationChainId,
         address destinationApp,
         IFillProofVerifier fillProofVerifier,
+        IProofOutbox proofOutbox,
         RoutedConfig memory routed
     ) {
         if (
             address(compact) == address(0) || address(aqua) == address(0) || address(originToken) == address(0)
                 || destinationApp == address(0) || address(fillProofVerifier) == address(0)
-                || address(routed.originUsdc) == address(0) || address(routed.swapRouter) == address(0)
-                || address(routed.tokenMessenger) == address(0) || routed.destinationUsdc == address(0)
-                || routed.feeRecipient == address(0)
+                || address(proofOutbox) == address(0) || address(routed.originUsdc) == address(0)
+                || address(routed.swapRouter) == address(0) || address(routed.tokenMessenger) == address(0)
+                || routed.destinationUsdc == address(0) || routed.feeRecipient == address(0)
         ) {
             revert ZeroAddress();
         }
@@ -108,6 +113,7 @@ contract CompactOriginSettler is ReentrancyGuardTransient {
         DESTINATION_CHAIN_ID = destinationChainId;
         DESTINATION_APP = destinationApp;
         FILL_PROOF_VERIFIER = fillProofVerifier;
+        PROOF_OUTBOX = proofOutbox;
         ORIGIN_USDC = routed.originUsdc;
         SWAP_ROUTER = routed.swapRouter;
         TOKEN_MESSENGER = routed.tokenMessenger;
@@ -170,6 +176,7 @@ contract CompactOriginSettler is ReentrancyGuardTransient {
         emit DirectMakerRepaid(
             orderId, fill.destinationMaker, address(ORIGIN_TOKEN), fill.repaymentAmount, usedAquaPush
         );
+        _recordDirectRepayment(orderId, fill);
     }
 
     /// @notice Claim the source token, swap it against M1's Aqua strategy, and burn CCTP USDC atomically.
@@ -250,6 +257,20 @@ contract CompactOriginSettler is ReentrancyGuardTransient {
 
     function mandateHash(SolventMandate calldata mandate) external pure returns (bytes32) {
         return CrossChainHashLib.hashMandate(mandate);
+    }
+
+    function _recordDirectRepayment(bytes32 orderId, IFillProofVerifier.VerifiedFill memory fill) private {
+        bytes32 repaymentId = keccak256(abi.encode(block.chainid, address(this), orderId, ProofKind.DirectRepayment));
+        IRepaymentProofVerifier.VerifiedRepayment memory repayment = IRepaymentProofVerifier.VerifiedRepayment({
+            orderId: orderId,
+            originChainId: block.chainid,
+            originSettler: address(this),
+            maker: fill.destinationMaker,
+            repaymentToken: address(ORIGIN_TOKEN),
+            repaymentAmount: fill.repaymentAmount,
+            repaymentId: repaymentId
+        });
+        PROOF_OUTBOX.record(orderId, ProofKind.DirectRepayment, abi.encode(repayment));
     }
 
     function _validateOrder(SolventCrossChainOrder calldata order, RouteKind expectedRoute) private view {
