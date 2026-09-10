@@ -6,6 +6,22 @@ the project is pre-1.0 and evolving.
 
 ## [Unreleased]
 
+### Added — cross-chain execution
+
+- **Two chain-local Solvent services plus a keyless proxy** — authenticated private quote,
+  prepare/commit/inspect/release, staged-step, and status APIs; durable SQLite quote, reservation,
+  step, and saga records; deterministic chain-bound command IDs; restart-safe compensation and
+  post-delivery retries.
+- **Authenticated proof rails** — paired Chainlink CCIP outbox/inbox contracts with deferred exact-
+  payload dispatch, current-fee materialization, strict remote authentication, replay protection,
+  deployment scripts, and exported ABIs.
+- **Direct and CCTP repayment coordination** — concurrent leg aggregation, Circle fee/allowance
+  admission, Iris polling, order-bound message validation, late staging of attestation calldata,
+  and destination close through the owning chain service.
+- **Cross-chain SDK and operations surface** — Compact balance/deposit/signing helpers, typed proxy
+  client with durable polling, public proxy OpenAPI, service/proxy configuration examples, and an
+  architecture/runbook at `docs/CROSS_CHAIN_OPERATIONS.md`.
+
 ### Added — contracts (`contracts/`, Foundry)
 - **`UniswapXAquaFiller`** — the P1 on-chain filler: a zero-inventory UniswapX taker that sources order
   outputs from makers' Aqua positions via the SwapVM router, executing an off-chain routing plan
