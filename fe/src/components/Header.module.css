@@ -49,9 +49,19 @@
 .productCaretOpen {
   width: 51px;
   height: 72px;
-  border-left: 1px solid rgba(11, 11, 11, 0.16);
   position: relative;
   flex: none;
+}
+
+.productCaret::before,
+.productCaretOpen::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 40px;
+  border-left: 1px solid rgba(11, 11, 11, 0.16);
+  transform: translateY(-50%);
 }
 
 .productCaret::after,
