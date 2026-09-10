@@ -3,6 +3,7 @@
 
 use alloy::primitives::{Address, Bytes, B256, U256};
 use async_trait::async_trait;
+use solvent_core::primitives::ingest::OrderSource;
 use solvent_core::{
     deps::trade::{
         CreateResult, MakerFill, Page, Settlement, TradeFilter, TradeStats, TradeStore,
@@ -162,6 +163,11 @@ fn row_to_trade(row: &SqliteRow) -> Result<Trade, TradeStoreError> {
         block_number: opt_count(row, "block_number")?,
         created_at: count(row, "created_at")?,
         settled_at: opt_count(row, "settled_at")?,
+        indicative_amount_in: opt_amount(row, "indicative_amount_in")?,
+        source: match row.try_get::<String, _>("source").map_err(db)?.as_str() {
+            "uniswapx" => OrderSource::UniswapX,
+            _ => OrderSource::Solvent,
+        },
         token_in_price_usd: row.try_get("token_in_price_usd").map_err(db)?,
         token_out_price_usd: row.try_get("token_out_price_usd").map_err(db)?,
     })
@@ -195,8 +201,9 @@ async fn insert_trade(
         "INSERT INTO trade (
              id, order_hash, taker, token_in, token_out, amount_in, min_amount_out, amount_out,
              status, status_rank, deadline_block, signature, price_impact_pct, surplus, tx_hash,
-             block_number, created_at, settled_at, token_in_price_usd, token_out_price_usd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             block_number, created_at, settled_at, token_in_price_usd, token_out_price_usd,
+             indicative_amount_in, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (order_hash) DO NOTHING",
     )
     .bind(trade.id.to_string())
@@ -219,6 +226,8 @@ async fn insert_trade(
     .bind(trade.settled_at.map(i64_of).transpose()?)
     .bind(trade.token_in_price_usd)
     .bind(trade.token_out_price_usd)
+    .bind(trade.indicative_amount_in.as_ref().map(amount_text))
+    .bind(trade.source.as_str())
     .execute(&mut **tx)
     .await
     .map_err(db)?

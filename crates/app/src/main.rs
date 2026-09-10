@@ -22,19 +22,20 @@ use solvent_adapters::ingest::uniswapx::{
     UniswapXV2Normalizer,
 };
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
-use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
+use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteOrderLog, SqliteQuoteLog};
 use solvent_adapters::registry::{AlloyBlockTimes, AlloyChainSource, SqliteStore};
 use solvent_adapters::routing::{BinanceFeed, BinanceHistory, GasPoller, MarketCache};
 use solvent_adapters::trade::SqliteTradeStore;
 use solvent_core::asset::{AssetManager, PairHistoryService};
 use solvent_core::balances::BalancesService;
-use solvent_core::decision::{DecisionConfig, DecisionService};
+use solvent_core::decision::{DecisionConfig, DecisionDeps, DecisionService};
 use solvent_core::deps::asset::PairPriceHistorySource;
 use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ingest::{Normalizer, OrderFeed};
 use solvent_core::deps::ledger::BudgetSource;
 use solvent_core::deps::maker_metrics::MakerMetricsStore;
+use solvent_core::deps::order_log::OrderLog;
 use solvent_core::deps::quote_log::QuoteLog;
 use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::routing::{GasPrice, PriceOracle};
@@ -153,6 +154,7 @@ async fn main() -> Result<(), StartupError> {
         Arc::new(SystemClock),
     ));
     let trade_store: Arc<dyn TradeStore> = Arc::new(SqliteTradeStore::new(pool.clone()));
+    let order_log = Arc::new(SqliteOrderLog::new(pool.clone()));
     let quote_log: Arc<dyn QuoteLog> =
         Arc::new(SqliteQuoteLog::new(pool.clone(), Arc::new(SystemClock)));
     ledger.recover().await?;
@@ -397,6 +399,7 @@ async fn main() -> Result<(), StartupError> {
                 tokens: admitted,
                 max_outputs: config.max_outputs,
             },
+            Some(Arc::clone(&order_log) as Arc<dyn OrderLog>),
         ));
         let orders_client = Arc::new(
             OrdersApiClient::new(
@@ -431,12 +434,15 @@ async fn main() -> Result<(), StartupError> {
         // Re-price every held order once per block: that is how often the state a decision rests on
         // can change, and an order's price only moves with time.
         let decision = Arc::new(DecisionService::new(
-            Arc::clone(&registry),
-            Arc::clone(&decision_ledger),
-            Arc::clone(&swap),
-            Arc::clone(&leg_cost),
-            Arc::clone(&valuation),
-            Arc::new(SystemClock),
+            DecisionDeps {
+                registry: Arc::clone(&registry),
+                ledger: Arc::clone(&decision_ledger),
+                swap: Arc::clone(&swap),
+                leg_cost: Arc::clone(&leg_cost),
+                valuation: Arc::clone(&valuation),
+                clock: Arc::new(SystemClock),
+                order_log: Some(Arc::clone(&order_log) as Arc<dyn OrderLog>),
+            },
             DecisionConfig {
                 routing: RoutingConfig::new(MAX_CANDIDATES, MAX_LEGS, config.gas_units_per_leg),
                 filler: config.filler,
@@ -482,6 +488,7 @@ async fn main() -> Result<(), StartupError> {
         valuation,
         quote_log,
         feed_health: feed_health_handle,
+        order_log: Some(Arc::clone(&order_log)),
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;

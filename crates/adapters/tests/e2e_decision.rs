@@ -37,7 +37,7 @@ use solvent_adapters::ingest::uniswapx::{
 use solvent_adapters::routing::MarketCache;
 use solvent_adapters::trade::SqliteTradeStore;
 use solvent_core::asset::{AssetManager, TokenList, TokenMeta};
-use solvent_core::decision::{DecisionConfig, DecisionService};
+use solvent_core::decision::{DecisionConfig, DecisionDeps, DecisionService};
 use solvent_core::deps::ingest::{FillBuilder, Normalizer, OrderFeed};
 use solvent_core::deps::ledger::Clock;
 use solvent_core::deps::routing::{GasPrice, PriceOracle};
@@ -307,6 +307,7 @@ async fn e2e_the_loop_waits_for_the_price_then_fills_from_the_feed() {
             tokens: BTreeSet::from([stack.h.t0, stack.h.t1]),
             max_outputs: 4,
         },
+        None,
     ));
     let feed: Arc<dyn OrderFeed> = Arc::new(HostedFeed::new(
         Arc::new(
@@ -367,12 +368,15 @@ async fn e2e_the_loop_waits_for_the_price_then_fills_from_the_feed() {
         },
     ));
     let decision = Arc::new(DecisionService::new(
-        Arc::clone(&snapshot),
-        Arc::clone(&led),
-        Arc::clone(&swap),
-        Arc::clone(&leg_cost),
-        Arc::clone(&valuation),
-        Arc::clone(&clock) as Arc<dyn Clock>,
+        DecisionDeps {
+            registry: Arc::clone(&snapshot),
+            ledger: Arc::clone(&led),
+            swap: Arc::clone(&swap),
+            leg_cost: Arc::clone(&leg_cost),
+            valuation: Arc::clone(&valuation),
+            clock: Arc::clone(&clock) as Arc<dyn Clock>,
+            order_log: None,
+        },
         DecisionConfig {
             routing,
             filler: stack.filler,

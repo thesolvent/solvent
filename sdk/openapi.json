@@ -332,6 +332,38 @@
         }
       }
     },
+    "/v1/orders": {
+      "get": {
+        "tags": [
+          "explorer"
+        ],
+        "operationId": "orders",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservedOrders"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/pairs": {
       "get": {
         "tags": [
@@ -1771,6 +1803,82 @@
           }
         ],
         "description": "A settlement in a maker's feed: the trade header plus the maker's share and captured fee."
+      },
+      "ObservedOrder": {
+        "type": "object",
+        "description": "One observed order.",
+        "required": [
+          "order_hash",
+          "source",
+          "token_in",
+          "amount_in",
+          "verdict",
+          "seen_at"
+        ],
+        "properties": {
+          "amount_in": {
+            "type": "string"
+          },
+          "indicative_in": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What sourcing the delivery would cost us, once routing priced it."
+          },
+          "order_hash": {
+            "type": "string"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The admission rule that refused it."
+          },
+          "required_out": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the settler demands, priced when the order was seen."
+          },
+          "seen_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "source": {
+            "type": "string",
+            "description": "Where it came from: `uniswapx` (the public book) or `solvent` (our own endpoint)."
+          },
+          "token_in": {
+            "type": "string"
+          },
+          "token_out": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verdict": {
+            "type": "string",
+            "description": "`admitted` or `dropped`."
+          }
+        }
+      },
+      "ObservedOrders": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObservedOrder"
+            }
+          }
+        }
       },
       "PairInfo": {
         "type": "object",
@@ -3431,6 +3539,7 @@
                     "taker",
                     "input",
                     "output",
+                    "source",
                     "created_at"
                   ],
                   "properties": {
@@ -3458,6 +3567,17 @@
                     },
                     "id": {
                       "type": "string"
+                    },
+                    "indicative_input": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/Amount",
+                          "description": "What sourcing the delivery would have cost, gas included, in input-token units — present on\ndeclined trades too, where it is the only account of why the resolver passed. Compare it to\n`input` to read the shortfall."
+                        }
+                      ]
                     },
                     "input": {
                       "$ref": "#/components/schemas/TokenAmount",
@@ -3515,6 +3635,10 @@
                         "boolean",
                         "null"
                       ]
+                    },
+                    "source": {
+                      "type": "string",
+                      "description": "Where the order came from: `uniswapx` (the public book) or `solvent` (our own endpoint)."
                     },
                     "status": {
                       "type": "string"
@@ -4160,6 +4284,7 @@
               "taker",
               "input",
               "output",
+              "source",
               "created_at"
             ],
             "properties": {
@@ -4187,6 +4312,17 @@
               },
               "id": {
                 "type": "string"
+              },
+              "indicative_input": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Amount",
+                    "description": "What sourcing the delivery would have cost, gas included, in input-token units — present on\ndeclined trades too, where it is the only account of why the resolver passed. Compare it to\n`input` to read the shortfall."
+                  }
+                ]
               },
               "input": {
                 "$ref": "#/components/schemas/TokenAmount",
@@ -4244,6 +4380,10 @@
                   "boolean",
                   "null"
                 ]
+              },
+              "source": {
+                "type": "string",
+                "description": "Where the order came from: `uniswapx` (the public book) or `solvent` (our own endpoint)."
               },
               "status": {
                 "type": "string"
@@ -4544,6 +4684,7 @@
           "taker",
           "input",
           "output",
+          "source",
           "created_at"
         ],
         "properties": {
@@ -4571,6 +4712,17 @@
           },
           "id": {
             "type": "string"
+          },
+          "indicative_input": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Amount",
+                "description": "What sourcing the delivery would have cost, gas included, in input-token units — present on\ndeclined trades too, where it is the only account of why the resolver passed. Compare it to\n`input` to read the shortfall."
+              }
+            ]
           },
           "input": {
             "$ref": "#/components/schemas/TokenAmount",
@@ -4628,6 +4780,10 @@
               "boolean",
               "null"
             ]
+          },
+          "source": {
+            "type": "string",
+            "description": "Where the order came from: `uniswapx` (the public book) or `solvent` (our own endpoint)."
           },
           "status": {
             "type": "string"

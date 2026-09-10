@@ -4,6 +4,7 @@
 
 use alloy::primitives::{Address, Bytes, B256, U256};
 use solvent_adapters::trade::SqliteTradeStore;
+use solvent_core::primitives::ingest::OrderSource;
 use solvent_core::{
     deps::trade::{Page, Settlement, TradeFilter, TradeStore},
     primitives::{
@@ -33,6 +34,8 @@ fn tid(i: u64) -> TradeId {
 
 fn trade(id: TradeId, order: u8, taker: u8, status: TradeStatus) -> Trade {
     Trade {
+        indicative_amount_in: None,
+        source: OrderSource::UniswapX,
         id,
         order_hash: IntentId(B256::from([order; 32])),
         taker: Address::from([taker; 20]),

@@ -7,6 +7,8 @@ use core::str::FromStr;
 
 use alloy_primitives::{Address, Bytes, B256, U256};
 use serde::Serialize;
+
+use crate::primitives::ingest::OrderSource;
 use ulid::Ulid;
 
 use super::amount::{Amount, TokenAmount};
@@ -133,6 +135,12 @@ pub struct Trade {
     pub settled_at: Option<u64>,
     /// USD price of `token_in`/`token_out` captured when the trade was submitted, so fee and value
     /// figures stay fixed at trade-time economics rather than drifting with the current market.
+    /// What sourcing the delivery would cost, gas included, in `token_in` — present even when the
+    /// trade declined, since it is the only account a declined trade gives of itself. `None` when
+    /// no candidate had capacity, so there was no cost to quote.
+    pub indicative_amount_in: Option<U256>,
+    /// Which venue the order arrived from.
+    pub source: OrderSource,
     pub token_in_price_usd: Option<f64>,
     pub token_out_price_usd: Option<f64>,
 }
@@ -186,6 +194,13 @@ pub struct TradeView {
     /// Expected resolver profit from exact-out routing, net of estimated gas, in input-token units.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub surplus: Option<Amount>,
+    /// Where the order came from: `uniswapx` (the public book) or `solvent` (our own endpoint).
+    pub source: String,
+    /// What sourcing the delivery would have cost, gas included, in input-token units — present on
+    /// declined trades too, where it is the only account of why the resolver passed. Compare it to
+    /// `input` to read the shortfall.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indicative_input: Option<Amount>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tx_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

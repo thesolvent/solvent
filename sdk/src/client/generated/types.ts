@@ -144,6 +144,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["orders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pairs": {
         parameters: {
             query?: never;
@@ -695,6 +711,28 @@ export interface components {
              */
             share_pct?: number | null;
         };
+        /** @description One observed order. */
+        ObservedOrder: {
+            amount_in: string;
+            /** @description What sourcing the delivery would cost us, once routing priced it. */
+            indicative_in?: string | null;
+            order_hash: string;
+            /** @description The admission rule that refused it. */
+            reason?: string | null;
+            /** @description What the settler demands, priced when the order was seen. */
+            required_out?: string | null;
+            /** Format: int64 */
+            seen_at: number;
+            /** @description Where it came from: `uniswapx` (the public book) or `solvent` (our own endpoint). */
+            source: string;
+            token_in: string;
+            token_out?: string | null;
+            /** @description `admitted` or `dropped`. */
+            verdict: string;
+        };
+        ObservedOrders: {
+            items: components["schemas"]["ObservedOrder"][];
+        };
         /**
          * @description One tradeable pair offered by the Create wizard: the two tokens, their kind, mid price, the
          *     suggested defaults, and (when a wallet is supplied) the maker's balance of each side.
@@ -1243,6 +1281,7 @@ export interface components {
                      */
                     deadline_block?: number | null;
                     id: string;
+                    indicative_input?: null | components["schemas"]["Amount"];
                     /** @description The swapper's input token and the maximum it authorized. */
                     input: components["schemas"]["TokenAmount"];
                     /** @description The maker slices the trade sourced — detail only. */
@@ -1261,6 +1300,8 @@ export interface components {
                     /** Format: int64 */
                     settled_at?: number | null;
                     signature_present?: boolean | null;
+                    /** @description Where the order came from: `uniswapx` (the public book) or `solvent` (our own endpoint). */
+                    source: string;
                     status: string;
                     surplus?: null | components["schemas"]["Amount"];
                     taker: string;
@@ -1467,6 +1508,7 @@ export interface components {
                  */
                 deadline_block?: number | null;
                 id: string;
+                indicative_input?: null | components["schemas"]["Amount"];
                 /** @description The swapper's input token and the maximum it authorized. */
                 input: components["schemas"]["TokenAmount"];
                 /** @description The maker slices the trade sourced — detail only. */
@@ -1485,6 +1527,8 @@ export interface components {
                 /** Format: int64 */
                 settled_at?: number | null;
                 signature_present?: boolean | null;
+                /** @description Where the order came from: `uniswapx` (the public book) or `solvent` (our own endpoint). */
+                source: string;
                 status: string;
                 surplus?: null | components["schemas"]["Amount"];
                 taker: string;
@@ -1600,6 +1644,7 @@ export interface components {
              */
             deadline_block?: number | null;
             id: string;
+            indicative_input?: null | components["schemas"]["Amount"];
             /** @description The swapper's input token and the maximum it authorized. */
             input: components["schemas"]["TokenAmount"];
             /** @description The maker slices the trade sourced — detail only. */
@@ -1618,6 +1663,8 @@ export interface components {
             /** Format: int64 */
             settled_at?: number | null;
             signature_present?: boolean | null;
+            /** @description Where the order came from: `uniswapx` (the public book) or `solvent` (our own endpoint). */
+            source: string;
             status: string;
             surplus?: null | components["schemas"]["Amount"];
             taker: string;
@@ -1819,6 +1866,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Response_List_MakerTrade"];
+                };
+            };
+        };
+    };
+    orders: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservedOrders"];
                 };
             };
         };

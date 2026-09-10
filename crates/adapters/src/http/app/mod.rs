@@ -6,6 +6,7 @@ pub mod assets;
 pub mod balances;
 pub mod config;
 pub mod makers;
+pub mod orders;
 pub mod pairs;
 pub mod pools;
 pub mod positions;

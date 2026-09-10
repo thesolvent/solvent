@@ -42,6 +42,7 @@ pub fn router(state: AppState) -> Router {
         .route("/pools/depth", get(app::pools::pool_depth))
         .route("/swap/quote", post(app::swap::quote))
         .route("/swap", post(app::swap::submit))
+        .route("/orders", get(app::orders::orders))
         .route("/trades", get(app::trades::trades))
         .route("/trades/{id}", get(app::trades::trade_detail))
         .route("/activity", get(app::activity::activity))
@@ -612,6 +613,7 @@ mod tests {
             valuation,
             quote_log: Arc::new(NoopQuoteLog),
             feed_health: None,
+            order_log: None,
         }
     }
 
