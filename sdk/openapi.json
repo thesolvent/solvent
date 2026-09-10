@@ -739,13 +739,53 @@
           "crate::http::app::rebates"
         ],
         "operationId": "rebates",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (default 50, max 200)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque next-page cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "ready or executed",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "maker",
+            "in": "query",
+            "description": "Maker address filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Response_Vec_RebateWork"
+                  "$ref": "#/components/schemas/Response_List_RebateWork"
                 }
               }
             }
@@ -782,7 +822,7 @@
             }
           },
           "404": {
-            "description": "Unknown or non-executable rebate batch"
+            "description": "Unknown rebate batch"
           }
         }
       }
@@ -2523,40 +2563,104 @@
           }
         }
       },
+      "RebateAllocationView": {
+        "type": "object",
+        "required": [
+          "trade_id",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "string"
+          },
+          "trade_id": {
+            "type": "string"
+          }
+        }
+      },
+      "RebateStatus": {
+        "type": "string",
+        "enum": [
+          "ready",
+          "executed"
+        ]
+      },
       "RebateWork": {
         "type": "object",
         "required": [
           "id",
-          "to",
+          "status",
           "maker",
           "strategy_hash",
           "token_in",
           "token_out",
           "amount_in",
           "amount_out",
+          "gross_surplus",
+          "safe_gas_cost",
           "maker_rebate",
           "executor_profit",
-          "nonce",
-          "deadline_block",
-          "calldata",
-          "published_at"
+          "deviation_bps",
+          "allocations"
         ],
         "properties": {
+          "allocations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RebateAllocationView"
+            }
+          },
           "amount_in": {
             "type": "string"
           },
           "amount_out": {
             "type": "string"
           },
+          "block_number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
           "calldata": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "deadline_block": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "deviation_bps": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
           },
+          "executed_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "executor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "executor_profit": {
+            "type": "string"
+          },
+          "gross_surplus": {
             "type": "string"
           },
           "id": {
@@ -2569,24 +2673,45 @@
             "type": "string"
           },
           "nonce": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "published_at": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
             "minimum": 0
+          },
+          "safe_gas_cost": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RebateStatus"
           },
           "strategy_hash": {
             "type": "string"
           },
           "to": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "token_in": {
             "type": "string"
           },
           "token_out": {
             "type": "string"
+          },
+          "transaction_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -3477,6 +3602,180 @@
           }
         }
       },
+      "Response_List_RebateWork": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "status",
+                    "maker",
+                    "strategy_hash",
+                    "token_in",
+                    "token_out",
+                    "amount_in",
+                    "amount_out",
+                    "gross_surplus",
+                    "safe_gas_cost",
+                    "maker_rebate",
+                    "executor_profit",
+                    "deviation_bps",
+                    "allocations"
+                  ],
+                  "properties": {
+                    "allocations": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RebateAllocationView"
+                      }
+                    },
+                    "amount_in": {
+                      "type": "string"
+                    },
+                    "amount_out": {
+                      "type": "string"
+                    },
+                    "block_number": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "calldata": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "deadline_block": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "deviation_bps": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "executed_at": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "executor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "executor_profit": {
+                      "type": "string"
+                    },
+                    "gross_surplus": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "maker": {
+                      "type": "string"
+                    },
+                    "maker_rebate": {
+                      "type": "string"
+                    },
+                    "nonce": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "published_at": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "safe_gas_cost": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "$ref": "#/components/schemas/RebateStatus"
+                    },
+                    "strategy_hash": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "token_in": {
+                      "type": "string"
+                    },
+                    "token_out": {
+                      "type": "string"
+                    },
+                    "transaction_hash": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
       "Response_List_TokenBalance": {
         "type": "object",
         "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
@@ -4185,36 +4484,78 @@
             "type": "object",
             "required": [
               "id",
-              "to",
+              "status",
               "maker",
               "strategy_hash",
               "token_in",
               "token_out",
               "amount_in",
               "amount_out",
+              "gross_surplus",
+              "safe_gas_cost",
               "maker_rebate",
               "executor_profit",
-              "nonce",
-              "deadline_block",
-              "calldata",
-              "published_at"
+              "deviation_bps",
+              "allocations"
             ],
             "properties": {
+              "allocations": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RebateAllocationView"
+                }
+              },
               "amount_in": {
                 "type": "string"
               },
               "amount_out": {
                 "type": "string"
               },
+              "block_number": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
               "calldata": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "deadline_block": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "deviation_bps": {
                 "type": "integer",
                 "format": "int64",
                 "minimum": 0
               },
+              "executed_at": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "executor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "executor_profit": {
+                "type": "string"
+              },
+              "gross_surplus": {
                 "type": "string"
               },
               "id": {
@@ -4227,24 +4568,45 @@
                 "type": "string"
               },
               "nonce": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "published_at": {
-                "type": "integer",
+                "type": [
+                  "integer",
+                  "null"
+                ],
                 "format": "int64",
                 "minimum": 0
+              },
+              "safe_gas_cost": {
+                "type": "string"
+              },
+              "status": {
+                "$ref": "#/components/schemas/RebateStatus"
               },
               "strategy_hash": {
                 "type": "string"
               },
               "to": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "token_in": {
                 "type": "string"
               },
               "token_out": {
                 "type": "string"
+              },
+              "transaction_hash": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             }
           },
@@ -4493,94 +4855,6 @@
                   "string",
                   "null"
                 ]
-              }
-            }
-          },
-          "status": {
-            "$ref": "#/components/schemas/Status"
-          }
-        }
-      },
-      "Response_Vec_RebateWork": {
-        "type": "object",
-        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
-        "required": [
-          "status"
-        ],
-        "properties": {
-          "error": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "result": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": [
-                "id",
-                "to",
-                "maker",
-                "strategy_hash",
-                "token_in",
-                "token_out",
-                "amount_in",
-                "amount_out",
-                "maker_rebate",
-                "executor_profit",
-                "nonce",
-                "deadline_block",
-                "calldata",
-                "published_at"
-              ],
-              "properties": {
-                "amount_in": {
-                  "type": "string"
-                },
-                "amount_out": {
-                  "type": "string"
-                },
-                "calldata": {
-                  "type": "string"
-                },
-                "deadline_block": {
-                  "type": "integer",
-                  "format": "int64",
-                  "minimum": 0
-                },
-                "executor_profit": {
-                  "type": "string"
-                },
-                "id": {
-                  "type": "string"
-                },
-                "maker": {
-                  "type": "string"
-                },
-                "maker_rebate": {
-                  "type": "string"
-                },
-                "nonce": {
-                  "type": "string"
-                },
-                "published_at": {
-                  "type": "integer",
-                  "format": "int64",
-                  "minimum": 0
-                },
-                "strategy_hash": {
-                  "type": "string"
-                },
-                "to": {
-                  "type": "string"
-                },
-                "token_in": {
-                  "type": "string"
-                },
-                "token_out": {
-                  "type": "string"
-                }
               }
             }
           },

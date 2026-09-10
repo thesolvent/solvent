@@ -190,6 +190,26 @@ export function validatedSalt(value: bigint): bigint {
     return validatedUint(value, 64, "salt");
 }
 
+export function assertFutureDeadline(
+    deadline: number,
+    now = Math.floor(Date.now() / 1_000),
+): void {
+    if (!Number.isSafeInteger(deadline) || deadline <= 0) {
+        throw new InputValidationError(
+            "deadline",
+            "invalid_integer",
+            "Deadline must be a positive integer in Unix seconds",
+        );
+    }
+    if (deadline <= now) {
+        throw new InputValidationError(
+            "deadline",
+            "expired",
+            "Swap order expired",
+        );
+    }
+}
+
 function uintMaximum(bits: 64 | 248 | 256): bigint {
     switch (bits) {
         case 64:

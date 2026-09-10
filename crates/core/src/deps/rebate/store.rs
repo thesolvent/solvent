@@ -4,7 +4,41 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::primitives::rebate::{RebateBatch, RebateSettlement};
-use crate::primitives::{ChainId, RebateBatchId, StrategyHash};
+use crate::primitives::{ChainId, MakerId, RebateBatchId, StrategyHash};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ExecutedRebateCursor {
+    pub executed_at: u64,
+    pub batch_id: RebateBatchId,
+}
+
+impl ExecutedRebateCursor {
+    pub fn new(executed_at: u64, batch_id: RebateBatchId) -> Self {
+        Self {
+            executed_at,
+            batch_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ExecutedRebateQuery {
+    pub maker: Option<MakerId>,
+    pub before: Option<ExecutedRebateCursor>,
+    pub limit: u32,
+}
+
+impl ExecutedRebateQuery {
+    pub fn new(maker: Option<MakerId>, before: Option<ExecutedRebateCursor>, limit: u32) -> Self {
+        Self {
+            maker,
+            before,
+            limit,
+        }
+    }
+}
 
 #[async_trait]
 pub trait RebateStore: Send + Sync {
@@ -37,6 +71,18 @@ pub trait RebateStore: Send + Sync {
 
     /// Atomically retain executed history and close its open batch.
     async fn finish_settlement(&self, id: RebateBatchId) -> Result<(), RebateStoreError>;
+
+    /// Executed rebates ordered newest first for public history and maker projections.
+    async fn executed_rebates(
+        &self,
+        query: &ExecutedRebateQuery,
+    ) -> Result<Vec<RebateSettlement>, RebateStoreError>;
+
+    /// One executed rebate by its stable batch identity.
+    async fn executed_rebate(
+        &self,
+        id: RebateBatchId,
+    ) -> Result<Option<RebateSettlement>, RebateStoreError>;
 }
 
 #[derive(Debug, Error)]

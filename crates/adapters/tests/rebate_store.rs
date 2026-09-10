@@ -14,7 +14,8 @@ use solvent_adapters::rebate::{
 };
 use solvent_core::deps::execution::{ExecutionAuthorizer, ExecutionAuthorizerError};
 use solvent_core::deps::rebate::{
-    RebateAccrualSource, RebateCallBuilder, RebateStore, RebateStoreError,
+    ExecutedRebateCursor, ExecutedRebateQuery, RebateAccrualSource, RebateCallBuilder, RebateStore,
+    RebateStoreError,
 };
 use solvent_core::primitives::execution::{ExecutionAuthorization, PolicySignature};
 use solvent_core::primitives::rebate::{
@@ -215,7 +216,10 @@ async fn execution_marker_closes_the_batch_and_cursor_never_rewinds() {
         1_001,
     );
     store.begin_settlement(&replay).await.unwrap();
-    assert_eq!(store.pending_settlements().await.unwrap(), vec![settlement]);
+    assert_eq!(
+        store.pending_settlements().await.unwrap(),
+        vec![settlement.clone()]
+    );
 
     store.finish_settlement(batch.id).await.unwrap();
     store.finish_settlement(batch.id).await.unwrap();
@@ -228,6 +232,31 @@ async fn execution_marker_closes_the_batch_and_cursor_never_rewinds() {
             .await
             .unwrap();
     assert_eq!(status.0, "executed");
+    assert_eq!(
+        store.executed_rebate(batch.id).await.unwrap(),
+        Some(settlement.clone())
+    );
+    assert_eq!(
+        store
+            .executed_rebates(&ExecutedRebateQuery::new(None, None, 10))
+            .await
+            .unwrap(),
+        vec![settlement.clone()]
+    );
+    assert!(store
+        .executed_rebates(&ExecutedRebateQuery::new(Some(MakerId(token(2))), None, 10,))
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .executed_rebates(&ExecutedRebateQuery::new(
+            None,
+            Some(ExecutedRebateCursor::new(settlement.executed_at, batch.id,)),
+            10,
+        ))
+        .await
+        .unwrap()
+        .is_empty());
 
     let chain = ChainId(31337);
     assert_eq!(store.scan_cursor(chain).await.unwrap(), None);

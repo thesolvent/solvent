@@ -7,7 +7,7 @@ use alloy::primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy::sol_types::{SolCall, SolValue};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use solvent_core::deps::rebate::{RebateStore, RebateStoreError};
+use solvent_core::deps::rebate::{ExecutedRebateQuery, RebateStore, RebateStoreError};
 use solvent_core::primitives::execution::{ExecutionAuthorization, ExecutionKind, PolicySignature};
 use solvent_core::primitives::rebate::{
     RebateAccrual, RebateAllocation, RebateBatch, RebateBatchState, RebateExecutedEvent,
@@ -16,7 +16,7 @@ use solvent_core::primitives::rebate::{
 use solvent_core::primitives::registry::{StrategyKey, TokenPair};
 use solvent_core::primitives::trade::TradeId;
 use solvent_core::primitives::{ChainId, MakerId, RebateBatchId, ReservationId, StrategyHash};
-use sqlx::{Sqlite, SqlitePool, Transaction};
+use sqlx::{QueryBuilder, Sqlite, SqlitePool, Transaction};
 
 use crate::execution::filler::{executeRebateCall, Authorization, Order};
 
@@ -202,11 +202,13 @@ impl RebateStore for SqliteRebateStore {
     ) -> Result<(), RebateStoreError> {
         let payload = serde_json::to_string(&StoredSettlement::from(settlement)).map_err(db)?;
         sqlx::query(
-            "INSERT INTO rebate_settlement (batch_id, status, payload)
-             VALUES (?, 'settling', ?) ON CONFLICT DO NOTHING",
+            "INSERT INTO rebate_settlement (batch_id, status, payload, maker, executed_at)
+             VALUES (?, 'settling', ?, ?, ?) ON CONFLICT DO NOTHING",
         )
         .bind(settlement.plan.batch_id.0.to_vec())
         .bind(&payload)
+        .bind(settlement.plan.strategy.maker.0.to_vec())
+        .bind(i64_of(settlement.executed_at)?)
         .execute(&self.pool)
         .await
         .map_err(db)?;
@@ -283,6 +285,56 @@ impl RebateStore for SqliteRebateStore {
         .await
         .map_err(db)?;
         transaction.commit().await.map_err(db)
+    }
+
+    async fn executed_rebates(
+        &self,
+        query: &ExecutedRebateQuery,
+    ) -> Result<Vec<RebateSettlement>, RebateStoreError> {
+        let mut statement = QueryBuilder::<Sqlite>::new(
+            "SELECT payload FROM rebate_settlement WHERE status = 'executed'",
+        );
+        if let Some(maker) = query.maker {
+            statement.push(" AND maker = ").push_bind(maker.0.to_vec());
+        }
+        if let Some(cursor) = query.before {
+            let executed_at = i64_of(cursor.executed_at)?;
+            statement
+                .push(" AND (executed_at < ")
+                .push_bind(executed_at)
+                .push(" OR (executed_at = ")
+                .push_bind(executed_at)
+                .push(" AND batch_id < ")
+                .push_bind(cursor.batch_id.0.to_vec())
+                .push("))");
+        }
+        statement
+            .push(" ORDER BY executed_at DESC, batch_id DESC LIMIT ")
+            .push_bind(i64::from(query.limit));
+        let rows = statement
+            .build_query_as::<(String,)>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db)?;
+        rows.into_iter()
+            .map(|(payload,)| decode_settlement(&payload))
+            .collect()
+    }
+
+    async fn executed_rebate(
+        &self,
+        id: RebateBatchId,
+    ) -> Result<Option<RebateSettlement>, RebateStoreError> {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT payload FROM rebate_settlement
+             WHERE batch_id = ? AND status = 'executed'",
+        )
+        .bind(id.0.to_vec())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db)?;
+        row.map(|(payload,)| decode_settlement(&payload))
+            .transpose()
     }
 }
 
@@ -782,6 +834,12 @@ fn i64_of(value: u64) -> Result<i64, RebateStoreError> {
 
 fn u64_of(value: i64, field: &str) -> Result<u64, RebateStoreError> {
     u64::try_from(value).map_err(|_| db(format!("{field} cannot be negative")))
+}
+
+fn decode_settlement(payload: &str) -> Result<RebateSettlement, RebateStoreError> {
+    serde_json::from_str::<StoredSettlement>(payload)
+        .map_err(db)?
+        .into_domain()
 }
 
 fn db(error: impl std::fmt::Display) -> RebateStoreError {

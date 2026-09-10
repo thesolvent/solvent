@@ -56,6 +56,22 @@ describe("createSolventClient", () => {
     );
   });
 
+  it("requests filtered rebate history and rebate detail", async () => {
+    const urls: string[] = [];
+    const client = createSolventClient({
+      baseUrl: "https://x.test",
+      transport: okTransport({ items: [] }, (url) => urls.push(url)),
+    });
+
+    await client.rebates({ status: "executed", maker: "0x01", limit: 5 });
+    await client.rebateDetail("0x02");
+
+    expect(urls).toEqual([
+      "https://x.test/v1/rebates?status=executed&maker=0x01&limit=5",
+      "https://x.test/v1/rebates/0x02",
+    ]);
+  });
+
   it.each([undefined, "buy", "sell"] as const)(
     "passes the depth direction %s to both endpoints",
     async (side) => {

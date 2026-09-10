@@ -22,11 +22,8 @@ import {
     writeContract,
 } from "viem/actions";
 
-import {
-    assertFutureDeadline,
-    type OrderApproval,
-    type UnsignedOrder,
-} from "../orders";
+import type { OrderApproval, UnsignedOrder } from "../orders";
+import { assertFutureDeadline } from "../validation";
 
 export interface WalletClients {
     publicClient: Client;
@@ -113,6 +110,13 @@ export function createWalletSession({
             }),
         ]);
         return { balance, allowance };
+    }
+
+    async function currentBlock(chainId: number): Promise<bigint> {
+        if ((await getChainId(publicClient)) !== chainId) {
+            throw new Error("Wrong RPC network");
+        }
+        return getBlockNumber(publicClient, { cacheTime: 0 });
     }
 
     /** Cover an input with an exact allowance; reuse existing approval and await successful receipts. */
@@ -211,6 +215,7 @@ export function createWalletSession({
     }
 
     return {
+        currentBlock,
         tokenAccount,
         ensureAllowance,
         sendTransaction,

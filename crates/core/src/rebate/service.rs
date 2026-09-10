@@ -8,7 +8,9 @@ use alloy_sol_types::SolValue;
 use tokio::sync::Mutex;
 
 use crate::asset::AssetManager;
-use crate::deps::rebate::{RebateCallBuilder, RebateMarketBook, RebateMarketRequest, RebateStore};
+use crate::deps::rebate::{
+    ExecutedRebateQuery, RebateCallBuilder, RebateMarketBook, RebateMarketRequest, RebateStore,
+};
 use crate::deps::routing::GasPrice;
 use crate::ledger::{AvailableSnapshot, LedgerService};
 use crate::primitives::execution::ExecutionKind;
@@ -477,6 +479,20 @@ impl RebateService {
             })
     }
 
+    pub async fn executed(
+        &self,
+        query: &ExecutedRebateQuery,
+    ) -> Result<Vec<RebateSettlement>, SolventError> {
+        self.store.executed_rebates(query).await.map_err(Into::into)
+    }
+
+    pub async fn executed_by_id(
+        &self,
+        id: RebateBatchId,
+    ) -> Result<Option<RebateSettlement>, SolventError> {
+        self.store.executed_rebate(id).await.map_err(Into::into)
+    }
+
     async fn finish_interrupted_transition(
         &self,
         batch: &mut RebateBatch,
@@ -862,6 +878,20 @@ mod tests {
         async fn finish_settlement(&self, _id: RebateBatchId) -> Result<(), RebateStoreError> {
             Ok(())
         }
+
+        async fn executed_rebates(
+            &self,
+            _query: &ExecutedRebateQuery,
+        ) -> Result<Vec<RebateSettlement>, RebateStoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn executed_rebate(
+            &self,
+            _id: RebateBatchId,
+        ) -> Result<Option<RebateSettlement>, RebateStoreError> {
+            Ok(None)
+        }
     }
 
     #[async_trait]
@@ -907,6 +937,20 @@ mod tests {
         async fn finish_settlement(&self, _id: RebateBatchId) -> Result<(), RebateStoreError> {
             Ok(())
         }
+
+        async fn executed_rebates(
+            &self,
+            _query: &ExecutedRebateQuery,
+        ) -> Result<Vec<RebateSettlement>, RebateStoreError> {
+            Ok(Vec::new())
+        }
+
+        async fn executed_rebate(
+            &self,
+            _id: RebateBatchId,
+        ) -> Result<Option<RebateSettlement>, RebateStoreError> {
+            Ok(None)
+        }
     }
 
     #[async_trait]
@@ -950,6 +994,20 @@ mod tests {
         }
 
         async fn finish_settlement(&self, _id: RebateBatchId) -> Result<(), RebateStoreError> {
+            Err(RebateStoreError::Db("unavailable".to_string()))
+        }
+
+        async fn executed_rebates(
+            &self,
+            _query: &ExecutedRebateQuery,
+        ) -> Result<Vec<RebateSettlement>, RebateStoreError> {
+            Err(RebateStoreError::Db("unavailable".to_string()))
+        }
+
+        async fn executed_rebate(
+            &self,
+            _id: RebateBatchId,
+        ) -> Result<Option<RebateSettlement>, RebateStoreError> {
             Err(RebateStoreError::Db("unavailable".to_string()))
         }
     }

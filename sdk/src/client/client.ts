@@ -29,6 +29,9 @@ export type PairPriceHistory = Schemas["PairPriceHistory"];
 export type PriceHistoryPeriod = Schemas["PriceHistoryPeriod"];
 export type PreviewRequest = Schemas["PreviewRequest"];
 export type PreviewResponse = Schemas["PreviewResponse"];
+export type Rebate = Schemas["RebateWork"];
+export type RebateStatus = Schemas["RebateStatus"];
+export type RebateAllocation = Schemas["RebateAllocationView"];
 
 /** A page of a collection (mirrors the wire `List<T>`). */
 export interface List<T> {
@@ -68,6 +71,10 @@ export type PositionDepthQuery = NonNullable<
 export type PairHistoryQuery = NonNullable<
     operations["pair_history"]["parameters"]["query"]
 >;
+export type RebatesQuery = Omit<
+    NonNullable<operations["rebates"]["parameters"]["query"]>,
+    "status"
+> & { status?: RebateStatus };
 type Query = Record<string, string | number | boolean | undefined>;
 
 /** The typed read/write client over the Solvent API. Every method throws {@link SolventApiError}
@@ -105,6 +112,8 @@ export interface SolventClient {
     }): Promise<List<PairInfo>>;
     pairHistory(query: PairHistoryQuery): Promise<PairPriceHistory>;
     positionsPreview(body: PreviewRequest): Promise<PreviewResponse>;
+    rebates(query?: RebatesQuery): Promise<List<Rebate>>;
+    rebateDetail(id: string): Promise<Rebate>;
 }
 
 /** Create a client bound to `baseUrl`. Reads and the two writes go through one `Transport`. */
@@ -193,6 +202,8 @@ export function createSolventClient(
             get<PairPriceHistory>("/v1/pairs/history", query),
         positionsPreview: (body) =>
             post<PreviewResponse>("/v1/positions/preview", body),
+        rebates: (query) => get<List<Rebate>>("/v1/rebates", query),
+        rebateDetail: (id) => get<Rebate>(`/v1/rebates/${id}`),
     };
 }
 

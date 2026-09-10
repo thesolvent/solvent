@@ -9,5 +9,5 @@ pub mod trade_source;
 pub use call_builder::{RebateCallBuilder, RebateCallBuilderError};
 pub use chain_source::{RebateChainSource, RebateChainSourceError};
 pub use market_book::{RebateMarketBook, RebateMarketBookError, RebateMarketRequest};
-pub use store::{RebateStore, RebateStoreError};
+pub use store::{ExecutedRebateCursor, ExecutedRebateQuery, RebateStore, RebateStoreError};
 pub use trade_source::{RebateAccrualSource, RebateAccrualSourceError};

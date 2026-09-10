@@ -260,6 +260,20 @@ mod tests {
         async fn finish_settlement(&self, _: RebateBatchId) -> Result<(), RebateStoreError> {
             Ok(())
         }
+        async fn executed_rebates(
+            &self,
+            _: &solvent_core::deps::rebate::ExecutedRebateQuery,
+        ) -> Result<Vec<solvent_core::primitives::rebate::RebateSettlement>, RebateStoreError>
+        {
+            Ok(Vec::new())
+        }
+        async fn executed_rebate(
+            &self,
+            _: RebateBatchId,
+        ) -> Result<Option<solvent_core::primitives::rebate::RebateSettlement>, RebateStoreError>
+        {
+            Ok(None)
+        }
     }
 
     #[async_trait::async_trait]
@@ -716,7 +730,7 @@ mod tests {
     async fn rebate_queue_is_read_only_and_hides_non_ready_batches() {
         let (status, body) = get("/v1/rebates").await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body["result"], serde_json::json!([]));
+        assert_eq!(body["result"]["items"], serde_json::json!([]));
 
         let (status, _) = get(&format!("/v1/rebates/{}", B256::ZERO)).await;
         assert_eq!(status, StatusCode::NOT_FOUND);

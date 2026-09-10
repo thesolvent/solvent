@@ -89,6 +89,8 @@ use utoipa::OpenApi;
         solvent_core::primitives::asset::PriceHistoryPeriod,
         crate::http::app::positions::PreviewRequest,
         crate::http::app::positions::AmountIn,
+        crate::http::app::rebates::RebateStatus,
+        crate::http::app::rebates::RebateAllocationView,
         crate::http::app::rebates::RebateWork,
     ))
 )]
