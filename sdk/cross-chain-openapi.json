@@ -60,6 +60,118 @@
         }
       }
     },
+    "/v1/cross-chain/orders/direct": {
+      "post": {
+        "tags": [
+          "cross-chain"
+        ],
+        "summary": "Verify the wallet authorization, obtain chain-authored plans, and start a direct route.",
+        "operationId": "create_direct_order",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDirectOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Direct cross-chain order created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrossChainOrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Quote or wallet authorization is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A chain service or saga store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Direct settlement is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cross-chain/orders/draft": {
+      "post": {
+        "tags": [
+          "cross-chain"
+        ],
+        "summary": "Build the exact Compact commitment and settlement terms the wallet will authorize.",
+        "operationId": "draft_order",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectOrderDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Wallet-signable direct-order terms",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectOrderDraft"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Quote or authorization terms are invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Direct-order drafting is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/cross-chain/orders/{id}": {
       "get": {
         "tags": [
@@ -289,6 +401,47 @@
           }
         }
       },
+      "CompactCommitmentTerms": {
+        "type": "object",
+        "required": [
+          "arbiter",
+          "sponsor",
+          "nonce",
+          "expires",
+          "lock_tag",
+          "token",
+          "amount",
+          "mandate"
+        ],
+        "properties": {
+          "amount": {
+            "type": "string"
+          },
+          "arbiter": {
+            "type": "string"
+          },
+          "expires": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "lock_tag": {
+            "type": "string"
+          },
+          "mandate": {
+            "$ref": "#/components/schemas/SolventCompactMandate"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "sponsor": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        }
+      },
       "CreateCrossChainOrderRequest": {
         "type": "object",
         "required": [
@@ -309,6 +462,21 @@
           },
           "quote": {
             "$ref": "#/components/schemas/AggregateQuote"
+          }
+        }
+      },
+      "CreateDirectOrderRequest": {
+        "type": "object",
+        "required": [
+          "draft",
+          "sponsor_signature"
+        ],
+        "properties": {
+          "draft": {
+            "$ref": "#/components/schemas/DirectOrderDraftRequest"
+          },
+          "sponsor_signature": {
+            "type": "string"
           }
         }
       },
@@ -463,6 +631,66 @@
           },
           "state": {
             "$ref": "#/components/schemas/SagaState"
+          }
+        }
+      },
+      "DirectOrderDraft": {
+        "type": "object",
+        "required": [
+          "aggregate_id",
+          "order_id",
+          "compact",
+          "order",
+          "commitment"
+        ],
+        "properties": {
+          "aggregate_id": {
+            "type": "string"
+          },
+          "commitment": {
+            "$ref": "#/components/schemas/CompactCommitmentTerms"
+          },
+          "compact": {
+            "type": "string"
+          },
+          "order": {
+            "$ref": "#/components/schemas/SolventCompactOrder"
+          },
+          "order_id": {
+            "type": "string"
+          }
+        }
+      },
+      "DirectOrderDraftRequest": {
+        "type": "object",
+        "required": [
+          "quote",
+          "sponsor",
+          "recipient",
+          "order_nonce",
+          "compact_nonce",
+          "compact_expires_unix"
+        ],
+        "properties": {
+          "compact_expires_unix": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "compact_nonce": {
+            "type": "string"
+          },
+          "order_nonce": {
+            "type": "string"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/AggregateQuote"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "sponsor": {
+            "type": "string"
           }
         }
       },
@@ -633,6 +861,154 @@
           "failed_before_delivery",
           "needs_reconcile"
         ]
+      },
+      "SolventCompactMandate": {
+        "type": "object",
+        "required": [
+          "order_id",
+          "destination_chain_id",
+          "destination_settler",
+          "fill_proof_verifier",
+          "output_token",
+          "minimum_output_amount",
+          "recipient",
+          "fill_deadline",
+          "exclusive_filler",
+          "route_kind"
+        ],
+        "properties": {
+          "destination_chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "destination_settler": {
+            "type": "string"
+          },
+          "exclusive_filler": {
+            "type": "string"
+          },
+          "fill_deadline": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "fill_proof_verifier": {
+            "type": "string"
+          },
+          "minimum_output_amount": {
+            "type": "string"
+          },
+          "order_id": {
+            "type": "string"
+          },
+          "output_token": {
+            "type": "string"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "route_kind": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "SolventCompactOrder": {
+        "type": "object",
+        "required": [
+          "user",
+          "nonce",
+          "origin_chain_id",
+          "origin_settler",
+          "compact",
+          "compact_id",
+          "compact_expires",
+          "input_token",
+          "input_amount",
+          "destination_chain_id",
+          "output_token",
+          "minimum_output_amount",
+          "recipient",
+          "destination_settler",
+          "fill_proof_verifier",
+          "exclusive_filler",
+          "exclusivity_ends",
+          "fill_deadline",
+          "route_kind"
+        ],
+        "properties": {
+          "compact": {
+            "type": "string"
+          },
+          "compact_expires": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "compact_id": {
+            "type": "string"
+          },
+          "destination_chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "destination_settler": {
+            "type": "string"
+          },
+          "exclusive_filler": {
+            "type": "string"
+          },
+          "exclusivity_ends": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "fill_deadline": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "fill_proof_verifier": {
+            "type": "string"
+          },
+          "input_amount": {
+            "type": "string"
+          },
+          "input_token": {
+            "type": "string"
+          },
+          "minimum_output_amount": {
+            "type": "string"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "origin_chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "origin_settler": {
+            "type": "string"
+          },
+          "output_token": {
+            "type": "string"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "route_kind": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "user": {
+            "type": "string"
+          }
+        }
       },
       "StepEvidence": {
         "type": "object",

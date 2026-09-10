@@ -3,6 +3,9 @@ import type {
     CreateCrossChainOrderRequest,
     CrossChainOrder,
     CrossChainQuoteRequest,
+    CreateDirectOrderRequest,
+    DirectOrderDraft,
+    DirectOrderDraftRequest,
 } from "./types";
 
 export interface CrossChainClientConfig {
@@ -13,12 +16,24 @@ export interface CrossChainClientConfig {
 
 export interface CrossChainClient {
     quote(request: CrossChainQuoteRequest): Promise<AggregateQuote>;
+    draft(request: DirectOrderDraftRequest): Promise<DirectOrderDraft>;
+    submitDirect(request: CreateDirectOrderRequest): Promise<CrossChainOrder>;
     submit(request: CreateCrossChainOrderRequest): Promise<CrossChainOrder>;
     order(orderId: string): Promise<CrossChainOrder>;
     wait(
         orderId: string,
         options?: { intervalMs?: number; signal?: AbortSignal },
     ): Promise<CrossChainOrder>;
+}
+
+export class CrossChainApiError extends Error {
+    readonly status: number;
+
+    constructor(status: number, message: string) {
+        super(message);
+        this.name = "CrossChainApiError";
+        this.status = status;
+    }
 }
 
 export function createCrossChainClient({
@@ -43,7 +58,10 @@ export function createCrossChainClient({
             error?: string;
         } & T;
         if (!response.ok) {
-            throw new Error(payload.error ?? `Cross-chain HTTP ${response.status}`);
+            throw new CrossChainApiError(
+                response.status,
+                payload.error ?? `Cross-chain HTTP ${response.status}`,
+            );
         }
         return payload;
     }
@@ -58,6 +76,18 @@ export function createCrossChainClient({
     return {
         quote: (body) =>
             request<AggregateQuote>("/v1/cross-chain/quote", body),
+        draft: (body) =>
+            request<DirectOrderDraft>(
+                "/v1/cross-chain/orders/draft",
+                body,
+            ),
+        async submitDirect(body) {
+            const response = await request<{ order: CrossChainOrder }>(
+                "/v1/cross-chain/orders/direct",
+                body,
+            );
+            return response.order;
+        },
         async submit(body) {
             const response = await request<{ order: CrossChainOrder }>(
                 "/v1/cross-chain/orders",

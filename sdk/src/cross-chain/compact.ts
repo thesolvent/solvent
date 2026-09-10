@@ -96,7 +96,11 @@ export async function depositCompact(
         getChainId(walletClient),
         getChainId(publicClient),
     ]);
-    if (!accounts[0] || accounts[0].toLowerCase() !== request.sponsor.toLowerCase()) {
+    if (
+        !accounts.some(
+            (account) => account.toLowerCase() === request.sponsor.toLowerCase(),
+        )
+    ) {
         throw new Error("Wallet account changed");
     }
     if (walletChain !== rpcChain) throw new Error("Wallet and RPC networks differ");
@@ -121,6 +125,40 @@ export async function depositCompact(
     });
     const receipt = await waitForTransactionReceipt(publicClient, { hash });
     if (receipt.status !== "success") throw new Error("Compact deposit reverted");
+    return hash;
+}
+
+export async function approveCompact(
+    publicClient: Client,
+    walletClient: Client<Transport, Chain>,
+    request: {
+        compact: Address;
+        token: Address;
+        amount: bigint;
+        sponsor: Address;
+    },
+): Promise<Hex | undefined> {
+    const allowance = await readContract(publicClient, {
+        address: request.token,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [request.sponsor, request.compact],
+    });
+    if (allowance >= request.amount) return undefined;
+    const account: Account | Address =
+        walletClient.account?.type === "local"
+            ? walletClient.account
+            : request.sponsor;
+    const hash = await writeContract(walletClient, {
+        account,
+        chain: walletClient.chain,
+        address: request.token,
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [request.compact, request.amount],
+    });
+    const receipt = await waitForTransactionReceipt(publicClient, { hash });
+    if (receipt.status !== "success") throw new Error("Compact approval reverted");
     return hash;
 }
 
