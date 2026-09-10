@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::deps::asset::PairPriceHistorySourceError;
 use crate::deps::balances::BalancesOracleError;
-use crate::deps::execution::{ExecutionError, SettlementError, SimError};
+use crate::deps::execution::{ExecutionAuthorizerError, ExecutionError, SettlementError, SimError};
 use crate::deps::ingest::{FillBuilderError, NormalizeError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
 use crate::deps::maker_metrics::MakerMetricsError;
@@ -50,6 +50,9 @@ pub enum SolventError {
     /// The tx engine failed to submit or track a fill.
     #[error("execution: {0}")]
     Execution(#[from] ExecutionError),
+    /// Signing a maker-execution policy failed.
+    #[error("execution authorizer: {0}")]
+    ExecutionAuthorizer(#[from] ExecutionAuthorizerError),
     /// The simulation engine failed to evaluate a fill.
     #[error("simulation: {0}")]
     Sim(#[from] SimError),

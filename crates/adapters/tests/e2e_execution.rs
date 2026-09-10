@@ -19,7 +19,7 @@ use common::{
 };
 use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
 use solvent_adapters::ingest::uniswapx::{
-    OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXFillBuilder, UniswapXV2Normalizer,
+    OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXV2Normalizer,
 };
 use solvent_core::deps::ingest::{FillBuilder, Normalizer, OrderFeed};
 use solvent_core::execution::ExecutionService;
@@ -131,8 +131,10 @@ async fn reserve_order(
     svc.reserve(rid(1), intent.id, sources, 60)
         .await
         .expect("reserve the routed plan");
-    let calldata = UniswapXFillBuilder::new(h.app)
+    let calldata = stack
+        .fill_builder()
         .build(&intent, &plan, &snap)
+        .await
         .expect("fill calldata");
     (intent, plan, calldata, caps)
 }

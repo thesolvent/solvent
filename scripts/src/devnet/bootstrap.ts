@@ -139,6 +139,7 @@ function main(): void {
     ENV_OUT,
     `# Signing keys the server reads from the environment. Anvil dev accounts — devnet only.\n` +
       `export SOLVENT_SIGNER_KEY=${DEPLOYER_KEY}\n` +
+      `export SOLVENT_POLICY_SIGNER_KEY=${DEPLOYER_KEY}\n` +
       `export SOLVENT_COSIGNER_KEY=${COSIGNER_KEY}\n`,
   );
 

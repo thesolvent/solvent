@@ -6,9 +6,76 @@
         "name": "owner_",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "router_",
+        "type": "address",
+        "internalType": "contract ISwapVM"
+      },
+      {
+        "name": "reactor_",
+        "type": "address",
+        "internalType": "contract IReactor"
+      },
+      {
+        "name": "policySigner_",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "AUTHORIZATION_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "REACTOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IReactor"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ROUTER",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ISwapVM"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "TAKER_CREDENTIAL",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract SolventTakerCredential"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -19,13 +86,167 @@
   },
   {
     "type": "function",
-    "name": "fill",
+    "name": "allowedToken",
     "inputs": [
       {
-        "name": "reactor",
+        "name": "token",
         "type": "address",
-        "internalType": "contract IReactor"
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "allowed",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "eip712Domain",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "fields",
+        "type": "bytes1",
+        "internalType": "bytes1"
       },
+      {
+        "name": "name",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "version",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "chainId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "verifyingContract",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "extensions",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "executeRebate",
+    "inputs": [
+      {
+        "name": "order",
+        "type": "tuple",
+        "internalType": "struct ISwapVM.Order",
+        "components": [
+          {
+            "name": "maker",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "traits",
+            "type": "uint256",
+            "internalType": "MakerTraits"
+          },
+          {
+            "name": "data",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "authorization",
+        "type": "tuple",
+        "internalType": "struct UniswapXAquaFiller.Authorization",
+        "components": [
+          {
+            "name": "kind",
+            "type": "uint8",
+            "internalType": "enum UniswapXAquaFiller.ExecutionKind"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "contextHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "strategyHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "maker",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "tokenIn",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "tokenOut",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amountOut",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "amountInLimit",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "rebateAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "deadlineBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
+      },
+      {
+        "name": "signature",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "fill",
+    "inputs": [
       {
         "name": "order",
         "type": "tuple",
@@ -49,11 +270,6 @@
         "internalType": "struct UniswapXAquaFiller.SourceSwap[]",
         "components": [
           {
-            "name": "router",
-            "type": "address",
-            "internalType": "contract ISwapVM"
-          },
-          {
             "name": "order",
             "type": "tuple",
             "internalType": "struct ISwapVM.Order",
@@ -76,24 +292,71 @@
             ]
           },
           {
-            "name": "tokenIn",
-            "type": "address",
-            "internalType": "address"
+            "name": "authorization",
+            "type": "tuple",
+            "internalType": "struct UniswapXAquaFiller.Authorization",
+            "components": [
+              {
+                "name": "kind",
+                "type": "uint8",
+                "internalType": "enum UniswapXAquaFiller.ExecutionKind"
+              },
+              {
+                "name": "nonce",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "contextHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "strategyHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "maker",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "tokenIn",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "tokenOut",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "amountOut",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "amountInLimit",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "rebateAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "deadlineBlock",
+                "type": "uint64",
+                "internalType": "uint64"
+              }
+            ]
           },
           {
-            "name": "tokenOut",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "amountOut",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "amountInMaximum",
-            "type": "uint256",
-            "internalType": "uint256"
+            "name": "policySignature",
+            "type": "bytes",
+            "internalType": "bytes"
           }
         ]
       }
@@ -105,11 +368,6 @@
     "type": "function",
     "name": "fillBatch",
     "inputs": [
-      {
-        "name": "reactor",
-        "type": "address",
-        "internalType": "contract IReactor"
-      },
       {
         "name": "orders",
         "type": "tuple[]",
@@ -133,11 +391,6 @@
         "internalType": "struct UniswapXAquaFiller.SourceSwap[]",
         "components": [
           {
-            "name": "router",
-            "type": "address",
-            "internalType": "contract ISwapVM"
-          },
-          {
             "name": "order",
             "type": "tuple",
             "internalType": "struct ISwapVM.Order",
@@ -160,6 +413,113 @@
             ]
           },
           {
+            "name": "authorization",
+            "type": "tuple",
+            "internalType": "struct UniswapXAquaFiller.Authorization",
+            "components": [
+              {
+                "name": "kind",
+                "type": "uint8",
+                "internalType": "enum UniswapXAquaFiller.ExecutionKind"
+              },
+              {
+                "name": "nonce",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "contextHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "strategyHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "maker",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "tokenIn",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "tokenOut",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "amountOut",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "amountInLimit",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "rebateAmount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "deadlineBlock",
+                "type": "uint64",
+                "internalType": "uint64"
+              }
+            ]
+          },
+          {
+            "name": "policySignature",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "hashAuthorization",
+    "inputs": [
+      {
+        "name": "authorization",
+        "type": "tuple",
+        "internalType": "struct UniswapXAquaFiller.Authorization",
+        "components": [
+          {
+            "name": "kind",
+            "type": "uint8",
+            "internalType": "enum UniswapXAquaFiller.ExecutionKind"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "contextHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "strategyHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "maker",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
             "name": "tokenIn",
             "type": "address",
             "internalType": "address"
@@ -175,15 +535,68 @@
             "internalType": "uint256"
           },
           {
-            "name": "amountInMaximum",
+            "name": "amountInLimit",
             "type": "uint256",
             "internalType": "uint256"
+          },
+          {
+            "name": "rebateAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "deadlineBlock",
+            "type": "uint64",
+            "internalType": "uint64"
           }
         ]
       }
     ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "invalidateNonces",
+    "inputs": [
+      {
+        "name": "word",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "mask",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "isNonceUsed",
+    "inputs": [
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -200,7 +613,40 @@
   },
   {
     "type": "function",
+    "name": "pause",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "paused",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "pendingOwner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "policySigner",
     "inputs": [],
     "outputs": [
       {
@@ -327,6 +773,37 @@
     "name": "renounceOwnership",
     "inputs": [],
     "outputs": [],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "setPolicySigner",
+    "inputs": [
+      {
+        "name": "newSigner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setTokenAllowed",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "allowed",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -359,6 +836,100 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "unpause",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "userFillBatchContext",
+    "inputs": [
+      {
+        "name": "orders",
+        "type": "tuple[]",
+        "internalType": "struct SignedOrder[]",
+        "components": [
+          {
+            "name": "order",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "sig",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "userFillContext",
+    "inputs": [
+      {
+        "name": "order",
+        "type": "tuple",
+        "internalType": "struct SignedOrder",
+        "components": [
+          {
+            "name": "order",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "sig",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "event",
+    "name": "EIP712DomainChanged",
+    "inputs": [],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "NoncesInvalidated",
+    "inputs": [
+      {
+        "name": "word",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "mask",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
   },
   {
     "type": "event",
@@ -400,6 +971,99 @@
   },
   {
     "type": "event",
+    "name": "Paused",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PolicySignerUpdated",
+    "inputs": [
+      {
+        "name": "previousSigner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newSigner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RebateExecuted",
+    "inputs": [
+      {
+        "name": "contextHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "strategyHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "executor",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "maker",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "tokenIn",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "tokenOut",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "amountIn",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountOut",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "rebateAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Swept",
     "inputs": [
       {
@@ -424,6 +1088,107 @@
     "anonymous": false
   },
   {
+    "type": "event",
+    "name": "TokenPermissionUpdated",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "allowed",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Unpaused",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AssetBalanceDecreased",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "balanceBefore",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "balanceAfter",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AuthorizationContextMismatch",
+    "inputs": [
+      {
+        "name": "supplied",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AuthorizationExpired",
+    "inputs": [
+      {
+        "name": "deadlineBlock",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "currentBlock",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AuthorizationMakerMismatch",
+    "inputs": [
+      {
+        "name": "supplied",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
     "type": "error",
     "name": "CallbackUnauthorized",
     "inputs": [
@@ -436,6 +1201,122 @@
         "name": "expected",
         "type": "address",
         "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "CredentialGateMissing",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ECDSAInvalidSignature",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ECDSAInvalidSignatureLength",
+    "inputs": [
+      {
+        "name": "length",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ECDSAInvalidSignatureS",
+    "inputs": [
+      {
+        "name": "s",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "EnforcedPause",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ExpectedPause",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InsufficientSourcedOutput",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "required",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "sourced",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidExecutionKind",
+    "inputs": [
+      {
+        "name": "supplied",
+        "type": "uint8",
+        "internalType": "enum UniswapXAquaFiller.ExecutionKind"
+      },
+      {
+        "name": "expected",
+        "type": "uint8",
+        "internalType": "enum UniswapXAquaFiller.ExecutionKind"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidMakerTraits",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidPolicySigner",
+    "inputs": [
+      {
+        "name": "recovered",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidShortString",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NonceAlreadyUsed",
+    "inputs": [
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
@@ -474,7 +1355,17 @@
   },
   {
     "type": "error",
-    "name": "ProfitabilityGuard",
+    "name": "OwnershipRenunciationDisabled",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RebateRequired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RecipientBalanceMismatch",
     "inputs": [
       {
         "name": "token",
@@ -482,12 +1373,17 @@
         "internalType": "address"
       },
       {
-        "name": "balanceBefore",
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
-        "name": "balanceAfter",
+        "name": "actual",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -527,6 +1423,33 @@
   },
   {
     "type": "error",
+    "name": "StrategyHashMismatch",
+    "inputs": [
+      {
+        "name": "supplied",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "StringTooLong",
+    "inputs": [
+      {
+        "name": "str",
+        "type": "string",
+        "internalType": "string"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "TakerTraitsMissingHasPreTransferInFlag",
     "inputs": []
   },
@@ -548,7 +1471,76 @@
   },
   {
     "type": "error",
+    "name": "TokenBalanceMismatch",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TokenNotAllowed",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TokenPairInvalid",
+    "inputs": [
+      {
+        "name": "tokenIn",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenOut",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnexpectedRebate",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroAmount",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroContext",
     "inputs": []
   }
 ]

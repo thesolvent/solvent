@@ -12,7 +12,9 @@ use alloy::providers::{Provider, ProviderBuilder};
 use alloy::signers::local::PrivateKeySigner;
 use solvent_adapters::balances::AlloyBalancesOracle;
 use solvent_adapters::chain::ChainHead;
-use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
+use solvent_adapters::execution::{
+    AquaSettlementReader, LocalPolicySigner, SqliteFillStore, WalletkitExecutor,
+};
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
 use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
@@ -25,6 +27,7 @@ use solvent_core::asset::{AssetManager, PairHistoryService};
 use solvent_core::balances::BalancesService;
 use solvent_core::deps::asset::PairPriceHistorySource;
 use solvent_core::deps::balances::BalancesOracle;
+use solvent_core::deps::execution::ExecutionAuthorizer;
 use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ledger::BudgetSource;
 use solvent_core::deps::maker_metrics::MakerMetricsStore;
@@ -239,6 +242,8 @@ async fn main() -> Result<(), StartupError> {
         .map_err(|_| StartupError::MissingSecret("SOLVENT_COSIGNER_KEY"))?;
     let filler_key = std::env::var("SOLVENT_SIGNER_KEY")
         .map_err(|_| StartupError::MissingSecret("SOLVENT_SIGNER_KEY"))?;
+    let policy_signer_key = std::env::var("SOLVENT_POLICY_SIGNER_KEY")
+        .map_err(|_| StartupError::MissingSecret("SOLVENT_POLICY_SIGNER_KEY"))?;
     let cosigner_signer: PrivateKeySigner = cosigner_key
         .parse()
         .map_err(|_| StartupError::Key("SOLVENT_COSIGNER_KEY is not a valid private key".into()))?;
@@ -257,6 +262,14 @@ async fn main() -> Result<(), StartupError> {
         .address();
     let filler_signer = LocalSigner::from_private_key(&filler_key)
         .map_err(|_| StartupError::Key("SOLVENT_SIGNER_KEY is not a valid private key".into()))?;
+    let policy_signer = policy_signer_key.parse::<PrivateKeySigner>().map_err(|_| {
+        StartupError::Key("SOLVENT_POLICY_SIGNER_KEY is not a valid private key".into())
+    })?;
+    let authorizer: Arc<dyn ExecutionAuthorizer> = Arc::new(LocalPolicySigner::new(
+        config.chain_id,
+        config.filler,
+        policy_signer,
+    ));
     let policy = DefaultPolicyEngine::new(
         vec![Box::new(AllowAll)],
         Arc::new(walletkit::adapters::SystemClock),
@@ -295,7 +308,8 @@ async fn main() -> Result<(), StartupError> {
         settlement,
         Arc::clone(&ledger),
     ));
-    let fill_builder: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(config.app_address));
+    let fill_builder: Arc<dyn FillBuilder> =
+        Arc::new(UniswapXFillBuilder::new(config.app_address, authorizer));
     let reconcile = Arc::new(ReconcileService::new(
         Arc::clone(&execution),
         Arc::clone(&trade_store),

@@ -1,82 +1,37 @@
-//! Builds `UniswapXAquaFiller.fill(...)` calldata from a routed plan — the on-chain settlement of an
-//! ingested UniswapX order. Each routed leg becomes a `SourceSwap` that sources the maker's output
-//! by running its shipped Aqua order on the SwapVM router; the signed order forwards verbatim.
+//! Builds policy-authorized `UniswapXAquaFiller.fill(...)` calldata from a routed plan.
 
-use alloy::primitives::{Address, Bytes};
-use alloy::sol;
+use std::sync::Arc;
+
+use alloy::primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy::sol_types::{SolCall, SolValue};
+use async_trait::async_trait;
 
+use solvent_core::deps::execution::ExecutionAuthorizer;
 use solvent_core::deps::ingest::{FillBuilder, FillBuilderError};
+use solvent_core::primitives::execution::{ExecutionAuthorization, UserFillAuthorization};
 use solvent_core::primitives::ingest::Intent;
 use solvent_core::primitives::registry::{Snapshot, StrategyKey};
 use solvent_core::primitives::routing::{RouteLeg, RoutePlan};
 
-sol! {
-    struct Order {
-        address maker;
-        uint256 traits;
-        bytes data;
-    }
-    struct SignedOrder {
-        bytes order;
-        bytes sig;
-    }
-    struct SourceSwap {
-        address router;
-        Order order;
-        address tokenIn;
-        address tokenOut;
-        uint256 amountOut;
-        uint256 amountInMaximum;
-    }
-    function fill(address reactor, SignedOrder order, SourceSwap[] sources);
-}
+use crate::execution::filler::{fillCall, Authorization, Order, SignedOrder, SourceSwap};
 
-/// `router` is the deployment's single AquaSwapVMRouter — the `app` that keys strategies and the
-/// SwapVM each source runs on.
+/// The router is the deployment's Aqua app and hashes each source strategy. The authorizer binds
+/// the exact routed amounts and signed UniswapX order before the filler can execute them.
 pub struct UniswapXFillBuilder {
     router: Address,
+    authorizer: Arc<dyn ExecutionAuthorizer>,
 }
 
 impl UniswapXFillBuilder {
-    pub fn new(router: Address) -> UniswapXFillBuilder {
-        UniswapXFillBuilder { router }
+    pub fn new(router: Address, authorizer: Arc<dyn ExecutionAuthorizer>) -> Self {
+        Self { router, authorizer }
     }
-}
 
-impl FillBuilder for UniswapXFillBuilder {
-    fn build(
-        &self,
-        intent: &Intent,
-        plan: &RoutePlan,
-        snapshot: &Snapshot,
-    ) -> Result<Bytes, FillBuilderError> {
-        if plan.legs.is_empty() {
-            return Err(FillBuilderError::NoLegs);
-        }
-        let sources = plan
-            .legs
-            .iter()
-            .map(|leg| self.source_for(leg, snapshot))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let call = fillCall {
-            reactor: intent.settler,
-            order: SignedOrder {
-                order: intent.raw.clone(),
-                sig: intent.signature.clone(),
-            },
-            sources,
-        };
-        Ok(Bytes::from(call.abi_encode()))
-    }
-}
-
-impl UniswapXFillBuilder {
-    /// One leg → the `SourceSwap` that sources its output from the maker's shipped Aqua order.
-    fn source_for(
+    async fn source_for(
         &self,
         leg: &RouteLeg,
+        index: usize,
+        context_hash: B256,
         snapshot: &Snapshot,
     ) -> Result<SourceSwap, FillBuilderError> {
         let key = StrategyKey {
@@ -89,27 +44,108 @@ impl UniswapXFillBuilder {
             .ok_or(FillBuilderError::MissingStrategy)?;
         let order = Order::abi_decode(&strategy.program)
             .map_err(|_| FillBuilderError::UndecodableProgram)?;
+        if order.maker != leg.maker.0 {
+            return Err(FillBuilderError::StrategyMakerMismatch);
+        }
+
+        let authorization = ExecutionAuthorization::user_fill(UserFillAuthorization {
+            nonce: user_fill_nonce(context_hash, leg, index),
+            context_hash,
+            strategy_hash: leg.strategy_hash,
+            maker: leg.maker,
+            token_in: leg.token_in,
+            token_out: leg.token_out,
+            amount_out: leg.amount_out,
+            amount_in_limit: leg.amount_in,
+        });
+        let policy_signature = self
+            .authorizer
+            .authorize(&authorization)
+            .await?
+            .into_bytes();
+
         Ok(SourceSwap {
-            router: self.router,
             order,
-            tokenIn: leg.token_in,
-            tokenOut: leg.token_out,
-            amountOut: leg.amount_out,
-            amountInMaximum: leg.amount_in,
+            authorization: Authorization::from(&authorization),
+            policySignature: policy_signature,
         })
     }
 }
 
+#[async_trait]
+impl FillBuilder for UniswapXFillBuilder {
+    #[tracing::instrument(skip_all, fields(intent = %intent.id))]
+    async fn build(
+        &self,
+        intent: &Intent,
+        plan: &RoutePlan,
+        snapshot: &Snapshot,
+    ) -> Result<Bytes, FillBuilderError> {
+        if plan.legs.is_empty() {
+            return Err(FillBuilderError::NoLegs);
+        }
+
+        let order = SignedOrder {
+            order: intent.raw.clone(),
+            sig: intent.signature.clone(),
+        };
+        let context_hash = keccak256(order.abi_encode());
+        let mut sources = Vec::with_capacity(plan.legs.len());
+        for (index, leg) in plan.legs.iter().enumerate() {
+            sources.push(self.source_for(leg, index, context_hash, snapshot).await?);
+        }
+
+        Ok(Bytes::from(fillCall { order, sources }.abi_encode()))
+    }
+}
+
+fn user_fill_nonce(context_hash: B256, leg: &RouteLeg, index: usize) -> U256 {
+    let digest = keccak256(
+        (
+            context_hash,
+            leg.strategy_hash.0,
+            leg.maker.0,
+            leg.token_in,
+            leg.token_out,
+            leg.amount_in,
+            leg.amount_out,
+            U256::from(index),
+        )
+            .abi_encode(),
+    );
+    U256::from_be_slice(digest.as_slice())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloy::primitives::{address, B256, U256};
+    use async_trait::async_trait;
 
+    use solvent_core::deps::execution::{ExecutionAuthorizer, ExecutionAuthorizerError};
+    use solvent_core::primitives::execution::{ExecutionAuthorization, PolicySignature};
     use solvent_core::primitives::registry::AquaEvent;
     use solvent_core::primitives::{MakerId, StrategyHash};
 
+    use super::*;
+
+    struct FakeAuthorizer;
+
+    #[async_trait]
+    impl ExecutionAuthorizer for FakeAuthorizer {
+        async fn authorize(
+            &self,
+            _: &ExecutionAuthorization,
+        ) -> Result<PolicySignature, ExecutionAuthorizerError> {
+            Ok(PolicySignature::new(Bytes::from(vec![0xAA; 65])))
+        }
+    }
+
     fn router() -> Address {
         address!("9999999999999999999999999999999999999999")
+    }
+
+    fn builder() -> UniswapXFillBuilder {
+        UniswapXFillBuilder::new(router(), Arc::new(FakeAuthorizer))
     }
 
     fn leg() -> RouteLeg {
@@ -124,50 +160,63 @@ mod tests {
     }
 
     fn snapshot_with(program: Bytes) -> Snapshot {
-        let l = leg();
-        let mut snap = Snapshot::default();
-        snap.apply(AquaEvent::Shipped {
-            maker: l.maker,
+        let leg = leg();
+        let mut snapshot = Snapshot::default();
+        snapshot.apply(AquaEvent::Shipped {
+            maker: leg.maker,
             app: router(),
-            strategy_hash: l.strategy_hash,
+            strategy_hash: leg.strategy_hash,
             strategy: program,
         });
-        snap
+        snapshot
     }
 
-    #[test]
-    fn source_maps_a_leg_and_recovers_the_order() {
+    #[tokio::test]
+    async fn source_binds_the_routed_strategy_and_amounts() {
+        let leg = leg();
         let order = Order {
-            maker: address!("1111111111111111111111111111111111111111"),
+            maker: leg.maker.0,
             traits: U256::from(3u64),
             data: Bytes::from(vec![0xAB, 0xCD]),
         };
-        let snap = snapshot_with(Bytes::from(order.abi_encode()));
+        let snapshot = snapshot_with(Bytes::from(order.abi_encode()));
+        let context = B256::from([0xCC; 32]);
 
-        let l = leg();
-        let src = UniswapXFillBuilder::new(router())
-            .source_for(&l, &snap)
-            .expect("maps");
-        assert_eq!(src.router, router());
-        assert_eq!(src.order.maker, order.maker);
-        assert_eq!(src.order.traits, order.traits);
-        assert_eq!(src.order.data, order.data);
-        assert_eq!(src.tokenIn, l.token_in);
-        assert_eq!(src.tokenOut, l.token_out);
-        assert_eq!(src.amountOut, l.amount_out);
-        assert_eq!(src.amountInMaximum, l.amount_in);
+        let source = builder()
+            .source_for(&leg, 0, context, &snapshot)
+            .await
+            .expect("maps and authorizes");
+
+        assert_eq!(source.order.maker, order.maker);
+        assert_eq!(source.order.traits, order.traits);
+        assert_eq!(source.order.data, order.data);
+        assert_eq!(source.authorization.contextHash, context);
+        assert_eq!(source.authorization.strategyHash, leg.strategy_hash.0);
+        assert_eq!(source.authorization.amountOut, leg.amount_out);
+        assert_eq!(source.authorization.amountInLimit, leg.amount_in);
+        assert_eq!(source.authorization.rebateAmount, U256::ZERO);
+        assert_eq!(source.policySignature, Bytes::from(vec![0xAA; 65]));
     }
 
-    #[test]
-    fn missing_strategy_errors() {
-        let r = UniswapXFillBuilder::new(router()).source_for(&leg(), &Snapshot::default());
-        assert!(matches!(r, Err(FillBuilderError::MissingStrategy)));
-    }
+    #[tokio::test]
+    async fn malformed_snapshot_entries_fail_before_signing() {
+        let context = B256::from([0xCC; 32]);
+        let missing = builder()
+            .source_for(&leg(), 0, context, &Snapshot::default())
+            .await;
+        assert!(matches!(missing, Err(FillBuilderError::MissingStrategy)));
 
-    #[test]
-    fn undecodable_program_errors() {
-        let snap = snapshot_with(Bytes::from(vec![1, 2, 3]));
-        let r = UniswapXFillBuilder::new(router()).source_for(&leg(), &snap);
-        assert!(matches!(r, Err(FillBuilderError::UndecodableProgram)));
+        let malformed = builder()
+            .source_for(
+                &leg(),
+                0,
+                context,
+                &snapshot_with(Bytes::from(vec![1, 2, 3])),
+            )
+            .await;
+        assert!(matches!(
+            malformed,
+            Err(FillBuilderError::UndecodableProgram)
+        ));
     }
 }

@@ -434,8 +434,9 @@ mod tests {
         }
     }
     struct FakeFill;
+    #[async_trait::async_trait]
     impl FillBuilder for FakeFill {
-        fn build(
+        async fn build(
             &self,
             _: &Intent,
             _: &RoutePlan,

@@ -212,7 +212,7 @@ impl SwapService {
         reservation: ReservationId,
         now: u64,
     ) -> Result<SwapOutcome, SolventError> {
-        let calldata = self.fill_builder.build(intent, plan, snapshot)?;
+        let calldata = self.fill_builder.build(intent, plan, snapshot).await?;
         let pending = PendingFill::new(
             FillTx::new(
                 intent.id,
@@ -578,8 +578,9 @@ mod tests {
     }
 
     struct FakeFill;
+    #[async_trait]
     impl FillBuilder for FakeFill {
-        fn build(
+        async fn build(
             &self,
             _: &Intent,
             _: &RoutePlan,

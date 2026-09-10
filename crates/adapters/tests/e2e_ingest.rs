@@ -16,7 +16,7 @@ use common::{
     PERMIT2,
 };
 use solvent_adapters::ingest::uniswapx::{
-    OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXFillBuilder, UniswapXV2Normalizer,
+    OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXV2Normalizer,
 };
 use solvent_core::deps::ingest::{FillBuilder, Normalizer, OrderFeed};
 use solvent_core::primitives::ingest::RawOrder;
@@ -122,8 +122,10 @@ async fn e2e_self_hosted_order_fills_on_chain() {
         .expect("reserve the routed plan");
 
     // Build the fill calldata and settle it on-chain as the filler's owner.
-    let calldata = UniswapXFillBuilder::new(h.app)
+    let calldata = stack
+        .fill_builder()
         .build(&intent, &plan, &snap)
+        .await
         .expect("fill calldata");
     let receipt = h
         .maker_provider

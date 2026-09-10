@@ -36,6 +36,7 @@ usd_stable_pegs = ["0xdac17f958d2ee523a2206206994597c13d831ec7"]  # USDT
 # Swap (submit) path. The resolver's Aqua filler contract and the account authorized to call it;
 # the filler-owner and cosigner signing keys are read from the environment, never this file:
 #   SOLVENT_SIGNER_KEY    — the filler-owner key that signs and pays for fills
+#   SOLVENT_POLICY_SIGNER_KEY — the EIP-712 key authorized by the filler contract
 #   SOLVENT_COSIGNER_KEY  — the key that cosigns each order's decay before it fills
 filler = "0x0000000000000000000000000000000000000000"
 # Required: the deployed UniswapX V2 reactor used by taker orders.
