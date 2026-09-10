@@ -21,7 +21,7 @@ use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 use crate::primitives::trade::{Trade, TradeAttempt, TradeId, TradeLeg, TradeStatus};
 use crate::primitives::{IntentId, ReservationId};
 use crate::registry::SharedSnapshot;
-use crate::routing::{route, LegCostResolver, RoutingBook, StrategyGuard};
+use crate::routing::{route, GuardAdmission, LegCostResolver, RoutingBook, StrategyGuard};
 use crate::SolventError;
 
 /// The chain/fill constants and routing knobs the swap path needs, bundled to keep the constructor
@@ -158,7 +158,7 @@ impl SwapService {
 
         let reservation = reservation_id(intent.id, &plan);
         if let Some(declined) = self
-            .reserve_or_decline(&created.id, intent.id, reservation, &plan, now)
+            .reserve_or_decline(&created.id, intent.id, reservation, &plan, &snapshot, now)
             .await?
         {
             return Ok(declined);
@@ -179,9 +179,20 @@ impl SwapService {
         intent_id: IntentId,
         reservation: ReservationId,
         plan: &RoutePlan,
+        snapshot: &Snapshot,
         now: u64,
     ) -> Result<Option<SwapOutcome>, SolventError> {
-        match self
+        let admission = self.guards.admission().await;
+        if plan_is_guarded(plan, snapshot, &admission) {
+            drop(admission);
+            warn!(intent = %intent_id, "reserve declined: strategy guarded");
+            self.settle(id, TradeStatus::Declined, now).await?;
+            return Ok(Some(SwapOutcome {
+                trade_id: *id,
+                status: TradeStatus::Declined,
+            }));
+        }
+        let result = self
             .ledger
             .reserve(
                 reservation,
@@ -189,8 +200,9 @@ impl SwapService {
                 sources_of(plan),
                 self.config.reservation_ttl_secs,
             )
-            .await
-        {
+            .await;
+        drop(admission);
+        match result {
             Ok(()) => Ok(None),
             Err(SolventError::Ledger(LedgerError::Insufficient(_))) => {
                 warn!(intent = %intent_id, "reserve declined: insufficient capacity");
@@ -337,6 +349,16 @@ impl SwapService {
             token_out_price_usd: prices.token_out_usd,
         }
     }
+}
+
+fn plan_is_guarded(plan: &RoutePlan, snapshot: &Snapshot, admission: &GuardAdmission<'_>) -> bool {
+    plan.legs.iter().any(|leg| {
+        snapshot.strategies().any(|strategy| {
+            strategy.key.maker == leg.maker
+                && strategy.key.strategy_hash == leg.strategy_hash
+                && admission.is_guarded(&strategy.key)
+        })
+    })
 }
 
 /// The USD prices of a swap's tokens at submit, captured by the adapter (which holds the oracle) and

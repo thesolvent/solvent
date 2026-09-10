@@ -10,7 +10,9 @@ use crate::deps::execution::{ExecutionAuthorizerError, ExecutionError, Settlemen
 use crate::deps::ingest::{FillBuilderError, NormalizeError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
 use crate::deps::maker_metrics::MakerMetricsError;
+use crate::deps::rebate::{RebateCallBuilderError, RebateMarketBookError, RebateStoreError};
 use crate::deps::registry::{BlockTimesError, ChainSourceError, StoreError};
+use crate::deps::routing::GasPriceError;
 use crate::deps::trade::TradeStoreError;
 use crate::primitives::ledger::LedgerError;
 use crate::rebate::RebateError;
@@ -45,6 +47,18 @@ pub enum SolventError {
     /// Rebate accrual or policy evaluation failed.
     #[error("rebate: {0}")]
     Rebate(#[from] RebateError),
+    /// The durable rebate batch store failed.
+    #[error("rebate store: {0}")]
+    RebateStore(#[from] RebateStoreError),
+    /// A fresh executable market book was unavailable.
+    #[error("rebate market: {0}")]
+    RebateMarketBook(#[from] RebateMarketBookError),
+    /// Building signed public rebate calldata failed.
+    #[error("rebate call builder: {0}")]
+    RebateCallBuilder(#[from] RebateCallBuilderError),
+    /// Reading the current gas price for a rebate failed.
+    #[error("gas price: {0}")]
+    GasPrice(#[from] GasPriceError),
     /// Reading a settleable budget failed.
     #[error("budget source: {0}")]
     BudgetSource(#[from] BudgetSourceError),

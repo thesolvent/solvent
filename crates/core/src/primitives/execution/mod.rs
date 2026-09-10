@@ -5,7 +5,8 @@ pub mod authorization;
 pub mod fill;
 
 pub use authorization::{
-    ExecutionAuthorization, ExecutionKind, PolicySignature, UserFillAuthorization,
+    ExecutionAuthorization, ExecutionKind, PolicySignature, RebateAuthorization,
+    UserFillAuthorization,
 };
 pub use fill::{
     ExecHandle, ExecStatus, FillOutcome, FillTx, PendingFill, Settled, SettledOutcome, SimVerdict,

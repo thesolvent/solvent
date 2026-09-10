@@ -12,6 +12,7 @@ use crate::primitives::{MakerId, StrategyHash};
 #[non_exhaustive]
 pub enum ExecutionKind {
     UserFill = 0,
+    Rebate = 1,
 }
 
 impl ExecutionKind {
@@ -55,6 +56,22 @@ impl ExecutionAuthorization {
             deadline_block: u64::MAX,
         }
     }
+
+    pub fn rebate(value: RebateAuthorization) -> Self {
+        Self {
+            kind: ExecutionKind::Rebate,
+            nonce: value.nonce,
+            context_hash: value.context_hash,
+            strategy_hash: value.strategy_hash,
+            maker: value.maker,
+            token_in: value.token_in,
+            token_out: value.token_out,
+            amount_out: value.amount_out,
+            amount_in_limit: value.amount_in_limit,
+            rebate_amount: value.rebate_amount,
+            deadline_block: value.deadline_block,
+        }
+    }
 }
 
 /// Inputs that vary for a normal UniswapX source authorization.
@@ -69,6 +86,20 @@ pub struct UserFillAuthorization {
     pub amount_in_limit: U256,
 }
 
+/// Inputs that bind a public restoration to one batch and protected strategy.
+pub struct RebateAuthorization {
+    pub nonce: U256,
+    pub context_hash: B256,
+    pub strategy_hash: StrategyHash,
+    pub maker: MakerId,
+    pub token_in: Address,
+    pub token_out: Address,
+    pub amount_out: U256,
+    pub amount_in_limit: U256,
+    pub rebate_amount: U256,
+    pub deadline_block: u64,
+}
+
 /// A signature is executable authority. Its debug representation must never expose signed bytes.
 #[derive(Clone, PartialEq, Eq)]
 pub struct PolicySignature(Bytes);
@@ -80,6 +111,10 @@ impl PolicySignature {
 
     pub fn into_bytes(self) -> Bytes {
         self.0
+    }
+
+    pub fn as_bytes(&self) -> &Bytes {
+        &self.0
     }
 }
 

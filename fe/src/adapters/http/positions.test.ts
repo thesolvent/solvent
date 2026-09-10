@@ -7,6 +7,7 @@ const sdk = vi.hoisted(() => ({
   submit: vi.fn(),
 }));
 const api = vi.hoisted(() => ({
+  config: vi.fn(),
   pairs: vi.fn(),
   pairHistory: vi.fn(),
   assets: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("@solvent/sdk/construction", () => ({
 vi.mock("./client", () => ({ solventApi: api }));
 
 const MAKER = "0x1111111111111111111111111111111111111111";
+const CREDENTIAL = "0x6666666666666666666666666666666666666666";
 const MAX_UINT64 = (1n << 64n) - 1n;
 const pair: CreatePair = {
   base: {
@@ -91,6 +93,7 @@ const input: PositionInput = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  api.config.mockResolvedValue({ taker_credential: CREDENTIAL });
   api.assets.mockResolvedValue({ items: [] });
   api.pairs.mockResolvedValue({ items: [] });
   api.pairHistory.mockResolvedValue({ points: [] });
@@ -211,7 +214,7 @@ describe("positionsAdapter", () => {
     });
     expect(construction.builder.fee).toHaveBeenCalledWith(5);
     expect(construction.builder.salt).toHaveBeenCalledWith(salt);
-    expect(construction.builder.build).toHaveBeenCalledWith(MAKER);
+    expect(construction.builder.build).toHaveBeenCalledWith(MAKER, CREDENTIAL);
     expect(sdk.createIntent).toHaveBeenCalledOnce();
     expect(sdk.createIntent).toHaveBeenCalledWith({
       maker: MAKER,

@@ -58,6 +58,8 @@ pub fn router(state: AppState) -> Router {
         .route("/pairs", get(app::pairs::pairs))
         .route("/pairs/history", get(app::pairs::pair_history))
         .route("/positions/preview", post(app::positions::preview))
+        .route("/rebates", get(app::rebates::rebates))
+        .route("/rebates/{id}", get(app::rebates::rebate_detail))
         .route("/positions/{hash}", get(app::makers::position_detail))
         .route("/positions/{hash}/depth", get(app::makers::position_depth))
         .route(
@@ -118,6 +120,9 @@ mod tests {
         MakerMetrics, MakerMetricsError, MakerMetricsStore, PairMetrics, PositionMetrics,
     };
     use solvent_core::deps::quote_log::{QuoteLog, QuoteLogError, QuoteServed};
+    use solvent_core::deps::rebate::{
+        RebateCallBuilder, RebateCallBuilderError, RebateMarketBook, RebateStore, RebateStoreError,
+    };
     use solvent_core::deps::registry::{EventStore, RecordedEvent, StoreError};
     use solvent_core::deps::routing::{GasPrice, PriceOracle};
     use solvent_core::deps::trade::{
@@ -133,15 +138,20 @@ mod tests {
     };
     use solvent_core::primitives::ingest::Intent;
     use solvent_core::primitives::ledger::{AccountKey, Reservation, ReservationSource};
+    use solvent_core::primitives::rebate::{RebateBatch, RebateExecution, RebatePlan};
+    use solvent_core::primitives::registry::MakerStrategy;
     use solvent_core::primitives::registry::TokenPair;
     use solvent_core::primitives::registry::{AquaEvent, EventCursor, EventExt, Snapshot};
     use solvent_core::primitives::routing::{RoutePlan, RoutingConfig};
     use solvent_core::primitives::trade::{
         Trade, TradeAttempt, TradeId, TradeInfo, TradeLeg, TradeStatus,
     };
-    use solvent_core::primitives::{ChainId, IntentId, ReservationId};
+    use solvent_core::primitives::{ChainId, IntentId, RebateBatchId, ReservationId};
     use solvent_core::primitives::{MakerId, StrategyHash};
     use solvent_core::quote::QuoteService;
+    use solvent_core::rebate::{
+        RebatePolicy, RebatePolicyConfig, RebateService, RebateServiceConfig,
+    };
     use solvent_core::registry::SharedSnapshot;
     use solvent_core::routing::LegCostResolver;
     use solvent_core::swap::{SwapConfig, SwapService};
@@ -208,6 +218,33 @@ mod tests {
         }
         async fn open_reservations(&self) -> Result<Vec<Reservation>, LedgerStoreError> {
             Ok(Vec::new())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RebateStore for NoopLedgerStore {
+        async fn save(&self, _: &RebateBatch) -> Result<(), RebateStoreError> {
+            Ok(())
+        }
+        async fn open_batches(&self) -> Result<Vec<RebateBatch>, RebateStoreError> {
+            Ok(Vec::new())
+        }
+        async fn close(&self, _: RebateBatchId) -> Result<(), RebateStoreError> {
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RebateCallBuilder for NoopLedgerStore {
+        async fn build(
+            &self,
+            _: &MakerStrategy,
+            _: RebatePlan,
+            _: ReservationId,
+            _: u64,
+            _: u64,
+        ) -> Result<RebateExecution, RebateCallBuilderError> {
+            Err(RebateCallBuilderError::UndecodableProgram)
         }
     }
 
@@ -468,10 +505,11 @@ mod tests {
         ));
         let market = MarketCache::new();
         let gas: Arc<dyn GasPrice> = market.clone();
-        let oracle: Arc<dyn PriceOracle> = market;
+        let oracle: Arc<dyn PriceOracle> = market.clone();
+        let rebate_market: Arc<dyn RebateMarketBook> = market;
         let valuation = Arc::new(Valuation::new(Arc::clone(&oracle)));
         let leg_cost = Arc::new(LegCostResolver::new(
-            gas,
+            Arc::clone(&gas),
             oracle,
             Arc::clone(&assets),
             Address::ZERO,
@@ -485,12 +523,22 @@ mod tests {
             Arc::new(ZeroOracle),
             Arc::new(SystemClock),
         ));
+        let strategy_guard = Arc::new(solvent_core::routing::StrategyGuard::default());
+        let rebates = Arc::new(RebateService::new(
+            RebatePolicy::new(RebatePolicyConfig::new(50, 12_000)),
+            Arc::clone(&ledger),
+            Arc::clone(&strategy_guard),
+            Arc::new(NoopLedgerStore),
+            Arc::new(NoopLedgerStore),
+            solvent_core::rebate::RebateMarketData::new(rebate_market, gas, Arc::clone(&assets)),
+            RebateServiceConfig::new(Address::ZERO, 1, 1),
+        ));
         let depth = Arc::new(DepthService::new(
             Arc::clone(&registry),
             Arc::clone(&ledger),
+            Arc::clone(&strategy_guard),
             Arc::clone(&assets),
         ));
-        let strategy_guard = Arc::new(solvent_core::routing::StrategyGuard::default());
         let quote = Arc::new(QuoteService::new(
             Arc::clone(&registry),
             Arc::clone(&ledger),
@@ -511,7 +559,7 @@ mod tests {
         let swap = Arc::new(SwapService::new(
             Arc::clone(&registry),
             Arc::clone(&ledger),
-            strategy_guard,
+            Arc::clone(&strategy_guard),
             Arc::clone(&trades),
             execution,
             Arc::new(FakeFill),
@@ -570,6 +618,8 @@ mod tests {
                 app: Address::ZERO,
                 reactor: Address::ZERO,
                 permit2: Address::ZERO,
+                filler: Address::ZERO,
+                taker_credential: Address::ZERO,
                 cosigner: Address::ZERO,
             }),
             head: ChainHead::stub(0),
@@ -581,6 +631,7 @@ mod tests {
             makers,
             quote,
             swap,
+            rebates,
             cosigner,
             trades: trade_svc,
             registry: Arc::clone(&registry),
@@ -631,6 +682,16 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn rebate_queue_is_read_only_and_hides_non_ready_batches() {
+        let (status, body) = get("/v1/rebates").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["result"], serde_json::json!([]));
+
+        let (status, _) = get(&format!("/v1/rebates/{}", B256::ZERO)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

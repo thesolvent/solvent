@@ -4,4 +4,4 @@ mod policy;
 mod service;
 
 pub use policy::{RebateError, RebatePolicy, RebatePolicyConfig};
-pub use service::{RebateEvaluationInput, RebateService};
+pub use service::{RebateEvaluationInput, RebateMarketData, RebateService, RebateServiceConfig};

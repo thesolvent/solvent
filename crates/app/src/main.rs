@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::signers::local::PrivateKeySigner;
+use alloy::sol;
 use solvent_adapters::balances::AlloyBalancesOracle;
 use solvent_adapters::chain::ChainHead;
 use solvent_adapters::execution::{
@@ -20,6 +21,7 @@ use solvent_adapters::http::{self};
 use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
+use solvent_adapters::rebate::{FillerRebateCallBuilder, SqliteRebateStore};
 use solvent_adapters::registry::{AlloyBlockTimes, AlloyChainSource, SqliteStore};
 use solvent_adapters::routing::{BinanceFeed, BinanceHistory, GasPoller, MarketCache};
 use solvent_adapters::trade::SqliteTradeStore;
@@ -32,6 +34,7 @@ use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ledger::BudgetSource;
 use solvent_core::deps::maker_metrics::MakerMetricsStore;
 use solvent_core::deps::quote_log::QuoteLog;
+use solvent_core::deps::rebate::RebateMarketBook;
 use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::routing::{GasPrice, PriceOracle};
 use solvent_core::deps::trade::TradeStore;
@@ -42,6 +45,9 @@ use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
+use solvent_core::rebate::{
+    RebateMarketData, RebatePolicy, RebatePolicyConfig, RebateService, RebateServiceConfig,
+};
 use solvent_core::reconcile::ReconcileService;
 use solvent_core::registry::{RegistrySync, SharedSnapshot};
 use solvent_core::routing::{LegCostResolver, StrategyGuard};
@@ -56,6 +62,13 @@ use walletkit::core::deps::SubmissionOpts;
 use walletkit::Wallet;
 
 use crate::config::{load_token_list, Config, StartupError};
+
+sol! {
+    #[sol(rpc)]
+    interface FillerConfiguration {
+        function TAKER_CREDENTIAL() external view returns (address);
+    }
+}
 
 /// How often the background poller refreshes the cached chain head.
 const BLOCK_POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -89,6 +102,11 @@ async fn main() -> Result<(), StartupError> {
         .parse()
         .map_err(|e| StartupError::RpcUrl(format!("{e}")))?;
     let provider = ProviderBuilder::new().connect_http(rpc).erased();
+    let taker_credential = FillerConfiguration::new(config.filler, provider.clone())
+        .TAKER_CREDENTIAL()
+        .call()
+        .await
+        .map_err(|error| StartupError::FillerConfiguration(error.to_string()))?;
     let (head, poller) = ChainHead::new(provider.clone(), BLOCK_POLL_INTERVAL);
     tokio::spawn(poller);
 
@@ -168,7 +186,8 @@ async fn main() -> Result<(), StartupError> {
         .run(),
     );
     let gas: Arc<dyn GasPrice> = market.clone();
-    let oracle: Arc<dyn PriceOracle> = market;
+    let oracle: Arc<dyn PriceOracle> = market.clone();
+    let rebate_market: Arc<dyn RebateMarketBook> = market;
     let valuation = Arc::new(Valuation::new(Arc::clone(&oracle)));
     let history_source: Arc<dyn PairPriceHistorySource> = Arc::new(
         BinanceHistory::new(
@@ -181,7 +200,7 @@ async fn main() -> Result<(), StartupError> {
     let pair_history = Arc::new(PairHistoryService::new(history_source));
     // One per-leg gas resolver shared by both routing paths — quote and swap price gas the same way.
     let leg_cost = Arc::new(LegCostResolver::new(
-        gas,
+        Arc::clone(&gas),
         oracle,
         Arc::clone(&assets),
         config.native_token,
@@ -221,12 +240,13 @@ async fn main() -> Result<(), StartupError> {
         Arc::new(SystemClock),
         ChainId(config.chain_id),
     ));
+    let strategy_guard = Arc::new(StrategyGuard::default());
     let depth = Arc::new(DepthService::new(
         Arc::clone(&registry),
         Arc::clone(&ledger),
+        Arc::clone(&strategy_guard),
         Arc::clone(&assets),
     ));
-    let strategy_guard = Arc::new(StrategyGuard::default());
     let quote = Arc::new(QuoteService::new(
         Arc::clone(&registry),
         Arc::clone(&ledger),
@@ -310,8 +330,31 @@ async fn main() -> Result<(), StartupError> {
         settlement,
         Arc::clone(&ledger),
     ));
-    let fill_builder: Arc<dyn FillBuilder> =
-        Arc::new(UniswapXFillBuilder::new(config.app_address, authorizer));
+    let rebates = Arc::new(RebateService::new(
+        RebatePolicy::new(RebatePolicyConfig::new(
+            config.rebate.deviation_threshold_bps,
+            config.rebate.gas_safety_bps,
+        )),
+        Arc::clone(&ledger),
+        Arc::clone(&strategy_guard),
+        Arc::new(SqliteRebateStore::new(pool.clone())),
+        Arc::new(FillerRebateCallBuilder::new(
+            taker_credential,
+            Arc::clone(&authorizer),
+        )),
+        RebateMarketData::new(rebate_market, gas, Arc::clone(&assets)),
+        RebateServiceConfig::new(
+            config.native_token,
+            config.rebate.gas_units,
+            config.rebate.market_max_age_secs,
+        ),
+    ));
+    rebates.recover().await?;
+    let fill_builder: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(
+        config.app_address,
+        taker_credential,
+        authorizer,
+    ));
     let reconcile = Arc::new(ReconcileService::new(
         Arc::clone(&execution),
         Arc::clone(&trade_store),
@@ -321,7 +364,7 @@ async fn main() -> Result<(), StartupError> {
     let swap = Arc::new(SwapService::new(
         Arc::clone(&registry),
         Arc::clone(&ledger),
-        strategy_guard,
+        Arc::clone(&strategy_guard),
         Arc::clone(&trade_store),
         Arc::clone(&execution),
         fill_builder,
@@ -365,7 +408,7 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&registry),
     ));
     let state = AppState {
-        config: Arc::new(config.app_config(cosigner.address())),
+        config: Arc::new(config.app_config(cosigner.address(), taker_credential)),
         head,
         assets,
         pair_history,
@@ -375,6 +418,7 @@ async fn main() -> Result<(), StartupError> {
         makers,
         quote,
         swap,
+        rebates,
         cosigner,
         trades,
         registry: Arc::clone(&registry),

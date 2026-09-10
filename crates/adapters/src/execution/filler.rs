@@ -1,6 +1,6 @@
 //! Shared wire schema for the policy-authorized filler contract.
 
-use alloy::sol;
+use alloy::{primitives::Address, sol};
 
 use solvent_core::primitives::execution::ExecutionAuthorization;
 
@@ -33,6 +33,7 @@ sol! {
         bytes policySignature;
     }
     function fill(SignedOrder order, SourceSwap[] sources);
+    function executeRebate(Order order, Authorization authorization, bytes signature);
 }
 
 impl From<&ExecutionAuthorization> for Authorization {
@@ -51,4 +52,18 @@ impl From<&ExecutionAuthorization> for Authorization {
             deadlineBlock: value.deadline_block,
         }
     }
+}
+
+/// Match the credential gate enforced by `UniswapXAquaFiller` before signing an execution.
+pub(crate) fn uses_taker_credential(program: &[u8], credential: Address) -> bool {
+    const PREFIX_LENGTH: usize = 22;
+    const ONLY_TAKER_BALANCE_NON_ZERO: u8 = 0x0e;
+    const ADDRESS_LENGTH: u8 = 20;
+
+    let Some(prefix) = program.get(..PREFIX_LENGTH) else {
+        return false;
+    };
+    prefix[0] == ONLY_TAKER_BALANCE_NON_ZERO
+        && prefix[1] == ADDRESS_LENGTH
+        && prefix[2..] == *credential
 }

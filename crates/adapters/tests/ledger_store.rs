@@ -5,7 +5,7 @@
 use alloy::primitives::{Address, B256, U256};
 use solvent_adapters::ledger::SqliteLedgerStore;
 use solvent_core::{
-    deps::ledger::LedgerStore,
+    deps::ledger::{LedgerStore, LedgerStoreError},
     primitives::{
         ledger::{Reservation, ReservationSource},
         IntentId, MakerId, RebateBatchId, ReservationId, StrategyHash,
@@ -44,6 +44,16 @@ fn rid(id: u8) -> ReservationId {
     ReservationId(B256::from([id; 32]))
 }
 
+#[derive(sqlx::FromRow)]
+struct MigratedReservationRow {
+    id: Vec<u8>,
+    owner_kind: String,
+    owner_id: Vec<u8>,
+    state: String,
+    filled: Option<String>,
+    expires_at: i64,
+}
+
 /// A migrated, empty in-memory store. One connection keeps the `:memory:` database alive.
 async fn setup() -> SqliteLedgerStore {
     let pool = SqlitePoolOptions::new()
@@ -54,6 +64,69 @@ async fn setup() -> SqliteLedgerStore {
     let store = SqliteLedgerStore::new(pool);
     store.migrate().await.expect("migrate");
     store
+}
+
+#[tokio::test]
+async fn owner_migration_preserves_populated_legacy_rows() {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("open in-memory sqlite");
+    sqlx::raw_sql(include_str!("../migrations/0002_ledger.sql"))
+        .execute(&pool)
+        .await
+        .expect("create legacy ledger schema");
+
+    let pending = reservation(1, vec![source(1, 1, 3, 500_000)]);
+    let posted = reservation(2, vec![source(2, 2, 4, 600_000)]);
+    for (reservation, state, filled) in [
+        (&pending, "pending", None),
+        (&posted, "posted", Some("[\"0x927c0\"]")),
+    ] {
+        sqlx::query(
+            "INSERT INTO ledger_reservation (id, intent, sources, state, filled, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(reservation.id.0.to_vec())
+        .bind(reservation.owner.id().to_vec())
+        .bind(serde_json::to_string(&reservation.sources).expect("serialize sources"))
+        .bind(state)
+        .bind(filled)
+        .bind(i64::try_from(reservation.expires_at).expect("fixture expiry fits i64"))
+        .execute(&pool)
+        .await
+        .expect("insert legacy reservation");
+    }
+
+    sqlx::raw_sql(include_str!("../migrations/0010_ledger_owner.sql"))
+        .execute(&pool)
+        .await
+        .expect("migrate owner schema");
+
+    let rows: Vec<MigratedReservationRow> = sqlx::query_as(
+        "SELECT id, owner_kind, owner_id, state, filled, expires_at
+         FROM ledger_reservation ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("read migrated rows");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].id, pending.id.0.to_vec());
+    assert_eq!(rows[0].owner_kind, "swap");
+    assert_eq!(rows[0].owner_id, pending.owner.id().to_vec());
+    assert_eq!(rows[0].state, "pending");
+    assert_eq!(rows[0].filled, None);
+    assert_eq!(rows[0].expires_at, pending.expires_at as i64);
+    assert_eq!(rows[1].id, posted.id.0.to_vec());
+    assert_eq!(rows[1].owner_kind, "swap");
+    assert_eq!(rows[1].owner_id, posted.owner.id().to_vec());
+    assert_eq!(rows[1].state, "posted");
+    assert_eq!(rows[1].filled.as_deref(), Some("[\"0x927c0\"]"));
+    assert_eq!(rows[1].expires_at, posted.expires_at as i64);
+
+    let store = SqliteLedgerStore::new(pool);
+    assert_eq!(store.open_reservations().await.unwrap(), vec![pending]);
 }
 
 #[tokio::test]
@@ -79,16 +152,30 @@ async fn recovers_only_the_open_reservations() {
 }
 
 #[tokio::test]
-async fn reserve_is_idempotent() {
+async fn reserve_accepts_only_an_exact_pending_duplicate() {
     let store = setup().await;
     let a = reservation(1, vec![source(1, 1, 3, 500_000)]);
     store.reserve(&a).await.unwrap();
-    // A duplicate id (even with a different body) neither overwrites nor duplicates.
-    store
-        .reserve(&reservation(1, vec![source(9, 9, 9, 1)]))
-        .await
-        .unwrap();
+    store.reserve(&a).await.unwrap();
+
+    let mut different_expiry = a.clone();
+    different_expiry.expires_at += 1;
+    for conflicting in [
+        rebate_reservation(1, a.sources.clone()),
+        reservation(1, vec![source(9, 9, 9, 1)]),
+        different_expiry,
+    ] {
+        let conflict = store.reserve(&conflicting).await.unwrap_err();
+        assert!(matches!(conflict, LedgerStoreError::Conflict(id) if id == rid(1)));
+    }
     assert_eq!(store.open_reservations().await.unwrap(), vec![a]);
+
+    store.void(rid(1)).await.unwrap();
+    let terminal = store
+        .reserve(&reservation(1, vec![source(1, 1, 3, 500_000)]))
+        .await
+        .unwrap_err();
+    assert!(matches!(terminal, LedgerStoreError::Conflict(id) if id == rid(1)));
 }
 
 #[tokio::test]

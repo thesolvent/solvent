@@ -614,6 +614,7 @@ pub struct Stack {
     pub h: Harness,
     pub reactor: Address,
     pub filler: Address,
+    pub credential: Address,
     pub chain_id: u64,
     pub policy_signer: PrivateKeySigner,
 }
@@ -622,6 +623,7 @@ impl Stack {
     pub fn fill_builder(&self) -> UniswapXFillBuilder {
         UniswapXFillBuilder::new(
             self.h.app,
+            self.credential,
             Arc::new(LocalPolicySigner::new(
                 self.chain_id,
                 self.filler,
@@ -676,6 +678,7 @@ pub async fn setup() -> Stack {
         h,
         reactor: *reactor.address(),
         filler: *filler.address(),
+        credential,
         chain_id,
         policy_signer,
     }

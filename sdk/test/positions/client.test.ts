@@ -20,6 +20,7 @@ vi.mock("../../src/swap/wallet", () => ({
 }));
 
 const MAKER = "0x1111111111111111111111111111111111111111" as Address;
+const CREDENTIAL = "0x6666666666666666666666666666666666666666" as Address;
 const AQUA = "0x2222222222222222222222222222222222222222" as Address;
 const APP = "0x3333333333333333333333333333333333333333" as Address;
 const TOKEN_A = "0x4444444444444444444444444444444444444444" as Address;
@@ -30,7 +31,7 @@ const config = {
     aqua: AQUA,
     app: APP,
 } as AppConfig;
-const strategy = Strategy.fullRange().salt(7n).build(MAKER);
+const strategy = Strategy.fullRange().salt(7n).build(MAKER, CREDENTIAL);
 const amounts = [
     { token: TOKEN_A, amount: 10n },
     { token: TOKEN_B, amount: 20n },

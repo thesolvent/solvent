@@ -36,6 +36,8 @@ pub enum FillBuilderError {
     UndecodableProgram,
     #[error("a routed leg's maker does not match its shipped order")]
     StrategyMakerMismatch,
+    #[error("a routed leg is not protected by the configured taker credential")]
+    UnprotectedStrategy,
     #[error("a routed leg could not be policy-authorized: {0}")]
     Authorization(#[from] ExecutionAuthorizerError),
 }

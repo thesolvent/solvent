@@ -13,18 +13,29 @@ use solvent_core::primitives::ingest::Intent;
 use solvent_core::primitives::registry::{Snapshot, StrategyKey};
 use solvent_core::primitives::routing::{RouteLeg, RoutePlan};
 
-use crate::execution::filler::{fillCall, Authorization, Order, SignedOrder, SourceSwap};
+use crate::execution::filler::{
+    fillCall, uses_taker_credential, Authorization, Order, SignedOrder, SourceSwap,
+};
 
 /// The router is the deployment's Aqua app and hashes each source strategy. The authorizer binds
 /// the exact routed amounts and signed UniswapX order before the filler can execute them.
 pub struct UniswapXFillBuilder {
     router: Address,
+    taker_credential: Address,
     authorizer: Arc<dyn ExecutionAuthorizer>,
 }
 
 impl UniswapXFillBuilder {
-    pub fn new(router: Address, authorizer: Arc<dyn ExecutionAuthorizer>) -> Self {
-        Self { router, authorizer }
+    pub fn new(
+        router: Address,
+        taker_credential: Address,
+        authorizer: Arc<dyn ExecutionAuthorizer>,
+    ) -> Self {
+        Self {
+            router,
+            taker_credential,
+            authorizer,
+        }
     }
 
     async fn source_for(
@@ -46,6 +57,9 @@ impl UniswapXFillBuilder {
             .map_err(|_| FillBuilderError::UndecodableProgram)?;
         if order.maker != leg.maker.0 {
             return Err(FillBuilderError::StrategyMakerMismatch);
+        }
+        if !uses_taker_credential(&order.data, self.taker_credential) {
+            return Err(FillBuilderError::UnprotectedStrategy);
         }
 
         let authorization = ExecutionAuthorization::user_fill(UserFillAuthorization {
@@ -145,7 +159,15 @@ mod tests {
     }
 
     fn builder() -> UniswapXFillBuilder {
-        UniswapXFillBuilder::new(router(), Arc::new(FakeAuthorizer))
+        UniswapXFillBuilder::new(router(), credential(), Arc::new(FakeAuthorizer))
+    }
+
+    fn credential() -> Address {
+        address!("5555555555555555555555555555555555555555")
+    }
+
+    fn protected_program(tail: &[u8]) -> Bytes {
+        Bytes::from([vec![0x0e, 20], credential().to_vec(), tail.to_vec()].concat())
     }
 
     fn leg() -> RouteLeg {
@@ -177,7 +199,7 @@ mod tests {
         let order = Order {
             maker: leg.maker.0,
             traits: U256::from(3u64),
-            data: Bytes::from(vec![0xAB, 0xCD]),
+            data: protected_program(&[0xAB, 0xCD]),
         };
         let snapshot = snapshot_with(Bytes::from(order.abi_encode()));
         let context = B256::from([0xCC; 32]);
@@ -217,6 +239,24 @@ mod tests {
         assert!(matches!(
             malformed,
             Err(FillBuilderError::UndecodableProgram)
+        ));
+
+        let order = Order {
+            maker: leg().maker.0,
+            traits: U256::ZERO,
+            data: Bytes::from_static(&[0x11, 0]),
+        };
+        let unprotected = builder()
+            .source_for(
+                &leg(),
+                0,
+                context,
+                &snapshot_with(order.abi_encode().into()),
+            )
+            .await;
+        assert!(matches!(
+            unprotected,
+            Err(FillBuilderError::UnprotectedStrategy)
         ));
     }
 }

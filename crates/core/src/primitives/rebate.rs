@@ -1,7 +1,10 @@
 //! Values shared by rebate accrual, policy evaluation, and execution.
 
-use alloy_primitives::{Address, U256};
+use std::collections::BTreeMap;
 
+use alloy_primitives::{Address, Bytes, U256};
+
+use crate::primitives::execution::{ExecutionAuthorization, PolicySignature};
 use crate::primitives::pricing::Ratio;
 use crate::primitives::registry::StrategyKey;
 use crate::primitives::trade::TradeId;
@@ -44,21 +47,36 @@ impl RebateAccrual {
     }
 }
 
-/// Fresh external price for one oriented token pair, expressed as output per input in base units.
+/// Fresh executable prices for both sides of a token pair, expressed as output per input in base
+/// units. The two sides are independent because a real order book has a spread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RebateMarket {
-    pub token_in: Address,
-    pub token_out: Address,
-    pub output_per_input: Ratio,
+    pub token_a: Address,
+    pub token_b: Address,
+    pub a_to_b: Ratio,
+    pub b_to_a: Ratio,
 }
 
 impl RebateMarket {
-    pub fn new(token_in: Address, token_out: Address, output_per_input: Ratio) -> Self {
+    pub fn new(token_a: Address, token_b: Address, a_to_b: Ratio, b_to_a: Ratio) -> Self {
         Self {
-            token_in,
-            token_out,
-            output_per_input,
+            token_a,
+            token_b,
+            a_to_b,
+            b_to_a,
+        }
+    }
+
+    pub fn rate(&self, token_in: Address, token_out: Address) -> Option<&Ratio> {
+        match (token_in, token_out) {
+            (input, output) if input == self.token_a && output == self.token_b => {
+                Some(&self.a_to_b)
+            }
+            (input, output) if input == self.token_b && output == self.token_a => {
+                Some(&self.b_to_a)
+            }
+            _ => None,
         }
     }
 }
@@ -89,12 +107,37 @@ impl RebateRequirements {
     }
 }
 
+/// Token-denominated policy floors. The service adds a fresh gas estimate before assessment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RebateMinimums {
+    pub token: Address,
+    pub minimum_maker_rebate: U256,
+    pub minimum_executor_profit: U256,
+}
+
+impl RebateMinimums {
+    pub fn new(token: Address, minimum_maker_rebate: U256, minimum_executor_profit: U256) -> Self {
+        Self {
+            token,
+            minimum_maker_rebate,
+            minimum_executor_profit,
+        }
+    }
+}
+
 /// One affected trade's share of the maker rebate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RebateAllocation {
     pub trade_id: TradeId,
     pub amount: U256,
+}
+
+impl RebateAllocation {
+    pub fn new(trade_id: TradeId, amount: U256) -> Self {
+        Self { trade_id, amount }
+    }
 }
 
 /// An exact-output restoration that clears all policy gates.
@@ -115,16 +158,148 @@ pub struct RebatePlan {
     pub allocations: Vec<RebateAllocation>,
 }
 
-/// The batch state; a ready plan carries the inventory reservation that makes it firm.
+impl RebatePlan {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        batch_id: RebateBatchId,
+        strategy: StrategyKey,
+        token_in: Address,
+        token_out: Address,
+        amount_in: U256,
+        amount_out: U256,
+        gross_surplus: U256,
+        safe_gas_cost: U256,
+        maker_rebate: U256,
+        executor_profit: U256,
+        deviation_bps: u64,
+        allocations: Vec<RebateAllocation>,
+    ) -> Self {
+        Self {
+            batch_id,
+            strategy,
+            token_in,
+            token_out,
+            amount_in,
+            amount_out,
+            gross_surplus,
+            safe_gas_cost,
+            maker_rebate,
+            executor_profit,
+            deviation_bps,
+            allocations,
+        }
+    }
+}
+
+/// The signed, immutable transaction payload exposed to public executors.
+#[derive(Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RebateExecution {
+    pub plan: Box<RebatePlan>,
+    pub reservation: ReservationId,
+    pub authorization: ExecutionAuthorization,
+    pub order: Bytes,
+    pub policy_signature: PolicySignature,
+    pub calldata: Bytes,
+    pub published_at: u64,
+}
+
+impl RebateExecution {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        plan: RebatePlan,
+        reservation: ReservationId,
+        authorization: ExecutionAuthorization,
+        order: Bytes,
+        policy_signature: PolicySignature,
+        calldata: Bytes,
+        published_at: u64,
+    ) -> Self {
+        Self {
+            plan: Box::new(plan),
+            reservation,
+            authorization,
+            order,
+            policy_signature,
+            calldata,
+            published_at,
+        }
+    }
+}
+
+impl core::fmt::Debug for RebateExecution {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("RebateExecution")
+            .field("plan", &self.plan)
+            .field("reservation", &self.reservation)
+            .field("authorization", &self.authorization)
+            .field("order", &"[REDACTED]")
+            .field("policy_signature", &"[REDACTED]")
+            .field("calldata", &"[REDACTED]")
+            .field("published_at", &self.published_at)
+            .finish()
+    }
+}
+
+/// The durable batch state. Transitional states let restart recovery safely compensate an
+/// interrupted reservation change before any authorization is exposed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RebateBatchState {
     Accumulating,
     Guarded,
-    Ready {
+    Preparing {
         plan: Box<RebatePlan>,
         reservation: ReservationId,
     },
+    Ready(Box<RebateExecution>),
+    Invalidating {
+        reservation: ReservationId,
+    },
+}
+
+/// One strategy's only open restoration batch and every mined trade leg that contributed to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RebateBatch {
+    pub id: RebateBatchId,
+    pub strategy: StrategyKey,
+    pub pair: crate::primitives::registry::TokenPair,
+    pub accruals: BTreeMap<TradeId, RebateAccrual>,
+    pub state: RebateBatchState,
+}
+
+impl RebateBatch {
+    pub fn new(
+        id: RebateBatchId,
+        pair: crate::primitives::registry::TokenPair,
+        accrual: RebateAccrual,
+    ) -> Self {
+        Self {
+            id,
+            strategy: accrual.strategy,
+            pair,
+            accruals: BTreeMap::from([(accrual.trade_id, accrual)]),
+            state: RebateBatchState::Accumulating,
+        }
+    }
+
+    pub fn from_parts(
+        id: RebateBatchId,
+        strategy: StrategyKey,
+        pair: crate::primitives::registry::TokenPair,
+        accruals: BTreeMap<TradeId, RebateAccrual>,
+        state: RebateBatchState,
+    ) -> Self {
+        Self {
+            id,
+            strategy,
+            pair,
+            accruals,
+            state,
+        }
+    }
 }
 
 /// The policy result visible to the worker.

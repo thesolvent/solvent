@@ -88,9 +88,10 @@ impl RebatePolicy {
                 "trade pair does not match the strategy",
             ));
         }
-        if pair != TokenPair::new(market.token_in, market.token_out)
-            || market.token_in == market.token_out
-            || market.output_per_input.is_zero()
+        if pair != TokenPair::new(market.token_a, market.token_b)
+            || market.token_a == market.token_b
+            || market.a_to_b.is_zero()
+            || market.b_to_a.is_zero()
         {
             return Err(RebateError::MarketPairMismatch);
         }
@@ -114,21 +115,22 @@ impl RebatePolicy {
         // Reuse the routed curve's price-limit primitive so rebate and swap pricing cannot diverge.
         let fill = opportunity.candidate.net_quote_with_limit(
             opportunity.candidate.full_input_bound(),
-            &opportunity.market_rate,
+            &opportunity.price_limit,
         )?;
         if fill.amount_in.is_zero() || fill.amount_out.is_zero() {
             return Ok(RebateAssessment::Guarded {
                 deviation_bps: opportunity.deviation_bps,
             });
         }
+        if !fill.limited {
+            return Ok(RebateAssessment::Guarded {
+                deviation_bps: opportunity.deviation_bps,
+            });
+        }
         let amount_in = opportunity.candidate.net_quote_exact_out(fill.amount_out)?;
-        let external_value = (Ratio::from(fill.amount_out)
-            * opportunity
-                .market_rate
-                .invert()
-                .ok_or(RebateError::Arithmetic)?)
-        .floor()
-        .ok_or(RebateError::Arithmetic)?;
+        let external_value = (Ratio::from(fill.amount_out) * opportunity.output_value_rate)
+            .floor()
+            .ok_or(RebateError::Arithmetic)?;
         let Some(gross_surplus) = external_value.checked_sub(amount_in) else {
             return Ok(RebateAssessment::Guarded {
                 deviation_bps: opportunity.deviation_bps,
@@ -181,33 +183,35 @@ impl RebatePolicy {
         caps: &AvailableSnapshot,
         market: &RebateMarket,
     ) -> Result<Option<Direction>, RebateError> {
-        let inverse = market
-            .output_per_input
-            .clone()
-            .invert()
-            .ok_or(RebateError::MarketPairMismatch)?;
         let directions = [
-            (
-                market.token_in,
-                market.token_out,
-                market.output_per_input.clone(),
-            ),
-            (market.token_out, market.token_in, inverse),
+            (market.token_a, market.token_b),
+            (market.token_b, market.token_a),
         ];
         let mut best: Option<Direction> = None;
-        for (token_in, token_out, market_rate) in directions {
+        for (token_in, token_out) in directions {
+            // For A -> B, the executable B -> A side is the adverse value the executor can realize
+            // for B. Its inverse is the highest A -> B curve price that still restores profitably.
+            let output_value_rate = market
+                .rate(token_out, token_in)
+                .cloned()
+                .ok_or(RebateError::MarketPairMismatch)?;
+            let price_limit = output_value_rate
+                .clone()
+                .invert()
+                .ok_or(RebateError::MarketPairMismatch)?;
             let Some(candidate) = build_pricing_candidate(strategy, caps, token_in, token_out)
             else {
                 continue;
             };
             let marginal = candidate.marginal_price()?;
-            if marginal <= market_rate {
+            if marginal <= price_limit {
                 continue;
             }
             let direction = Direction {
-                deviation_bps: marginal.rel_diff_bps(&market_rate),
+                deviation_bps: marginal.rel_diff_bps(&price_limit),
                 candidate,
-                market_rate,
+                price_limit,
+                output_value_rate,
             };
             if best
                 .as_ref()
@@ -222,7 +226,8 @@ impl RebatePolicy {
 
 struct Direction {
     candidate: Candidate,
-    market_rate: Ratio,
+    price_limit: Ratio,
+    output_value_rate: Ratio,
     deviation_bps: u64,
 }
 
@@ -433,7 +438,12 @@ mod tests {
                 &accruals(&strategy),
                 &strategy,
                 &caps(&strategy),
-                &RebateMarket::new(token_in, token_out, market),
+                &RebateMarket::new(
+                    token_in,
+                    token_out,
+                    market.clone(),
+                    market.invert().unwrap(),
+                ),
                 &[RebateRequirements::new(
                     token_in,
                     gas,
@@ -527,6 +537,7 @@ mod tests {
                     token(1),
                     token(2),
                     Ratio::new(U256::from(9u64), U256::from(10u64)).unwrap(),
+                    Ratio::new(U256::from(10u64), U256::from(9u64)).unwrap(),
                 ),
                 &[RebateRequirements::new(
                     token(1),
@@ -537,5 +548,123 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(no_capacity, RebateAssessment::Guarded { .. }));
+    }
+
+    #[test]
+    fn spread_values_both_orientations_at_the_executable_reverse_side() {
+        let market = RebateMarket::new(
+            token(1),
+            token(2),
+            Ratio::new(U256::from(4u64), U256::from(5u64)).unwrap(),
+            Ratio::new(U256::from(11u64), U256::from(10u64)).unwrap(),
+        );
+        let requirements = [
+            RebateRequirements::new(token(1), U256::ZERO, U256::ZERO, U256::ZERO),
+            RebateRequirements::new(token(2), U256::ZERO, U256::ZERO, U256::ZERO),
+        ];
+
+        let mut forward = strategy(Curve::Xyc);
+        forward.balances.insert(token(1), units(500));
+        forward.balances.insert(token(2), units(1_000));
+        let forward_assessment = RebatePolicy::new(config(1))
+            .assess(
+                RebateBatchId(B256::ZERO),
+                &accruals(&forward),
+                &forward,
+                &caps(&forward),
+                &market,
+                &requirements,
+            )
+            .unwrap();
+        let RebateAssessment::Ready(forward_plan) = forward_assessment else {
+            panic!("forward orientation should clear the rebate gates");
+        };
+        assert_eq!(forward_plan.token_in, token(1));
+        assert_eq!(forward_plan.token_out, token(2));
+        let forward_value = (Ratio::from(forward_plan.amount_out) * market.b_to_a.clone())
+            .floor()
+            .unwrap();
+        let optimistic_forward = (Ratio::from(forward_plan.amount_out)
+            * market.a_to_b.clone().invert().unwrap())
+        .floor()
+        .unwrap();
+        assert_eq!(
+            forward_plan.gross_surplus,
+            forward_value - forward_plan.amount_in
+        );
+        assert!(forward_value < optimistic_forward);
+
+        let mut reverse = strategy(Curve::Xyc);
+        reverse.balances.insert(token(1), units(1_000));
+        reverse.balances.insert(token(2), units(500));
+        let reverse_assessment = RebatePolicy::new(config(1))
+            .assess(
+                RebateBatchId(B256::ZERO),
+                &accruals(&reverse),
+                &reverse,
+                &caps(&reverse),
+                &market,
+                &requirements,
+            )
+            .unwrap();
+        let RebateAssessment::Ready(reverse_plan) = reverse_assessment else {
+            panic!("reverse orientation should clear the rebate gates");
+        };
+        assert_eq!(reverse_plan.token_in, token(2));
+        assert_eq!(reverse_plan.token_out, token(1));
+        let reverse_value = (Ratio::from(reverse_plan.amount_out) * market.a_to_b.clone())
+            .floor()
+            .unwrap();
+        let optimistic_reverse = (Ratio::from(reverse_plan.amount_out)
+            * market.b_to_a.clone().invert().unwrap())
+        .floor()
+        .unwrap();
+        assert_eq!(
+            reverse_plan.gross_surplus,
+            reverse_value - reverse_plan.amount_in
+        );
+        assert!(reverse_value < optimistic_reverse);
+    }
+
+    #[test]
+    fn capacity_limited_restoration_stays_guarded() {
+        let mut strategy = strategy(Curve::Xyc);
+        strategy.balances.insert(token(1), units(500));
+        strategy.balances.insert(token(2), units(1_000));
+        let mut available = caps(&strategy);
+        for account in [
+            AccountKey::WalletBudget {
+                maker: strategy.key.maker,
+                token: token(2),
+            },
+            AccountKey::StrategyVirtual {
+                maker: strategy.key.maker,
+                strategy_hash: strategy.key.strategy_hash,
+                token: token(2),
+            },
+        ] {
+            available.0.insert(account, units(1));
+        }
+
+        let assessment = RebatePolicy::new(config(1))
+            .assess(
+                RebateBatchId(B256::ZERO),
+                &accruals(&strategy),
+                &strategy,
+                &available,
+                &RebateMarket::new(
+                    token(1),
+                    token(2),
+                    Ratio::new(U256::from(4u64), U256::from(5u64)).unwrap(),
+                    Ratio::new(U256::from(11u64), U256::from(10u64)).unwrap(),
+                ),
+                &[
+                    RebateRequirements::new(token(1), U256::ZERO, U256::ZERO, U256::ZERO),
+                    RebateRequirements::new(token(2), U256::ZERO, U256::ZERO, U256::ZERO),
+                ],
+            )
+            .unwrap();
+
+        assert!(matches!(assessment, RebateAssessment::Guarded { .. }));
     }
 }

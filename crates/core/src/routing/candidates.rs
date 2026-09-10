@@ -649,8 +649,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn guarded_strategies_are_absent_from_the_frozen_candidate_set() {
+    #[tokio::test]
+    async fn guarded_strategies_are_absent_from_the_frozen_candidate_set() {
         let (a, b) = (tok(1), tok(2));
         let guarded = xyc(maker(1), hash(1), a, b, 5_000);
         let available = xyc(maker(2), hash(2), a, b, 1_000);
@@ -662,7 +662,7 @@ mod tests {
             (virt(maker(2), hash(2), b), 10_000),
         ]);
         let guards = StrategyGuard::default();
-        guards.guard(guarded.key);
+        guards.guard(guarded.key).await;
 
         let chosen = select(&snap, &c, &guards.snapshot(), &request(a, b, 100), 64).chosen;
         assert_eq!(chosen.len(), 1);

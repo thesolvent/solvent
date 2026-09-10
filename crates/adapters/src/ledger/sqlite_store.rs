@@ -67,7 +67,8 @@ impl LedgerStore for SqliteLedgerStore {
         let sources = serde_json::to_string(&reservation.sources).map_err(db)?;
         let owner_kind = reservation.owner.kind();
         let owner_id = reservation.owner.id();
-        sqlx::query(
+        let mut transaction = self.pool.begin().await.map_err(db)?;
+        let inserted = sqlx::query(
             "INSERT INTO ledger_reservation (id, owner_kind, owner_id, sources, state, expires_at)
              VALUES (?, ?, ?, ?, 'pending', ?)
              ON CONFLICT DO NOTHING",
@@ -77,10 +78,34 @@ impl LedgerStore for SqliteLedgerStore {
         .bind(owner_id.to_vec())
         .bind(sources)
         .bind(i64_of(reservation.expires_at)?)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
+        .await
+        .map_err(db)?
+        .rows_affected();
+        if inserted == 1 {
+            transaction.commit().await.map_err(db)?;
+            return Ok(());
+        }
+
+        let stored: (String, Vec<u8>, String, String, i64) = sqlx::query_as(
+            "SELECT owner_kind, owner_id, sources, state, expires_at
+             FROM ledger_reservation WHERE id = ?",
+        )
+        .bind(reservation.id.0.to_vec())
+        .fetch_one(&mut *transaction)
         .await
         .map_err(db)?;
-        Ok(())
+        let stored_sources: Vec<ReservationSource> = serde_json::from_str(&stored.2).map_err(db)?;
+        let exact = stored.3 == "pending"
+            && stored.0 == owner_kind
+            && b256(&stored.1)? == owner_id
+            && stored_sources == reservation.sources
+            && stored.4 == i64_of(reservation.expires_at)?;
+        transaction.commit().await.map_err(db)?;
+        match exact {
+            true => Ok(()),
+            false => Err(LedgerStoreError::Conflict(reservation.id)),
+        }
     }
 
     async fn post(&self, id: ReservationId, filled: &[U256]) -> Result<(), LedgerStoreError> {

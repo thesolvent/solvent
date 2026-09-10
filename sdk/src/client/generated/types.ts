@@ -294,6 +294,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/rebates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["rebates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/rebates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["rebate_detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/stats": {
         parameters: {
             query?: never;
@@ -465,11 +497,15 @@ export interface components {
             /** Format: int32 */
             default_fee_bps: number;
             features: components["schemas"]["Features"];
+            /** @description The public executor target for encoded rebate transactions. */
+            filler: string;
             networks: string[];
             /** @description The Permit2 contract verifying the taker witness. */
             permit2: string;
             /** @description The UniswapX reactor that settles taker orders. */
             reactor: string;
+            /** @description The immutable token whose balance gates every strategy to the filler contract. */
+            taker_credential: string;
         };
         /**
          * @description The complete picture of one asset: identity + static metadata + market + protocol status. Every
@@ -933,6 +969,24 @@ export interface components {
             price_impact_pct: number;
             quote_id: string;
         };
+        RebateWork: {
+            amount_in: string;
+            amount_out: string;
+            calldata: string;
+            /** Format: int64 */
+            deadline_block: number;
+            executor_profit: string;
+            id: string;
+            maker: string;
+            maker_rebate: string;
+            nonce: string;
+            /** Format: int64 */
+            published_at: number;
+            strategy_hash: string;
+            to: string;
+            token_in: string;
+            token_out: string;
+        };
         /** @description The envelope wrapping every response. `status_code` sets the HTTP status (never serialized). */
         Response_AppConfig: {
             error?: string | null;
@@ -950,11 +1004,15 @@ export interface components {
                 /** Format: int32 */
                 default_fee_bps: number;
                 features: components["schemas"]["Features"];
+                /** @description The public executor target for encoded rebate transactions. */
+                filler: string;
                 networks: string[];
                 /** @description The Permit2 contract verifying the taker witness. */
                 permit2: string;
                 /** @description The UniswapX reactor that settles taker orders. */
                 reactor: string;
+                /** @description The immutable token whose balance gates every strategy to the filler contract. */
+                taker_credential: string;
             };
             status: components["schemas"]["Status"];
         };
@@ -1419,6 +1477,29 @@ export interface components {
             status: components["schemas"]["Status"];
         };
         /** @description The envelope wrapping every response. `status_code` sets the HTTP status (never serialized). */
+        Response_RebateWork: {
+            error?: string | null;
+            result?: {
+                amount_in: string;
+                amount_out: string;
+                calldata: string;
+                /** Format: int64 */
+                deadline_block: number;
+                executor_profit: string;
+                id: string;
+                maker: string;
+                maker_rebate: string;
+                nonce: string;
+                /** Format: int64 */
+                published_at: number;
+                strategy_hash: string;
+                to: string;
+                token_in: string;
+                token_out: string;
+            };
+            status: components["schemas"]["Status"];
+        };
+        /** @description The envelope wrapping every response. `status_code` sets the HTTP status (never serialized). */
         Response_Stats: {
             error?: string | null;
             result?: {
@@ -1490,6 +1571,29 @@ export interface components {
                 taker: string;
                 tx_hash?: string | null;
             };
+            status: components["schemas"]["Status"];
+        };
+        /** @description The envelope wrapping every response. `status_code` sets the HTTP status (never serialized). */
+        Response_Vec_RebateWork: {
+            error?: string | null;
+            result?: {
+                amount_in: string;
+                amount_out: string;
+                calldata: string;
+                /** Format: int64 */
+                deadline_block: number;
+                executor_profit: string;
+                id: string;
+                maker: string;
+                maker_rebate: string;
+                nonce: string;
+                /** Format: int64 */
+                published_at: number;
+                strategy_hash: string;
+                to: string;
+                token_in: string;
+                token_out: string;
+            }[];
             status: components["schemas"]["Status"];
         };
         /**
@@ -2098,6 +2202,54 @@ export interface operations {
                 };
             };
             /** @description Unknown position */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    rebates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_Vec_RebateWork"];
+                };
+            };
+        };
+    };
+    rebate_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Rebate batch id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_RebateWork"];
+                };
+            };
+            /** @description Unknown or non-executable rebate batch */
             404: {
                 headers: {
                     [name: string]: unknown;

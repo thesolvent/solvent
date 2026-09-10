@@ -24,11 +24,14 @@ Use a different salt to ship multiple positions with the same maker, curve, rang
 initial token amounts:
 
 ```ts
+import { createSolventClient } from "@solvent/sdk/client";
 import { Strategy } from "@solvent/sdk/construction";
 
+const api = createSolventClient({ baseUrl: "https://api.example.com" });
 const strategy = Strategy.inRange({ base, quote, mid: "3000", halfWidthPct: 8 }).fee(5);
-const first = strategy.build(maker);
-const second = strategy.salt(1n).build(maker);
+const { taker_credential: takerCredential } = await api.config();
+const first = strategy.build(maker, takerCredential);
+const second = strategy.salt(1n).build(maker, takerCredential);
 ```
 
 `salt` reuses SwapVM's `withSalt` instruction, which changes the strategy hash while preserving
@@ -36,6 +39,10 @@ the pricing instructions. It accepts an unsigned 64-bit bigint; zero keeps the u
 The same maker, configuration, and salt reproduce the same hash. `fee` and `salt` return new
 builders and compose in either order. Ship both orders with the same token amounts to give
 each copy the same initial inventory.
+
+Every strategy starts with SwapVM's `onlyTakerTokenBalanceNonZero` instruction for the deployed
+filler credential returned by `GET /config`. This keeps direct public calls from moving the curve
+outside Solvent's protected fill and rebate path.
 
 Aqua hashes are immutable, including after a position is docked. A repeat seed checks
 `rawBalances.tokensCount`: `0` is unused, `255` is docked, and other values are active. Skip

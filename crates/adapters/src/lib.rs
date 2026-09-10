@@ -13,6 +13,7 @@ pub mod http;
 pub mod ingest;
 pub mod ledger;
 pub mod metrics;
+pub mod rebate;
 pub mod registry;
 pub mod routing;
 pub mod trade;
