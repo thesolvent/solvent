@@ -14,8 +14,8 @@ use alloy::signers::local::PrivateKeySigner;
 use solvent_adapters::balances::AlloyBalancesOracle;
 use solvent_adapters::chain::ChainHead;
 use solvent_adapters::crosschain::{
-    AlloyStepValidator, CcipStepMaterializer, ServiceLegQuoter, SqlitePreparationStore,
-    SqliteStepStore,
+    AlloyDirectPlanAuthor, AlloyStepValidator, CcipStepMaterializer, DirectPlanAuthorConfig,
+    ServiceLegQuoter, SqlitePreparationStore, SqliteStepStore,
 };
 use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
 use solvent_adapters::http::state::AppState;
@@ -32,7 +32,7 @@ use solvent_core::crosschain::{LocalCrossChainService, LocalStepService};
 use solvent_core::deps::asset::PairPriceHistorySource;
 use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::crosschain::{
-    LegQuoter, PreparationStore, StepMaterializer, StepStore, StepValidator,
+    DirectPlanAuthor, LegQuoter, PreparationStore, StepMaterializer, StepStore, StepValidator,
 };
 use solvent_core::deps::execution::{Execution, SimGate};
 use solvent_core::deps::ingest::FillBuilder;
@@ -370,8 +370,41 @@ async fn main() -> Result<(), StartupError> {
             .with_validator(validator)
             .with_materializer(materializer),
         );
+        let direct_author: Option<Arc<dyn DirectPlanAuthor>> = crosschain
+            .direct_author
+            .as_ref()
+            .map(|direct| {
+                let maker_key = std::env::var("SOLVENT_CROSSCHAIN_MAKER_KEY")
+                    .map_err(|_| StartupError::MissingSecret("SOLVENT_CROSSCHAIN_MAKER_KEY"))?;
+                let maker = maker_key
+                    .parse::<PrivateKeySigner>()
+                    .map_err(|error| StartupError::Key(error.to_string()))?;
+                AlloyDirectPlanAuthor::new(
+                    DirectPlanAuthorConfig {
+                        origin_chain: ChainId(direct.origin_chain_id),
+                        destination_chain: ChainId(config.chain_id),
+                        origin_settler: crosschain.origin_settler,
+                        destination_app: crosschain.destination_app,
+                        origin_proof_outbox: direct.origin_proof_outbox,
+                        destination_proof_outbox: direct.destination_proof_outbox,
+                        origin_strategy_hash: solvent_core::primitives::StrategyHash(
+                            direct.origin_strategy_hash,
+                        ),
+                    },
+                    maker,
+                )
+                .map(|author| Arc::new(author) as Arc<dyn DirectPlanAuthor>)
+                .map_err(SolventError::from)
+                .map_err(StartupError::from)
+            })
+            .transpose()?;
         let internal_listener = tokio::net::TcpListener::bind(crosschain.bind_addr).await?;
-        let internal_router = http::crosschain_internal_router(local, steps, authorization);
+        let internal_router = http::crosschain_internal_router_with_author(
+            local,
+            steps,
+            authorization,
+            direct_author,
+        );
         obs_info!(addr = %crosschain.bind_addr, "private cross-chain service listening");
         tokio::spawn(async move {
             if let Err(error) = axum::serve(internal_listener, internal_router).await {

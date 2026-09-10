@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::primitives::crosschain::{
-    ChainExecutionPlan, LegQuote, LegQuoteRequest, Preparation, RemoteCommand, StepEvidence,
-    StepValidationContext,
+    ChainExecutionPlan, DirectExecutionPlans, DirectOrderAuthorization, LegQuote, LegQuoteRequest,
+    Preparation, RemoteCommand, StepEvidence, StepValidationContext,
 };
 use crate::primitives::{AggregateQuoteId, CrossChainOrderId, CrossChainStepId, PrepareToken};
 
@@ -34,6 +34,15 @@ pub trait RemoteSolvent: Send + Sync {
         context: &StepValidationContext,
         plan: &ChainExecutionPlan,
     ) -> Result<(), RemoteSolventError>;
+    async fn author_direct(
+        &self,
+        authorization: &DirectOrderAuthorization,
+    ) -> Result<DirectExecutionPlans, RemoteSolventError> {
+        let _ = authorization;
+        Err(RemoteSolventError::Rejected(
+            "remote Solvent does not support direct plan authoring".to_string(),
+        ))
+    }
     async fn stage_cctp_completion(
         &self,
         context: &StepValidationContext,

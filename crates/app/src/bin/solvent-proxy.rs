@@ -4,12 +4,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use alloy::primitives::Address;
+use alloy::primitives::{Address, FixedBytes};
 use serde::Deserialize;
 use solvent_adapters::crosschain::{
-    CircleCctpCompletion, CircleIrisClient, SolventClient, SqliteSagaStore,
+    CircleCctpCompletion, CircleIrisClient, DirectOrderDraftBuilder, DirectOrderDraftConfig,
+    SolventClient, SqliteSagaStore,
 };
-use solvent_adapters::http::crosschain_proxy_router;
+use solvent_adapters::http::crosschain_proxy_router_with_drafts;
 use solvent_adapters::ledger::SystemClock;
 use solvent_core::crosschain::CrossChainProxy;
 use solvent_core::deps::crosschain::{CctpAttestation, CctpCompletion, RemoteSolvent, SagaStore};
@@ -25,7 +26,21 @@ struct ProxyConfig {
     #[serde(default = "default_poll_interval_ms")]
     poll_interval_ms: u64,
     #[serde(default)]
+    direct: Option<DirectDraftProxyConfig>,
+    #[serde(default)]
     cctp: Option<CctpProxyConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DirectDraftProxyConfig {
+    origin_chain_id: u64,
+    destination_chain_id: u64,
+    origin_settler: Address,
+    compact: Address,
+    destination_settler: Address,
+    fill_proof_verifier: Address,
+    exclusive_filler: Address,
+    compact_lock_tag: FixedBytes<12>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,6 +88,21 @@ async fn main() -> Result<(), ProxyStartupError> {
     let path =
         std::env::var("SOLVENT_PROXY_CONFIG").unwrap_or_else(|_| "solvent-proxy".to_string());
     let config = ProxyConfig::load(&path)?;
+    let direct_drafts = config
+        .direct
+        .map(|direct| {
+            DirectOrderDraftBuilder::new(DirectOrderDraftConfig {
+                origin_chain: solvent_core::primitives::ChainId(direct.origin_chain_id),
+                destination_chain: solvent_core::primitives::ChainId(direct.destination_chain_id),
+                origin_settler: direct.origin_settler,
+                compact: direct.compact,
+                destination_settler: direct.destination_settler,
+                fill_proof_verifier: direct.fill_proof_verifier,
+                exclusive_filler: direct.exclusive_filler,
+                compact_lock_tag: direct.compact_lock_tag,
+            })
+        })
+        .transpose()?;
     let pool = SqlitePool::connect(&config.database_url).await?;
     let saga_store = Arc::new(SqliteSagaStore::new(pool));
     saga_store
@@ -133,7 +163,7 @@ async fn main() -> Result<(), ProxyStartupError> {
     info!(addr = %config.bind_addr, "cross-chain proxy listening");
     axum::serve(
         listener,
-        crosschain_proxy_router(proxy, Arc::new(SystemClock)),
+        crosschain_proxy_router_with_drafts(proxy, Arc::new(SystemClock), direct_drafts),
     )
     .await?;
     Ok(())

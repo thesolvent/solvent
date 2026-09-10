@@ -7,8 +7,8 @@ use crate::deps::crosschain::{
     SagaStore,
 };
 use crate::primitives::crosschain::{
-    AggregateQuote, ChainExecutionPlan, CrossChainSaga, LegQuote, LegQuoteRequest, LegRole,
-    RemoteCommand, SagaState,
+    AggregateQuote, ChainExecutionPlan, CrossChainSaga, DirectOrderAuthorization, LegQuote,
+    LegQuoteRequest, LegRole, RemoteCommand, SagaState,
 };
 use crate::primitives::{AggregateQuoteId, CrossChainOrderId, CrossChainStepId, SolventError};
 
@@ -174,6 +174,22 @@ impl CrossChainProxy {
 
         self.continue_preparation(&mut saga).await?;
         Ok(saga)
+    }
+
+    pub async fn start_direct(
+        &self,
+        authorization: DirectOrderAuthorization,
+        now_unix: u64,
+    ) -> Result<CrossChainSaga, SolventError> {
+        let plans = self.destination.author_direct(&authorization).await?;
+        self.start(
+            authorization.order_id,
+            authorization.quote,
+            &plans.origin,
+            &plans.destination,
+            now_unix,
+        )
+        .await
     }
 
     /// Advance by at most one remote command. Repeating this method is always safe.
@@ -693,6 +709,10 @@ pub(crate) fn validate_aggregate_binding(
         ));
     }
     Ok(())
+}
+
+pub fn validate_aggregate_quote(quote: &AggregateQuote, now_unix: u64) -> Result<(), SolventError> {
+    validate_aggregate_binding(quote, now_unix)
 }
 
 pub(crate) fn step_id(

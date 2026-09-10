@@ -10,10 +10,10 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde::Deserialize;
 use solvent_core::crosschain::{LocalCrossChainService, LocalStepService};
-use solvent_core::deps::crosschain::RemoteProgress;
+use solvent_core::deps::crosschain::{DirectPlanAuthor, RemoteProgress};
 use solvent_core::primitives::crosschain::{
-    ChainExecutionPlan, LegQuote, LegQuoteRequest, Preparation, RemoteCommand,
-    StepValidationContext,
+    ChainExecutionPlan, DirectExecutionPlans, DirectOrderAuthorization, LegQuote, LegQuoteRequest,
+    Preparation, RemoteCommand, StepValidationContext,
 };
 use solvent_core::primitives::{
     AggregateQuoteId, CrossChainOrderId, CrossChainStepId, PrepareToken, SolventError,
@@ -23,6 +23,7 @@ use solvent_core::primitives::{
 struct InternalState {
     local: Arc<LocalCrossChainService>,
     steps: Arc<LocalStepService>,
+    direct_author: Option<Arc<dyn DirectPlanAuthor>>,
 }
 
 #[derive(Clone)]
@@ -35,11 +36,25 @@ pub fn crosschain_internal_router(
     steps: Arc<LocalStepService>,
     authorization: HeaderValue,
 ) -> Router {
-    let state = InternalState { local, steps };
+    crosschain_internal_router_with_author(local, steps, authorization, None)
+}
+
+pub fn crosschain_internal_router_with_author(
+    local: Arc<LocalCrossChainService>,
+    steps: Arc<LocalStepService>,
+    authorization: HeaderValue,
+    direct_author: Option<Arc<dyn DirectPlanAuthor>>,
+) -> Router {
+    let state = InternalState {
+        local,
+        steps,
+        direct_author,
+    };
     let auth = InternalAuth { authorization };
     Router::new()
         .route("/internal/v1/cross-chain/leg-quotes", post(leg_quote))
         .route("/internal/v1/cross-chain/stage", post(stage))
+        .route("/internal/v1/cross-chain/direct-plans", post(author_direct))
         .route(
             "/internal/v1/cross-chain/stage-cctp-completion",
             post(stage_cctp_completion),
@@ -57,6 +72,28 @@ pub fn crosschain_internal_router(
         .route("/internal/v1/cross-chain/steps", post(command))
         .with_state(state)
         .layer(middleware::from_fn_with_state(auth, require_auth))
+}
+
+async fn author_direct(
+    State(state): State<InternalState>,
+    Json(authorization): Json<DirectOrderAuthorization>,
+) -> Result<Json<DirectExecutionPlans>, StatusCode> {
+    let author = state
+        .direct_author
+        .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    author
+        .author(&authorization)
+        .await
+        .map(Json)
+        .map_err(|error| match error {
+            solvent_core::deps::crosschain::DirectPlanAuthorError::Invalid(_) => {
+                StatusCode::BAD_REQUEST
+            }
+            solvent_core::deps::crosschain::DirectPlanAuthorError::Unavailable(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        })
 }
 
 async fn require_auth(

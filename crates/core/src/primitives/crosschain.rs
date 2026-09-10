@@ -167,6 +167,133 @@ pub struct AggregateQuote {
     pub expires_at_unix: u64,
 }
 
+/// Exact direct-route terms authorized by the sponsor for chain-local plan construction.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectOrderAuthorization {
+    pub quote: AggregateQuote,
+    pub order_id: CrossChainOrderId,
+    pub order: DirectSettlementOrder,
+    pub mandate: DirectSettlementMandate,
+    pub compact_claim: CompactClaimAuthorization,
+}
+
+impl core::fmt::Debug for DirectOrderAuthorization {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("DirectOrderAuthorization")
+            .field("quote", &self.quote)
+            .field("order_id", &self.order_id)
+            .field("order", &self.order)
+            .field("mandate", &self.mandate)
+            .field("compact_claim", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectSettlementOrder {
+    pub user: Address,
+    pub nonce: U256,
+    pub origin_chain_id: u64,
+    pub origin_settler: Address,
+    pub compact: Address,
+    pub compact_id: U256,
+    pub compact_expires: u64,
+    pub input_token: Address,
+    pub input_amount: U256,
+    pub destination_chain_id: u64,
+    pub output_token: Address,
+    pub minimum_output_amount: U256,
+    pub recipient: Address,
+    pub destination_settler: Address,
+    pub fill_proof_verifier: Address,
+    pub exclusive_filler: Address,
+    pub exclusivity_ends: u64,
+    pub fill_deadline: u64,
+    pub route_kind: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectSettlementMandate {
+    pub order_id: B256,
+    pub destination_chain_id: u64,
+    pub destination_settler: Address,
+    pub fill_proof_verifier: Address,
+    pub output_token: Address,
+    pub minimum_output_amount: U256,
+    pub recipient: Address,
+    pub fill_deadline: u64,
+    pub exclusive_filler: Address,
+    pub route_kind: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectExecutionPlans {
+    pub origin: ChainExecutionPlan,
+    pub destination: ChainExecutionPlan,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompactClaimAuthorization {
+    pub sponsor_signature: Bytes,
+    pub sponsor: Address,
+    pub nonce: U256,
+    pub expires: u64,
+    pub witness: B256,
+    pub witness_typestring: String,
+    pub id: U256,
+    pub allocated_amount: U256,
+    pub claimant: Address,
+    pub claimant_amount: U256,
+}
+
+impl core::fmt::Debug for CompactClaimAuthorization {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("CompactClaimAuthorization")
+            .field("sponsor_signature", &"[REDACTED]")
+            .field("sponsor", &self.sponsor)
+            .field("nonce", &self.nonce)
+            .field("expires", &self.expires)
+            .field("witness", &self.witness)
+            .field("witness_typestring", &self.witness_typestring)
+            .field("id", &self.id)
+            .field("allocated_amount", &self.allocated_amount)
+            .field("claimant", &self.claimant)
+            .field("claimant_amount", &self.claimant_amount)
+            .finish()
+    }
+}
+
+/// Destination maker's order-bound authorization; its signature must never enter diagnostics.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignedDirectMakerQuote {
+    pub maker: Address,
+    pub destination_strategy_hash: B256,
+    pub origin_strategy_hash: B256,
+    pub output_amount: U256,
+    pub repayment_amount: U256,
+    pub nonce: U256,
+    pub expires: u64,
+    pub signature: Bytes,
+}
+
+impl core::fmt::Debug for SignedDirectMakerQuote {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("SignedDirectMakerQuote")
+            .field("maker", &self.maker)
+            .field("destination_strategy_hash", &self.destination_strategy_hash)
+            .field("origin_strategy_hash", &self.origin_strategy_hash)
+            .field("output_amount", &self.output_amount)
+            .field("repayment_amount", &self.repayment_amount)
+            .field("nonce", &self.nonce)
+            .field("expires", &self.expires)
+            .field("signature", &"[REDACTED]")
+            .finish()
+    }
+}
+
 /// State of a chain-local capital hold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -7,9 +7,9 @@ use thiserror::Error;
 use crate::deps::asset::PairPriceHistorySourceError;
 use crate::deps::balances::BalancesOracleError;
 use crate::deps::crosschain::{
-    CctpAttestationError, CctpCompletionError, LegQuoteStoreError, LegQuoterError,
-    PreparationStoreError, RemoteSolventError, SagaStoreError, StepMaterializerError,
-    StepStoreError, StepValidatorError,
+    CctpAttestationError, CctpCompletionError, DirectPlanAuthorError, LegQuoteStoreError,
+    LegQuoterError, PreparationStoreError, RemoteSolventError, SagaStoreError,
+    StepMaterializerError, StepStoreError, StepValidatorError,
 };
 use crate::deps::execution::{ExecutionError, SettlementError, SimError};
 use crate::deps::ingest::{FillBuilderError, NormalizeError};
@@ -37,6 +37,8 @@ pub enum SolventError {
     StepMaterializer(#[from] StepMaterializerError),
     #[error("cross-chain step validation: {0}")]
     StepValidator(#[from] StepValidatorError),
+    #[error("direct plan author: {0}")]
+    DirectPlanAuthor(#[from] DirectPlanAuthorError),
     #[error("CCTP attestation: {0}")]
     CctpAttestation(#[from] CctpAttestationError),
     #[error("CCTP completion: {0}")]

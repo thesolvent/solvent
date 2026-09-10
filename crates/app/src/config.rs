@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
-use alloy::primitives::{address, Address};
+use alloy::primitives::{address, Address, B256};
 use serde::Deserialize;
 use solvent_adapters::http::state::{AppConfig, Features};
 use solvent_core::asset::TokenList;
@@ -89,6 +89,16 @@ pub struct CrossChainConfig {
     pub proof_outbox: Address,
     #[serde(default = "default_crosschain_quote_ttl_secs")]
     pub quote_ttl_secs: u64,
+    #[serde(default)]
+    pub direct_author: Option<DirectAuthorConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DirectAuthorConfig {
+    pub origin_chain_id: u64,
+    pub origin_proof_outbox: Address,
+    pub destination_proof_outbox: Address,
+    pub origin_strategy_hash: B256,
 }
 
 /// One Binance price symbol and the tokens whose USD price it feeds.

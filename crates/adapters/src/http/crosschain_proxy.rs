@@ -2,7 +2,11 @@
 
 use std::sync::Arc;
 
-use alloy::primitives::{Address, B256, U256};
+use crate::crosschain::{
+    CompactCommitmentTerms, DirectOrderDraft, DirectOrderDraftBuilder, DirectOrderDraftRequest,
+    SolventCompactMandate, SolventCompactOrder,
+};
+use alloy::primitives::{Address, Bytes, B256, U256};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
@@ -20,18 +24,63 @@ use utoipa::OpenApi;
 struct ProxyState {
     proxy: Arc<CrossChainProxy>,
     clock: Arc<dyn Clock>,
+    direct_drafts: Option<DirectOrderDraftBuilder>,
 }
 
 pub fn crosschain_proxy_router(proxy: Arc<CrossChainProxy>, clock: Arc<dyn Clock>) -> Router {
-    let state = ProxyState { proxy, clock };
+    crosschain_proxy_router_with_drafts(proxy, clock, None)
+}
+
+pub fn crosschain_proxy_router_with_drafts(
+    proxy: Arc<CrossChainProxy>,
+    clock: Arc<dyn Clock>,
+    direct_drafts: Option<DirectOrderDraftBuilder>,
+) -> Router {
+    let state = ProxyState {
+        proxy,
+        clock,
+        direct_drafts,
+    };
     Router::new()
         .merge(documentation_routes())
         .route("/healthz", get(healthz))
         .route("/v1/cross-chain/quote", post(quote))
+        .route("/v1/cross-chain/orders/draft", post(draft_order))
+        .route("/v1/cross-chain/orders/direct", post(create_direct_order))
         .route("/v1/cross-chain/orders", post(create_order))
         .route("/v1/cross-chain/orders/{id}", get(order))
         .route("/v1/cross-chain/orders/{id}/advance", post(advance))
         .with_state(state)
+}
+
+/// Build the exact Compact commitment and settlement terms the wallet will authorize.
+#[utoipa::path(
+    post,
+    path = "/v1/cross-chain/orders/draft",
+    tag = "cross-chain",
+    request_body = DirectOrderDraftRequest,
+    responses(
+        (status = 200, description = "Wallet-signable direct-order terms", body = DirectOrderDraft),
+        (status = 400, description = "Quote or authorization terms are invalid", body = ErrorBody),
+        (status = 503, description = "Direct-order drafting is not configured", body = ErrorBody),
+    )
+)]
+async fn draft_order(
+    State(state): State<ProxyState>,
+    Json(request): Json<DirectOrderDraftRequest>,
+) -> Result<Json<DirectOrderDraft>, (StatusCode, Json<ErrorBody>)> {
+    let builder = state.direct_drafts.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorBody {
+                error: "direct-order drafting is not configured".to_string(),
+            }),
+        )
+    })?;
+    builder
+        .draft(request, state.clock.now_unix())
+        .map(Json)
+        .map_err(proxy_error)
 }
 
 fn documentation_routes<S>() -> Router<S>
@@ -72,6 +121,13 @@ pub struct CreateCrossChainOrderRequest {
     pub quote: AggregateQuote,
     pub origin_plan: ChainExecutionPlan,
     pub destination_plan: ChainExecutionPlan,
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct CreateDirectOrderRequest {
+    pub draft: DirectOrderDraftRequest,
+    #[schema(value_type = String)]
+    pub sponsor_signature: Bytes,
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -163,6 +219,43 @@ async fn create_order(
         .map_err(proxy_error)
 }
 
+/// Verify the wallet authorization, obtain chain-authored plans, and start a direct route.
+#[utoipa::path(
+    post,
+    path = "/v1/cross-chain/orders/direct",
+    tag = "cross-chain",
+    request_body = CreateDirectOrderRequest,
+    responses(
+        (status = 200, description = "Direct cross-chain order created", body = CrossChainOrderResponse),
+        (status = 400, description = "Quote or wallet authorization is invalid", body = ErrorBody),
+        (status = 502, description = "A chain service or saga store is unavailable", body = ErrorBody),
+        (status = 503, description = "Direct settlement is not configured", body = ErrorBody),
+    )
+)]
+async fn create_direct_order(
+    State(state): State<ProxyState>,
+    Json(request): Json<CreateDirectOrderRequest>,
+) -> Result<Json<CrossChainOrderResponse>, (StatusCode, Json<ErrorBody>)> {
+    let builder = state.direct_drafts.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorBody {
+                error: "direct-order settlement is not configured".to_string(),
+            }),
+        )
+    })?;
+    let now = state.clock.now_unix();
+    let authorization = builder
+        .authorize(request.draft, request.sponsor_signature, now)
+        .map_err(proxy_error)?;
+    state
+        .proxy
+        .start_direct(authorization, now)
+        .await
+        .map(|order| Json(CrossChainOrderResponse { order }))
+        .map_err(proxy_error)
+}
+
 /// Return the last durable state recorded for a cross-chain order.
 #[utoipa::path(
     get,
@@ -248,11 +341,17 @@ async fn healthz() -> &'static str {
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Solvent Cross-Chain Proxy API", version = "0.1.0"),
-    paths(quote, create_order, order, advance),
+    paths(quote, draft_order, create_direct_order, create_order, order, advance),
     components(schemas(
         CrossChainQuoteRequest,
         CreateCrossChainOrderRequest,
+        CreateDirectOrderRequest,
         CrossChainOrderResponse,
+        DirectOrderDraftRequest,
+        DirectOrderDraft,
+        SolventCompactOrder,
+        SolventCompactMandate,
+        CompactCommitmentTerms,
         ErrorBody,
         CrossChainRoute,
         LegRole,

@@ -4,8 +4,8 @@ use reqwest::{Client, StatusCode, Url};
 use serde::Serialize;
 use solvent_core::deps::crosschain::{RemoteProgress, RemoteSolvent, RemoteSolventError};
 use solvent_core::primitives::crosschain::{
-    ChainExecutionPlan, LegQuote, LegQuoteRequest, Preparation, RemoteCommand,
-    StepValidationContext,
+    ChainExecutionPlan, DirectExecutionPlans, DirectOrderAuthorization, LegQuote, LegQuoteRequest,
+    Preparation, RemoteCommand, StepValidationContext,
 };
 use solvent_core::primitives::{
     AggregateQuoteId, CrossChainOrderId, CrossChainStepId, PrepareToken,
@@ -106,6 +106,14 @@ struct CommandRequest {
 impl RemoteSolvent for SolventClient {
     async fn quote(&self, request: &LegQuoteRequest) -> Result<LegQuote, RemoteSolventError> {
         self.post("internal/v1/cross-chain/leg-quotes", request)
+            .await
+    }
+
+    async fn author_direct(
+        &self,
+        authorization: &DirectOrderAuthorization,
+    ) -> Result<DirectExecutionPlans, RemoteSolventError> {
+        self.post("internal/v1/cross-chain/direct-plans", authorization)
             .await
     }
 

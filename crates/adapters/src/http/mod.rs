@@ -13,8 +13,8 @@ pub mod openapi;
 pub mod primitives;
 pub mod state;
 
-pub use crosschain_internal::crosschain_internal_router;
-pub use crosschain_proxy::crosschain_proxy_router;
+pub use crosschain_internal::{crosschain_internal_router, crosschain_internal_router_with_author};
+pub use crosschain_proxy::{crosschain_proxy_router, crosschain_proxy_router_with_drafts};
 pub use depth::DepthReader;
 
 use std::time::Duration;
