@@ -9,7 +9,7 @@ use crate::deps::balances::BalancesOracleError;
 use crate::deps::crosschain::{
     CctpAttestationError, CctpCompletionError, LegQuoteStoreError, LegQuoterError,
     PreparationStoreError, RemoteSolventError, SagaStoreError, StepMaterializerError,
-    StepStoreError,
+    StepStoreError, StepValidatorError,
 };
 use crate::deps::execution::{ExecutionError, SettlementError, SimError};
 use crate::deps::ingest::{FillBuilderError, NormalizeError};
@@ -35,6 +35,8 @@ pub enum SolventError {
     StepStore(#[from] StepStoreError),
     #[error("cross-chain step materializer: {0}")]
     StepMaterializer(#[from] StepMaterializerError),
+    #[error("cross-chain step validation: {0}")]
+    StepValidator(#[from] StepValidatorError),
     #[error("CCTP attestation: {0}")]
     CctpAttestation(#[from] CctpAttestationError),
     #[error("CCTP completion: {0}")]

@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::primitives::crosschain::{
     ChainExecutionPlan, LegQuote, LegQuoteRequest, Preparation, RemoteCommand, StepEvidence,
+    StepValidationContext,
 };
 use crate::primitives::{AggregateQuoteId, CrossChainOrderId, CrossChainStepId, PrepareToken};
 
@@ -30,9 +31,20 @@ pub trait RemoteSolvent: Send + Sync {
     async fn quote(&self, request: &LegQuoteRequest) -> Result<LegQuote, RemoteSolventError>;
     async fn stage(
         &self,
-        order_id: CrossChainOrderId,
+        context: &StepValidationContext,
         plan: &ChainExecutionPlan,
     ) -> Result<(), RemoteSolventError>;
+    async fn stage_cctp_completion(
+        &self,
+        context: &StepValidationContext,
+        plan: &ChainExecutionPlan,
+        preparation: PrepareToken,
+    ) -> Result<(), RemoteSolventError> {
+        let _ = (context, plan, preparation);
+        Err(RemoteSolventError::Rejected(
+            "remote Solvent does not support authorized CCTP completion staging".to_string(),
+        ))
+    }
     async fn prepare(
         &self,
         aggregate_id: AggregateQuoteId,

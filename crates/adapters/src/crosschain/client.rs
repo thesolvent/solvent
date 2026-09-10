@@ -5,6 +5,7 @@ use serde::Serialize;
 use solvent_core::deps::crosschain::{RemoteProgress, RemoteSolvent, RemoteSolventError};
 use solvent_core::primitives::crosschain::{
     ChainExecutionPlan, LegQuote, LegQuoteRequest, Preparation, RemoteCommand,
+    StepValidationContext,
 };
 use solvent_core::primitives::{
     AggregateQuoteId, CrossChainOrderId, CrossChainStepId, PrepareToken,
@@ -77,8 +78,15 @@ struct PrepareRequest<'a> {
 
 #[derive(Serialize)]
 struct StageRequest<'a> {
-    order_id: CrossChainOrderId,
+    context: &'a StepValidationContext,
     plan: &'a ChainExecutionPlan,
+}
+
+#[derive(Serialize)]
+struct CompletionStageRequest<'a> {
+    context: &'a StepValidationContext,
+    plan: &'a ChainExecutionPlan,
+    preparation: PrepareToken,
 }
 
 #[derive(Serialize)]
@@ -103,12 +111,29 @@ impl RemoteSolvent for SolventClient {
 
     async fn stage(
         &self,
-        order_id: CrossChainOrderId,
+        context: &StepValidationContext,
         plan: &ChainExecutionPlan,
     ) -> Result<(), RemoteSolventError> {
         self.post(
             "internal/v1/cross-chain/stage",
-            &StageRequest { order_id, plan },
+            &StageRequest { context, plan },
+        )
+        .await
+    }
+
+    async fn stage_cctp_completion(
+        &self,
+        context: &StepValidationContext,
+        plan: &ChainExecutionPlan,
+        preparation: PrepareToken,
+    ) -> Result<(), RemoteSolventError> {
+        self.post(
+            "internal/v1/cross-chain/stage-cctp-completion",
+            &CompletionStageRequest {
+                context,
+                plan,
+                preparation,
+            },
         )
         .await
     }

@@ -5,7 +5,9 @@ use alloy_primitives::keccak256;
 use crate::deps::crosschain::{LegQuoteStore, LegQuoter, PreparationStore};
 use crate::deps::ledger::Clock;
 use crate::ledger::LedgerService;
-use crate::primitives::crosschain::{LegQuote, LegQuoteRequest, Preparation, PreparationState};
+use crate::primitives::crosschain::{
+    LegQuote, LegQuoteRequest, Preparation, PreparationState, StepValidationContext,
+};
 use crate::primitives::ledger::{LedgerError, ReservationState};
 use crate::primitives::{
     AggregateQuoteId, ChainId, IntentId, PrepareToken, ReservationId, SolventError,
@@ -119,6 +121,35 @@ impl LocalCrossChainService {
             Err(error) => return Err(error),
         }
         Ok(self.preparations.insert(&preparation).await?)
+    }
+
+    pub async fn validate_stage_context(
+        &self,
+        context: &StepValidationContext,
+    ) -> Result<(), SolventError> {
+        crate::crosschain::proxy::validate_aggregate_binding(
+            &context.quote,
+            self.clock.now_unix(),
+        )?;
+        let quote = context.local_quote();
+        if quote.local_chain != self.chain_id
+            || quote.quote_id != crate::crosschain::leg_quote_id(quote)
+        {
+            return Err(SolventError::InvalidCrossChain(
+                "stage context does not contain this service's quote".to_string(),
+            ));
+        }
+        let issued = self.quotes.load(quote.quote_id).await?.ok_or_else(|| {
+            SolventError::InvalidCrossChain(
+                "stage context quote was not issued by this service".to_string(),
+            )
+        })?;
+        if issued != *quote {
+            return Err(SolventError::InvalidCrossChain(
+                "stage context differs from the locally issued quote".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     pub async fn commit(&self, token: PrepareToken) -> Result<Preparation, SolventError> {

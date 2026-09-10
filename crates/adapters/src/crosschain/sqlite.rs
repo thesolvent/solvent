@@ -272,29 +272,58 @@ impl StepStore for SqliteStepStore {
         plan: &ChainExecutionPlan,
     ) -> Result<(), StepStoreError> {
         let mut transaction = self.pool.begin().await.map_err(step_db)?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO crosschain_order_binding (order_id, aggregate_id) VALUES (?, ?)",
+        )
+        .bind(order_id.0.to_vec())
+        .bind(plan.aggregate_id.0.to_vec())
+        .execute(&mut *transaction)
+        .await
+        .map_err(step_db)?;
+        let bound: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT aggregate_id FROM crosschain_order_binding WHERE order_id = ?",
+        )
+        .bind(order_id.0.to_vec())
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(step_db)?;
+        let bound = bound
+            .as_deref()
+            .map(aggregate_quote_id)
+            .transpose()?
+            .ok_or(StepStoreError::Conflict)?;
+        if bound != plan.aggregate_id {
+            return Err(StepStoreError::Conflict);
+        }
         for step in &plan.steps {
             let body = serde_json::to_string(step).map_err(step_db)?;
             sqlx::query(
-                "INSERT INTO crosschain_step (order_id, command, body) VALUES (?, ?, ?)
+                "INSERT INTO crosschain_step (order_id, command, aggregate_id, body) VALUES (?, ?, ?, ?)
                  ON CONFLICT(order_id, command) DO NOTHING",
             )
             .bind(order_id.0.to_vec())
             .bind(command_label(step.command))
+            .bind(plan.aggregate_id.0.to_vec())
             .bind(body)
             .execute(&mut *transaction)
             .await
             .map_err(step_db)?;
 
-            let stored: String = sqlx::query_scalar(
-                "SELECT body FROM crosschain_step WHERE order_id = ? AND command = ?",
+            let (aggregate_id, stored): (Option<Vec<u8>>, String) = sqlx::query_as(
+                "SELECT aggregate_id, body FROM crosschain_step WHERE order_id = ? AND command = ?",
             )
             .bind(order_id.0.to_vec())
             .bind(command_label(step.command))
             .fetch_one(&mut *transaction)
             .await
             .map_err(step_db)?;
+            let aggregate_id = aggregate_id
+                .as_deref()
+                .map(aggregate_quote_id)
+                .transpose()?
+                .ok_or(StepStoreError::Conflict)?;
             let stored: PreparedStep = serde_json::from_str(&stored).map_err(step_db)?;
-            if stored != *step {
+            if aggregate_id != plan.aggregate_id || stored != *step {
                 return Err(StepStoreError::Conflict);
             }
         }
@@ -317,6 +346,35 @@ impl StepStore for SqliteStepStore {
         body.map(|body| serde_json::from_str(&body).map_err(step_db))
             .transpose()
     }
+
+    async fn aggregate_id(
+        &self,
+        order_id: CrossChainOrderId,
+        command: RemoteCommand,
+    ) -> Result<Option<AggregateQuoteId>, StepStoreError> {
+        let aggregate_id: Option<Option<Vec<u8>>> = sqlx::query_scalar(
+            "SELECT aggregate_id FROM crosschain_step WHERE order_id = ? AND command = ?",
+        )
+        .bind(order_id.0.to_vec())
+        .bind(command_label(command))
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(step_db)?;
+        aggregate_id
+            .flatten()
+            .as_deref()
+            .map(aggregate_quote_id)
+            .transpose()
+    }
+}
+
+fn aggregate_quote_id(bytes: &[u8]) -> Result<AggregateQuoteId, StepStoreError> {
+    B256::try_from(bytes).map(AggregateQuoteId).map_err(|_| {
+        StepStoreError::Backend(format!(
+            "expected a 32-byte aggregate id, got {}",
+            bytes.len()
+        ))
+    })
 }
 
 fn i64_of(value: u64) -> Result<i64, String> {

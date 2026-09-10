@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::primitives::crosschain::{ChainExecutionPlan, PreparedStep, RemoteCommand};
-use crate::primitives::CrossChainOrderId;
+use crate::primitives::{AggregateQuoteId, CrossChainOrderId};
 
 #[derive(Debug, Error)]
 pub enum StepStoreError {
@@ -24,4 +24,9 @@ pub trait StepStore: Send + Sync {
         order_id: CrossChainOrderId,
         command: RemoteCommand,
     ) -> Result<Option<PreparedStep>, StepStoreError>;
+    async fn aggregate_id(
+        &self,
+        order_id: CrossChainOrderId,
+        command: RemoteCommand,
+    ) -> Result<Option<AggregateQuoteId>, StepStoreError>;
 }

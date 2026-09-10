@@ -7,6 +7,7 @@ mod remote_solvent;
 mod saga_store;
 mod step_materializer;
 mod step_store;
+mod step_validator;
 
 pub use cctp::{
     CctpAttestation, CctpAttestationError, CctpAttestationStatus, CctpFee, CctpRouteCapacity,
@@ -19,3 +20,4 @@ pub use remote_solvent::{RemoteProgress, RemoteSolvent, RemoteSolventError};
 pub use saga_store::{SagaStore, SagaStoreError};
 pub use step_materializer::{StepMaterializer, StepMaterializerError};
 pub use step_store::{StepStore, StepStoreError};
+pub use step_validator::{StepValidator, StepValidatorError};

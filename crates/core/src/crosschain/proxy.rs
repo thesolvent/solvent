@@ -114,18 +114,7 @@ impl CrossChainProxy {
             ));
         }
 
-        if quote.id
-            != aggregate_id(
-                &quote.origin,
-                &quote.destination,
-                quote.bridge_fee,
-                quote.cctp_finality_threshold,
-            )
-        {
-            return Err(SolventError::InvalidCrossChain(
-                "aggregate quote fingerprint is invalid".to_string(),
-            ));
-        }
+        validate_aggregate_binding(&quote, now_unix)?;
         match quote.origin.route {
             crate::primitives::crosschain::CrossChainRoute::Direct
                 if !quote.bridge_fee.is_zero() || quote.cctp_finality_threshold.is_some() =>
@@ -150,15 +139,22 @@ impl CrossChainProxy {
             _ => {}
         }
 
-        if quote.expires_at_unix <= now_unix {
-            return Err(SolventError::InvalidCrossChain(
-                "aggregate quote expired before order admission".to_string(),
-            ));
-        }
         validate_plan(&quote, origin_plan, LegRole::Origin)?;
         validate_plan(&quote, destination_plan, LegRole::Destination)?;
-        self.origin.stage(order_id, origin_plan).await?;
-        self.destination.stage(order_id, destination_plan).await?;
+        let origin_context = crate::primitives::crosschain::StepValidationContext {
+            order_id,
+            quote: quote.clone(),
+            role: LegRole::Origin,
+        };
+        let destination_context = crate::primitives::crosschain::StepValidationContext {
+            order_id,
+            quote: quote.clone(),
+            role: LegRole::Destination,
+        };
+        self.origin.stage(&origin_context, origin_plan).await?;
+        self.destination
+            .stage(&destination_context, destination_plan)
+            .await?;
 
         let mut saga = CrossChainSaga {
             order_id,
@@ -327,13 +323,18 @@ impl CrossChainProxy {
                     match cctp.close_step(order_id, origin_transaction).await {
                         Ok(prepared) => {
                             self.destination
-                                .stage(
-                                    order_id,
+                                .stage_cctp_completion(
+                                    &crate::primitives::crosschain::StepValidationContext {
+                                        order_id,
+                                        quote: saga.quote.clone(),
+                                        role: LegRole::Destination,
+                                    },
                                     &ChainExecutionPlan {
                                         aggregate_id: saga.quote.id,
                                         chain_id: saga.quote.destination.local_chain,
                                         steps: vec![prepared.step],
                                     },
+                                    required_token(saga.destination_prepare)?,
                                 )
                                 .await?;
                             saga.repayment = Some(crate::primitives::crosschain::StepEvidence {
@@ -612,7 +613,7 @@ pub fn aggregate_quote(
     })
 }
 
-fn aggregate_id(
+pub(crate) fn aggregate_id(
     origin: &LegQuote,
     destination: &LegQuote,
     bridge_fee: alloy_primitives::U256,
@@ -624,6 +625,74 @@ fn aggregate_id(
     bytes.extend_from_slice(&bridge_fee.to_be_bytes::<32>());
     bytes.extend_from_slice(&cctp_finality_threshold.unwrap_or_default().to_be_bytes());
     AggregateQuoteId(keccak256(bytes))
+}
+
+pub(crate) fn validate_aggregate_binding(
+    quote: &AggregateQuote,
+    now_unix: u64,
+) -> Result<(), SolventError> {
+    let compatible = quote.id
+        == aggregate_id(
+            &quote.origin,
+            &quote.destination,
+            quote.bridge_fee,
+            quote.cctp_finality_threshold,
+        )
+        && quote.origin.quote_id == leg_quote_id(&quote.origin)
+        && quote.destination.quote_id == leg_quote_id(&quote.destination)
+        && quote.origin.role == LegRole::Origin
+        && quote.destination.role == LegRole::Destination
+        && quote.origin.local_chain != quote.destination.local_chain
+        && quote.origin.local_chain == quote.destination.remote_chain
+        && quote.origin.remote_chain == quote.destination.local_chain
+        && quote.origin.request_id == quote.destination.request_id
+        && quote.origin.route == quote.destination.route
+        && quote.amount_in == quote.origin.amount_in
+        && quote.amount_out == quote.destination.amount_out
+        && quote.expires_at_unix
+            == quote
+                .origin
+                .expires_at_unix
+                .min(quote.destination.expires_at_unix)
+        && !quote.amount_in.is_zero()
+        && !quote.amount_out.is_zero();
+    if !compatible {
+        return Err(SolventError::InvalidCrossChain(
+            "aggregate quote context is inconsistent".to_string(),
+        ));
+    }
+    match quote.origin.route {
+        crate::primitives::crosschain::CrossChainRoute::Direct
+            if !quote.bridge_fee.is_zero() || quote.cctp_finality_threshold.is_some() =>
+        {
+            return Err(SolventError::InvalidCrossChain(
+                "direct quote contains CCTP terms".to_string(),
+            ));
+        }
+        crate::primitives::crosschain::CrossChainRoute::Cctp => {
+            let required = quote
+                .destination
+                .amount_in
+                .checked_add(quote.bridge_fee)
+                .ok_or_else(|| {
+                    SolventError::InvalidCrossChain(
+                        "CCTP repayment plus fee exceeds uint256".to_string(),
+                    )
+                })?;
+            if quote.cctp_finality_threshold.is_none() || quote.origin.amount_out < required {
+                return Err(SolventError::InvalidCrossChain(
+                    "CCTP aggregate terms are inconsistent".to_string(),
+                ));
+            }
+        }
+        _ => {}
+    }
+    if quote.expires_at_unix <= now_unix {
+        return Err(SolventError::InvalidCrossChain(
+            "aggregate quote expired before order admission".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn step_id(
@@ -837,10 +906,19 @@ mod tests {
 
         async fn stage(
             &self,
-            _: CrossChainOrderId,
+            _: &crate::primitives::crosschain::StepValidationContext,
             _: &ChainExecutionPlan,
         ) -> Result<(), RemoteSolventError> {
             Ok(())
+        }
+
+        async fn stage_cctp_completion(
+            &self,
+            context: &crate::primitives::crosschain::StepValidationContext,
+            plan: &ChainExecutionPlan,
+            _: PrepareToken,
+        ) -> Result<(), RemoteSolventError> {
+            self.stage(context, plan).await
         }
 
         async fn prepare(

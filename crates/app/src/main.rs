@@ -14,7 +14,8 @@ use alloy::signers::local::PrivateKeySigner;
 use solvent_adapters::balances::AlloyBalancesOracle;
 use solvent_adapters::chain::ChainHead;
 use solvent_adapters::crosschain::{
-    CcipStepMaterializer, ServiceLegQuoter, SqlitePreparationStore, SqliteStepStore,
+    AlloyStepValidator, CcipStepMaterializer, ServiceLegQuoter, SqlitePreparationStore,
+    SqliteStepStore,
 };
 use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
 use solvent_adapters::http::state::AppState;
@@ -30,7 +31,9 @@ use solvent_core::balances::BalancesService;
 use solvent_core::crosschain::{LocalCrossChainService, LocalStepService};
 use solvent_core::deps::asset::PairPriceHistorySource;
 use solvent_core::deps::balances::BalancesOracle;
-use solvent_core::deps::crosschain::{LegQuoter, PreparationStore, StepMaterializer, StepStore};
+use solvent_core::deps::crosschain::{
+    LegQuoter, PreparationStore, StepMaterializer, StepStore, StepValidator,
+};
 use solvent_core::deps::execution::{Execution, SimGate};
 use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ledger::BudgetSource;
@@ -351,6 +354,10 @@ async fn main() -> Result<(), StartupError> {
         let simulator: Arc<dyn SimGate> = executor.clone();
         let materializer: Arc<dyn StepMaterializer> =
             Arc::new(CcipStepMaterializer::new(provider.clone()));
+        let validator: Arc<dyn StepValidator> = Arc::new(
+            AlloyStepValidator::new(filler_owner, config.native_token)
+                .with_applications(crosschain.origin_settler, crosschain.destination_app),
+        );
         let steps = Arc::new(
             LocalStepService::new(
                 ChainId(config.chain_id),
@@ -360,6 +367,7 @@ async fn main() -> Result<(), StartupError> {
                 execution_port,
                 simulator,
             )
+            .with_validator(validator)
             .with_materializer(materializer),
         );
         let internal_listener = tokio::net::TcpListener::bind(crosschain.bind_addr).await?;

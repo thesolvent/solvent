@@ -73,6 +73,23 @@ pub struct ChainExecutionPlan {
     pub steps: Vec<PreparedStep>,
 }
 
+/// Immutable authority supplied when one chain stages its portion of an aggregate order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StepValidationContext {
+    pub order_id: CrossChainOrderId,
+    pub quote: AggregateQuote,
+    pub role: LegRole,
+}
+
+impl StepValidationContext {
+    pub fn local_quote(&self) -> &LegQuote {
+        match self.role {
+            LegRole::Origin => &self.quote.origin,
+            LegRole::Destination => &self.quote.destination,
+        }
+    }
+}
+
 impl core::fmt::Debug for ChainExecutionPlan {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter

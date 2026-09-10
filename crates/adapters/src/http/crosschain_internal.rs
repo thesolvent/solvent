@@ -13,6 +13,7 @@ use solvent_core::crosschain::{LocalCrossChainService, LocalStepService};
 use solvent_core::deps::crosschain::RemoteProgress;
 use solvent_core::primitives::crosschain::{
     ChainExecutionPlan, LegQuote, LegQuoteRequest, Preparation, RemoteCommand,
+    StepValidationContext,
 };
 use solvent_core::primitives::{
     AggregateQuoteId, CrossChainOrderId, CrossChainStepId, PrepareToken, SolventError,
@@ -39,6 +40,10 @@ pub fn crosschain_internal_router(
     Router::new()
         .route("/internal/v1/cross-chain/leg-quotes", post(leg_quote))
         .route("/internal/v1/cross-chain/stage", post(stage))
+        .route(
+            "/internal/v1/cross-chain/stage-cctp-completion",
+            post(stage_cctp_completion),
+        )
         .route("/internal/v1/cross-chain/preparations", post(prepare))
         .route("/internal/v1/cross-chain/preparations/commit", post(commit))
         .route(
@@ -68,8 +73,15 @@ async fn require_auth(
 
 #[derive(Deserialize)]
 struct StageRequest {
-    order_id: CrossChainOrderId,
+    context: StepValidationContext,
     plan: ChainExecutionPlan,
+}
+
+#[derive(Deserialize)]
+struct CompletionStageRequest {
+    context: StepValidationContext,
+    plan: ChainExecutionPlan,
+    preparation: PrepareToken,
 }
 
 #[derive(Deserialize)]
@@ -108,8 +120,35 @@ async fn stage(
     Json(request): Json<StageRequest>,
 ) -> Result<Json<()>, StatusCode> {
     state
+        .local
+        .validate_stage_context(&request.context)
+        .await
+        .map_err(internal_error)?;
+    state
         .steps
-        .stage(request.order_id, &request.plan)
+        .stage(&request.context, &request.plan)
+        .await
+        .map(|()| Json(()))
+        .map_err(internal_error)
+}
+
+async fn stage_cctp_completion(
+    State(state): State<InternalState>,
+    Json(request): Json<CompletionStageRequest>,
+) -> Result<Json<()>, StatusCode> {
+    state
+        .local
+        .validate_stage_context(&request.context)
+        .await
+        .map_err(internal_error)?;
+    let preparation = state
+        .local
+        .inspect(request.preparation)
+        .await
+        .map_err(internal_error)?;
+    state
+        .steps
+        .stage_cctp_completion(&request.context, &request.plan, &preparation)
         .await
         .map(|()| Json(()))
         .map_err(internal_error)
@@ -167,9 +206,19 @@ async fn command(
     State(state): State<InternalState>,
     Json(request): Json<CommandRequest>,
 ) -> Result<Json<RemoteProgress>, StatusCode> {
+    let preparation = state
+        .local
+        .inspect(request.preparation)
+        .await
+        .map_err(internal_error)?;
     let progress = state
         .steps
-        .command(request.order_id, request.command_id, request.command)
+        .command(
+            request.order_id,
+            request.command_id,
+            request.command,
+            &preparation,
+        )
         .await
         .map_err(internal_error)?;
     if matches!(progress, RemoteProgress::Finalized { .. })
@@ -189,9 +238,9 @@ async fn command(
 
 fn internal_error(error: SolventError) -> StatusCode {
     match error {
-        SolventError::InvalidCrossChain(_) | SolventError::InvalidId { .. } => {
-            StatusCode::BAD_REQUEST
-        }
+        SolventError::InvalidCrossChain(_)
+        | SolventError::StepValidator(_)
+        | SolventError::InvalidId { .. } => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
