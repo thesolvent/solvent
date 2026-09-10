@@ -66,6 +66,22 @@ impl Normalizer for UniswapXV2Normalizer {
         if order.info.deadline < cd.decayEndTime {
             return Err(bad());
         }
+        // `DutchDecayLib` reverts `EndTimeBeforeStartTime` on a window that does not advance, and
+        // `IncorrectAmounts` on a curve that decays the wrong way — an output may only fall and an
+        // input may only rise. Resolving these off-chain would price an order the reactor refuses.
+        if cd.decayEndTime <= cd.decayStartTime {
+            return Err(bad());
+        }
+        if order.baseInput.endAmount < order.baseInput.startAmount {
+            return Err(bad());
+        }
+        if order
+            .baseOutputs
+            .iter()
+            .any(|o| o.endAmount > o.startAmount)
+        {
+            return Err(bad());
+        }
         verify_cosignature(&order, &self.cosigners).ok_or_else(bad)?;
 
         let start_time = u64::try_from(cd.decayStartTime).map_err(|_| bad())?;
@@ -139,6 +155,11 @@ fn overridden(override_amount: U256, base: U256) -> U256 {
 /// that to a decode error, since a caller can do nothing but drop the order either way.
 fn verify_cosignature(order: &V2DutchOrder, cosigners: &[Address]) -> Option<()> {
     let hash: B256 = order_hash(order);
+    // `from_raw` normalises the recovery byte, but the reactor hands `cosignature[64]` straight to
+    // `ecrecover`, which needs 27 or 28. Accepting 0/1 would admit an order that reverts on chain.
+    if !matches!(order.cosignature.get(64), Some(27 | 28)) {
+        return None;
+    }
     let signature = Signature::from_raw(&order.cosignature).ok()?;
     let signer = signature
         .recover_address_from_prehash(&cosign_digest(order, hash))
@@ -318,6 +339,56 @@ mod tests {
         rejects(&tampered(|o| {
             o.cosignerData.outputAmounts[0] = o.baseOutputs[0].startAmount - U256::from(1u64)
         }));
+    }
+
+    /// `EndTimeBeforeStartTime`: a window that does not advance.
+    #[test]
+    fn rejects_a_decay_window_that_does_not_advance() {
+        rejects(&tampered(|o| {
+            o.cosignerData.decayEndTime = o.cosignerData.decayStartTime
+        }));
+        rejects(&tampered(|o| {
+            o.cosignerData.decayEndTime = o.cosignerData.decayStartTime - U256::from(1u64)
+        }));
+    }
+
+    /// `IncorrectAmounts`: an output may only fall.
+    #[test]
+    fn rejects_an_output_that_decays_upward() {
+        rejects(&tampered(|o| {
+            o.baseOutputs[0].endAmount = o.baseOutputs[0].startAmount + U256::from(1u64)
+        }));
+    }
+
+    /// `IncorrectAmounts`: an input may only rise.
+    #[test]
+    fn rejects_an_input_that_decays_downward() {
+        rejects(&tampered(|o| {
+            o.baseInput.endAmount = o.baseInput.startAmount - U256::from(1u64)
+        }));
+    }
+
+    /// The reactor feeds `cosignature[64]` to `ecrecover`, which needs 27/28. A genuine signature
+    /// with the recovery byte rewritten to 0/1 still recovers locally and reverts on chain.
+    #[test]
+    fn rejects_a_cosignature_with_a_raw_recovery_byte() {
+        let (raw, normalizer) = fixture();
+        let mut order = V2DutchOrder::abi_decode(&raw.payload).expect("decode");
+        let mut sig = order.cosignature.to_vec();
+        assert!(matches!(sig[64], 27 | 28), "fixture is well formed");
+        sig[64] -= 27;
+        order.cosignature = Bytes::from(sig);
+        let forged = RawOrder::new(
+            ProtocolId::UniswapXV2,
+            ChainId(1),
+            Bytes::from(order.abi_encode()),
+            raw.signature.clone(),
+            raw.observed_at,
+        );
+        assert!(matches!(
+            normalizer.normalize(&forged),
+            Err(NormalizeError::Decode(_))
+        ));
     }
 
     /// `DeadlineBeforeEndTime`: the decay may not outlive the order.

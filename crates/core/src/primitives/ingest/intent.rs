@@ -212,7 +212,7 @@ impl Intent {
                 (output.token == token)
                     .then(|| per_leg(output.curve.amount_at(at)))
                     .flatten()
-                    .map(|amount| total.saturating_add(amount))
+                    .and_then(|amount| total.checked_add(amount))
             })
             .map(|amount| Delivery { token, amount })
     }
