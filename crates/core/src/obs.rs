@@ -9,9 +9,18 @@ use core::fmt;
 pub use tracing::{debug, error, info, warn};
 
 /// No-op stand-in for the tracing macros when the `tracing` feature is off.
+///
+/// It still borrows every value it was handed. Discarding the tokens outright would make a variable
+/// that is only ever logged read as unused, so the crate would only be warning-clean in whichever
+/// feature set happened to enable `tracing` — which is how a per-crate `-D warnings` job fails while
+/// the workspace one passes.
 #[cfg(not(feature = "tracing"))]
 #[macro_export]
 macro_rules! __obs_noop {
+    ($($field:ident = $sigil:tt $value:expr,)* $message:literal $(, $arg:expr)* $(,)?) => {{
+        $(let _ = &$value;)*
+        $(let _ = &$arg;)*
+    }};
     ($($t:tt)*) => {{}};
 }
 #[cfg(not(feature = "tracing"))]
