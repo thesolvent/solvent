@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use crate::deps::ledger::{BudgetSource, Clock, LedgerStore};
 use crate::primitives::ledger::{AccountKey, Ledger, Reservation, ReservationSource};
 use crate::primitives::registry::Snapshot;
-use crate::primitives::{IntentId, ReservationId, SolventError};
+use crate::primitives::{IntentId, RebateBatchId, ReservationId, SolventError};
 
 /// The available room at every known account, republished after each command for lock-free reads.
 #[derive(Debug, Default)]
@@ -59,8 +59,32 @@ impl LedgerService {
         // Read budgets before the lock, off the critical section.
         let budgets = self.read_budgets(&accounts_of(&sources)).await?;
         let expires_at = self.clock.now_unix().saturating_add(ttl_secs);
-        let reservation = Reservation::new(id, intent, sources, expires_at);
+        let reservation = Reservation::for_swap(id, intent, sources, expires_at);
 
+        self.reserve_owned(reservation, budgets).await
+    }
+
+    /// Admit a restoration reservation. Its lifecycle is managed with the rebate batch so a
+    /// generic swap sweep cannot release inventory while the strategy remains guarded.
+    pub async fn reserve_rebate(
+        &self,
+        id: ReservationId,
+        batch: RebateBatchId,
+        sources: Vec<ReservationSource>,
+        ttl_secs: u64,
+    ) -> Result<(), SolventError> {
+        let budgets = self.read_budgets(&accounts_of(&sources)).await?;
+        let expires_at = self.clock.now_unix().saturating_add(ttl_secs);
+        let reservation = Reservation::for_rebate(id, batch, sources, expires_at);
+
+        self.reserve_owned(reservation, budgets).await
+    }
+
+    async fn reserve_owned(
+        &self,
+        reservation: Reservation,
+        budgets: Vec<(AccountKey, U256)>,
+    ) -> Result<(), SolventError> {
         let mut ledger = self.ledger.lock().await;
         for (account, budget) in &budgets {
             ledger.set_budget(*account, *budget);
@@ -86,6 +110,15 @@ impl LedgerService {
         let mut ledger = self.ledger.lock().await;
         self.store.void(id).await?;
         ledger.void(id)?;
+        self.publish(&ledger);
+        Ok(())
+    }
+
+    /// Release one elapsed reservation chosen by its owning workflow.
+    pub async fn expire(&self, id: ReservationId) -> Result<(), SolventError> {
+        let mut ledger = self.ledger.lock().await;
+        self.store.expire(id).await?;
+        ledger.expire(id)?;
         self.publish(&ledger);
         Ok(())
     }
@@ -120,13 +153,13 @@ impl LedgerService {
         let now = self.clock.now_unix();
         let mut ledger = self.ledger.lock().await;
         let expired: Vec<ReservationId> = ledger
-            .expired_as_of(now)
+            .expired_swaps_as_of(now)
             .into_iter()
             .filter(|id| !exclude.contains(id))
             .collect();
         let mut swept = Vec::with_capacity(expired.len());
         for id in &expired {
-            let intent = ledger.reservation(id).map(|r| r.intent);
+            let intent = ledger.reservation(id).and_then(|r| r.owner.swap_intent());
             self.store.expire(*id).await?;
             ledger.expire(*id)?;
             swept.extend(intent);
@@ -229,8 +262,8 @@ fn active_accounts(snapshot: &Snapshot) -> Vec<AccountKey> {
 mod tests {
     use super::*;
     use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
-    use crate::primitives::ledger::ReservationState;
-    use crate::primitives::{MakerId, StrategyHash};
+    use crate::primitives::ledger::{LedgerError, ReservationState};
+    use crate::primitives::{MakerId, RebateBatchId, StrategyHash};
     use alloy_primitives::{Address, B256};
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -526,5 +559,69 @@ mod tests {
         svc.sync_budgets(&registry).await.unwrap();
         assert_eq!(svc.snapshot().available(&wallet(1, 3)), amt(600_000));
         assert_eq!(svc.snapshot().available(&virt(1, 1, 3)), amt(200_000));
+    }
+
+    #[tokio::test]
+    async fn swap_and_rebate_reservations_share_both_inventory_ceilings() {
+        let (svc, _, _) = build(
+            &[
+                (wallet(1, 3), 100),
+                (virt(1, 1, 3), 80),
+                (virt(1, 2, 3), 80),
+            ],
+            1_000,
+        );
+        svc.reserve(resv(1), intent(1), vec![src(1, 1, 3, 50)], 60)
+            .await
+            .unwrap();
+
+        let exceeds_strategy = svc
+            .reserve_rebate(
+                resv(2),
+                RebateBatchId(B256::from([2; 32])),
+                vec![src(1, 1, 3, 31)],
+                60,
+            )
+            .await;
+        assert!(matches!(
+            exceeds_strategy,
+            Err(SolventError::Ledger(LedgerError::Insufficient(_)))
+        ));
+
+        let exceeds_wallet = svc
+            .reserve_rebate(
+                resv(2),
+                RebateBatchId(B256::from([2; 32])),
+                vec![src(1, 2, 3, 51)],
+                60,
+            )
+            .await;
+        assert!(matches!(
+            exceeds_wallet,
+            Err(SolventError::Ledger(LedgerError::Insufficient(_)))
+        ));
+
+        svc.reserve_rebate(
+            resv(2),
+            RebateBatchId(B256::from([2; 32])),
+            vec![src(1, 2, 3, 50)],
+            0,
+        )
+        .await
+        .unwrap();
+        assert_eq!(svc.available(&wallet(1, 3)), U256::ZERO);
+        assert_eq!(svc.available(&virt(1, 1, 3)), amt(30));
+        assert_eq!(svc.available(&virt(1, 2, 3)), amt(30));
+
+        assert!(svc
+            .sweep_expired(&BTreeSet::new())
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(svc.available(&wallet(1, 3)), U256::ZERO);
+
+        svc.void(resv(2)).await.unwrap();
+        assert_eq!(svc.available(&wallet(1, 3)), amt(50));
+        assert_eq!(svc.available(&virt(1, 2, 3)), amt(80));
     }
 }

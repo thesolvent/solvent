@@ -29,7 +29,7 @@ use solvent_core::primitives::ingest::{Intent, RawOrder};
 use solvent_core::primitives::ledger::{AccountKey, ReservationSource};
 use solvent_core::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 use solvent_core::registry::SharedSnapshot;
-use solvent_core::routing::route;
+use solvent_core::routing::{route, GuardSnapshot, RoutingBook};
 
 use sqlx::SqlitePool;
 use std::path::Path;
@@ -117,7 +117,15 @@ async fn reserve_order(
         amount: output,
         exact_in: false,
     };
-    let plan = route(&snap, &caps, &req, input, &cfg, U256::ZERO, None).expect("a routable plan");
+    let plan = route(
+        RoutingBook::new(&snap, &caps, &GuardSnapshot::default()),
+        &req,
+        input,
+        &cfg,
+        U256::ZERO,
+        None,
+    )
+    .expect("a routable plan");
     let sources: Vec<ReservationSource> = plan
         .legs
         .iter()

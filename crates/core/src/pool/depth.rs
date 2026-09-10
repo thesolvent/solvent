@@ -270,7 +270,7 @@ fn impact_bps(split: &Split, best: &Ratio) -> u64 {
 mod tests {
     use super::*;
     use crate::primitives::{routing::RouteRequest, IntentId};
-    use crate::routing::select;
+    use crate::routing::{select, GuardSnapshot};
     use alloy_primitives::B256;
 
     impl Direction {
@@ -405,6 +405,7 @@ mod tests {
             let candidates = select(
                 &snapshot,
                 &caps,
+                &GuardSnapshot::default(),
                 &direction.request(U256::from(1)),
                 usize::MAX,
             )

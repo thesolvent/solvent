@@ -8,7 +8,7 @@ use solvent_core::{
     deps::ledger::LedgerStore,
     primitives::{
         ledger::{Reservation, ReservationSource},
-        IntentId, MakerId, ReservationId, StrategyHash,
+        IntentId, MakerId, RebateBatchId, ReservationId, StrategyHash,
     },
 };
 use sqlx::sqlite::SqlitePoolOptions;
@@ -23,9 +23,18 @@ fn source(m: u8, s: u8, t: u8, amount: u64) -> ReservationSource {
 }
 
 fn reservation(id: u8, sources: Vec<ReservationSource>) -> Reservation {
-    Reservation::new(
+    Reservation::for_swap(
         ReservationId(B256::from([id; 32])),
         IntentId(B256::from([id; 32])),
+        sources,
+        1_700_000_000 + id as u64,
+    )
+}
+
+fn rebate_reservation(id: u8, sources: Vec<ReservationSource>) -> Reservation {
+    Reservation::for_rebate(
+        ReservationId(B256::from([id; 32])),
+        RebateBatchId(B256::from([id; 32])),
         sources,
         1_700_000_000 + id as u64,
     )
@@ -52,7 +61,7 @@ async fn recovers_only_the_open_reservations() {
     let store = setup().await;
     let a = reservation(1, vec![source(1, 1, 3, 600_000), source(1, 2, 3, 100_000)]);
     let b = reservation(2, vec![source(2, 1, 3, 200_000)]);
-    let c = reservation(3, vec![source(3, 1, 3, 300_000)]);
+    let c = rebate_reservation(3, vec![source(3, 1, 3, 300_000)]);
     store.reserve(&a).await.unwrap();
     store.reserve(&b).await.unwrap();
     store.reserve(&c).await.unwrap();

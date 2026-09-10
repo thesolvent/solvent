@@ -490,9 +490,11 @@ mod tests {
             Arc::clone(&ledger),
             Arc::clone(&assets),
         ));
+        let strategy_guard = Arc::new(solvent_core::routing::StrategyGuard::default());
         let quote = Arc::new(QuoteService::new(
             Arc::clone(&registry),
             Arc::clone(&ledger),
+            Arc::clone(&strategy_guard),
             Arc::clone(&assets),
             RoutingConfig::new(16, 4, 0),
             Arc::new(SystemClock),
@@ -509,6 +511,7 @@ mod tests {
         let swap = Arc::new(SwapService::new(
             Arc::clone(&registry),
             Arc::clone(&ledger),
+            strategy_guard,
             Arc::clone(&trades),
             execution,
             Arc::new(FakeFill),

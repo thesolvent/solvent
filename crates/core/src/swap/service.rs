@@ -21,7 +21,7 @@ use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 use crate::primitives::trade::{Trade, TradeAttempt, TradeId, TradeLeg, TradeStatus};
 use crate::primitives::{IntentId, ReservationId};
 use crate::registry::SharedSnapshot;
-use crate::routing::{route, LegCostResolver};
+use crate::routing::{route, LegCostResolver, RoutingBook, StrategyGuard};
 use crate::SolventError;
 
 /// The chain/fill constants and routing knobs the swap path needs, bundled to keep the constructor
@@ -45,6 +45,7 @@ pub struct SwapOutcome {
 pub struct SwapService {
     registry: Arc<SharedSnapshot>,
     ledger: Arc<LedgerService>,
+    guards: Arc<StrategyGuard>,
     trades: Arc<dyn TradeStore>,
     execution: Arc<ExecutionService>,
     fill_builder: Arc<dyn FillBuilder>,
@@ -58,6 +59,7 @@ impl SwapService {
     pub fn new(
         registry: Arc<SharedSnapshot>,
         ledger: Arc<LedgerService>,
+        guards: Arc<StrategyGuard>,
         trades: Arc<dyn TradeStore>,
         execution: Arc<ExecutionService>,
         fill_builder: Arc<dyn FillBuilder>,
@@ -68,6 +70,7 @@ impl SwapService {
         Self {
             registry,
             ledger,
+            guards,
             trades,
             execution,
             fill_builder,
@@ -95,6 +98,7 @@ impl SwapService {
 
         let snapshot = self.registry.load();
         let caps = self.ledger.snapshot();
+        let guards = self.guards.snapshot();
         let request = RouteRequest {
             intent: intent.id,
             token_in: amounts.token_in,
@@ -107,8 +111,7 @@ impl SwapService {
         // The taker's input is the max-in bound: a plan that can't source the output within it (net
         // of gas) is unprofitable, so the router declines.
         let Some(plan) = route(
-            &snapshot,
-            &caps,
+            RoutingBook::new(&snapshot, &caps, &guards),
             &request,
             amounts.amount_in,
             &self.config.routing,
@@ -789,6 +792,7 @@ mod tests {
         let swap = SwapService::new(
             Arc::clone(&registry),
             Arc::clone(&ledger),
+            Arc::new(StrategyGuard::default()),
             trades.clone(),
             execution,
             Arc::new(FakeFill),

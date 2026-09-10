@@ -19,6 +19,8 @@ use crate::primitives::routing::RouteRequest;
 use crate::registry::curves::feasible_bound;
 use crate::registry::{gross_up_by_fees, shrink_by_fees, CurveError, CurvePool, Pricing};
 
+use super::GuardSnapshot;
+
 /// A frozen, priceable maker venue for one `token_in -> token_out` direction. Carries
 /// the oriented curve and its flat fees so the solver can price it net-of-fee.
 #[derive(Debug, Clone)]
@@ -209,6 +211,7 @@ impl Candidate {
 pub fn select(
     snapshot: &Snapshot,
     caps: &AvailableSnapshot,
+    guards: &GuardSnapshot,
     request: &RouteRequest,
     k: usize,
 ) -> Selection {
@@ -223,6 +226,7 @@ pub fn select(
     };
     let mut scored: Vec<Scored> = snapshot
         .active_strategies_for_pair(pair)
+        .filter(|strategy| !guards.is_guarded(&strategy.key))
         .filter_map(|s| build_candidate(s, caps, request.token_in, request.token_out))
         .map(|candidate| Scored {
             score: score(&candidate),
@@ -309,6 +313,18 @@ pub(crate) fn build_candidate(
     token_in: Address,
     token_out: Address,
 ) -> Option<Candidate> {
+    build_pricing_candidate(strategy, caps, token_in, token_out)
+        .filter(|candidate| !candidate.cap_out.is_zero())
+}
+
+/// Build the same oriented curve used by routing while retaining a zero-cap candidate so policy
+/// code can measure its displacement without promising unavailable inventory.
+pub(crate) fn build_pricing_candidate(
+    strategy: &MakerStrategy,
+    caps: &AvailableSnapshot,
+    token_in: Address,
+    token_out: Address,
+) -> Option<Candidate> {
     if !strategy.active {
         return None;
     }
@@ -321,9 +337,6 @@ pub(crate) fn build_candidate(
         return None;
     }
     let cap = frozen_cap(strategy, caps, token_out);
-    if cap.deliverable.is_zero() {
-        return None;
-    }
     Some(Candidate {
         key: strategy.key,
         token_in,
@@ -363,6 +376,7 @@ mod tests {
     use super::*;
     use crate::primitives::registry::Curve;
     use crate::primitives::{IntentId, MakerId, StrategyHash};
+    use crate::routing::StrategyGuard;
     use alloy_primitives::B256;
     use std::collections::BTreeMap;
 
@@ -475,7 +489,13 @@ mod tests {
 
         const SIZE: u64 = 1_000_000;
         let amount = U256::from(SIZE);
-        let selection = select(&snapshot, &available, &request(in_tok, out_tok, SIZE), 4);
+        let selection = select(
+            &snapshot,
+            &available,
+            &GuardSnapshot::default(),
+            &request(in_tok, out_tok, SIZE),
+            4,
+        );
         let out = selection.chosen[0]
             .net_quote_exact_in(amount)
             .expect("a dust trade prices against a pool this deep");
@@ -491,7 +511,14 @@ mod tests {
         let snap = Snapshot::from_strategies([xyc(m, h, a, b, 1000)]);
         // Payout token is b; wallet 100, strategy-virtual 60 ⇒ cap is the tighter 60.
         let c = caps(&[(wallet(m, b), 100), (virt(m, h, b), 60)]);
-        let out = select(&snap, &c, &request(a, b, 100), 64).chosen;
+        let out = select(
+            &snap,
+            &c,
+            &GuardSnapshot::default(),
+            &request(a, b, 100),
+            64,
+        )
+        .chosen;
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].cap_out, U256::from(60u64));
         assert_eq!(out[0].token_out, b);
@@ -516,7 +543,15 @@ mod tests {
             (wallet(maker(3), b), 100),
             (virt(maker(3), hash(3), b), 100),
         ]);
-        assert!(select(&snap, &c, &request(a, b, 100), 64).chosen.is_empty());
+        assert!(select(
+            &snap,
+            &c,
+            &GuardSnapshot::default(),
+            &request(a, b, 100),
+            64
+        )
+        .chosen
+        .is_empty());
     }
 
     #[test]
@@ -538,11 +573,17 @@ mod tests {
             (wallet(maker(3), b), big),
             (virt(maker(3), hash(9), b), big),
         ]);
-        let order: Vec<_> = select(&snap, &c, &request(a, b, 100), 64)
-            .chosen
-            .iter()
-            .map(|c| c.key.strategy_hash)
-            .collect();
+        let order: Vec<_> = select(
+            &snap,
+            &c,
+            &GuardSnapshot::default(),
+            &request(a, b, 100),
+            64,
+        )
+        .chosen
+        .iter()
+        .map(|c| c.key.strategy_hash)
+        .collect();
         assert_eq!(order, vec![hash(5), hash(9), hash(10)]);
     }
 
@@ -559,11 +600,22 @@ mod tests {
             entries.push((virt(maker(n), hash(n), b), 1_000_000));
         }
         let c = caps(&entries);
-        let top2 = select(&snap, &c, &request(a, b, 100), 2).chosen;
+        let top2 = select(&snap, &c, &GuardSnapshot::default(), &request(a, b, 100), 2).chosen;
         assert_eq!(top2.len(), 2);
         assert_eq!(top2[0].key.strategy_hash, hash(5)); // deepest
         assert_eq!(top2[1].key.strategy_hash, hash(4));
-        assert_eq!(select(&snap, &c, &request(a, b, 100), 64).chosen.len(), 5);
+        assert_eq!(
+            select(
+                &snap,
+                &c,
+                &GuardSnapshot::default(),
+                &request(a, b, 100),
+                64
+            )
+            .chosen
+            .len(),
+            5
+        );
     }
 
     #[test]
@@ -584,12 +636,36 @@ mod tests {
                 .collect::<Vec<_>>(),
         );
         // k below the eligible count ⇒ the certificate carries the best dropped pool's spot.
-        assert!(select(&snap, &c, &request(a, b, 100), 2)
-            .best_omitted_spot
-            .is_some());
+        assert!(
+            select(&snap, &c, &GuardSnapshot::default(), &request(a, b, 100), 2)
+                .best_omitted_spot
+                .is_some()
+        );
         // k at or above the count ⇒ nothing dropped, nothing to certify.
-        assert!(select(&snap, &c, &request(a, b, 100), 3)
-            .best_omitted_spot
-            .is_none());
+        assert!(
+            select(&snap, &c, &GuardSnapshot::default(), &request(a, b, 100), 3)
+                .best_omitted_spot
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn guarded_strategies_are_absent_from_the_frozen_candidate_set() {
+        let (a, b) = (tok(1), tok(2));
+        let guarded = xyc(maker(1), hash(1), a, b, 5_000);
+        let available = xyc(maker(2), hash(2), a, b, 1_000);
+        let snap = Snapshot::from_strategies([guarded.clone(), available]);
+        let c = caps(&[
+            (wallet(maker(1), b), 10_000),
+            (virt(maker(1), hash(1), b), 10_000),
+            (wallet(maker(2), b), 10_000),
+            (virt(maker(2), hash(2), b), 10_000),
+        ]);
+        let guards = StrategyGuard::default();
+        guards.guard(guarded.key);
+
+        let chosen = select(&snap, &c, &guards.snapshot(), &request(a, b, 100), 64).chosen;
+        assert_eq!(chosen.len(), 1);
+        assert_eq!(chosen[0].key.strategy_hash, hash(2));
     }
 }

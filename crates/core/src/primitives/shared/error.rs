@@ -13,6 +13,7 @@ use crate::deps::maker_metrics::MakerMetricsError;
 use crate::deps::registry::{BlockTimesError, ChainSourceError, StoreError};
 use crate::deps::trade::TradeStoreError;
 use crate::primitives::ledger::LedgerError;
+use crate::rebate::RebateError;
 
 /// The error every fallible Solvent API returns.
 #[derive(Debug, Error)]
@@ -41,6 +42,9 @@ pub enum SolventError {
     /// The ledger store failed.
     #[error("ledger store: {0}")]
     LedgerStore(#[from] LedgerStoreError),
+    /// Rebate accrual or policy evaluation failed.
+    #[error("rebate: {0}")]
+    Rebate(#[from] RebateError),
     /// Reading a settleable budget failed.
     #[error("budget source: {0}")]
     BudgetSource(#[from] BudgetSourceError),

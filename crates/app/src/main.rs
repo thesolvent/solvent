@@ -44,7 +44,7 @@ use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
 use solvent_core::reconcile::ReconcileService;
 use solvent_core::registry::{RegistrySync, SharedSnapshot};
-use solvent_core::routing::LegCostResolver;
+use solvent_core::routing::{LegCostResolver, StrategyGuard};
 use solvent_core::swap::{SwapConfig, SwapService};
 use solvent_core::trade::TradeService;
 use solvent_core::valuation::Valuation;
@@ -226,9 +226,11 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&ledger),
         Arc::clone(&assets),
     ));
+    let strategy_guard = Arc::new(StrategyGuard::default());
     let quote = Arc::new(QuoteService::new(
         Arc::clone(&registry),
         Arc::clone(&ledger),
+        Arc::clone(&strategy_guard),
         Arc::clone(&assets),
         RoutingConfig::new(MAX_CANDIDATES, MAX_LEGS, config.gas_units_per_leg),
         Arc::new(SystemClock),
@@ -319,6 +321,7 @@ async fn main() -> Result<(), StartupError> {
     let swap = Arc::new(SwapService::new(
         Arc::clone(&registry),
         Arc::clone(&ledger),
+        strategy_guard,
         Arc::clone(&trade_store),
         Arc::clone(&execution),
         fill_builder,

@@ -10,12 +10,13 @@ pub mod maker;
 pub mod pool;
 pub mod pricing;
 pub mod quote;
+pub mod rebate;
 pub mod registry;
 pub mod routing;
 pub mod shared;
 pub mod trade;
 
 pub use shared::{
-    Bps, ChainConfig, ChainId, FillId, IntentId, LeaseId, MakerId, ReservationId, SolventError,
-    StrategyHash, SystemConfig, Usd, UsdPrice,
+    Bps, ChainConfig, ChainId, FillId, IntentId, LeaseId, MakerId, RebateBatchId, ReservationId,
+    SolventError, StrategyHash, SystemConfig, Usd, UsdPrice,
 };
