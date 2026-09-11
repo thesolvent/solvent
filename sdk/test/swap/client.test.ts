@@ -1,7 +1,11 @@
 import { anvil } from "viem/chains";
 import { createClient, custom } from "viem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createSwapClient, SwapDeclinedError } from "../../src/swap";
+import {
+    createSwapClient,
+    SwapDeclinedError,
+    type SwapSubmissionStatus,
+} from "../../src/swap";
 import type { AppConfig } from "../../src/client";
 
 const sign = vi.hoisted(() => vi.fn());
@@ -76,6 +80,25 @@ describe("swap intent", () => {
         expect(sign.mock.calls[0][0].approval.amount).toBe(10n);
         expect(sign).toHaveBeenCalledOnce();
         expect(api.swap).toHaveBeenCalledOnce();
+    });
+
+    it("reports preparation, signing, and submission to the caller", async () => {
+        const { swaps } = setup();
+        const statuses: SwapSubmissionStatus[] = [];
+        sign.mockImplementationOnce(async (_order, options) => {
+            options?.onStatus?.({ kind: "signing" });
+            return "0xsigned";
+        });
+
+        await swaps
+            .createIntent(terms)
+            .submit({ onStatus: (status) => statuses.push(status) });
+
+        expect(statuses).toEqual([
+            { kind: "preparing" },
+            { kind: "signing" },
+            { kind: "submitting" },
+        ]);
     });
 
     it("retains a known decline without creating or posting another order", async () => {

@@ -2,6 +2,7 @@ import { onlineManager } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SolventApiError } from "@solvent/sdk/client";
 import type { Asset, Quote, SubmittedSwap } from "@/data";
 import { renderWithServices } from "@/test/harness";
 import { useQuote } from "./quote";
@@ -150,6 +151,20 @@ describe("swap submission", () => {
     expect(await screen.findByText("submitted")).toBeInTheDocument();
     expect(createIntent).toHaveBeenCalledOnce();
     expect(submit).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps synchronous intent construction failures in mutation state", async () => {
+    renderWithServices(<Probe />, {
+      swap: {
+        createIntent: () => {
+          throw new SolventApiError(409, "Quote expired");
+        },
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "send" }));
+
+    expect(await screen.findByText("Quote expired")).toBeInTheDocument();
   });
 
   it("creates a fresh intent after a known decline", async () => {

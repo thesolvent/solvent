@@ -10,7 +10,12 @@ import {
 
 import type { SolventClient } from "../client";
 import type { BuiltStrategy } from "../construction/strategy";
-import { createWalletSession, type WalletClients } from "../swap/wallet";
+import {
+    createWalletSession,
+    type WalletActionOptions,
+    type WalletActionStatus,
+    type WalletClients,
+} from "../swap/wallet";
 import {
     assertDistinctAddresses,
     InputValidationError,
@@ -35,8 +40,18 @@ export interface CreatedPosition {
     transactionHash: Hex;
 }
 
+export type PositionCreationStatus =
+    | { kind: "preparing" }
+    | { kind: "approving"; token: Address; index: number; total: number }
+    | { kind: "shipping"; approvalCount: number }
+    | { kind: "confirming"; approvalCount: number };
+
+export interface PositionSubmissionOptions {
+    onStatus?(status: PositionCreationStatus): void;
+}
+
 export interface PositionIntent {
-    submit(): Promise<CreatedPosition>;
+    submit(options?: PositionSubmissionOptions): Promise<CreatedPosition>;
 }
 
 export interface PositionTransaction {
@@ -44,7 +59,16 @@ export interface PositionTransaction {
 }
 
 export interface PositionTransactionIntent {
-    submit(): Promise<PositionTransaction>;
+    submit(
+        options?: PositionTransactionSubmissionOptions,
+    ): Promise<PositionTransaction>;
+}
+
+export type PositionTransactionStatus =
+    { kind: "preparing" } | WalletActionStatus;
+
+export interface PositionTransactionSubmissionOptions extends WalletActionOptions {
+    onStatus?(status: PositionTransactionStatus): void;
 }
 
 export interface PushPositionRequest {
@@ -108,37 +132,45 @@ export function createPositionClient({
     const wallet = createWalletSession(clients);
 
     function actionIntent(
-        prepare: () => Promise<PositionTransactionPlan>,
+        prepare: (
+            options?: PositionTransactionSubmissionOptions,
+        ) => Promise<PositionTransactionPlan>,
     ): PositionTransactionIntent {
         let plan: Promise<PositionTransactionPlan> | undefined;
         let transactionHash: Hex | undefined;
         let result: PositionTransaction | undefined;
         let pending: Promise<PositionTransaction> | undefined;
 
-        function actionPlan() {
-            plan ??= prepare().catch((error: unknown) => {
+        function actionPlan(options?: PositionTransactionSubmissionOptions) {
+            plan ??= prepare(options).catch((error: unknown) => {
                 plan = undefined;
                 throw error;
             });
             return plan;
         }
 
-        async function execute(): Promise<PositionTransaction> {
+        async function execute(
+            options?: PositionTransactionSubmissionOptions,
+        ): Promise<PositionTransaction> {
             if (result) return result;
-            const current = await actionPlan();
-            transactionHash ??= await wallet.sendTransaction({
-                ...current.transaction,
-                owner: current.owner,
-                chainId: current.chainId,
-            });
-            await wallet.confirmTransaction(transactionHash);
+            options?.onStatus?.({ kind: "preparing" });
+            const current = await actionPlan(options);
+            transactionHash ??= await wallet.sendTransaction(
+                {
+                    ...current.transaction,
+                    owner: current.owner,
+                    chainId: current.chainId,
+                },
+                options,
+            );
+            await wallet.confirmTransaction(transactionHash, options);
             result = { transactionHash };
             return result;
         }
 
         return {
-            submit() {
-                pending ??= execute().finally(() => {
+            submit(options) {
+                pending ??= execute(options).finally(() => {
                     pending = undefined;
                 });
                 return pending;
@@ -189,8 +221,17 @@ export function createPositionClient({
             return plan;
         }
 
-        async function authorize(current: PositionPlan): Promise<void> {
-            for (const approval of current.approvals) {
+        async function authorize(
+            current: PositionPlan,
+            onStatus: PositionSubmissionOptions["onStatus"],
+        ): Promise<void> {
+            for (const [index, approval] of current.approvals.entries()) {
+                onStatus?.({
+                    kind: "approving",
+                    token: approval.token,
+                    index,
+                    total: current.approvals.length,
+                });
                 await wallet.ensureAllowance({
                     owner: snapshot.maker,
                     chainId: current.chainId,
@@ -202,14 +243,21 @@ export function createPositionClient({
             }
         }
 
-        async function execute(): Promise<CreatedPosition> {
+        async function execute(
+            options?: PositionSubmissionOptions,
+        ): Promise<CreatedPosition> {
             if (result) return result;
+            options?.onStatus?.({ kind: "preparing" });
             const current = await positionPlan();
             if (!transactionHash) {
-                await authorize(current);
+                await authorize(current, options?.onStatus);
                 const tx = positions(current).ship({
                     strategy: snapshot.strategy.order,
                     amounts: snapshot.amounts,
+                });
+                options?.onStatus?.({
+                    kind: "shipping",
+                    approvalCount: current.approvals.length,
                 });
                 transactionHash = await wallet.sendTransaction({
                     ...tx,
@@ -217,6 +265,10 @@ export function createPositionClient({
                     chainId: current.chainId,
                 });
             }
+            options?.onStatus?.({
+                kind: "confirming",
+                approvalCount: current.approvals.length,
+            });
             await wallet.confirmTransaction(transactionHash);
             result = {
                 strategyHash: snapshot.strategy.strategyHash,
@@ -226,8 +278,8 @@ export function createPositionClient({
         }
 
         return {
-            submit() {
-                pending ??= execute().finally(() => {
+            submit(options) {
+                pending ??= execute(options).finally(() => {
                     pending = undefined;
                 });
                 return pending;
@@ -239,7 +291,7 @@ export function createPositionClient({
         request: PushPositionRequest,
     ): PositionTransactionIntent {
         const snapshot = { ...request };
-        return actionIntent(async () => {
+        return actionIntent(async (options) => {
             const maker = validatedAddress(snapshot.maker, "maker");
             const strategyHash = validatedStrategyHash(snapshot.strategyHash);
             const token = validatedAddress(snapshot.token, "push token");
@@ -252,14 +304,17 @@ export function createPositionClient({
                 aqua: getAddress(config.aqua),
                 app: getAddress(config.app),
             };
-            await wallet.ensureAllowance({
-                owner: maker,
-                chainId: deployment.chainId,
-                token,
-                spender: deployment.aqua,
-                amount,
-                approvalAmount: maxUint256,
-            });
+            await wallet.ensureAllowance(
+                {
+                    owner: maker,
+                    chainId: deployment.chainId,
+                    token,
+                    spender: deployment.aqua,
+                    amount,
+                    approvalAmount: maxUint256,
+                },
+                options,
+            );
             return {
                 owner: maker,
                 chainId: deployment.chainId,

@@ -65,6 +65,11 @@ export interface CompactCommitment {
     mandate: CompactMandate;
 }
 
+/** Lets callers update their UI once the wallet has broadcast a Compact transaction. */
+export interface CompactTransactionOptions {
+    onBroadcast?(): void;
+}
+
 export async function compactBalance(
     client: Client,
     compact: Address,
@@ -89,8 +94,10 @@ export async function depositCompact(
         amount: bigint;
         sponsor: Address;
     },
+    options?: CompactTransactionOptions,
 ): Promise<Hex> {
-    if (request.amount <= 0n) throw new Error("Compact deposit must be positive");
+    if (request.amount <= 0n)
+        throw new Error("Compact deposit must be positive");
     const [accounts, walletChain, rpcChain] = await Promise.all([
         getAddresses(walletClient),
         getChainId(walletClient),
@@ -98,19 +105,22 @@ export async function depositCompact(
     ]);
     if (
         !accounts.some(
-            (account) => account.toLowerCase() === request.sponsor.toLowerCase(),
+            (account) =>
+                account.toLowerCase() === request.sponsor.toLowerCase(),
         )
     ) {
         throw new Error("Wallet account changed");
     }
-    if (walletChain !== rpcChain) throw new Error("Wallet and RPC networks differ");
+    if (walletChain !== rpcChain)
+        throw new Error("Wallet and RPC networks differ");
     const allowance = await readContract(publicClient, {
         address: request.token,
         abi: erc20Abi,
         functionName: "allowance",
         args: [request.sponsor, request.compact],
     });
-    if (allowance < request.amount) throw new Error("Compact allowance is insufficient");
+    if (allowance < request.amount)
+        throw new Error("Compact allowance is insufficient");
     const account: Account | Address =
         walletClient.account?.type === "local"
             ? walletClient.account
@@ -123,8 +133,10 @@ export async function depositCompact(
         functionName: "depositERC20",
         args: [request.token, request.lockTag, request.amount, request.sponsor],
     });
+    options?.onBroadcast?.();
     const receipt = await waitForTransactionReceipt(publicClient, { hash });
-    if (receipt.status !== "success") throw new Error("Compact deposit reverted");
+    if (receipt.status !== "success")
+        throw new Error("Compact deposit reverted");
     return hash;
 }
 
@@ -137,6 +149,7 @@ export async function approveCompact(
         amount: bigint;
         sponsor: Address;
     },
+    options?: CompactTransactionOptions,
 ): Promise<Hex | undefined> {
     const allowance = await readContract(publicClient, {
         address: request.token,
@@ -157,8 +170,10 @@ export async function approveCompact(
         functionName: "approve",
         args: [request.compact, request.amount],
     });
+    options?.onBroadcast?.();
     const receipt = await waitForTransactionReceipt(publicClient, { hash });
-    if (receipt.status !== "success") throw new Error("Compact approval reverted");
+    if (receipt.status !== "success")
+        throw new Error("Compact approval reverted");
     return hash;
 }
 

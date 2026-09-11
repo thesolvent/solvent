@@ -40,15 +40,23 @@ beforeEach(() => {
 
 describe("Compact deposits", () => {
     it("uses the selected sponsor when the wallet exposes multiple accounts", async () => {
+        const onBroadcast = vi.fn();
         await expect(
-            depositCompact(client, client, {
-                compact: "0x3333333333333333333333333333333333333333",
-                token: "0x4444444444444444444444444444444444444444",
-                lockTag: "0x0102030405060708090a0b0c",
-                amount: 10n,
-                sponsor,
-            }),
+            depositCompact(
+                client,
+                client,
+                {
+                    compact: "0x3333333333333333333333333333333333333333",
+                    token: "0x4444444444444444444444444444444444444444",
+                    lockTag: "0x0102030405060708090a0b0c",
+                    amount: 10n,
+                    sponsor,
+                },
+                { onBroadcast },
+            ),
         ).resolves.toBe("0xdeposit");
+
+        expect(onBroadcast).toHaveBeenCalledOnce();
 
         expect(rpc.write).toHaveBeenCalledWith(
             client,
