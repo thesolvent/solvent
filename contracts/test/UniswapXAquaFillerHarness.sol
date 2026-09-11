@@ -20,6 +20,9 @@ import { IPermit2 } from "permit2/src/interfaces/IPermit2.sol";
 import { ERC20 as SolERC20 } from "solmate/src/tokens/ERC20.sol";
 
 import { UniswapXAquaFiller } from "../src/UniswapXAquaFiller.sol";
+import { SolventTakerCredential } from "../src/SolventTakerCredential.sol";
+
+contract CredentialPeer { }
 
 /// @notice Shared machinery for the `UniswapXAquaFiller` suites: 1inch's Aqua/SwapVM maker builders +
 ///         UniswapX V2 order signing, so the hermetic and fork suites differ only in how they obtain the
@@ -34,6 +37,7 @@ abstract contract UniswapXAquaFillerHarness is AquaStrategyBuilders, PermitSigna
     IPermit2 internal permit2;
     V2DutchOrderReactor internal reactor;
     UniswapXAquaFiller internal filler;
+    SolventTakerCredential internal takerCredential;
 
     uint256 internal constant SWAPPER_PK = 0x1010;
     uint256 internal constant COSIGNER_PK = 0x2020;
@@ -53,9 +57,17 @@ abstract contract UniswapXAquaFillerHarness is AquaStrategyBuilders, PermitSigna
     function _deploy() internal {
         super.setUp(); // sets maker, tokenA, tokenB
         swapVm = new AquaSwapVMRouter(address(aqua), address(0), address(this), "SwapVM", "1.0.0");
+        takerCredential = new SolventTakerCredential(address(this));
         filler = new UniswapXAquaFiller(
-            address(this), ISwapVM(address(swapVm)), IReactor(address(reactor)), vm.addr(POLICY_SIGNER_PK)
+            address(this),
+            ISwapVM(address(swapVm)),
+            IReactor(address(reactor)),
+            takerCredential,
+            vm.addr(POLICY_SIGNER_PK)
         );
+        takerCredential.setTaker(address(filler), true);
+        takerCredential.setTaker(address(new CredentialPeer()), true);
+        takerCredential.freeze();
         filler.setTokenAllowed(address(tokenA), true);
         filler.setTokenAllowed(address(tokenB), true);
 
