@@ -731,7 +731,7 @@ async fn supported_crosschain_scenario_matrix() {
         assert_eq!(saga.state, SagaState::Prepared);
         let mut states = Vec::new();
         for advance in 0..5 {
-            saga = proxy.advance(order).await.unwrap();
+            saga = proxy.advance(order, NOW + advance + 1).await.unwrap();
             states.push(saga.state);
             assert_eq!(saga_store.load(order).await.unwrap(), Some(saga.clone()));
             if case.route == CrossChainRoute::Cctp {
@@ -816,7 +816,7 @@ async fn supported_crosschain_scenario_matrix() {
             .await
             .unwrap();
         assert_eq!(replay, saga);
-        assert_eq!(proxy.advance(order).await.unwrap(), saga);
+        assert_eq!(proxy.advance(order, NOW + 6).await.unwrap(), saga);
         assert_eq!(sent.lock().await.len(), actual.len());
     }
 }

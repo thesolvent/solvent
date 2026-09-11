@@ -14,6 +14,7 @@ use solvent_adapters::http::crosschain_proxy_router_with_drafts;
 use solvent_adapters::ledger::SystemClock;
 use solvent_core::crosschain::CrossChainProxy;
 use solvent_core::deps::crosschain::{CctpAttestation, CctpCompletion, RemoteSolvent, SagaStore};
+use solvent_core::deps::ledger::Clock;
 use solvent_core::obs::{info, warn};
 use sqlx::SqlitePool;
 
@@ -139,6 +140,7 @@ async fn main() -> Result<(), ProxyStartupError> {
     let proxy = Arc::new(proxy);
 
     let coordinator = Arc::clone(&proxy);
+    let coordinator_clock = SystemClock;
     let interval = Duration::from_millis(config.poll_interval_ms.max(100));
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(interval);
@@ -152,7 +154,10 @@ async fn main() -> Result<(), ProxyStartupError> {
                 }
             };
             for order in orders {
-                if let Err(error) = coordinator.advance(order.order_id).await {
+                if let Err(error) = coordinator
+                    .advance(order.order_id, coordinator_clock.now_unix())
+                    .await
+                {
                     warn!(order_id = %order.order_id, error = %error, "cross-chain step will retry");
                 }
             }

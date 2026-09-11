@@ -480,6 +480,35 @@
           }
         }
       },
+      "CrossChainLifecycleEvent": {
+        "type": "object",
+        "required": [
+          "stage",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "stage": {
+            "$ref": "#/components/schemas/CrossChainLifecycleStage"
+          }
+        }
+      },
+      "CrossChainLifecycleStage": {
+        "type": "string",
+        "description": "User-visible milestones recorded as the cross-chain saga progresses.",
+        "enum": [
+          "quoted",
+          "destination_fill",
+          "proof_relay",
+          "origin_claim",
+          "repayment",
+          "complete"
+        ]
+      },
       "CrossChainOrderResponse": {
         "type": "object",
         "required": [
@@ -596,6 +625,12 @@
                 "$ref": "#/components/schemas/StepEvidence"
               }
             ]
+          },
+          "lifecycle": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CrossChainLifecycleEvent"
+            }
           },
           "order_id": {
             "type": "string"

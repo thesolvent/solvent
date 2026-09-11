@@ -65,18 +65,21 @@ function crossChainStatus(state: SagaState): string {
   return "submitted";
 }
 
-function crossChainLifecycle(order: CrossChainOrder, at: number) {
+function crossChainLifecycle(order: CrossChainOrder) {
+  const recordedAt = new Map(
+    (order.lifecycle ?? []).map((event) => [event.stage, event.at]),
+  );
   const stages = [
-    ["quoted", true],
-    ["destination fill", order.destination != null],
-    ["proof relay", order.fill_proof != null],
-    ["origin claim", order.origin != null],
-    ["repayment", order.repayment != null],
-    ["complete", order.state === "complete"],
+    ["quoted", "quoted", true],
+    ["destination fill", "destination_fill", order.destination != null],
+    ["proof relay", "proof_relay", order.fill_proof != null],
+    ["origin claim", "origin_claim", order.origin != null],
+    ["repayment", "repayment", order.repayment != null],
+    ["complete", "complete", order.state === "complete"],
   ] as const;
   return stages
-    .filter(([, recorded]) => recorded)
-    .map(([status]) => ({ status, at }));
+    .filter(([, , recorded]) => recorded)
+    .map(([status, stage]) => ({ status, at: recordedAt.get(stage) ?? null }));
 }
 
 function servedAsset(assets: Asset[], address: string): Asset | undefined {
@@ -90,7 +93,6 @@ export function toCrossChainTrade(
   order: CrossChainOrder,
   originAssets: Asset[],
   destinationAssets: Asset[],
-  now = Math.floor(Date.now() / 1_000),
 ): TradeRecord {
   const input = servedAsset(originAssets, order.quote.origin.input_token);
   const destinationInput = servedAsset(
@@ -113,8 +115,12 @@ export function toCrossChainTrade(
   // Browser-authored quotes expire ten minutes after creation; the saga currently stores no clock.
   const createdAt = Math.max(0, order.quote.expires_at_unix - 600);
   const status = crossChainStatus(order.state);
-  const completed = order.state === "complete";
   const evidence = order.origin ?? order.destination;
+  const lifecycle = crossChainLifecycle(order);
+  const quotedAt = lifecycle.find((stage) => stage.status === "quoted")?.at;
+  const completedAt = lifecycle.find(
+    (stage) => stage.status === "complete",
+  )?.at;
 
   return {
     flow: "cross-chain",
@@ -139,11 +145,11 @@ export function toCrossChainTrade(
     makers: new Set(sources.map((source) => source.maker.toLowerCase())).size,
     txHash: evidence?.transaction_hash ?? null,
     blockNumber: evidence?.block_number ?? null,
-    createdAt,
-    settledAt: completed ? now : null,
+    createdAt: quotedAt ?? createdAt,
+    settledAt: completedAt ?? null,
     deadlineAt: order.quote.expires_at_unix,
     orderHash: order.order_id,
-    lifecycle: crossChainLifecycle(order, completed ? now : createdAt),
+    lifecycle,
     legs: sources.map((source) => {
       const sourceOutput = BigInt(source.amount);
       const destinationAmountIn = BigInt(order.quote.destination.amount_in);

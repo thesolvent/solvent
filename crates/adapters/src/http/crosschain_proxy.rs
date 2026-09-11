@@ -302,7 +302,7 @@ async fn advance(
 ) -> Result<Json<CrossChainOrderResponse>, (StatusCode, Json<ErrorBody>)> {
     state
         .proxy
-        .advance(order_id)
+        .advance(order_id, state.clock.now_unix())
         .await
         .map(|order| Json(CrossChainOrderResponse { order }))
         .map_err(proxy_error)
@@ -362,6 +362,8 @@ async fn healthz() -> &'static str {
         solvent_core::primitives::crosschain::LegQuote,
         AggregateQuote,
         solvent_core::primitives::crosschain::SagaState,
+        solvent_core::primitives::crosschain::CrossChainLifecycleStage,
+        solvent_core::primitives::crosschain::CrossChainLifecycleEvent,
         solvent_core::primitives::crosschain::StepEvidence,
         CrossChainSaga,
     ))

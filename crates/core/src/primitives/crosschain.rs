@@ -376,6 +376,24 @@ pub enum SagaState {
     NeedsReconcile,
 }
 
+/// User-visible milestones recorded as the cross-chain saga progresses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CrossChainLifecycleStage {
+    Quoted,
+    DestinationFill,
+    ProofRelay,
+    OriginClaim,
+    Repayment,
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CrossChainLifecycleEvent {
+    pub stage: CrossChainLifecycleStage,
+    pub at: u64,
+}
+
 impl SagaState {
     pub fn permits(self, next: Self) -> bool {
         use SagaState::*;
@@ -427,6 +445,8 @@ pub struct CrossChainSaga {
     pub order_id: CrossChainOrderId,
     pub quote: AggregateQuote,
     pub state: SagaState,
+    #[serde(default)]
+    pub lifecycle: Vec<CrossChainLifecycleEvent>,
     #[schema(value_type = Option<String>)]
     pub origin_prepare: Option<PrepareToken>,
     #[schema(value_type = Option<String>)]
@@ -448,6 +468,12 @@ impl CrossChainSaga {
         }
         self.state = next;
         Ok(())
+    }
+
+    pub(crate) fn record_lifecycle(&mut self, stage: CrossChainLifecycleStage, at: u64) {
+        if self.lifecycle.iter().all(|event| event.stage != stage) {
+            self.lifecycle.push(CrossChainLifecycleEvent { stage, at });
+        }
     }
 }
 

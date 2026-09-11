@@ -7,7 +7,7 @@ export interface TokenQuantity {
 
 export interface TradeStage {
   status: string;
-  at: number;
+  at: number | null;
 }
 
 export interface TradeSource {

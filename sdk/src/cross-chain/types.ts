@@ -166,10 +166,24 @@ export type SagaState =
     | "failed_before_delivery"
     | "needs_reconcile";
 
+export type CrossChainLifecycleStage =
+    | "quoted"
+    | "destination_fill"
+    | "proof_relay"
+    | "origin_claim"
+    | "repayment"
+    | "complete";
+
+export interface CrossChainLifecycleEvent {
+    stage: CrossChainLifecycleStage;
+    at: number;
+}
+
 export interface CrossChainOrder {
     order_id: Hex;
     quote: AggregateQuote;
     state: SagaState;
+    lifecycle?: CrossChainLifecycleEvent[];
     origin_prepare?: Hex | null;
     destination_prepare?: Hex | null;
     destination?: StepEvidence | null;

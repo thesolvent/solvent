@@ -26,8 +26,9 @@ use solvent_core::deps::execution::{Execution, ExecutionError, SimError, SimGate
 use solvent_core::deps::ledger::{BudgetSource, BudgetSourceError, Clock};
 use solvent_core::ledger::LedgerService;
 use solvent_core::primitives::crosschain::{
-    AggregateQuote, ChainExecutionPlan, CrossChainRoute, CrossChainSaga, LegQuote, LegQuoteRequest,
-    LegRole, PreparationState, PreparedStep, RemoteCommand, SagaState, StepValidationContext,
+    AggregateQuote, ChainExecutionPlan, CrossChainLifecycleStage, CrossChainRoute, CrossChainSaga,
+    LegQuote, LegQuoteRequest, LegRole, PreparationState, PreparedStep, RemoteCommand, SagaState,
+    StepValidationContext,
 };
 use solvent_core::primitives::execution::{
     ExecHandle, ExecStatus, FillTx, SimVerdict, TrackedFill,
@@ -675,7 +676,7 @@ async fn direct_route_traverses_every_durable_backend_stage() {
     {
         saga = scenario
             .proxy
-            .advance(order_id)
+            .advance(order_id, NOW + index as u64 + 1)
             .await
             .expect("advance saga");
         assert_eq!(saga.state, *expected_state, "advance {index}");
@@ -741,6 +742,20 @@ async fn direct_route_traverses_every_durable_backend_stage() {
             SagaState::Complete,
         ]
     );
+    assert_eq!(
+        saga.lifecycle
+            .iter()
+            .map(|event| (event.stage, event.at))
+            .collect::<Vec<_>>(),
+        vec![
+            (CrossChainLifecycleStage::Quoted, NOW),
+            (CrossChainLifecycleStage::DestinationFill, NOW + 1),
+            (CrossChainLifecycleStage::ProofRelay, NOW + 2),
+            (CrossChainLifecycleStage::OriginClaim, NOW + 3),
+            (CrossChainLifecycleStage::Repayment, NOW + 4),
+            (CrossChainLifecycleStage::Complete, NOW + 5),
+        ]
+    );
     assert!(scenario
         .saga_store
         .recoverable()
@@ -750,7 +765,7 @@ async fn direct_route_traverses_every_durable_backend_stage() {
 
     let replay = scenario
         .proxy
-        .advance(order_id)
+        .advance(order_id, NOW + 6)
         .await
         .expect("replay complete");
     assert_eq!(replay, saga);

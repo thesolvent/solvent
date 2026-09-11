@@ -1001,7 +1001,11 @@ async fn advance_after_restart(
             .len(),
         1
     );
-    let saga = runtime.proxy.advance(order_id).await.expect("resume order");
+    let saga = runtime
+        .proxy
+        .advance(order_id, NOW + 1)
+        .await
+        .expect("resume order");
     assert_eq!(saga.state, after);
     let saga = assert_checkpoint(
         &runtime,
@@ -1050,7 +1054,7 @@ async fn recovery_scenario(route: CrossChainRoute) {
     let runtime = boot(&paths, route, false, false, false).await;
     let prepared = runtime
         .proxy
-        .advance(order_id)
+        .advance(order_id, NOW + 1)
         .await
         .expect("finish prepare");
     assert_eq!(prepared.state, SagaState::Prepared);
@@ -1149,7 +1153,7 @@ async fn recovery_scenario(route: CrossChainRoute) {
             .await;
             let pending = runtime
                 .proxy
-                .advance(order_id)
+                .advance(order_id, NOW + 1)
                 .await
                 .expect("poll attestation");
             assert_eq!(pending.state, SagaState::OriginFinalized);
@@ -1167,7 +1171,7 @@ async fn recovery_scenario(route: CrossChainRoute) {
             let runtime = boot(&paths, route, true, false, true).await;
             let repayment = runtime
                 .proxy
-                .advance(order_id)
+                .advance(order_id, NOW + 1)
                 .await
                 .expect("stage CCTP close");
             assert_eq!(repayment.state, SagaState::RepaymentPending);
@@ -1240,7 +1244,7 @@ async fn recovery_scenario(route: CrossChainRoute) {
     assert_eq!(
         runtime
             .proxy
-            .advance(order_id)
+            .advance(order_id, NOW + 1)
             .await
             .expect("replay complete"),
         complete

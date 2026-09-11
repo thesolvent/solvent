@@ -834,7 +834,14 @@ async fn assert_prep(chain: &ChainHarness, token: PrepareToken, state: Preparati
 }
 async fn finish(scenario: &Scenario, order: CrossChainOrderId) {
     for _ in 0..12 {
-        if scenario.proxy.advance(order).await.expect("advance").state == SagaState::Complete {
+        if scenario
+            .proxy
+            .advance(order, NOW + 1)
+            .await
+            .expect("advance")
+            .state
+            == SagaState::Complete
+        {
             return;
         }
     }
@@ -911,7 +918,7 @@ async fn transient_commit_failure_resumes_from_durable_preparations() {
     assert_eq!(
         scenario
             .proxy
-            .advance(order)
+            .advance(order, NOW + 1)
             .await
             .expect("resume commit")
             .state,
@@ -941,7 +948,7 @@ async fn deliver_simulation_rejection_never_submits_or_posts_capital() {
         .expect("destination preparation");
     let failed = scenario
         .proxy
-        .advance(order)
+        .advance(order, NOW + 1)
         .await
         .expect("reject delivery");
     assert_eq!(failed.state, SagaState::FailedBeforeDelivery);
@@ -980,7 +987,7 @@ async fn delivery_can_remain_pending_then_finalize_and_can_fail_before_delivery(
     assert_eq!(
         pending
             .proxy
-            .advance(order)
+            .advance(order, NOW + 1)
             .await
             .expect("pending delivery")
             .state,
@@ -990,7 +997,7 @@ async fn delivery_can_remain_pending_then_finalize_and_can_fail_before_delivery(
     assert_eq!(
         pending
             .proxy
-            .advance(order)
+            .advance(order, NOW + 1)
             .await
             .expect("finalized delivery")
             .state,
@@ -1012,7 +1019,7 @@ async fn delivery_can_remain_pending_then_finalize_and_can_fail_before_delivery(
     assert_eq!(
         failed
             .proxy
-            .advance(order)
+            .advance(order, NOW + 1)
             .await
             .expect("failed delivery")
             .state,
@@ -1044,7 +1051,12 @@ async fn post_delivery_proof_and_repayment_failures_reconcile_without_releasing_
         .destination_prepare
         .expect("destination preparation");
     assert_eq!(
-        scenario.proxy.advance(order).await.expect("deliver").state,
+        scenario
+            .proxy
+            .advance(order, NOW + 1)
+            .await
+            .expect("deliver")
+            .state,
         SagaState::DestinationFinalized
     );
     assert_prep(
@@ -1056,7 +1068,7 @@ async fn post_delivery_proof_and_repayment_failures_reconcile_without_releasing_
     assert_eq!(
         scenario
             .proxy
-            .advance(order)
+            .advance(order, NOW + 1)
             .await
             .expect("proof failure")
             .state,
@@ -1069,21 +1081,26 @@ async fn post_delivery_proof_and_repayment_failures_reconcile_without_releasing_
     assert_eq!(
         scenario
             .proxy
-            .advance(order)
+            .advance(order, NOW + 1)
             .await
             .expect("proof retry")
             .state,
         SagaState::OriginPending
     );
     assert_eq!(
-        scenario.proxy.advance(order).await.expect("claim").state,
+        scenario
+            .proxy
+            .advance(order, NOW + 1)
+            .await
+            .expect("claim")
+            .state,
         SagaState::OriginFinalized
     );
     assert_prep(&scenario.origin, origin, PreparationState::Executed).await;
     assert_eq!(
         scenario
             .proxy
-            .advance(order)
+            .advance(order, NOW + 1)
             .await
             .expect("repayment failure")
             .state,
@@ -1107,7 +1124,10 @@ async fn duplicate_concurrent_advances_submit_each_deterministic_command_once() 
     let scenario = Scenario::new().await;
     let (order, started) = scenario.start(0x81).await;
     assert_eq!(started.expect("start").state, SagaState::Prepared);
-    let (left, right) = tokio::join!(scenario.proxy.advance(order), scenario.proxy.advance(order));
+    let (left, right) = tokio::join!(
+        scenario.proxy.advance(order, NOW + 1),
+        scenario.proxy.advance(order, NOW + 1)
+    );
     assert_eq!(
         left.expect("left advance").state,
         SagaState::DestinationFinalized

@@ -52,7 +52,7 @@ export function tradeLifecycle(trade: TradeRecord) {
       label,
       state,
       elapsedSeconds:
-        at === undefined ? null : Math.max(0, at - trade.createdAt),
+        typeof at !== "number" ? null : Math.max(0, at - trade.createdAt),
     };
   });
   return {

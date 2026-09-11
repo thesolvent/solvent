@@ -7,8 +7,8 @@ use crate::deps::crosschain::{
     SagaStore,
 };
 use crate::primitives::crosschain::{
-    AggregateQuote, ChainExecutionPlan, CrossChainSaga, DirectOrderAuthorization, LegQuote,
-    LegQuoteRequest, LegRole, RemoteCommand, SagaState,
+    AggregateQuote, ChainExecutionPlan, CrossChainLifecycleStage, CrossChainSaga,
+    DirectOrderAuthorization, LegQuote, LegQuoteRequest, LegRole, RemoteCommand, SagaState,
 };
 use crate::primitives::{AggregateQuoteId, CrossChainOrderId, CrossChainStepId, SolventError};
 
@@ -160,6 +160,7 @@ impl CrossChainProxy {
             order_id,
             quote,
             state: SagaState::Quoted,
+            lifecycle: Vec::new(),
             origin_prepare: None,
             destination_prepare: None,
             destination: None,
@@ -168,6 +169,7 @@ impl CrossChainProxy {
             repayment: None,
             failure: None,
         };
+        saga.record_lifecycle(CrossChainLifecycleStage::Quoted, now_unix);
         saga = self.sagas.insert(&saga).await?;
         saga.transition(SagaState::Preparing).map_err(invariant)?;
         self.sagas.update(&saga).await?;
@@ -196,6 +198,7 @@ impl CrossChainProxy {
     pub async fn advance(
         &self,
         order_id: CrossChainOrderId,
+        now_unix: u64,
     ) -> Result<CrossChainSaga, SolventError> {
         let mut saga = self.sagas.load(order_id).await?.ok_or_else(|| {
             SolventError::InvalidCrossChain("unknown cross-chain order".to_string())
@@ -247,6 +250,7 @@ impl CrossChainProxy {
                     RemoteProgress::Finalized { evidence } => {
                         saga.destination = Some(evidence);
                         saga.state = SagaState::DestinationFinalized;
+                        saga.record_lifecycle(CrossChainLifecycleStage::DestinationFill, now_unix);
                     }
                     RemoteProgress::Failed { reason } => {
                         self.compensate(&mut saga, reason).await?;
@@ -273,6 +277,8 @@ impl CrossChainProxy {
                     progress,
                     SagaState::FillProofPending,
                     SagaState::OriginPending,
+                    CrossChainLifecycleStage::ProofRelay,
+                    now_unix,
                     |saga, evidence| saga.fill_proof = Some(evidence),
                 );
             }
@@ -295,6 +301,8 @@ impl CrossChainProxy {
                     progress,
                     SagaState::OriginPending,
                     SagaState::OriginFinalized,
+                    CrossChainLifecycleStage::OriginClaim,
+                    now_unix,
                     |saga, evidence| saga.origin = Some(evidence),
                 );
             }
@@ -318,6 +326,8 @@ impl CrossChainProxy {
                         progress,
                         SagaState::OriginFinalized,
                         SagaState::RepaymentPending,
+                        CrossChainLifecycleStage::Repayment,
+                        now_unix,
                         |saga, evidence| saga.repayment = Some(evidence),
                     );
                 }
@@ -367,6 +377,7 @@ impl CrossChainProxy {
                                 message_id: Some(prepared.message_id),
                             });
                             saga.state = SagaState::RepaymentPending;
+                            saga.record_lifecycle(CrossChainLifecycleStage::Repayment, now_unix);
                         }
                         Err(
                             CctpCompletionError::Pending | CctpCompletionError::RateLimited { .. },
@@ -400,6 +411,8 @@ impl CrossChainProxy {
                     progress,
                     SagaState::RepaymentPending,
                     SagaState::Complete,
+                    CrossChainLifecycleStage::Complete,
+                    now_unix,
                     |_, _| {},
                 );
             }
@@ -732,6 +745,8 @@ fn apply_post_delivery(
     progress: RemoteProgress,
     pending: SagaState,
     finalized: SagaState,
+    lifecycle_stage: CrossChainLifecycleStage,
+    now_unix: u64,
     record: impl FnOnce(&mut CrossChainSaga, crate::primitives::crosschain::StepEvidence),
 ) {
     match progress {
@@ -739,6 +754,7 @@ fn apply_post_delivery(
         RemoteProgress::Finalized { evidence } => {
             record(saga, evidence);
             saga.state = finalized;
+            saga.record_lifecycle(lifecycle_stage, now_unix);
         }
         RemoteProgress::Failed { reason } => {
             saga.failure = Some(reason);
@@ -1155,7 +1171,7 @@ mod tests {
             SagaState::Preparing
         );
 
-        let saga = proxy.advance(order_id).await.unwrap();
+        let saga = proxy.advance(order_id, 11).await.unwrap();
         assert_eq!(saga.state, SagaState::Prepared);
     }
 
@@ -1179,7 +1195,7 @@ mod tests {
             .await
             .unwrap();
         for _ in 0..5 {
-            saga = proxy.advance(order_id).await.unwrap();
+            saga = proxy.advance(order_id, 11).await.unwrap();
         }
         assert_eq!(saga.state, SagaState::Complete);
         assert!(saga.destination.is_some());
@@ -1220,7 +1236,7 @@ mod tests {
             .await
             .unwrap();
         for _ in 0..5 {
-            saga = proxy.advance(order_id).await.unwrap();
+            saga = proxy.advance(order_id, 11).await.unwrap();
         }
         assert_eq!(saga.state, SagaState::Complete);
         assert_eq!(

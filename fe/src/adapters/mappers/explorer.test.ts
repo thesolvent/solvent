@@ -119,13 +119,20 @@ describe("Explorer records", () => {
       destination: { command_id: "0x06", block_number: 74 },
       fill_proof: { command_id: "0x07", block_number: 163 },
       repayment: { command_id: "0x08", block_number: 217 },
+      lifecycle: [
+        { stage: "quoted", at: 1_900_000_000 },
+        { stage: "destination_fill", at: 1_900_000_030 },
+        { stage: "proof_relay", at: 1_900_000_060 },
+        { stage: "origin_claim", at: 1_900_000_090 },
+        { stage: "repayment", at: 1_900_000_120 },
+        { stage: "complete", at: 1_900_000_150 },
+      ],
     } satisfies CrossChainOrder;
 
     const trade = toCrossChainTrade(
       order,
       assets.items.map((asset) => toAsset(asset, "Chain A")) as Asset[],
       assets.items.map((asset) => toAsset(asset, "Base")) as Asset[],
-      1_900_000_620,
     );
 
     expect(trade).toMatchObject({
@@ -136,7 +143,8 @@ describe("Explorer records", () => {
       txHash:
         "0x243a599bce767f1783a3e5c66348496e349c8a1539815209a498673d3b4f471c",
       blockNumber: 148,
-      settledAt: 1_900_000_620,
+      createdAt: 1_900_000_000,
+      settledAt: 1_900_000_150,
     });
     expect(trade.lifecycle).toHaveLength(6);
     expect(trade.lifecycle.map((stage) => stage.status)).toEqual([
@@ -146,6 +154,10 @@ describe("Explorer records", () => {
       "origin claim",
       "repayment",
       "complete",
+    ]);
+    expect(trade.lifecycle.map((stage) => stage.at)).toEqual([
+      1_900_000_000, 1_900_000_030, 1_900_000_060, 1_900_000_090, 1_900_000_120,
+      1_900_000_150,
     ]);
     expect(trade.legs).toEqual([
       expect.objectContaining({
@@ -214,12 +226,13 @@ describe("Explorer records", () => {
       order,
       assets.items.map((asset) => toAsset(asset, "Chain A")) as Asset[],
       assets.items.map((asset) => toAsset(asset, "Base")) as Asset[],
-      1_900_000_100,
     );
 
     expect(trade.lifecycle.map((stage) => stage.status)).toEqual([
       "quoted",
       "destination fill",
     ]);
+    expect(trade.lifecycle.map((stage) => stage.at)).toEqual([null, null]);
+    expect(trade.settledAt).toBeNull();
   });
 });

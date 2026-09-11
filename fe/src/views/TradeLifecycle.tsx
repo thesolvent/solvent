@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import type { TradeRecord } from "@/data/explorer";
-import { tradeLifecycle } from "@/lib/trade-lifecycle";
+import { isTerminalTrade, tradeLifecycle } from "@/lib/trade-lifecycle";
 import styles from "./explorer.module.css";
 
 export function TradeLifecycle({ trade }: { trade: TradeRecord }) {
@@ -28,7 +28,9 @@ export function TradeLifecycle({ trade }: { trade: TradeRecord }) {
         </div>
         <span className={styles.lifecycleTotal}>
           {lifecycle.elapsedSeconds === null
-            ? "pending"
+            ? isTerminalTrade(trade.status)
+              ? "—"
+              : "pending"
             : `${lifecycle.elapsedSeconds}s`}{" "}
           total
         </span>
