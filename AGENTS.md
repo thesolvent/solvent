@@ -6,6 +6,11 @@ code itself. (Backend = the Rust workspace under `crates/`; on-chain = `contract
 
 ## Core rules (non-negotiable)
 
+- **Request scope is a hard constraint.** Make only the specific change the user explicitly
+  requests. Do not extend a visual, behavioral, or architectural change to adjacent components,
+  related controls, or similar surfaces without separate approval. If the request names one
+  dropdown, selector, page, field, or component, every unnamed surface stays unchanged.
+
 - **Frontend design is a hard constraint.** Preserve the original mock/hardcoded layouts,
   dimensions, typography, colors, charts, controls and field placement. Wire real data into
   existing slots. Ask the user before adding, removing or moving a visible field, link, control
