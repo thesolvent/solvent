@@ -14,6 +14,13 @@ export default defineConfig({
   server: {
     // Honour the harness-assigned port; 5173 may already be taken.
     port: process.env.PORT ? Number(process.env.PORT) : undefined,
+    proxy: {
+      "/solventx-api": {
+        target: process.env.SOLVENTX_PROXY_TARGET ?? "http://127.0.0.1:8090",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/solventx-api/, ""),
+      },
+    },
   },
   css: {
     modules: { localsConvention: "camelCaseOnly" },
