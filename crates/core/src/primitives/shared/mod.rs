@@ -10,6 +10,6 @@ pub use config::{ChainConfig, SystemConfig};
 pub use error::SolventError;
 pub use ids::{
     AggregateQuoteId, ChainId, CrossChainOrderId, CrossChainStepId, FillId, IntentId, LeaseId,
-    MakerId, PrepareToken, ReservationId, StrategyHash,
+    MakerId, PrepareToken, RebateBatchId, ReservationId, StrategyHash,
 };
 pub use valuation::{Bps, Usd, UsdPrice};

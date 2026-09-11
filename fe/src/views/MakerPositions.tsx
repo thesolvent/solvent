@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import type { makerView } from "@/lib/makers";
 import type { DockPositionInput, PushPositionInput } from "@/ports/positions";
@@ -59,6 +59,12 @@ export function MakerPositions({
     (first
       ? { pair: first.pair, position: first.positions[0].hash }
       : { pair: null, position: null });
+
+  useEffect(() => {
+    if (selected === undefined && first) {
+      setSelected({ pair: first.pair, position: first.positions[0].hash });
+    }
+  }, [first, selected]);
 
   const closeEditor = () => {
     setEditor(undefined);

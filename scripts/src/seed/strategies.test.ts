@@ -21,6 +21,7 @@ const quote = {
 };
 const aqua = "0x4444444444444444444444444444444444444444" as Address;
 const app = "0x5555555555555555555555555555555555555555" as Address;
+const credential = "0x6666666666666666666666666666666666666666" as Address;
 const spec = { base: "WETH", quote: "USDC", widthPct: 8, feeBps: 5, size: 30 };
 const pricing = { kind: "ranged" as const, mid: 3000 };
 const curve = Strategy.inRange({
@@ -30,7 +31,7 @@ const curve = Strategy.inRange({
     halfWidthPct: 8,
 }).fee(5);
 const copies = [0n, 1n, 2n, 3n].map((salt) =>
-    curve.salt(salt).build(maker.address),
+    curve.salt(salt).build(maker.address, credential),
 );
 const pos = positions({ aqua, app });
 const ships = copies.map((copy) =>
@@ -63,6 +64,7 @@ for (const { name, counts, pending } of [
         const minted: { token: Address; amount: bigint }[] = [];
         const sent: { to: Address; data: Hex; value: bigint }[] = [];
         const env = {
+            config: { taker_credential: credential },
             manifest: {
                 aqua,
                 router: app,

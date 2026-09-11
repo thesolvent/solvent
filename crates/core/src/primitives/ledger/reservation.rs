@@ -1,10 +1,10 @@
-//! A reservation: the promise to pull maker capital across one or more strategies to fill an
-//! intent, and where that promise sits in the two-phase lifecycle.
+//! A reservation: the promise to pull maker capital across one or more strategies, its owning
+//! workflow, and where that promise sits in the two-phase lifecycle.
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 
-use crate::primitives::{IntentId, MakerId, ReservationId, StrategyHash};
+use crate::primitives::{IntentId, MakerId, RebateBatchId, ReservationId, StrategyHash};
 
 use super::account::AccountKey;
 
@@ -55,13 +55,45 @@ pub enum ReservationState {
     ReorgOpen,
 }
 
-/// A promise to fill an intent by pulling maker capital across one or more `sources`. Created
-/// `Pending`; the ledger owns every subsequent transition.
+/// The operation whose inventory promise this reservation protects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ReservationOwner {
+    Swap(IntentId),
+    Rebate(RebateBatchId),
+}
+
+impl ReservationOwner {
+    pub fn kind(self) -> &'static str {
+        match self {
+            Self::Swap(_) => "swap",
+            Self::Rebate(_) => "rebate",
+        }
+    }
+
+    pub fn id(self) -> B256 {
+        match self {
+            Self::Swap(intent) => intent.0,
+            Self::Rebate(batch) => batch.0,
+        }
+    }
+
+    /// The swap intent when this is a normal fill reservation.
+    pub fn swap_intent(self) -> Option<IntentId> {
+        match self {
+            Self::Swap(intent) => Some(intent),
+            Self::Rebate(_) => None,
+        }
+    }
+}
+
+/// A promise to pull maker capital across one or more `sources`. Created `Pending`; the ledger owns
+/// every subsequent transition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Reservation {
     pub id: ReservationId,
-    pub intent: IntentId,
+    pub owner: ReservationOwner,
     pub sources: Vec<ReservationSource>,
     pub state: ReservationState,
     /// Unix seconds after which a TTL sweep may expire the reservation.
@@ -72,16 +104,36 @@ impl Reservation {
     /// A fresh `Pending` reservation. Only the ledger moves it out of `Pending`.
     pub fn new(
         id: ReservationId,
-        intent: IntentId,
+        owner: ReservationOwner,
         sources: Vec<ReservationSource>,
         expires_at: u64,
     ) -> Self {
         Self {
             id,
-            intent,
+            owner,
             sources,
             state: ReservationState::Pending,
             expires_at,
         }
+    }
+
+    /// A fresh reservation owned by a normal swap intent.
+    pub fn for_swap(
+        id: ReservationId,
+        intent: IntentId,
+        sources: Vec<ReservationSource>,
+        expires_at: u64,
+    ) -> Self {
+        Self::new(id, ReservationOwner::Swap(intent), sources, expires_at)
+    }
+
+    /// A fresh reservation owned by a price-restoration batch.
+    pub fn for_rebate(
+        id: ReservationId,
+        batch: RebateBatchId,
+        sources: Vec<ReservationSource>,
+        expires_at: u64,
+    ) -> Self {
+        Self::new(id, ReservationOwner::Rebate(batch), sources, expires_at)
     }
 }

@@ -11,6 +11,7 @@ pub mod maker;
 pub mod pool;
 pub mod pricing;
 pub mod quote;
+pub mod rebate;
 pub mod registry;
 pub mod routing;
 pub mod shared;
@@ -18,6 +19,6 @@ pub mod trade;
 
 pub use shared::{
     AggregateQuoteId, Bps, ChainConfig, ChainId, CrossChainOrderId, CrossChainStepId, FillId,
-    IntentId, LeaseId, MakerId, PrepareToken, ReservationId, SolventError, StrategyHash,
-    SystemConfig, Usd, UsdPrice,
+    IntentId, LeaseId, MakerId, PrepareToken, RebateBatchId, ReservationId, SolventError,
+    StrategyHash, SystemConfig, Usd, UsdPrice,
 };

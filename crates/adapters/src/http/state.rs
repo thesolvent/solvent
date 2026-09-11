@@ -13,6 +13,7 @@ use solvent_core::deps::registry::EventStore;
 use solvent_core::maker::MakerService;
 use solvent_core::pool::PoolService;
 use solvent_core::quote::QuoteService;
+use solvent_core::rebate::RebateService;
 use solvent_core::registry::SharedSnapshot;
 use solvent_core::swap::SwapService;
 use solvent_core::trade::TradeService;
@@ -49,6 +50,12 @@ pub struct AppConfig {
     /// The Permit2 contract verifying the taker witness.
     #[schema(value_type = String)]
     pub permit2: Address,
+    /// The public executor target for encoded rebate transactions.
+    #[schema(value_type = String)]
+    pub filler: Address,
+    /// The immutable token whose balance gates every strategy to the filler contract.
+    #[schema(value_type = String)]
+    pub taker_credential: Address,
     /// The resolver authorized to cosign taker orders.
     #[schema(value_type = String)]
     pub cosigner: Address,
@@ -69,6 +76,8 @@ pub struct AppState {
     pub makers: Arc<MakerService>,
     pub quote: Arc<QuoteService>,
     pub swap: Arc<SwapService>,
+    /// Durable, signed rebate work exposed through the public read-only queue.
+    pub rebates: Arc<RebateService>,
     /// Cosigns taker-signed orders on the swap path (holds only the resolver's cosigner key).
     pub cosigner: Arc<ServerCosigner>,
     /// The trade read-surface, backing the `/trades` and maker-settlements endpoints.

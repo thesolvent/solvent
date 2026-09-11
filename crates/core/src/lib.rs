@@ -12,6 +12,7 @@ pub mod obs;
 pub mod pool;
 pub mod primitives;
 pub mod quote;
+pub mod rebate;
 pub mod reconcile;
 pub mod registry;
 pub mod routing;

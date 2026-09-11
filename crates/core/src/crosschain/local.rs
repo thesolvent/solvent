@@ -200,7 +200,7 @@ impl LocalCrossChainService {
         if !already_executed {
             let sources = self
                 .ledger
-                .reservation_sources(ReservationId(token.0))
+                .settlement_reservation_sources(ReservationId(token.0))
                 .await
                 .ok_or_else(|| {
                     SolventError::InvalidCrossChain(

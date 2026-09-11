@@ -50,6 +50,10 @@ define_id!(
     ReservationId(B256)
 );
 define_id!(
+    /// One price-restoration batch for a maker strategy.
+    RebateBatchId(B256)
+);
+define_id!(
     /// TTL lease identifier.
     LeaseId(B256)
 );

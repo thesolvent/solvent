@@ -10,6 +10,7 @@ export type {
     PoolDepthQuery,
     PositionDepthQuery,
     PairHistoryQuery,
+    RebatesQuery,
     PairPriceHistory,
     PriceHistoryPeriod,
 } from "./client";
@@ -36,6 +37,9 @@ export type {
     PairInfo,
     PreviewRequest,
     PreviewResponse,
+    Rebate,
+    RebateStatus,
+    RebateAllocation,
 } from "./client";
 export { SolventApiError, SolventNetworkError } from "./errors";
 export { defaultTransport } from "./transport";

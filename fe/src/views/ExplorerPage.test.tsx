@@ -207,9 +207,9 @@ describe("Explorer live lists", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Activity" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Load more" })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "Next →" })).toBeEnabled(),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next →" }));
     const links = await screen.findAllByRole("link", {
       name: /View .* transaction/,
     });
@@ -219,6 +219,6 @@ describe("Explorer live lists", () => {
       `/explorer/strategies/${activity.items[0].strategy_hash}`,
     );
     expect(readActivity).toHaveBeenLastCalledWith({}, "older-events");
-    expect(screen.getByRole("button", { name: "Load more" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next →" })).toBeDisabled();
   });
 });

@@ -28,6 +28,11 @@
       "import": "./dist/positions.js",
       "require": "./dist/positions.cjs"
     },
+    "./rebates": {
+      "types": "./dist/rebates.d.ts",
+      "import": "./dist/rebates.js",
+      "require": "./dist/rebates.cjs"
+    },
     "./client": {
       "types": "./dist/client.d.ts",
       "import": "./dist/client.js",

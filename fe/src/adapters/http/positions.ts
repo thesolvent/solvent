@@ -70,11 +70,17 @@ export const positionsAdapter: PositionsPort = {
 
   createIntent(input, clients) {
     const sdk = createPositionClient({ api: solventApi, ...clients });
-    let intent: ReturnType<typeof sdk.createIntent> | undefined;
+    let intent: Promise<ReturnType<typeof sdk.createIntent>> | undefined;
     return {
       async submit() {
-        intent ??= sdk.createIntent(buildRequest(input));
-        return intent.submit();
+        intent ??= solventApi
+          .config()
+          .then((config) =>
+            sdk.createIntent(
+              buildRequest(input, config.taker_credential as Address),
+            ),
+          );
+        return (await intent).submit();
       },
     };
   },
@@ -165,7 +171,7 @@ function toCreateToken(
   };
 }
 
-function buildRequest(input: PositionInput) {
+function buildRequest(input: PositionInput, takerCredential: Address) {
   const { base, quote } = orientedPair(input);
   const amountBase = parseTokenAmount(
     input.amountBase,
@@ -183,7 +189,7 @@ function buildRequest(input: PositionInput) {
   const strategy = buildStrategy(input, base, quote, amountBase, amountQuote)
     .fee(input.feeBps)
     .salt(secureSalt())
-    .build(input.maker);
+    .build(input.maker, takerCredential);
   return {
     maker: input.maker,
     strategy,

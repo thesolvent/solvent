@@ -4,12 +4,15 @@ pragma solidity 0.8.30;
 import { AquaStrategyBuilders } from "@1inch/swap-vm/test/base/AquaStrategyBuilders.sol";
 import { AquaSwapVMRouter } from "@1inch/swap-vm/src/routers/AquaSwapVMRouter.sol";
 import { ISwapVM } from "@1inch/swap-vm/src/interfaces/ISwapVM.sol";
+import { Controls, ControlsArgsBuilder } from "@1inch/swap-vm/src/instructions/Controls.sol";
 import { TokenMock } from "@1inch/solidity-utils/contracts/mocks/TokenMock.sol";
+import { Program, ProgramBuilder } from "@1inch/swap-vm/test/utils/ProgramBuilder.sol";
 
 import { PermitSignature } from "uniswapx-test/util/PermitSignature.sol";
 import { DeployPermit2 } from "uniswapx-test/util/DeployPermit2.sol";
 import { OrderInfoBuilder } from "uniswapx-test/util/OrderInfoBuilder.sol";
 import { V2DutchOrderReactor } from "uniswapx/reactors/V2DutchOrderReactor.sol";
+import { IReactor } from "uniswapx/interfaces/IReactor.sol";
 import { V2DutchOrder, V2DutchOrderLib, CosignerData } from "uniswapx/lib/V2DutchOrderLib.sol";
 import { DutchInput, DutchOutput } from "uniswapx/lib/DutchOrderLib.sol";
 import { OrderInfo, SignedOrder } from "uniswapx/base/ReactorStructs.sol";
@@ -24,19 +27,22 @@ import { UniswapXAquaFiller } from "../src/UniswapXAquaFiller.sol";
 /// @dev `_deploy()` wires the maker side and the filler; each concrete suite sets `reactor`/`permit2` first.
 abstract contract UniswapXAquaFillerHarness is AquaStrategyBuilders, PermitSignature, DeployPermit2 {
     using OrderInfoBuilder for OrderInfo;
+    using ProgramBuilder for Program;
     using V2DutchOrderLib for V2DutchOrder;
 
-    AquaSwapVMRouter internal swapVM;
+    AquaSwapVMRouter internal swapVm;
     IPermit2 internal permit2;
     V2DutchOrderReactor internal reactor;
     UniswapXAquaFiller internal filler;
 
     uint256 internal constant SWAPPER_PK = 0x1010;
     uint256 internal constant COSIGNER_PK = 0x2020;
+    uint256 internal constant POLICY_SIGNER_PK = 0x3030;
     address internal swapper;
 
     // tokenA = input the swapper pays (USDC-like); tokenB = output the maker sources (WETH-like).
     uint256 internal nonce;
+    uint256 internal policyNonce;
 
     event Swept(address indexed token, address indexed to, uint256 amount);
 
@@ -46,8 +52,12 @@ abstract contract UniswapXAquaFillerHarness is AquaStrategyBuilders, PermitSigna
     ///      already be set by the caller.
     function _deploy() internal {
         super.setUp(); // sets maker, tokenA, tokenB
-        swapVM = new AquaSwapVMRouter(address(aqua), address(0), address(this), "SwapVM", "1.0.0");
-        filler = new UniswapXAquaFiller(address(this));
+        swapVm = new AquaSwapVMRouter(address(aqua), address(0), address(this), "SwapVM", "1.0.0");
+        filler = new UniswapXAquaFiller(
+            address(this), ISwapVM(address(swapVm)), IReactor(address(reactor)), vm.addr(POLICY_SIGNER_PK)
+        );
+        filler.setTokenAllowed(address(tokenA), true);
+        filler.setTokenAllowed(address(tokenB), true);
 
         swapper = vm.addr(SWAPPER_PK);
         vm.prank(swapper);
@@ -67,24 +77,39 @@ abstract contract UniswapXAquaFillerHarness is AquaStrategyBuilders, PermitSigna
         internal
         returns (ISwapVM.Order memory order, bytes32 strategyHash)
     {
-        maker = mkr; // createStrategy/shipStrategy read the inherited `maker`
-        order = createStrategy(
-            MakerSetup({
-                balanceA: 0,
-                balanceB: 0,
-                priceMin: 0,
-                priceMax: 0,
-                protocolFeeBps: 0,
-                feeInBps: 0,
-                protocolFeeRecipient: address(0),
-                swapType: SwapType.XYC
-            })
-        );
-        strategyHash = shipStrategy(swapVM, order, tokenIn, tokenOut, reserveIn, reserveOut);
+        order = _protectedXycOrder(mkr);
+        strategyHash = shipStrategy(swapVm, order, tokenIn, tokenOut, reserveIn, reserveOut);
         tokenOut.mint(mkr, realOut);
+        filler.setTokenAllowed(address(tokenIn), true);
+        filler.setTokenAllowed(address(tokenOut), true);
+    }
+
+    function _protectedXycOrder(address mkr) internal returns (ISwapVM.Order memory order) {
+        maker = mkr; // createStrategy reads the inherited maker
+        MakerSetup memory setup = MakerSetup({
+            balanceA: 0,
+            balanceB: 0,
+            priceMin: 0,
+            priceMax: 0,
+            protocolFeeBps: 0,
+            feeInBps: 0,
+            protocolFeeRecipient: address(0),
+            swapType: SwapType.XYC
+        });
+        Program memory program = ProgramBuilder.init(_opcodes());
+        order = createStrategy(
+            bytes.concat(
+                program.build(
+                    Controls._onlyTakerTokenBalanceNonZero,
+                    ControlsArgsBuilder.buildTakerTokenBalanceNonZero(address(filler.TAKER_CREDENTIAL()))
+                ),
+                buildProgram(setup)
+            )
+        );
     }
 
     function _source(
+        bytes32 contextHash,
         ISwapVM.Order memory order,
         TokenMock tokenIn,
         TokenMock tokenOut,
@@ -92,17 +117,70 @@ abstract contract UniswapXAquaFillerHarness is AquaStrategyBuilders, PermitSigna
         uint256 amountInMaximum
     )
         internal
-        view
-        returns (UniswapXAquaFiller.SourceSwap memory)
+        returns (UniswapXAquaFiller.SourceSwap memory source)
     {
-        return UniswapXAquaFiller.SourceSwap({
-            router: ISwapVM(address(swapVM)),
-            order: order,
+        UniswapXAquaFiller.Authorization memory authorization = UniswapXAquaFiller.Authorization({
+            kind: UniswapXAquaFiller.ExecutionKind.UserFill,
+            nonce: policyNonce++,
+            contextHash: contextHash,
+            strategyHash: swapVm.hash(order),
+            maker: order.maker,
             tokenIn: address(tokenIn),
             tokenOut: address(tokenOut),
             amountOut: amountOut,
-            amountInMaximum: amountInMaximum
+            amountInLimit: amountInMaximum,
+            rebateAmount: 0,
+            deadlineBlock: uint64(block.number + 100)
         });
+        source = UniswapXAquaFiller.SourceSwap({
+            order: order, authorization: authorization, policySignature: _signAuthorization(authorization)
+        });
+    }
+
+    function _rebateAuthorization(
+        bytes32 contextHash,
+        ISwapVM.Order memory order,
+        TokenMock tokenIn,
+        TokenMock tokenOut,
+        uint256 amountOut,
+        uint256 amountIn,
+        uint256 rebateAmount
+    )
+        internal
+        returns (UniswapXAquaFiller.Authorization memory authorization, bytes memory signature)
+    {
+        authorization = UniswapXAquaFiller.Authorization({
+            kind: UniswapXAquaFiller.ExecutionKind.Rebate,
+            nonce: policyNonce++,
+            contextHash: contextHash,
+            strategyHash: swapVm.hash(order),
+            maker: order.maker,
+            tokenIn: address(tokenIn),
+            tokenOut: address(tokenOut),
+            amountOut: amountOut,
+            amountInLimit: amountIn,
+            rebateAmount: rebateAmount,
+            deadlineBlock: uint64(block.number + 100)
+        });
+        signature = _signAuthorization(authorization);
+    }
+
+    function _signAuthorization(UniswapXAquaFiller.Authorization memory authorization)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 digest = filler.hashAuthorization(authorization);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(POLICY_SIGNER_PK, digest);
+        return bytes.concat(r, s, bytes1(v));
+    }
+
+    function _userFillContext(SignedOrder memory order) internal pure returns (bytes32) {
+        return keccak256(abi.encode(order));
+    }
+
+    function _userFillBatchContext(SignedOrder[] memory orders) internal pure returns (bytes32) {
+        return keccak256(abi.encode(orders));
     }
 
     function _outputs(
@@ -170,10 +248,10 @@ abstract contract UniswapXAquaFillerHarness is AquaStrategyBuilders, PermitSigna
         uint256 amountOut
     )
         internal
-        view
         returns (uint256 amountIn)
     {
         bytes memory takerData = new bytes(22);
-        (amountIn,,) = swapVM.asView().quote(order, tokenIn, tokenOut, amountOut, takerData);
+        vm.prank(address(filler));
+        (amountIn,,) = swapVm.quote(order, tokenIn, tokenOut, amountOut, takerData);
     }
 }

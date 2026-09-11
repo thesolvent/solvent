@@ -76,6 +76,8 @@ pub struct Config {
     /// Optional private listener and allow-listed contracts for cross-chain coordination.
     #[serde(default)]
     pub crosschain: Option<CrossChainConfig>,
+    #[serde(default)]
+    pub rebate: RebateConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,6 +110,35 @@ pub struct PriceSymbol {
     pub tokens: Vec<Address>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RebateConfig {
+    #[serde(default)]
+    pub start_block: u64,
+    #[serde(default = "default_rebate_deviation_bps")]
+    pub deviation_threshold_bps: u64,
+    #[serde(default = "default_rebate_gas_safety_bps")]
+    pub gas_safety_bps: u64,
+    #[serde(default = "default_rebate_gas_units")]
+    pub gas_units: u64,
+    #[serde(default = "default_rebate_market_max_age_secs")]
+    pub market_max_age_secs: u64,
+    #[serde(default = "default_rebate_authorization_ttl_blocks")]
+    pub authorization_ttl_blocks: u64,
+}
+
+impl Default for RebateConfig {
+    fn default() -> Self {
+        Self {
+            start_block: 0,
+            deviation_threshold_bps: default_rebate_deviation_bps(),
+            gas_safety_bps: default_rebate_gas_safety_bps(),
+            gas_units: default_rebate_gas_units(),
+            market_max_age_secs: default_rebate_market_max_age_secs(),
+            authorization_ttl_blocks: default_rebate_authorization_ttl_blocks(),
+        }
+    }
+}
+
 impl Config {
     /// Load from `<path>.toml` (the `config` crate resolves the extension).
     pub fn load(path: &str) -> Result<Self, StartupError> {
@@ -126,7 +157,7 @@ impl Config {
     }
 
     /// The subset the FE reads at bootstrap (the `/config` payload). `earn`/`send_buy` are MVP-off.
-    pub fn app_config(&self, cosigner: Address) -> AppConfig {
+    pub fn app_config(&self, cosigner: Address, taker_credential: Address) -> AppConfig {
         AppConfig {
             chain_id: self.chain_id,
             features: Features {
@@ -141,6 +172,8 @@ impl Config {
             app: self.app_address,
             reactor: self.reactor,
             permit2: self.permit2,
+            filler: self.filler,
+            taker_credential,
             cosigner,
         }
     }
@@ -188,6 +221,21 @@ fn default_wallet_state_db() -> String {
 fn default_crosschain_quote_ttl_secs() -> u64 {
     300
 }
+fn default_rebate_deviation_bps() -> u64 {
+    50
+}
+fn default_rebate_gas_safety_bps() -> u64 {
+    12_000
+}
+fn default_rebate_gas_units() -> u64 {
+    350_000
+}
+fn default_rebate_market_max_age_secs() -> u64 {
+    10
+}
+fn default_rebate_authorization_ttl_blocks() -> u64 {
+    30
+}
 
 /// Read and parse the token list JSON at `path`.
 pub fn load_token_list(path: &str) -> Result<TokenList, StartupError> {
@@ -211,6 +259,8 @@ pub enum StartupError {
     Key(String),
     #[error("wallet state store: {0}")]
     WalletStore(String),
+    #[error("filler configuration: {0}")]
+    FillerConfiguration(String),
     #[error("token list: {0}")]
     TokenList(String),
     #[error(transparent)]

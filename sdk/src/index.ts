@@ -4,6 +4,7 @@ export type { Address, Hex } from "viem";
 
 export * from "./construction";
 export * from "./positions";
+export * from "./rebates";
 export * from "./client";
 
 export * from "./orders";

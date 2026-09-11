@@ -177,7 +177,7 @@ export async function seedPair(
     key: Hex,
     pricing: Pricing,
 ): Promise<string> {
-    const { manifest } = env;
+    const { config, manifest } = env;
     const account = privateKeyToAccount(key);
     const pos = positions({
         aqua: manifest.aqua as Address,
@@ -188,7 +188,9 @@ export async function seedPair(
     const pending: BuiltStrategy[] = [];
     let active = 0;
     for (let salt = 0n; active + pending.length < COPIES_PER_PAIR; salt += 1n) {
-        const built = strategy.salt(salt).build(account.address);
+        const built = strategy
+            .salt(salt)
+            .build(account.address, config.taker_credential as Address);
         const count = await tokensCount(
             env,
             account.address,

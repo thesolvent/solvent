@@ -5,6 +5,7 @@ export default defineConfig({
         index: "src/index.ts",
         construction: "src/construction/index.ts",
         positions: "src/positions/index.ts",
+        rebates: "src/rebates/index.ts",
         client: "src/client/index.ts",
         orders: "src/orders/index.ts",
         swap: "src/swap/index.ts",
