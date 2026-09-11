@@ -65,6 +65,22 @@ define_id!(
     /// EVM chain identifier (e.g. `1` for Ethereum mainnet).
     ChainId(u64)
 );
+define_id!(
+    /// End-to-end identifier for one cross-chain settlement saga.
+    CrossChainOrderId(B256)
+);
+define_id!(
+    /// Deterministic identifier for a joined origin and destination quote.
+    AggregateQuoteId(B256)
+);
+define_id!(
+    /// Idempotency token for a chain-local capital preparation.
+    PrepareToken(B256)
+);
+define_id!(
+    /// Idempotency key for one irreversible step in a cross-chain saga.
+    CrossChainStepId(B256)
+);
 
 #[cfg(test)]
 mod tests {

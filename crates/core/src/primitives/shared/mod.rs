@@ -9,6 +9,7 @@ pub mod valuation;
 pub use config::{ChainConfig, SystemConfig};
 pub use error::SolventError;
 pub use ids::{
-    ChainId, FillId, IntentId, LeaseId, MakerId, RebateBatchId, ReservationId, StrategyHash,
+    AggregateQuoteId, ChainId, CrossChainOrderId, CrossChainStepId, FillId, IntentId, LeaseId,
+    MakerId, PrepareToken, RebateBatchId, ReservationId, StrategyHash,
 };
 pub use valuation::{Bps, Usd, UsdPrice};
