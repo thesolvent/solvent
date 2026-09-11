@@ -247,6 +247,14 @@ describe("Trade detail navigation", () => {
         display: "11.466663",
         net: "Base",
       },
+      legs: [
+        {
+          ...toTrade(detail).legs[0],
+          chainId: 31338,
+          input: { symbol: "DAI", display: "1", net: "Base" },
+          output: { symbol: "USDC", display: "0.999899", net: "Base" },
+        },
+      ],
     };
     renderWithServices(
       routes(),
@@ -260,9 +268,20 @@ describe("Trade detail navigation", () => {
     expect(
       await screen.findByLabelText("LINK token on Chain A"),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("USDC token on Base")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("USDC token on Base")).toHaveLength(2);
     expect(
       screen.queryByText("1 LINK → 11.466663 USDC"),
     ).not.toBeInTheDocument();
+    expect(screen.getByText("Destination liquidity")).toBeInTheDocument();
+    expect(
+      screen.getByText("Base execution · click a row to open its strategy"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("DAI token on Base")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("DAI token on Base").closest("a"),
+    ).toHaveAttribute(
+      "href",
+      `/explorer/strategies/${detail.legs[0].strategy_hash}?chain=31338`,
+    );
   });
 });

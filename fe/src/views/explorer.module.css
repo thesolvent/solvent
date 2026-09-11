@@ -1166,6 +1166,15 @@
   text-overflow: ellipsis;
 }
 
+.crossChainLegFlow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
 .legCurve {
   font-size: 10.5px;
   color: var(--text-dim);

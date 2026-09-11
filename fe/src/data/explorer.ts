@@ -14,6 +14,7 @@ export interface TradeSource {
   curve: string | null;
   maker: string;
   strategyHash: string;
+  chainId?: number;
   input: TokenQuantity;
   output: TokenQuantity;
   sharePct: number;

@@ -24,8 +24,9 @@ const PAGE_SIZE = 10;
 
 export const explorerAdapter: ExplorerPort = {
   async trades(filter, cursor) {
-    const page = await solventApi.trades({
-      ...filter,
+    const { chainId, ...query } = filter;
+    const page = await (chainId == null ? solventApi : baseApi).trades({
+      ...query,
       cursor,
       limit: PAGE_SIZE,
     });

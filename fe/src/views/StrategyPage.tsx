@@ -19,19 +19,31 @@ export function StrategyPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { strategyHash } = useParams();
+  const chainParam = new URLSearchParams(location.search).get("chain");
+  const parsedChainId = chainParam == null ? undefined : Number(chainParam);
+  const chainId =
+    parsedChainId != null &&
+    Number.isSafeInteger(parsedChainId) &&
+    parsedChainId > 0
+      ? parsedChainId
+      : undefined;
   const waitForIndex = Boolean(
     (location.state as RouteState | null)?.waitForStrategyIndex,
   );
-  const position = usePosition(strategyHash, { waitForIndex });
-  const history = usePositionHistory(position.data ? strategyHash : undefined);
+  const position = usePosition(strategyHash, { waitForIndex, chainId });
+  const history = usePositionHistory(
+    position.data ? strategyHash : undefined,
+    chainId,
+  );
   const depth = usePositionDepth(position.data, {
     waitForLiquidity: waitForIndex,
+    chainId,
   });
   const [hoverFrac, setHoverFrac] = useState<number | null>(null);
   const rangeHint = useId();
   const settlements = useTrades(
     strategyHash
-      ? { status: "confirmed", strategy_hash: strategyHash }
+      ? { status: "confirmed", strategy_hash: strategyHash, chainId }
       : undefined,
   );
   const sd = strategyDetail(

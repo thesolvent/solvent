@@ -9,10 +9,12 @@ const POST_CREATE_RETRY_LIMIT = 20;
 
 interface MakerReadOptions {
   waitForIndex?: boolean;
+  chainId?: number;
 }
 
 interface PositionDepthOptions {
   waitForLiquidity?: boolean;
+  chainId?: number;
 }
 
 function depthRefreshInterval(
@@ -45,11 +47,11 @@ function useMakerRead<T>(
   id: string | undefined,
   read: (id: string) => Promise<T>,
   period?: MakerPeriod,
-  { waitForIndex = false }: MakerReadOptions = {},
+  { waitForIndex = false, chainId }: MakerReadOptions = {},
 ) {
   return useQuery({
     ...LIVE_QUERY_OPTIONS,
-    queryKey: ["makers", name, id?.toLowerCase(), period],
+    queryKey: ["makers", name, id?.toLowerCase(), period, chainId],
     queryFn: id ? () => read(id) : skipToken,
     retry: (count, error) =>
       isMissingRecord(error)
@@ -108,10 +110,11 @@ export function usePosition(
   hash: string | undefined,
   options?: MakerReadOptions,
 ) {
+  const { makers } = useServices();
   return useMakerRead(
     "position",
     hash,
-    useServices().makers.position,
+    (id) => makers.position(id, options?.chainId),
     undefined,
     options,
   );
@@ -133,20 +136,27 @@ export function useMakerSettlements(
   });
 }
 
-export function usePositionHistory(hash: string | undefined) {
-  return useMakerRead("history", hash, useServices().makers.history);
+export function usePositionHistory(hash: string | undefined, chainId?: number) {
+  const { makers } = useServices();
+  return useMakerRead(
+    "history",
+    hash,
+    (id) => makers.history(id, chainId),
+    undefined,
+    { chainId },
+  );
 }
 
 export function usePositionDepth(
   position: Position | undefined,
-  { waitForLiquidity = false }: PositionDepthOptions = {},
+  { waitForLiquidity = false, chainId }: PositionDepthOptions = {},
 ) {
   const { makers } = useServices();
   return useQuery({
     ...LIVE_QUERY_OPTIONS,
-    queryKey: ["makers", "depth", position?.hash],
+    queryKey: ["makers", "depth", position?.hash, chainId],
     queryFn: position
-      ? () => makers.depth(position.hash, position.ref)
+      ? () => makers.depth(position.hash, position.ref, chainId)
       : skipToken,
     refetchInterval: (query) =>
       depthRefreshInterval(

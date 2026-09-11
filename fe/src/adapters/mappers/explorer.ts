@@ -112,7 +112,7 @@ export function toCrossChainTrade(
     0n,
   );
   const amountOut = BigInt(order.quote.amount_out);
-  // Browser-authored quotes expire ten minutes after creation; the saga currently stores no clock.
+  // Historical sagas predate recorded lifecycle timestamps, so their quote expiry is the only clock.
   const createdAt = Math.max(0, order.quote.expires_at_unix - 600);
   const status = crossChainStatus(order.state);
   const evidence = order.origin ?? order.destination;
@@ -158,14 +158,21 @@ export function toCrossChainTrade(
       return {
         maker: source.maker,
         strategyHash: source.strategy_hash,
+        chainId: order.quote.destination.local_chain,
         curve: null,
         input: {
           symbol: destinationInput?.symbol ?? "TOKEN",
           display: formatUnits(sourceInput, destinationInputDecimals),
+          net:
+            destinationInput?.net ??
+            `Chain ${order.quote.destination.local_chain}`,
+          logoUri: destinationInput?.logoUri,
         },
         output: {
           symbol: output?.symbol ?? "TOKEN",
           display: formatUnits(sourceOutput, outputDecimals),
+          net: output?.net ?? `Chain ${order.quote.destination.local_chain}`,
+          logoUri: output?.logoUri,
         },
         sharePct:
           total === 0n ? 0 : Number((sourceOutput * 10_000n) / total) / 100,

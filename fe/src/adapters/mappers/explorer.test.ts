@@ -163,8 +163,17 @@ describe("Explorer records", () => {
     ]);
     expect(trade.legs).toEqual([
       expect.objectContaining({
-        input: { symbol: "LINK", display: "1" },
-        output: { symbol: "USDC", display: "11.467239" },
+        input: expect.objectContaining({
+          symbol: "LINK",
+          display: "1",
+          net: "Base",
+        }),
+        output: expect.objectContaining({
+          symbol: "USDC",
+          display: "11.467239",
+          net: "Base",
+        }),
+        chainId: 31338,
         sharePct: 100,
       }),
     ]);
