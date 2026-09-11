@@ -12,6 +12,10 @@ the project is pre-1.0 and evolving.
   (`SourceSwap[]`). Supports multi-maker sourcing, multi-token outputs, and batched orders. Three safety
   layers (per-leg `amountInMaximum`, reactor approvals derived from the resolved orders, and a
   balance-snapshot profitability guard), plus `Ownable2Step` + a transient reentrancy guard.
+- **Cross-chain Aqua settlement** — `CompactOriginSettler` and `CrossChainAquaApp` implement direct
+  and CCTP-routed, zero-inventory fills between a user’s The Compact claim on the origin and a maker’s
+  Aqua strategy on the destination. The hermetic suite covers authorization, replay protection,
+  rollbacks, capacity limits, CCTP message binding, fee bounds, and destination repayment.
 - **Test suite** — 20 hermetic tests (happy paths, boundaries, every guard, admin, and a source-split
   fuzz) against source-deployed UniswapX + Aqua/SwapVM, plus an opt-in mainnet-fork test against the
   real V2 reactor + Permit2.
