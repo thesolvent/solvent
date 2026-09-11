@@ -92,6 +92,7 @@ contract CrossChainDirectTest is Test {
     bytes32 internal destinationStrategyHash;
     bytes32 internal destinationErc20StrategyHash;
     bytes32 internal originStrategyHash;
+    bytes12 internal compactLockTag;
     uint256 internal compactId;
 
     function setUp() public {
@@ -104,6 +105,13 @@ contract CrossChainDirectTest is Test {
         originAqua = new Aqua();
         wbtc = new DevToken("Wrapped Bitcoin", "WBTC", 8);
         allocator = new AlwaysOKAllocator();
+        uint96 allocatorId = compact.__registerAllocator(address(allocator), "");
+        compactLockTag = bytes12(
+            bytes32(
+                (uint256(Scope.Multichain) << 255) | (uint256(ResetPeriod.TenMinutes) << 252)
+                    | (uint256(allocatorId) << 160)
+            )
+        );
 
         vm.chainId(BASE_CHAIN_ID);
         baseAqua = new Aqua();
@@ -236,7 +244,10 @@ contract CrossChainDirectTest is Test {
             originStrategyHash,
             1,
             address(destinationToken),
-            ERC20_OUT
+            ERC20_OUT,
+            address(wbtc),
+            compactId,
+            WBTC_DUE
         );
 
         uint256 recipientBefore = destinationToken.balanceOf(user);
@@ -273,6 +284,58 @@ contract CrossChainDirectTest is Test {
         assertEq(_outstanding(maker, destinationErc20StrategyHash), 0);
         (,,,,, CrossChainAquaApp.ReceivableState state) = destinationApp.directReceivables(mandate.orderId);
         assertEq(uint8(state), uint8(CrossChainAquaApp.ReceivableState.Repaid));
+    }
+
+    function test_case1_acceptsAnotherOriginToken() public {
+        vm.chainId(ARBITRUM_CHAIN_ID);
+        DevToken dai = new DevToken("Dai Stablecoin", "DAI", 18);
+        uint256 inputAmount = 1 ether;
+        uint256 daiCompactId = _depositCompactToken(user, dai, inputAmount);
+
+        bytes32 daiDestinationStrategy =
+            _shipDestinationToken(maker, destinationToken, 5000e6, 2 ether, keccak256("maker-dai-usdc"));
+        bytes32 daiOriginStrategy = keccak256("maker-dai-origin");
+        (
+            SolventCrossChainOrder memory order,
+            SolventMandate memory mandate,
+            DirectMakerQuote memory quote,
+            bytes memory signature,
+            Claim memory compactClaim
+        ) = _scenarioForOutput(
+            user,
+            maker,
+            MAKER_PK,
+            daiDestinationStrategy,
+            daiOriginStrategy,
+            2,
+            address(destinationToken),
+            ERC20_OUT,
+            address(dai),
+            daiCompactId,
+            inputAmount
+        );
+
+        vm.chainId(BASE_CHAIN_ID);
+        destinationApp.fillDirect(order, mandate, quote, signature);
+
+        IFillProofVerifier.VerifiedFill memory fill = _verifiedFill(order, quote, keccak256("fill-dai"));
+        vm.chainId(ARBITRUM_CHAIN_ID);
+        uint256 makerBefore = dai.balanceOf(maker);
+        originSettler.settleDirect(order, mandate, abi.encode(fill), compactClaim);
+        assertEq(dai.balanceOf(maker) - makerBefore, inputAmount);
+
+        IRepaymentProofVerifier.VerifiedRepayment memory repayment = IRepaymentProofVerifier.VerifiedRepayment({
+            orderId: mandate.orderId,
+            originChainId: ARBITRUM_CHAIN_ID,
+            originSettler: address(originSettler),
+            maker: maker,
+            repaymentToken: address(dai),
+            repaymentAmount: inputAmount,
+            repaymentId: keccak256("repayment-dai")
+        });
+        vm.chainId(BASE_CHAIN_ID);
+        destinationApp.confirmDirectRepayment(mandate.orderId, abi.encode(repayment));
+        assertEq(_outstanding(maker, daiDestinationStrategy), 0);
     }
 
     function test_fillDirect_revertsAtomicallyWhenRecipientRejectsEth() public {
@@ -634,7 +697,10 @@ contract CrossChainDirectTest is Test {
             originStrategy,
             quoteNonce,
             address(0),
-            WETH_OUT
+            WETH_OUT,
+            address(wbtc),
+            compactId,
+            WBTC_DUE
         );
     }
 
@@ -646,7 +712,10 @@ contract CrossChainDirectTest is Test {
         bytes32 originStrategy,
         uint256 quoteNonce,
         address outputToken,
-        uint256 outputAmount
+        uint256 outputAmount,
+        address inputToken,
+        uint256 inputCompactId,
+        uint256 inputAmount
     )
         internal
         returns (
@@ -663,10 +732,10 @@ contract CrossChainDirectTest is Test {
             originChainId: ARBITRUM_CHAIN_ID,
             originSettler: address(originSettler),
             compact: address(compact),
-            compactId: compactId,
+            compactId: inputCompactId,
             compactExpires: block.timestamp + 2 days,
-            inputToken: address(wbtc),
-            inputAmount: WBTC_DUE,
+            inputToken: inputToken,
+            inputAmount: inputAmount,
             destinationChainId: BASE_CHAIN_ID,
             outputToken: outputToken,
             minimumOutputAmount: outputAmount,
@@ -697,7 +766,7 @@ contract CrossChainDirectTest is Test {
             destinationStrategyHash: destinationStrategy,
             originStrategyHash: originStrategy,
             outputAmount: outputAmount,
-            repaymentAmount: WBTC_DUE,
+            repaymentAmount: inputAmount,
             nonce: quoteNonce,
             expires: uint48(block.timestamp + 1 hours)
         });
@@ -718,17 +787,17 @@ contract CrossChainDirectTest is Test {
         returns (Claim memory compactClaim)
     {
         Component[] memory claimants = new Component[](1);
-        claimants[0] = Component({ claimant: uint256(uint160(address(originSettler))), amount: WBTC_DUE });
+        claimants[0] = Component({ claimant: uint256(uint160(address(originSettler))), amount: order.inputAmount });
         compactClaim = Claim({
             allocatorData: "",
             sponsorSignature: "",
-            sponsor: user,
+            sponsor: order.user,
             nonce: 91,
             expires: order.compactExpires,
             witness: originSettler.mandateHash(mandate),
             witnessTypestring: originSettler.MANDATE_WITNESS_TYPESTRING(),
-            id: compactId,
-            allocatedAmount: WBTC_DUE,
+            id: order.compactId,
+            allocatedAmount: order.inputAmount,
             claimants: claimants
         });
 
@@ -736,12 +805,12 @@ contract CrossChainDirectTest is Test {
             abi.encode(
                 originSettler.COMPACT_WITH_MANDATE_TYPEHASH(),
                 address(originSettler),
-                user,
+                order.user,
                 compactClaim.nonce,
                 compactClaim.expires,
-                bytes12(bytes32(compactId)),
-                address(wbtc),
-                WBTC_DUE,
+                bytes12(bytes32(order.compactId)),
+                order.inputToken,
+                order.inputAmount,
                 compactClaim.witness
             )
         );
@@ -770,7 +839,7 @@ contract CrossChainDirectTest is Test {
             destinationMaker: quote.maker,
             destinationStrategyHash: quote.destinationStrategyHash,
             originStrategyHash: quote.originStrategyHash,
-            repaymentToken: address(wbtc),
+            repaymentToken: order.inputToken,
             repaymentAmount: quote.repaymentAmount,
             maxCctpFee: 0,
             makerQuoteHash: destinationApp.directQuoteDigest(quote),
@@ -852,19 +921,16 @@ contract CrossChainDirectTest is Test {
     }
 
     function _depositCompact(address sponsor, uint256 amount) internal returns (uint256 id) {
+        return _depositCompactToken(sponsor, wbtc, amount);
+    }
+
+    function _depositCompactToken(address sponsor, DevToken token, uint256 amount) internal returns (uint256 id) {
         vm.chainId(ARBITRUM_CHAIN_ID);
-        uint96 allocatorId = compact.__registerAllocator(address(allocator), "");
-        bytes12 lockTag = bytes12(
-            bytes32(
-                (uint256(Scope.Multichain) << 255) | (uint256(ResetPeriod.TenMinutes) << 252)
-                    | (uint256(allocatorId) << 160)
-            )
-        );
-        wbtc.mint(sponsor, amount);
+        token.mint(sponsor, amount);
         vm.prank(sponsor);
-        wbtc.approve(address(compact), amount);
+        token.approve(address(compact), amount);
         vm.prank(sponsor);
-        id = compact.depositERC20(address(wbtc), lockTag, amount, sponsor);
+        id = compact.depositERC20(address(token), compactLockTag, amount, sponsor);
     }
 
     function _outstanding(address makerAddress, bytes32 strategyHash) internal view returns (uint256 outstanding) {

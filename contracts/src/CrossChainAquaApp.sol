@@ -107,6 +107,7 @@ contract CrossChainAquaApp is AquaApp, EIP712, ReentrancyGuardTransient {
 
     mapping(address maker => mapping(bytes32 strategyHash => DirectCreditStrategy)) public directStrategies;
     mapping(bytes32 orderId => DirectReceivable) public directReceivables;
+    mapping(bytes32 orderId => address token) private _directRepaymentTokens;
     mapping(bytes32 orderId => bool) public usedOrders;
     mapping(address maker => mapping(uint256 nonce => bool)) public usedDirectQuoteNonces;
     mapping(bytes32 repaymentId => bool) public usedRepaymentProofs;
@@ -328,6 +329,7 @@ contract CrossChainAquaApp is AquaApp, EIP712, ReentrancyGuardTransient {
             filledAt: uint48(block.timestamp),
             state: ReceivableState.Delivered
         });
+        _directRepaymentTokens[orderId] = order.inputToken;
 
         if (order.outputToken == address(0)) {
             _deliverNative(order.recipient, quote.maker, quote.destinationStrategyHash, quote.outputAmount);
@@ -346,7 +348,7 @@ contract CrossChainAquaApp is AquaApp, EIP712, ReentrancyGuardTransient {
             quote.destinationStrategyHash,
             quote.originStrategyHash,
             quote.outputAmount,
-            ORIGIN_TOKEN,
+            order.inputToken,
             quote.repaymentAmount,
             0,
             makerQuoteHash
@@ -499,7 +501,7 @@ contract CrossChainAquaApp is AquaApp, EIP712, ReentrancyGuardTransient {
         require(
             receivable.state == ReceivableState.Delivered && repayment.orderId == orderId
                 && repayment.originChainId == ORIGIN_CHAIN_ID && repayment.originSettler == ORIGIN_SETTLER
-                && repayment.maker == receivable.maker && repayment.repaymentToken == ORIGIN_TOKEN
+                && repayment.maker == receivable.maker && repayment.repaymentToken == _directRepaymentTokens[orderId]
                 && repayment.repaymentAmount == receivable.repaymentAmount && repayment.repaymentId != bytes32(0),
             InvalidRepaymentProof()
         );
@@ -566,10 +568,12 @@ contract CrossChainAquaApp is AquaApp, EIP712, ReentrancyGuardTransient {
         require(
             order.user != address(0) && order.recipient != address(0) && order.recipient != address(this)
                 && order.originChainId == ORIGIN_CHAIN_ID && order.originSettler == ORIGIN_SETTLER
-                && order.compact == ORIGIN_COMPACT && order.inputToken == ORIGIN_TOKEN
-                && address(uint160(order.compactId)) == ORIGIN_TOKEN && order.destinationChainId == block.chainid
-                && order.destinationSettler == address(this) && order.fillProofVerifier == FILL_PROOF_VERIFIER
-                && order.routeKind == expectedRoute && order.inputAmount != 0 && order.minimumOutputAmount != 0
+                && order.compact == ORIGIN_COMPACT && order.inputToken != address(0)
+                && address(uint160(order.compactId)) == order.inputToken
+                && (expectedRoute == RouteKind.DirectMaker || order.inputToken == ORIGIN_TOKEN)
+                && order.destinationChainId == block.chainid && order.destinationSettler == address(this)
+                && order.fillProofVerifier == FILL_PROOF_VERIFIER && order.routeKind == expectedRoute
+                && order.inputAmount != 0 && order.minimumOutputAmount != 0
                 && order.fillDeadline < order.compactExpires,
             InvalidOrder()
         );

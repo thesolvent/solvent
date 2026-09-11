@@ -146,36 +146,31 @@ contract CompactOriginSettler is ReentrancyGuardTransient {
         settledOrders[orderId] = true;
         usedFillProofs[fill.fillId] = true;
 
-        uint256 balanceBefore = ORIGIN_TOKEN.balanceOf(address(this));
+        IERC20 repaymentToken = IERC20(order.inputToken);
+        uint256 balanceBefore = repaymentToken.balanceOf(address(this));
         COMPACT.claim(compactClaim);
-        uint256 balanceAfterClaim = ORIGIN_TOKEN.balanceOf(address(this));
+        uint256 balanceAfterClaim = repaymentToken.balanceOf(address(this));
         uint256 claimed = balanceAfterClaim >= balanceBefore ? balanceAfterClaim - balanceBefore : 0;
         require(claimed == fill.repaymentAmount, UnexpectedRepaymentDelta(fill.repaymentAmount, claimed));
 
         (, uint8 tokensCount) =
-            AQUA.rawBalances(fill.destinationMaker, address(this), fill.originStrategyHash, address(ORIGIN_TOKEN));
+            AQUA.rawBalances(fill.destinationMaker, address(this), fill.originStrategyHash, order.inputToken);
         bool usedAquaPush = tokensCount != 0 && tokensCount != _DOCKED;
         if (usedAquaPush) {
-            ORIGIN_TOKEN.forceApprove(address(AQUA), fill.repaymentAmount);
+            repaymentToken.forceApprove(address(AQUA), fill.repaymentAmount);
             AQUA.push(
-                fill.destinationMaker,
-                address(this),
-                fill.originStrategyHash,
-                address(ORIGIN_TOKEN),
-                fill.repaymentAmount
+                fill.destinationMaker, address(this), fill.originStrategyHash, order.inputToken, fill.repaymentAmount
             );
-            ORIGIN_TOKEN.forceApprove(address(AQUA), 0);
+            repaymentToken.forceApprove(address(AQUA), 0);
         } else {
-            ORIGIN_TOKEN.safeTransfer(fill.destinationMaker, fill.repaymentAmount);
+            repaymentToken.safeTransfer(fill.destinationMaker, fill.repaymentAmount);
         }
 
         require(
-            ORIGIN_TOKEN.balanceOf(address(this)) == balanceBefore,
-            UnexpectedRepaymentDelta(balanceBefore, ORIGIN_TOKEN.balanceOf(address(this)))
+            repaymentToken.balanceOf(address(this)) == balanceBefore,
+            UnexpectedRepaymentDelta(balanceBefore, repaymentToken.balanceOf(address(this)))
         );
-        emit DirectMakerRepaid(
-            orderId, fill.destinationMaker, address(ORIGIN_TOKEN), fill.repaymentAmount, usedAquaPush
-        );
+        emit DirectMakerRepaid(orderId, fill.destinationMaker, order.inputToken, fill.repaymentAmount, usedAquaPush);
         _recordDirectRepayment(orderId, fill);
     }
 
@@ -266,7 +261,7 @@ contract CompactOriginSettler is ReentrancyGuardTransient {
             originChainId: block.chainid,
             originSettler: address(this),
             maker: fill.destinationMaker,
-            repaymentToken: address(ORIGIN_TOKEN),
+            repaymentToken: fill.repaymentToken,
             repaymentAmount: fill.repaymentAmount,
             repaymentId: repaymentId
         });
@@ -276,10 +271,11 @@ contract CompactOriginSettler is ReentrancyGuardTransient {
     function _validateOrder(SolventCrossChainOrder calldata order, RouteKind expectedRoute) private view {
         require(
             order.user != address(0) && order.originChainId == block.chainid && order.originSettler == address(this)
-                && order.compact == address(COMPACT) && order.inputToken == address(ORIGIN_TOKEN)
-                && address(uint160(order.compactId)) == address(ORIGIN_TOKEN) && order.inputAmount != 0
-                && order.compactExpires > order.fillDeadline && order.destinationChainId == DESTINATION_CHAIN_ID
-                && order.destinationSettler == DESTINATION_APP
+                && order.compact == address(COMPACT) && order.inputToken != address(0)
+                && address(uint160(order.compactId)) == order.inputToken
+                && (expectedRoute == RouteKind.DirectMaker || order.inputToken == address(ORIGIN_TOKEN))
+                && order.inputAmount != 0 && order.compactExpires > order.fillDeadline
+                && order.destinationChainId == DESTINATION_CHAIN_ID && order.destinationSettler == DESTINATION_APP
                 && order.fillProofVerifier == address(FILL_PROOF_VERIFIER) && order.routeKind == expectedRoute,
             InvalidOrder()
         );
@@ -318,7 +314,7 @@ contract CompactOriginSettler is ReentrancyGuardTransient {
                 && fill.recipient == order.recipient && fill.outputToken == order.outputToken
                 && fill.outputAmount >= order.minimumOutputAmount && fill.destinationMaker != address(0)
                 && fill.destinationStrategyHash != bytes32(0) && fill.originStrategyHash != bytes32(0)
-                && fill.repaymentToken == address(ORIGIN_TOKEN) && fill.repaymentAmount == order.inputAmount
+                && fill.repaymentToken == order.inputToken && fill.repaymentAmount == order.inputAmount
                 && fill.maxCctpFee == 0 && fill.makerQuoteHash != bytes32(0) && fill.fillId != bytes32(0),
             InvalidFillProof()
         );
