@@ -1,4 +1,7 @@
 import type { ActivityEvent, Stats, Trade } from "@solvent/sdk/client";
+import type { CrossChainOrder, SagaState } from "@solvent/sdk/cross-chain";
+import { formatUnits } from "viem";
+import type { Asset } from "@/data";
 import type {
   ActivityRecord,
   ExplorerStats,
@@ -9,6 +12,7 @@ export function toTrade(api: Trade): TradeRecord {
   const legs = api.legs ?? [];
   const total = legs.reduce((sum, leg) => sum + BigInt(leg.amount_out.raw), 0n);
   return {
+    flow: "same-chain",
     signaturePresent: api.signature_present ?? null,
     id: api.id,
     status: api.status,
@@ -50,6 +54,130 @@ export function toTrade(api: Trade): TradeRecord {
           ? 0
           : Number((BigInt(leg.amount_out.raw) * 10_000n) / total) / 100,
     })),
+  };
+}
+
+function crossChainStatus(state: SagaState): string {
+  if (state === "complete") return "confirmed";
+  if (state === "failed_before_delivery") return "failed";
+  if (state === "quoted") return "quoted";
+  if (["preparing", "prepared"].includes(state)) return "reserved";
+  return "submitted";
+}
+
+function crossChainLifecycle(order: CrossChainOrder) {
+  const recordedAt = new Map(
+    (order.lifecycle ?? []).map((event) => [event.stage, event.at]),
+  );
+  const stages = [
+    ["quoted", "quoted", true],
+    ["destination fill", "destination_fill", order.destination != null],
+    ["proof relay", "proof_relay", order.fill_proof != null],
+    ["origin claim", "origin_claim", order.origin != null],
+    ["repayment", "repayment", order.repayment != null],
+    ["complete", "complete", order.state === "complete"],
+  ] as const;
+  return stages
+    .filter(([, , recorded]) => recorded)
+    .map(([status, stage]) => ({ status, at: recordedAt.get(stage) ?? null }));
+}
+
+function servedAsset(assets: Asset[], address: string): Asset | undefined {
+  return assets.find(
+    (asset) => asset.address.toLowerCase() === address.toLowerCase(),
+  );
+}
+
+/** Adapt a durable SolventX saga to the already-reviewed trade details layout. */
+export function toCrossChainTrade(
+  order: CrossChainOrder,
+  originAssets: Asset[],
+  destinationAssets: Asset[],
+): TradeRecord {
+  const input = servedAsset(originAssets, order.quote.origin.input_token);
+  const destinationInput = servedAsset(
+    destinationAssets,
+    order.quote.destination.input_token,
+  );
+  const output = servedAsset(
+    destinationAssets,
+    order.quote.destination.output_token,
+  );
+  const inputDecimals = input?.decimals ?? 18;
+  const destinationInputDecimals = destinationInput?.decimals ?? 18;
+  const outputDecimals = output?.decimals ?? 18;
+  const sources = order.quote.destination.sources;
+  const total = sources.reduce(
+    (sum, source) => sum + BigInt(source.amount),
+    0n,
+  );
+  const amountOut = BigInt(order.quote.amount_out);
+  // Historical sagas predate recorded lifecycle timestamps, so their quote expiry is the only clock.
+  const createdAt = Math.max(0, order.quote.expires_at_unix - 600);
+  const status = crossChainStatus(order.state);
+  const evidence = order.origin ?? order.destination;
+  const lifecycle = crossChainLifecycle(order);
+  const quotedAt = lifecycle.find((stage) => stage.status === "quoted")?.at;
+  const completedAt = lifecycle.find(
+    (stage) => stage.status === "complete",
+  )?.at;
+
+  return {
+    flow: "cross-chain",
+    signaturePresent: true,
+    id: order.order_id,
+    status,
+    taker: order.taker ?? "",
+    input: {
+      symbol: input?.symbol ?? "TOKEN",
+      display: formatUnits(BigInt(order.quote.amount_in), inputDecimals),
+      net: input?.net ?? `Chain ${order.quote.origin.local_chain}`,
+      logoUri: input?.logoUri,
+    },
+    output: {
+      symbol: output?.symbol ?? "TOKEN",
+      display: formatUnits(amountOut, outputDecimals),
+      net: output?.net ?? `Chain ${order.quote.destination.local_chain}`,
+      logoUri: output?.logoUri,
+    },
+    surplus: null,
+    priceImpactPct: null,
+    makers: new Set(sources.map((source) => source.maker.toLowerCase())).size,
+    txHash: evidence?.transaction_hash ?? null,
+    blockNumber: evidence?.block_number ?? null,
+    createdAt: quotedAt ?? createdAt,
+    settledAt: completedAt ?? null,
+    deadlineAt: order.quote.expires_at_unix,
+    orderHash: order.order_id,
+    lifecycle,
+    legs: sources.map((source) => {
+      const sourceOutput = BigInt(source.amount);
+      const destinationAmountIn = BigInt(order.quote.destination.amount_in);
+      const sourceInput =
+        total === 0n ? 0n : (destinationAmountIn * sourceOutput) / total;
+      return {
+        maker: source.maker,
+        strategyHash: source.strategy_hash,
+        chainId: order.quote.destination.local_chain,
+        curve: null,
+        input: {
+          symbol: destinationInput?.symbol ?? "TOKEN",
+          display: formatUnits(sourceInput, destinationInputDecimals),
+          net:
+            destinationInput?.net ??
+            `Chain ${order.quote.destination.local_chain}`,
+          logoUri: destinationInput?.logoUri,
+        },
+        output: {
+          symbol: output?.symbol ?? "TOKEN",
+          display: formatUnits(sourceOutput, outputDecimals),
+          net: output?.net ?? `Chain ${order.quote.destination.local_chain}`,
+          logoUri: output?.logoUri,
+        },
+        sharePct:
+          total === 0n ? 0 : Number((sourceOutput * 10_000n) / total) / 100,
+      };
+    }),
   };
 }
 
