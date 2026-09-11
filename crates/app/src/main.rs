@@ -4,6 +4,7 @@
 
 mod config;
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,6 +14,10 @@ use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
 use solvent_adapters::balances::AlloyBalancesOracle;
 use solvent_adapters::chain::ChainHead;
+use solvent_adapters::crosschain::{
+    AlloyDirectPlanAuthor, AlloyStepValidator, CcipStepMaterializer, DirectPlanAuthorConfig,
+    ServiceLegQuoter, SqlitePreparationStore, SqliteStepStore,
+};
 use solvent_adapters::execution::{
     AquaSettlementReader, LocalPolicySigner, SqliteFillStore, WalletkitExecutor,
 };
@@ -29,9 +34,13 @@ use solvent_adapters::routing::{BinanceFeed, BinanceHistory, GasPoller, MarketCa
 use solvent_adapters::trade::SqliteTradeStore;
 use solvent_core::asset::{AssetManager, PairHistoryService};
 use solvent_core::balances::BalancesService;
+use solvent_core::crosschain::{LocalCrossChainService, LocalStepService};
 use solvent_core::deps::asset::PairPriceHistorySource;
 use solvent_core::deps::balances::BalancesOracle;
-use solvent_core::deps::execution::ExecutionAuthorizer;
+use solvent_core::deps::crosschain::{
+    DirectPlanAuthor, LegQuoter, PreparationStore, StepMaterializer, StepStore, StepValidator,
+};
+use solvent_core::deps::execution::{Execution, ExecutionAuthorizer, SimGate};
 use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ledger::BudgetSource;
 use solvent_core::deps::maker_metrics::MakerMetricsStore;
@@ -45,8 +54,9 @@ use solvent_core::deps::trade::TradeStore;
 use solvent_core::execution::ExecutionService;
 use solvent_core::ledger::LedgerService;
 use solvent_core::maker::MakerService;
-use solvent_core::obs::{info, warn};
+use solvent_core::obs::{error as obs_error, info, warn};
 use solvent_core::pool::{DepthService, PoolService};
+use solvent_core::primitives::crosschain::RemoteCommand;
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
@@ -332,10 +342,114 @@ async fn main() -> Result<(), StartupError> {
     ));
     let execution = Arc::new(ExecutionService::new(
         executor.clone(),
-        executor,
+        executor.clone(),
         settlement,
         Arc::clone(&ledger),
     ));
+    if let Some(crosschain) = &config.crosschain {
+        let internal_token = std::env::var("SOLVENT_INTERNAL_TOKEN")
+            .map_err(|_| StartupError::MissingSecret("SOLVENT_INTERNAL_TOKEN"))?;
+        let mut authorization = format!("Bearer {internal_token}")
+            .parse::<axum::http::HeaderValue>()
+            .map_err(|_| {
+                StartupError::Key("SOLVENT_INTERNAL_TOKEN is not a valid HTTP header".into())
+            })?;
+        authorization.set_sensitive(true);
+        let preparations: Arc<dyn PreparationStore> =
+            Arc::new(SqlitePreparationStore::new(pool.clone()));
+        let crosschain_quotes: Arc<dyn solvent_core::deps::crosschain::LegQuoteStore> = Arc::new(
+            solvent_adapters::crosschain::SqliteLegQuoteStore::new(pool.clone()),
+        );
+        let local_quoter: Arc<dyn LegQuoter> = Arc::new(ServiceLegQuoter::new(
+            ChainId(config.chain_id),
+            Arc::clone(&quote),
+            head.clone(),
+            Arc::new(SystemClock),
+            crosschain.quote_ttl_secs,
+        ));
+        let local = Arc::new(LocalCrossChainService::new(
+            ChainId(config.chain_id),
+            local_quoter,
+            crosschain_quotes,
+            preparations,
+            Arc::clone(&ledger),
+            Arc::new(SystemClock),
+        ));
+        let mut targets = BTreeMap::new();
+        if !crosschain.destination_app.is_zero() {
+            targets.insert(RemoteCommand::Deliver, crosschain.destination_app);
+            targets.insert(RemoteCommand::CloseDestination, crosschain.destination_app);
+        }
+        if !crosschain.origin_settler.is_zero() {
+            targets.insert(RemoteCommand::ClaimOrigin, crosschain.origin_settler);
+        }
+        if !crosschain.proof_outbox.is_zero() {
+            targets.insert(RemoteCommand::DispatchFillProof, crosschain.proof_outbox);
+            targets.insert(RemoteCommand::DispatchRepayment, crosschain.proof_outbox);
+        }
+        let step_store: Arc<dyn StepStore> = Arc::new(SqliteStepStore::new(pool.clone()));
+        let execution_port: Arc<dyn Execution> = executor.clone();
+        let simulator: Arc<dyn SimGate> = executor.clone();
+        let materializer: Arc<dyn StepMaterializer> =
+            Arc::new(CcipStepMaterializer::new(provider.clone()));
+        let validator: Arc<dyn StepValidator> = Arc::new(
+            AlloyStepValidator::new(filler_owner, config.native_token)
+                .with_applications(crosschain.origin_settler, crosschain.destination_app),
+        );
+        let steps = Arc::new(
+            LocalStepService::new(
+                ChainId(config.chain_id),
+                filler_owner,
+                targets,
+                step_store,
+                execution_port,
+                simulator,
+            )
+            .with_validator(validator)
+            .with_materializer(materializer),
+        );
+        let direct_author: Option<Arc<dyn DirectPlanAuthor>> = crosschain
+            .direct_author
+            .as_ref()
+            .map(|direct| {
+                let maker_key = std::env::var("SOLVENT_CROSSCHAIN_MAKER_KEY")
+                    .map_err(|_| StartupError::MissingSecret("SOLVENT_CROSSCHAIN_MAKER_KEY"))?;
+                let maker = maker_key
+                    .parse::<PrivateKeySigner>()
+                    .map_err(|error| StartupError::Key(error.to_string()))?;
+                AlloyDirectPlanAuthor::new(
+                    DirectPlanAuthorConfig {
+                        origin_chain: ChainId(direct.origin_chain_id),
+                        destination_chain: ChainId(config.chain_id),
+                        origin_settler: crosschain.origin_settler,
+                        destination_app: crosschain.destination_app,
+                        origin_proof_outbox: direct.origin_proof_outbox,
+                        destination_proof_outbox: direct.destination_proof_outbox,
+                        origin_strategy_hash: solvent_core::primitives::StrategyHash(
+                            direct.origin_strategy_hash,
+                        ),
+                    },
+                    maker,
+                )
+                .map(|author| Arc::new(author) as Arc<dyn DirectPlanAuthor>)
+                .map_err(SolventError::from)
+                .map_err(StartupError::from)
+            })
+            .transpose()?;
+        let internal_listener = tokio::net::TcpListener::bind(crosschain.bind_addr).await?;
+        let internal_router = http::crosschain_internal_router_with_author(
+            local,
+            steps,
+            authorization,
+            direct_author,
+        );
+        info!(addr = %crosschain.bind_addr, "private cross-chain service listening");
+        tokio::spawn(async move {
+            if let Err(error) = axum::serve(internal_listener, internal_router).await {
+                obs_error!(error = %error, "private cross-chain service stopped");
+            }
+        });
+    }
     let rebate_store: Arc<dyn RebateStore> = Arc::new(SqliteRebateStore::new(pool.clone()));
     let rebates = Arc::new(RebateService::new(
         RebatePolicy::new(RebatePolicyConfig::new(

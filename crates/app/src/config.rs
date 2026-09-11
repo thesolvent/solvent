@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
-use alloy::primitives::{address, Address};
+use alloy::primitives::{address, Address, B256};
 use serde::Deserialize;
 use solvent_adapters::http::state::{AppConfig, Features};
 use solvent_core::asset::TokenList;
@@ -73,8 +73,34 @@ pub struct Config {
     /// Path to the tx engine's durable state (redb), so in-flight fills survive a restart.
     #[serde(default = "default_wallet_state_db")]
     pub wallet_state_db: String,
+    /// Optional private listener and allow-listed contracts for cross-chain coordination.
+    #[serde(default)]
+    pub crosschain: Option<CrossChainConfig>,
     #[serde(default)]
     pub rebate: RebateConfig,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CrossChainConfig {
+    pub bind_addr: SocketAddr,
+    #[serde(default)]
+    pub destination_app: Address,
+    #[serde(default)]
+    pub origin_settler: Address,
+    #[serde(default)]
+    pub proof_outbox: Address,
+    #[serde(default = "default_crosschain_quote_ttl_secs")]
+    pub quote_ttl_secs: u64,
+    #[serde(default)]
+    pub direct_author: Option<DirectAuthorConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DirectAuthorConfig {
+    pub origin_chain_id: u64,
+    pub origin_proof_outbox: Address,
+    pub destination_proof_outbox: Address,
+    pub origin_strategy_hash: B256,
 }
 
 /// One Binance price symbol and the tokens whose USD price it feeds.
@@ -191,6 +217,9 @@ fn default_decay_secs() -> u64 {
 }
 fn default_wallet_state_db() -> String {
     "walletkit.redb".to_string()
+}
+fn default_crosschain_quote_ttl_secs() -> u64 {
+    300
 }
 fn default_rebate_deviation_bps() -> u64 {
     50
