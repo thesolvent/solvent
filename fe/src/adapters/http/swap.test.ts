@@ -18,6 +18,7 @@ const from = {
   change: "0%",
   tags: ["USD"],
   net: "Devnet",
+  logoUri: null,
   pairs: ["USDC/WETH"],
 } satisfies Asset;
 const to = {
@@ -29,6 +30,7 @@ const to = {
   change: "0%",
   tags: ["ETH"],
   net: "Devnet",
+  logoUri: null,
   pairs: ["USDC/WETH"],
 } satisfies Asset;
 const quote: Quote = {

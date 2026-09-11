@@ -25,6 +25,7 @@ const ASSET = {
   change: "0%",
   tags: ["ETH"],
   net: "Devnet",
+  logoUri: null,
   pairs: ["WETH/USDC"],
 } satisfies Asset;
 const QUOTE = {

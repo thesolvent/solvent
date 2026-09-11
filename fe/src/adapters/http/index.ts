@@ -37,7 +37,7 @@ const assets: AssetsPort = {
       solventApi.assets(),
       solventApi.config(),
     ]);
-    const network = config.networks[0] ?? "Unknown";
+    const network = config.chains?.[0]?.name ?? "Unknown";
     return served.items.map((asset) => toAsset(asset, network));
   },
 };

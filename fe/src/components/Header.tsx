@@ -4,9 +4,16 @@ import { useState } from "react";
 import { NAV } from "@/data";
 import { useAppActions } from "@/state";
 
+import { Icon } from "@/components/Icon";
+import { TokenIcon } from "@/components/TokenIcon";
+import { useConfig } from "@/services/system";
+
 import styles from "./Header.module.css";
 
 export function Header() {
+  // A deployment whose server predates `chains` still answers `/config`, so the array itself has
+  // to be guarded — not just the response.
+  const chain = useConfig().data?.chains?.[0];
   const { page, navTo } = useAppActions();
   // Inert in the design; kept local so the field still accepts input.
   const [query, setQuery] = useState("");
@@ -43,9 +50,20 @@ export function Header() {
       </nav>
 
       <div className={styles.right}>
+        {chain ? (
+          <span className={styles.chain}>
+            <TokenIcon
+              className={styles.chainIcon}
+              logoUri={chain.logo_uri}
+              symbol={chain.name}
+            />
+            <span className={styles.chainName}>{chain.name}</span>
+          </span>
+        ) : null}
         <label className={styles.search}>
-          <span className={styles.searchGlyph} />
+          <Icon className={styles.searchGlyph} name="search" />
           <input
+            aria-label="Search"
             className={styles.searchInput}
             value={query}
             onChange={(e) => setQuery(e.target.value)}

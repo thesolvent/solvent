@@ -25,6 +25,7 @@ export function toAsset(api: ApiAsset, network: string): Asset {
     change: signed(api.change_24h_pct),
     tags: api.tags,
     net: network,
+    logoUri: api.logo_uri ?? null,
     pairs: api.pairs,
   };
 }

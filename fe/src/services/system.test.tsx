@@ -14,7 +14,7 @@ const CONFIG: AppConfig = {
   chain_id: 31337,
   default_fee_bps: 5,
   features: { earn: true, faucet: true, send_buy: true },
-  networks: ["Ethereum"],
+  chains: [{ chain_id: 31337, name: "Ethereum", logo_uri: null }],
   reactor: "0x0",
   permit2: "0x0",
   cosigner: "0x0",

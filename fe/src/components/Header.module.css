@@ -87,8 +87,7 @@
 .searchGlyph {
   width: 16px;
   height: 16px;
-  border: 1.6px solid var(--on-dark-dim);
-  border-radius: 50%;
+  color: var(--on-dark-dim);
   flex: none;
 }
 
@@ -126,4 +125,25 @@
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.chain {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  height: 100%;
+  border-left: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.chainIcon {
+  width: 18px;
+  height: 18px;
+}
+
+.chainName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-mid);
 }

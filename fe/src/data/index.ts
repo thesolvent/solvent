@@ -510,6 +510,8 @@ export type Asset = {
   change: string;
   tags: string[];
   net: string;
+  /** The token list's icon, absent when it carried none. */
+  logoUri: string | null;
   /** Pairs this asset is quotable in, as "BASE/QUOTE" labels. */
   pairs: string[];
 };

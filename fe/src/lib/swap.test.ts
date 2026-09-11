@@ -24,6 +24,7 @@ function asset(
     price: 1,
     change: "+0.00%",
     tags,
+    logoUri: null,
     net,
     pairs,
   };
