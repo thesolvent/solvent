@@ -22,7 +22,8 @@ Built for **ETHOnline 2026**.
 2. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Phase 1 (UniswapX) architecture in full detail.
 3. [`docs/RESEARCH.md`](docs/RESEARCH.md) — the critical research + honest novelty analysis.
 4. [`docs/CROSS_CHAIN_SETTLEMENT_PRIMER.md`](docs/CROSS_CHAIN_SETTLEMENT_PRIMER.md) — cross-chain settlement from first principles.
-5. [`docs/RESOLVER_FLOW_CATALOG.md`](docs/RESOLVER_FLOW_CATALOG.md) — every protocol flow + component inventory.
+5. [`docs/CROSS_CHAIN_OPERATIONS.md`](docs/CROSS_CHAIN_OPERATIONS.md) — the implemented two-service proxy architecture, lifecycle, and runbook.
+6. [`docs/RESOLVER_FLOW_CATALOG.md`](docs/RESOLVER_FLOW_CATALOG.md) — every protocol flow + component inventory.
 
 Diagrams live in [`docs/images/`](docs/images/).
 

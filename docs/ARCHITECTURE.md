@@ -22,20 +22,20 @@
 **The build, in scope order:**
 1. **Phase 1 — the UniswapX resolver (this document):** same-chain, one protocol, end to end. The MVP and the thesis proof.
 2. **Extensibility — more adapters:** ERC-7683 (same standard, ~one adapter), then CoW / 0x-RFQ / Hashflow, etc. Each new protocol is a thin adapter over the same Aqua-sourcing core.
-3. **Cross-chain frontier:** the resolver as a value-router between two non-custodial resource locks — the maker's **Aqua** lock (destination liquidity) and the user's **The Compact** lock (origin claim) — with a pluggable proof layer (CCIP/Hyperlane/optimistic) and netting for residuals. See `CROSS_CHAIN_SETTLEMENT_PRIMER.md`.
+3. **Cross-chain frontier:** implemented for one configured EVM pair as two chain-local Solvent services plus a keyless proxy, using **The Compact**, destination **Aqua**, authenticated CCIP proofs, and direct or CCTP repayment. See `CROSS_CHAIN_OPERATIONS.md`.
 
 **Tracks we target (all genuine, nothing forced):**
 | Track | How we hit it |
 |---|---|
 | **1inch — Build Aqua App** ($5k) | the resolver sources liquidity through Aqua/SwapVM; the whole thesis is an Aqua use case |
-| **Uniswap Foundation** ($3k) | fills **UniswapX** orders (Phase 1); later **The Compact** for cross-chain — two Uniswap protocols |
+| **Uniswap Foundation** ($3k) | fills **UniswapX** orders and uses **The Compact** for cross-chain — two Uniswap protocols |
 | **The Graph** ($15k) | subgraph over Aqua positions + fills → the maker utilization dashboard |
 | **Chainlink** ($3k) | CCIP as one adapter behind the cross-chain proof port |
 | **Privy / Ledger** ($5k ea) | maker onboarding wallet / clear-signing |
 
-**The layered model (for the cross-chain future; Phase 1 only needs L1):**
+**The layered model:**
 - **L1 Liquidity** = Aqua (destination) — *Phase 1 uses this.*
-- **L2 Claim** = per-protocol (UniswapX atomic same-chain now; The Compact / UMA / hashlock cross-chain later).
+- **L2 Claim** = per-protocol (UniswapX atomic same-chain; The Compact for the implemented cross-chain pair).
 - **L3 Proof** = pluggable messaging (CCIP / Hyperlane / LayerZero / optimistic).
 - **L4 Rebalance** = netting (Everclear-style) + CCTP.
 
@@ -182,4 +182,4 @@ The exact number `2930` is whatever Maya's program computes — the resolver nev
 2. The off-chain engine: watcher (mock feed first) → pricing (`quote()`) → reservation ledger → execution → reconciler.
 3. A simulation (Anvil) proving the worked example above end to end, plus the **forced-contention test**: two orders, one maker's last WETH — the ledger grants one, declines the other off-chain, and the fill lands exactly once.
 
-Out of Phase 1 scope (later): ERC-7683 and other adapters, cross-chain (Compact/settlement/netting), the Graph dashboard, Privy onboarding.
+Outside the original Phase 1 scope but now implemented separately: the configured-pair Compact/CCIP/CCTP cross-chain path. Still later: ERC-7683 and other protocol adapters, multi-pair netting, the Graph dashboard, and Privy onboarding.
