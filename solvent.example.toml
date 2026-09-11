@@ -58,7 +58,7 @@ wallet_state_db = "walletkit.redb"
 # destination_app = "0x0000000000000000000000000000000000000000"
 # origin_settler = "0x0000000000000000000000000000000000000000"
 # proof_outbox = "0x0000000000000000000000000000000000000000"
-# quote_ttl_secs = 30
+# quote_ttl_secs = 300
 
 # Binance symbol -> the tokens it prices. Devnet tokens sit at mainnet addresses, so mainnet
 # symbols apply. Stables quoted against USDT read ~1; USDT itself has no pair and stays gas-free.

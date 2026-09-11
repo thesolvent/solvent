@@ -13,6 +13,7 @@ type U48 = Uint<48, 1>;
 
 const DIRECT_ROUTE_KIND: u8 = 1;
 const MAX_U48: u64 = (1_u64 << 48) - 1;
+const MIN_FILL_WINDOW_SECS: u64 = 120;
 const MANDATE_WITNESS_TYPESTRING: &str = "bytes32 orderId,uint256 destinationChainId,address destinationSettler,address fillProofVerifier,address outputToken,uint256 minimumOutputAmount,address recipient,uint48 fillDeadline,address exclusiveFiller,uint8 routeKind";
 
 sol! {
@@ -121,6 +122,11 @@ impl DirectOrderDraftBuilder {
             ));
         }
         let fill_deadline = request.quote.expires_at_unix;
+        if fill_deadline < now_unix.saturating_add(MIN_FILL_WINDOW_SECS) {
+            return Err(SolventError::InvalidCrossChain(
+                "quote expires too soon; request a fresh price".to_string(),
+            ));
+        }
         if fill_deadline > MAX_U48 || request.compact_expires_unix <= fill_deadline {
             return Err(SolventError::InvalidCrossChain(
                 "Compact expiry must be later than the quoted fill deadline".to_string(),
@@ -468,7 +474,7 @@ mod tests {
             amount_out,
             route: CrossChainRoute::Direct,
             block_number: 50,
-            expires_at_unix: NOW + 100,
+            expires_at_unix: NOW + 300,
             sources,
         };
         quote.quote_id = leg_quote_id(&quote);
@@ -497,7 +503,7 @@ mod tests {
             recipient: address(0x32),
             order_nonce: U256::from(7),
             compact_nonce: U256::from(8),
-            compact_expires_unix: NOW + 200,
+            compact_expires_unix: NOW + 400,
         }
     }
 
@@ -508,14 +514,14 @@ mod tests {
         assert_eq!(draft.aggregate_id, request().quote.id);
         assert_eq!(draft.order.input_amount, U256::from(10_000));
         assert_eq!(draft.order.minimum_output_amount, U256::from(9_900));
-        assert_eq!(draft.order.fill_deadline, NOW + 100);
+        assert_eq!(draft.order.fill_deadline, NOW + 300);
         assert_eq!(draft.commitment.arbiter, address(0x21));
         assert_eq!(draft.commitment.amount, U256::from(10_000));
         assert_eq!(draft.commitment.mandate.order_id, draft.order_id.0);
         assert_eq!(
             draft.order_id.0,
             alloy::primitives::b256!(
-                "73fdd2c829c6b61a7f18bba5a85093b8ea08ea20f007a9861459e11cc629aaa7"
+                "f88c808ee24f6ff747d373ae54d7a9b8490ca359ea92cf0ad79fed3003ea87bd"
             ),
         );
 
@@ -553,5 +559,14 @@ mod tests {
             .draft(request, NOW)
             .expect_err("claim expiry must outlive fill");
         assert!(error.to_string().contains("later"));
+    }
+
+    #[test]
+    fn draft_rejects_a_quote_without_enough_time_to_fill() {
+        let error = builder()
+            .draft(request(), NOW + 181)
+            .expect_err("a nearly expired quote must not reach the wallet");
+
+        assert!(error.to_string().contains("expires too soon"));
     }
 }

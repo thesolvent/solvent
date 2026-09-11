@@ -186,7 +186,7 @@ fn default_wallet_state_db() -> String {
     "walletkit.redb".to_string()
 }
 fn default_crosschain_quote_ttl_secs() -> u64 {
-    30
+    300
 }
 
 /// Read and parse the token list JSON at `path`.
