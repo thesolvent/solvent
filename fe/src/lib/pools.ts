@@ -92,21 +92,85 @@ export function bestByApr(pools: Pool[]): Pool | undefined {
 }
 
 /** Descending by the named magnitude; unvalued pools sink rather than sorting as zero. */
-function byDesc(key: "tvlUsd" | "aprPct") {
-  return (a: Pool, b: Pool) => (b[key] ?? -Infinity) - (a[key] ?? -Infinity);
+/** Mean size of a trade in the window; `null` when the window has no fills to divide by. */
+export function tradeSizeUsd(pool: Pool): number | null {
+  const volume = pool.volumeUsd;
+  const fills = pool.fills24h;
+  if (volume == null || !fills) return null;
+  return volume / fills;
+}
+
+/** How each sort orders the list. A sort that cannot order is not offered. */
+const SORT_KEYS: Record<string, (pool: Pool) => number | null | undefined> = {
+  Depth: (p) => p.tvlUsd,
+  Volume: (p) => p.volumeUsd,
+  "Trade size": tradeSizeUsd,
+  "Highest APR": (p) => p.aprPct,
+};
+
+/** The sorts offered, in the order they are shown. */
+export const POOL_SORTS = Object.keys(SORT_KEYS);
+
+export function sortPools(pools: Pool[], sort: string): Pool[] {
+  const key = SORT_KEYS[sort];
+  if (!key) return pools;
+  return [...pools].sort(
+    (a, b) => (key(b) ?? -Infinity) - (key(a) ?? -Infinity),
+  );
 }
 
 /**
- * Order the visible pools. "Best" and "Newest" keep the server's order — it already ranks, and
- * nothing served carries a creation time to sort "Newest" by.
+ * Rank of each pool under the active sort, keyed by pair, for the top `top` only.
+ *
+ * A pool with no value for the sorted metric is left unranked rather than ranked last: it is
+ * unmeasured, which is not the same as worst.
  */
-export function sortPools(pools: Pool[], sort: string): Pool[] {
-  switch (sort) {
-    case "Highest APR":
-      return [...pools].sort(byDesc("aprPct"));
-    case "Most TVL":
-      return [...pools].sort(byDesc("tvlUsd"));
+export function poolRanks(
+  pools: Pool[],
+  sort: string,
+  top = 3,
+): Record<string, number> {
+  const key = SORT_KEYS[sort];
+  if (!key) return {};
+  const ranked: Record<string, number> = {};
+  pools
+    .filter((pool) => key(pool) != null)
+    .slice(0, top)
+    .forEach((pool, index) => {
+      ranked[pool.pair] = index + 1;
+    });
+  return ranked;
+}
+
+/** How a pool's makers price, as a glyph and the sentence behind it. */
+export function curveMark(curves?: string[]): {
+  name: "curveXyc" | "curveConcentrated" | "curvePegged" | "curveMixed";
+  label: string;
+} {
+  const shapes = curves ?? [];
+  if (shapes.length > 1) {
+    return {
+      name: "curveMixed",
+      label: `Mixed — makers price on ${shapes.join(" and ").toLowerCase()}`,
+    };
+  }
+  switch (shapes[0]) {
+    case "Constant product":
+      return {
+        name: "curveXyc",
+        label: "Constant product — makers quote across the whole price range",
+      };
+    case "Concentrated":
+      return {
+        name: "curveConcentrated",
+        label: "Concentrated — makers quote inside a price band",
+      };
+    case "Pegged":
+      return {
+        name: "curvePegged",
+        label: "Pegged — makers quote around a fixed price",
+      };
     default:
-      return pools;
+      return { name: "curveMixed", label: "Curve shape unknown" };
   }
 }

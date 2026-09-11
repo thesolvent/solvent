@@ -198,7 +198,7 @@ export const INITIAL_STATE: AppState = {
     fee: "Any",
     apr: "Any",
   },
-  poolSort: "Best",
+  poolSort: "Depth",
   poolPage: 0,
 
   detail: null,

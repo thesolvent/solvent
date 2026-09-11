@@ -30,13 +30,23 @@ pub struct Features {
     pub send_buy: bool,
 }
 
+/// A chain this process can name: the id its assets report, the name people read, and the mark
+/// that stands for it. A process serves one chain, but may name the chains it bridges to, so the
+/// FE can label a counterpart's assets before it has called that deployment.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct Chain {
+    pub chain_id: u64,
+    pub name: String,
+    pub logo_uri: Option<String>,
+}
+
 /// Runtime config the FE reads instead of hardcoding — also the `/config` response body.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct AppConfig {
     pub chain_id: u64,
     pub features: Features,
     pub default_fee_bps: u32,
-    pub networks: Vec<String>,
+    pub chains: Vec<Chain>,
     pub block_explorer_url: String,
     /// The Aqua deployment holding maker virtual balances.
     #[schema(value_type = String)]

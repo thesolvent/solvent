@@ -22,6 +22,8 @@ import { useSubmitSwap } from "@/services/swap";
 import { chain } from "@/adapters/wallet/config";
 import { useApp } from "@/state";
 import { AssetIdentity } from "@/components/AssetIdentity";
+import { Term } from "@/components/Tooltip";
+import type { GlossaryKey } from "@/lib/glossary";
 
 import styles from "./SwapPage.module.css";
 
@@ -59,15 +61,24 @@ export function SwapPage() {
   const outStr = quote?.amountOut ?? (hasAmount && amt > 0 && to ? DASH : "");
   const dotAt = outStr.indexOf(".");
 
-  const routeStats = [
+  const routeStats: { label: string; term: GlossaryKey; value: string }[] = [
     {
       label: "Fills",
+      term: "fills",
       value: quote
         ? `${quote.makersSourced} ${quote.makersSourced === 1 ? "maker" : "makers"}`
         : DASH,
     },
-    { label: "Price impact", value: quote?.priceImpact ?? DASH },
-    { label: "Max slippage", value: `${config.slippage}%` },
+    {
+      label: "Price impact",
+      term: "priceImpact",
+      value: quote?.priceImpact ?? DASH,
+    },
+    {
+      label: "Max slippage",
+      term: "maxSlippage",
+      value: `${config.slippage}%`,
+    },
   ];
 
   const { isConnected, chainId } = useAccount();
@@ -295,7 +306,9 @@ export function SwapPage() {
           <div className={styles.route}>
             {routeStats.map((s) => (
               <div key={s.label} className={styles.routeCell}>
-                <div className={styles.routeLabel}>{s.label}</div>
+                <div className={styles.routeLabel}>
+                  <Term term={s.term}>{s.label}</Term>
+                </div>
                 <div className={styles.routeValue}>{s.value}</div>
               </div>
             ))}

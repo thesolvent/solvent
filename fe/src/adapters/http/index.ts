@@ -5,6 +5,18 @@ import type { SystemPort } from "@/ports/system";
 import type { Services } from "@/services/context";
 
 import { toAsset } from "../mappers/asset";
+
+/** The chains a deployment names, as the mappers consume them. */
+function chainsOf(config: {
+  chains?: { chain_id: number; name: string; logo_uri?: string | null }[];
+}) {
+  return (config.chains ?? []).map((c) => ({
+    chainId: c.chain_id,
+    name: c.name,
+    logoUri: c.logo_uri,
+  }));
+}
+
 import { toPool } from "../mappers/pool";
 import { toDepthCurve, toPoolRoster } from "../mappers/pool-detail";
 import { swapAdapter } from "./swap";
@@ -38,18 +50,20 @@ const assets: AssetsPort = {
       solventApi.assets(),
       solventApi.config(),
     ]);
-    const network = config.networks[0] ?? "Unknown";
-    const primary = served.items.map((asset) => toAsset(asset, network));
+    const primary = served.items.map((asset) =>
+      toAsset(asset, chainsOf(config)),
+    );
     if (!includeCrossChain) return primary;
 
     const [baseServed, baseConfig] = await Promise.all([
       baseApi.assets(),
       baseApi.config(),
     ]);
-    const baseNetwork = baseConfig.networks[0] ?? "Unknown";
+    // Both deployments' chains, so an asset is named by its own id whichever answered for it.
+    const known = [...chainsOf(config), ...chainsOf(baseConfig)];
     return [
-      ...primary,
-      ...baseServed.items.map((asset) => toAsset(asset, baseNetwork)),
+      ...served.items.map((asset) => toAsset(asset, known)),
+      ...baseServed.items.map((asset) => toAsset(asset, known)),
     ];
   },
 };

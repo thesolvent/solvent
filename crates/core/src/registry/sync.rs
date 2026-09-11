@@ -9,6 +9,7 @@ use moka::sync::Cache;
 use super::SharedSnapshot;
 use crate::deps::registry::{ChainSource, EventStore};
 use crate::primitives::registry::{EventCursor, Snapshot};
+use crate::obs::warn;
 use crate::primitives::{ChainConfig, ChainId};
 use crate::SolventError;
 
@@ -58,6 +59,17 @@ impl RegistrySync {
         let from_block = resume.map_or(self.start_block, |c| {
             c.block_number.saturating_sub(self.overlap_blocks)
         });
+        // A head behind the cursor means the chain is not the one this cursor was recorded
+        // against — a reset node, or a devnet redeployed under the same id. Fetching would ask
+        // for an inverted range and fail every tick while the snapshot silently went stale, so
+        // say so once per cycle and wait for the head to catch up.
+        if from_block > to_block {
+            warn!(
+                from_block,
+                to_block, "chain head is behind the stored cursor; skipping this sync cycle"
+            );
+            return Ok(());
+        }
         let fetched = self.source.fetch(from_block, to_block).await?;
 
         // The `seen` cache keys on `(block, log)`, not the block hash, so it can't spot a reorg replacement.

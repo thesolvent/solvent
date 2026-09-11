@@ -437,6 +437,8 @@ export type Pool = {
   /** Signed 24h move of the pool's value, already formatted with its arrow. */
   tvlChange?: string;
   aprPct?: number | null;
+  volumeUsd?: number | null;
+  fills24h?: number | null;
   /** The bare fee tier. `fee` carries a version suffix for display, so it cannot be compared. */
   feeTier?: string;
   /** Curve shapes this pool's makers price on; a pool commonly mixes several. */
@@ -500,6 +502,13 @@ export const DASH = "—";
  * Distinct from `Token` below, whose sample rows carry neither an address nor decimals — a quote
  * cannot be asked for without both, so they are required here rather than optional.
  */
+/** A chain a deployment can name, as `/config` reports it. */
+export type ChainInfo = {
+  chainId: number;
+  name: string;
+  logoUri?: string | null;
+};
+
 export type Asset = {
   chainId: number;
   address: `0x${string}`;
@@ -513,6 +522,8 @@ export type Asset = {
   change: string;
   tags: string[];
   net: string;
+  /** The mark of the chain this asset lives on, when the deployment names one. */
+  chainLogoUri?: string | null;
   /** Pairs this asset is quotable in, as "BASE/QUOTE" labels. */
   pairs: string[];
 };

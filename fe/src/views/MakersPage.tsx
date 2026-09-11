@@ -20,6 +20,8 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { MakerAssets } from "./MakerAssets";
 import { MakerPositions } from "./MakerPositions";
+import { Term } from "@/components/Tooltip";
+
 import styles from "./MakersPage.module.css";
 
 function ChartTooltip({
@@ -172,7 +174,13 @@ export function MakersPage() {
               backgroundImage: `linear-gradient(${k.sep}, ${k.sep})`,
             }}
           >
-            <div className={styles.kpiLabel}>{k.label}</div>
+            <div className={styles.kpiLabel}>
+              {"term" in k && k.term ? (
+                <Term term={k.term}>{k.label}</Term>
+              ) : (
+                k.label
+              )}
+            </div>
             <div className={styles.kpiRow}>
               <span className={styles.kpiValue}>{k.value}</span>
               <span className={styles.kpiDelta} style={{ color: k.deltaFg }}>

@@ -1,6 +1,6 @@
 import type { Asset as ApiAsset } from "@solvent/sdk/client";
 
-import { DASH, type Asset } from "@/data";
+import { DASH, type Asset, type ChainInfo } from "@/data";
 
 /** Signed to a leading `+`/`-`, which is how the picker decides the colour to print it in. */
 function signed(pct?: number | null): string {
@@ -12,10 +12,12 @@ function signed(pct?: number | null): string {
 /**
  * One served asset.
  *
- * The network name comes from config rather than from the asset: a deployment names the chain it
- * serves, while the asset only reports the id.
+ * The chain is resolved from the asset's own id rather than from the deployment that answered:
+ * this build reads several deployments, and labelling every asset with the endpoint's own chain
+ * mislabels anything sourced across one.
  */
-export function toAsset(api: ApiAsset, network: string): Asset {
+export function toAsset(api: ApiAsset, chains: ChainInfo[]): Asset {
+  const chain = chains.find((c) => c.chainId === api.chain_id);
   return {
     chainId: api.chain_id,
     address: api.address as `0x${string}`,
@@ -26,7 +28,8 @@ export function toAsset(api: ApiAsset, network: string): Asset {
     price: api.price_usd ?? 0,
     change: signed(api.change_24h_pct),
     tags: api.tags,
-    net: network,
+    net: chain?.name ?? "Unknown",
+    chainLogoUri: chain?.logoUri,
     pairs: api.pairs,
   };
 }

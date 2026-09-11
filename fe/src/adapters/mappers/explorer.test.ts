@@ -132,8 +132,12 @@ describe("Explorer records", () => {
 
     const trade = toCrossChainTrade(
       order,
-      assets.items.map((asset) => toAsset(asset, "Chain A")) as Asset[],
-      assets.items.map((asset) => toAsset(asset, "Base")) as Asset[],
+      assets.items.map((asset) =>
+        toAsset(asset, [{ chainId: asset.chain_id, name: "Chain A" }]),
+      ) as Asset[],
+      assets.items.map((asset) =>
+        toAsset(asset, [{ chainId: asset.chain_id, name: "Base" }]),
+      ) as Asset[],
     );
 
     expect(trade).toMatchObject({
@@ -235,8 +239,12 @@ describe("Explorer records", () => {
 
     const trade = toCrossChainTrade(
       order,
-      assets.items.map((asset) => toAsset(asset, "Chain A")) as Asset[],
-      assets.items.map((asset) => toAsset(asset, "Base")) as Asset[],
+      assets.items.map((asset) =>
+        toAsset(asset, [{ chainId: asset.chain_id, name: "Chain A" }]),
+      ) as Asset[],
+      assets.items.map((asset) =>
+        toAsset(asset, [{ chainId: asset.chain_id, name: "Base" }]),
+      ) as Asset[],
     );
 
     expect(trade.lifecycle.map((stage) => stage.status)).toEqual([

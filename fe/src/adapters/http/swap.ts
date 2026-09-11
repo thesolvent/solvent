@@ -128,6 +128,21 @@ function directIntent(
   };
 }
 
+/** A deployment's own chain name, for a message that has to name it. */
+function chainName(
+  config: {
+    chain_id: number;
+    chains?: { chain_id: number; name: string }[];
+  },
+  fallback: string,
+): string {
+  return (
+    config.chains?.find((c) => c.chain_id === config.chain_id)?.name ??
+    config.chains?.[0]?.name ??
+    fallback
+  );
+}
+
 async function crossChainQuote({
   from,
   to,
@@ -145,7 +160,7 @@ async function crossChainQuote({
     to.chainId !== destinationConfig.chain_id
   ) {
     throw new Error(
-      `Cross-chain quoting is configured from ${originConfig.networks[0] ?? "the origin chain"} to ${destinationConfig.networks[0] ?? "the destination chain"}`,
+      `Cross-chain quoting is configured from ${chainName(originConfig, "the origin chain")} to ${chainName(destinationConfig, "the destination chain")}`,
     );
   }
 

@@ -14,7 +14,8 @@
       "decimals": 18,
       "tags": [
         "Majors"
-      ]
+      ],
+      "logoURI": "/tokens/weth.png"
     },
     {
       "chainId": 31337,
@@ -24,7 +25,8 @@
       "decimals": 6,
       "tags": [
         "Stables"
-      ]
+      ],
+      "logoURI": "/tokens/usdc.png"
     },
     {
       "chainId": 31337,
@@ -34,7 +36,8 @@
       "decimals": 6,
       "tags": [
         "Stables"
-      ]
+      ],
+      "logoURI": "/tokens/usdt.png"
     },
     {
       "chainId": 31337,
@@ -44,7 +47,8 @@
       "decimals": 8,
       "tags": [
         "Majors"
-      ]
+      ],
+      "logoURI": "/tokens/wbtc.png"
     },
     {
       "chainId": 31337,
@@ -54,7 +58,8 @@
       "decimals": 18,
       "tags": [
         "Stables"
-      ]
+      ],
+      "logoURI": "/tokens/dai.png"
     },
     {
       "chainId": 31337,
@@ -64,7 +69,8 @@
       "decimals": 18,
       "tags": [
         "DeFi"
-      ]
+      ],
+      "logoURI": "/tokens/link.png"
     }
   ]
 }

@@ -1,0 +1,51 @@
+/* A term carries a faint underline so there is something to hover; it inherits everything else. */
+.term {
+  text-decoration: underline dotted var(--line-strong, #c9c9c4);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  cursor: help;
+}
+
+.term:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.bubble {
+  position: fixed;
+  z-index: 60;
+  transform: translate(-50%, -100%);
+  max-width: 280px;
+  padding: 8px 11px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: left;
+  pointer-events: none;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+}
+
+.bubbleBelow {
+  composes: bubble;
+  transform: translate(-50%, 0);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bubble,
+  .bubbleBelow {
+    animation: appear 90ms ease-out;
+  }
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

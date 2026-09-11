@@ -7,6 +7,18 @@ import {
   toTrade,
 } from "../mappers/explorer";
 import { toAsset } from "../mappers/asset";
+
+/** The chains a deployment names, as the mappers consume them. */
+function chainsOf(config: {
+  chains?: { chain_id: number; name: string; logo_uri?: string | null }[];
+}) {
+  return (config.chains ?? []).map((c) => ({
+    chainId: c.chain_id,
+    name: c.name,
+    logoUri: c.logo_uri,
+  }));
+}
+
 import {
   baseApi,
   crossChainApi,
@@ -57,10 +69,16 @@ export const explorerAdapter: ExplorerPort = {
       return toCrossChainTrade(
         order,
         originAssets.items.map((asset) =>
-          toAsset(asset, originConfig.networks[0] ?? "Unknown"),
+          toAsset(asset, [
+            ...chainsOf(originConfig),
+            ...chainsOf(destinationConfig),
+          ]),
         ),
         destinationAssets.items.map((asset) =>
-          toAsset(asset, destinationConfig.networks[0] ?? "Unknown"),
+          toAsset(asset, [
+            ...chainsOf(originConfig),
+            ...chainsOf(destinationConfig),
+          ]),
         ),
       );
     }

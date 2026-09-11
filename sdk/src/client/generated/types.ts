@@ -492,6 +492,7 @@ export interface components {
             block_explorer_url: string;
             /** Format: int64 */
             chain_id: number;
+            chains: components["schemas"]["Chain"][];
             /** @description The resolver authorized to cosign taker orders. */
             cosigner: string;
             /** Format: int32 */
@@ -499,7 +500,6 @@ export interface components {
             features: components["schemas"]["Features"];
             /** @description The public executor target for encoded rebate transactions. */
             filler: string;
-            networks: string[];
             /** @description The Permit2 contract verifying the taker witness. */
             permit2: string;
             /** @description The UniswapX reactor that settles taker orders. */
@@ -533,6 +533,17 @@ export interface components {
             supported: boolean;
             symbol: string;
             tags: string[];
+        };
+        /**
+         * @description A chain this process can name: the id its assets report, the name people read, and the mark
+         *     that stands for it. A process serves one chain, but may name the chains it bridges to, so the
+         *     FE can label a counterpart's assets before it has called that deployment.
+         */
+        Chain: {
+            /** Format: int64 */
+            chain_id: number;
+            logo_uri?: string | null;
+            name: string;
         };
         /**
          * @description How many of a pool's active makers price on each curve shape. A pool commonly mixes shapes,
@@ -1017,6 +1028,7 @@ export interface components {
                 block_explorer_url: string;
                 /** Format: int64 */
                 chain_id: number;
+                chains: components["schemas"]["Chain"][];
                 /** @description The resolver authorized to cosign taker orders. */
                 cosigner: string;
                 /** Format: int32 */
@@ -1024,7 +1036,6 @@ export interface components {
                 features: components["schemas"]["Features"];
                 /** @description The public executor target for encoded rebate transactions. */
                 filler: string;
-                networks: string[];
                 /** @description The Permit2 contract verifying the taker witness. */
                 permit2: string;
                 /** @description The UniswapX reactor that settles taker orders. */
@@ -1712,6 +1723,8 @@ export interface components {
             chain_id: number;
             /** Format: int32 */
             decimals: number;
+            /** @description The token list's icon, when it carried one. */
+            logo_uri?: string | null;
             symbol: string;
         };
         /** @description One token paired with an amount. */

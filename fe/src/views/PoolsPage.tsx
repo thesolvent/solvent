@@ -11,9 +11,14 @@ import {
   filterPools,
   poolTypeOptions,
   sortPools,
+  POOL_SORTS,
+  poolRanks,
+  curveMark,
 } from "@/lib/pools";
 import { useAssetSymbols } from "@/services/assets";
 import { slug, usePools } from "@/services/pools";
+import { Icon } from "@/components/Icon";
+import { Term } from "@/components/Tooltip";
 import { useApp, type PoolQuery } from "@/state";
 
 import styles from "./PoolsPage.module.css";
@@ -57,8 +62,6 @@ const FILTER_GROUPS = [
 
 const CURVE_GROUP = 0;
 
-const SORTS = ["Best", "Highest APR", "Most TVL", "Newest"];
-
 export function PoolsPage() {
   const { state, set } = useApp();
   const navigate = useNavigate();
@@ -77,6 +80,7 @@ export function PoolsPage() {
     }),
     state.poolSort,
   );
+  const ranks = poolRanks(matching, state.poolSort);
   const page = matching.slice(
     state.poolPage * PAGE_SIZE,
     state.poolPage * PAGE_SIZE + PAGE_SIZE,
@@ -257,7 +261,7 @@ export function PoolsPage() {
 
         <div>
           <div className={styles.sorts}>
-            {SORTS.map((t) => (
+            {POOL_SORTS.map((t) => (
               <button
                 key={t}
                 type="button"
@@ -289,7 +293,17 @@ export function PoolsPage() {
                   </div>
                   <div className={styles.poolFigures}>
                     <div style={{ minWidth: 0 }}>
-                      <div className={styles.poolBig}>{p.pair}</div>
+                      <div className={styles.poolBig}>
+                        {p.pair}
+                        {ranks[p.pair] && (
+                          <span
+                            className={styles.poolRank}
+                            title={`#${ranks[p.pair]} by ${state.poolSort.toLowerCase()}`}
+                          >
+                            #{ranks[p.pair]}
+                          </span>
+                        )}
+                      </div>
                       <div className={styles.poolSub}>{p.venue}</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
@@ -304,14 +318,28 @@ export function PoolsPage() {
                 </div>
                 <div className={styles.poolSide}>
                   <div className={styles.poolFee}>
-                    <span className={styles.poolFeeChip} />
+                    <span
+                      aria-label={curveMark(p.curves).label}
+                      className={styles.poolFeeChip}
+                      role="img"
+                      title={curveMark(p.curves).label}
+                    >
+                      <Icon
+                        className={styles.poolFeeGlyph}
+                        name={curveMark(p.curves).name}
+                      />
+                    </span>
                     <div style={{ minWidth: 0 }}>
-                      <div className={styles.poolMicro}>Fee tier</div>
+                      <div className={styles.poolMicro}>
+                        <Term term="feeTier">Fee tier</Term>
+                      </div>
                       <div className={styles.poolFeeValue}>{p.fee}</div>
                     </div>
                   </div>
                   <div className={styles.poolApr}>
-                    <div className={styles.poolMicro}>Net APR</div>
+                    <div className={styles.poolMicro}>
+                      <Term term="netApr">Net APR</Term>
+                    </div>
                     <div className={styles.poolAprValue}>{p.apr}</div>
                   </div>
                 </div>

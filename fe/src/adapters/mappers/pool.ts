@@ -70,6 +70,8 @@ export function toPool(api: ApiPool): Pool {
       quoteDecimals: api.quote.decimals,
     },
     tvlUsd: api.tvl_usd,
+    volumeUsd: api.volume_24h_usd,
+    fills24h: api.fills_24h,
     tvlChange: change(api.tvl_change_24h_pct),
     aprPct: api.apr_pct,
   };
