@@ -440,7 +440,7 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
         Arc::clone(&clock) as Arc<dyn Clock>,
         SwapConfig {
             routing,
-            chain_id: chain_id,
+            chain_id,
             filler: Address::ZERO, // unused: 1inch intents never carry UniswapX-style exclusivity
             filler_owner: h.maker,
             reservation_ttl_secs: 600,
