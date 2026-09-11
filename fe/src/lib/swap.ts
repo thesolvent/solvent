@@ -251,7 +251,11 @@ function isWalletRejection(error: unknown): boolean {
 export function submissionProblem(error: Error | null): string | undefined {
   if (!error) return undefined;
   if (isSwapDeclined(error)) return "The resolver declined this swap";
-  if (error.name === "InputValidationError") return error.message;
+  if (
+    error.name === "InputValidationError" ||
+    error.name === "CrossChainApiError"
+  )
+    return error.message;
   return isWalletRejection(error)
     ? "Wallet request rejected"
     : "Could not submit the swap";

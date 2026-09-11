@@ -7,6 +7,7 @@ import {
   choices,
   networkOptions,
   settleLegs,
+  submissionProblem,
   swapAction,
   tagOptions,
 } from "./swap";
@@ -193,5 +194,16 @@ describe("the action button", () => {
       label: "Switch to Solvent Devnet",
       ready: true,
     });
+  });
+});
+
+describe("submission errors", () => {
+  it("shows a cross-chain coordinator rejection instead of hiding it", () => {
+    const error = new Error("Quote expires too soon; request a fresh price");
+    error.name = "CrossChainApiError";
+
+    expect(submissionProblem(error)).toBe(
+      "Quote expires too soon; request a fresh price",
+    );
   });
 });
