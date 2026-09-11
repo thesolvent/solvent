@@ -11,11 +11,15 @@ use super::account::AccountKey;
 /// One maker-capital source a reservation draws on: `amount` of `token` pulled from a specific
 /// strategy — settled by exactly one Aqua `pull`. Each source holds capacity at both ceilings, the
 /// shared wallet and the strategy virtual.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ReservationSource {
+    #[schema(value_type = String)]
     pub maker: MakerId,
+    #[schema(value_type = String)]
     pub strategy_hash: StrategyHash,
+    #[schema(value_type = String)]
     pub token: Address,
+    #[schema(value_type = String)]
     pub amount: U256,
 }
 
@@ -39,10 +43,12 @@ impl ReservationSource {
 /// The two-phase lifecycle of a reservation. `Pending` holds at both ceilings; a terminal state
 /// releases them (`Voided`/`Expired`) or consumes them (`Posted`). `ReorgOpen` is a posted
 /// settlement that a reorg rolled back — its consumption is reversed and reconcile re-decides it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ReservationState {
     Pending,
+    Committed,
     Posted,
     Voided,
     Expired,
