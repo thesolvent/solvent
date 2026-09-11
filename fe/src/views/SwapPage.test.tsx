@@ -11,6 +11,10 @@ import { TransitionRoutes } from "@/components/TransitionRoutes";
 import * as swapService from "@/services/swap";
 import { SwapPage } from "@/views/SwapPage";
 
+const walletReads = vi.hoisted(() => ({
+  data: [] as { result: bigint; status: "success" }[],
+}));
+
 vi.mock("@privy-io/react-auth", () => ({
   usePrivy: () => ({ connectOrCreateWallet: vi.fn() }),
 }));
@@ -24,16 +28,18 @@ vi.mock("wagmi", async (original) => ({
   }),
   useClient: () => ({}),
   useConnectorClient: () => ({ data: {} }),
+  useReadContracts: () => ({ data: walletReads.data }),
 }));
 
-beforeEach(() =>
+beforeEach(() => {
+  walletReads.data = [];
   useAppStore.setState({
     ...INITIAL_STATE,
     fromToken: "WETH",
     toToken: "USDC",
     amount: "1",
-  }),
-);
+  });
+});
 
 function TradeDestination() {
   const { tradeId } = useParams();
@@ -122,6 +128,23 @@ const ERC7683_CONFIG: AppConfig = {
 };
 
 describe("SwapPage", () => {
+  it("shows the connected wallet's balance in each picker row", async () => {
+    walletReads.data = [
+      { result: 1_500_000_000_000_000_000n, status: "success" },
+      { result: 399_300_000_000n, status: "success" },
+    ];
+    renderWithServices(<SwapPage />, {
+      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    await screen.findByText("2,477");
+    fireEvent.click(screen.getByText("WETH").closest("button")!);
+
+    expect(await screen.findByText("Balance 1.5 WETH")).toBeVisible();
+    expect(screen.getByText("Balance 399,300 USDC")).toBeVisible();
+  });
+
   it.each([false, true])(
     "transitions to the returned trade only after the backend accepts the order (same-page navigation: %s)",
     async (samePageNavigation) => {
@@ -405,7 +428,7 @@ describe("SwapPage", () => {
 
     await waitFor(() => expect(list).toHaveBeenCalledWith(true));
     fireEvent.click(await screen.findByRole("button", { name: "Select ▾" }));
-    fireEvent.click(screen.getByRole("button", { name: /USDC USDC · Base/ }));
+    fireEvent.click(screen.getByRole("button", { name: /USDC.*Base/ }));
 
     expect(screen.getByLabelText("USDC token on Base")).toBeInTheDocument();
     expect(useAppStore.getState().toToken).toBe("31338:0xbase-usdc");

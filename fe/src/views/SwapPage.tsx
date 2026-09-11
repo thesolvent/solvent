@@ -21,7 +21,7 @@ import { useSubmitSwap } from "@/services/swap";
 import { useConfig } from "@/services/system";
 import { type SwapProtocol, useApp } from "@/state";
 import { AssetIdentity } from "@/components/AssetIdentity";
-import { useWalletAction } from "@/services/wallet";
+import { useAssetBalances, useWalletAction } from "@/services/wallet";
 
 import styles from "./SwapPage.module.css";
 
@@ -98,6 +98,7 @@ export function SwapPage() {
   ];
 
   const wallet = useWalletAction();
+  const balances = useAssetBalances(assets);
   const walletNetwork =
     wallet.connected && wallet.chainId !== undefined
       ? (assets.find((asset) => asset.chainId === wallet.chainId)?.net ??
@@ -464,6 +465,7 @@ export function SwapPage() {
                     selected !== undefined &&
                     assetKey(selected) === assetKey(t);
                   const down = t.change.charAt(0) === "-";
+                  const balance = balances.get(assetKey(t)) ?? DASH;
                   return (
                     <button
                       key={assetKey(t)}
@@ -479,7 +481,11 @@ export function SwapPage() {
                       <span className={styles.tokenMain}>
                         <span className={styles.tokenName}>{t.name}</span>
                         <span className={styles.tokenMeta}>
-                          {t.symbol} · {t.net}
+                          <span className={styles.tokenBalance}>
+                            Balance {balance} {t.symbol}
+                          </span>
+                          <span aria-hidden="true"> · </span>
+                          {t.net}
                         </span>
                       </span>
                       <span className={styles.tokenPrices}>
