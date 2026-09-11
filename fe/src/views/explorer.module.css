@@ -280,6 +280,17 @@
   text-overflow: ellipsis;
 }
 
+.crossChainFlow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: clamp(15px, 1.35vw, 20px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+
 .statValueXs {
   composes: statValueSm;
   font-size: clamp(14px, 1.25vw, 18px);
@@ -1092,6 +1103,15 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.crossChainLegFlow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  white-space: nowrap;
 }
 
 .legCurve {
