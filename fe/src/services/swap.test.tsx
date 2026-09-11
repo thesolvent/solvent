@@ -17,6 +17,7 @@ vi.mock("wagmi", async (original) => ({
   useConnectorClient: () => ({ data: {} }),
 }));
 const ASSET = {
+  chainId: 31337,
   address: "0x2222222222222222222222222222222222222222",
   symbol: "WETH",
   name: "Wrapped Ether",
@@ -215,4 +216,25 @@ it("does not query a value that exceeds the input token precision", async () => 
     await screen.findByText("Swap amount supports at most 18 decimal places"),
   ).toBeInTheDocument();
   expect(quoteRequest).not.toHaveBeenCalled();
+});
+
+it("quotes matching token addresses when their chains differ", async () => {
+  function PriceProbe() {
+    const { quote } = useQuote(
+      ASSET,
+      { ...ASSET, chainId: 31338, net: "Base" },
+      "1",
+    );
+    return <p>{quote?.amountOut ?? "pending"}</p>;
+  }
+  const quoteRequest = vi.fn().mockResolvedValue(QUOTE);
+  renderWithServices(<PriceProbe />, { swap: { quote: quoteRequest } });
+
+  expect(await screen.findByText("100")).toBeInTheDocument();
+  expect(quoteRequest).toHaveBeenCalledWith(
+    expect.objectContaining({
+      from: expect.objectContaining({ chainId: 31337 }),
+      to: expect.objectContaining({ chainId: 31338 }),
+    }),
+  );
 });
