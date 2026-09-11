@@ -36,6 +36,7 @@ usd_stable_pegs = ["0xdac17f958d2ee523a2206206994597c13d831ec7"]  # USDT
 # Swap (submit) path. The resolver's Aqua filler contract and the account authorized to call it;
 # the filler-owner and cosigner signing keys are read from the environment, never this file:
 #   SOLVENT_SIGNER_KEY    — the filler-owner key that signs and pays for fills
+#   SOLVENT_POLICY_SIGNER_KEY — the EIP-712 key authorized by the filler contract
 #   SOLVENT_COSIGNER_KEY  — the key that cosigns each order's decay before it fills
 filler = "0x0000000000000000000000000000000000000000"
 # Required: the deployed UniswapX V2 reactor used by taker orders.
@@ -92,6 +93,14 @@ max_outputs = 4            # each output is a token to source; an order with hun
 dedup_ttl_secs = 900       # longer than any order lives, so one order is admitted once
 dedup_capacity = 16384     # bounded as well as expiring: the order stream is not ours to control
 max_tracked_intents = 64   # orders held for re-pricing at once; the feed's volume is not ours to control
+
+[rebate]
+start_block = 0               # filler deployment block; avoids scanning older chain history
+deviation_threshold_bps = 50 # batch below 0.50%; guard and evaluate at or above it
+gas_safety_bps = 12000       # charge 1.20x the estimated gas before the 95/5 split
+gas_units = 350000            # conservative executeRebate transaction gas estimate
+market_max_age_secs = 10      # do not authorize against an older executable book
+authorization_ttl_blocks = 30 # blocks in which published rebate calldata remains executable
 
 # Binance symbol -> the tokens it prices. Devnet tokens sit at mainnet addresses, so mainnet
 # symbols apply. Stables quoted against USDT read ~1; USDT itself has no pair and stays gas-free.

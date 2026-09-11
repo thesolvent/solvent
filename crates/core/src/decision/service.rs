@@ -28,7 +28,7 @@ use crate::primitives::routing::{RouteRequest, RoutingConfig};
 use crate::primitives::trade::{TradeId, TradeStatus};
 use crate::primitives::IntentId;
 use crate::registry::SharedSnapshot;
-use crate::routing::{route, LegCostResolver};
+use crate::routing::{route, LegCostResolver, RoutingBook};
 use crate::swap::{SwapService, TradePrices};
 use crate::valuation::Valuation;
 
@@ -166,8 +166,11 @@ impl DecisionService {
         // The taker's input is the ceiling: a plan that cannot source the delivery within it, net of
         // gas, is not yet profitable. The router returning nothing is the whole test.
         let plan = route(
-            &self.registry.load(),
-            &self.ledger.snapshot(),
+            RoutingBook::new(
+                &self.registry.load(),
+                &self.ledger.snapshot(),
+                &self.swap.guards(),
+            ),
             &request,
             intent.input.curve.amount_at(now),
             &self.config.routing,

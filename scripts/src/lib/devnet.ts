@@ -55,7 +55,11 @@ export async function connectDevnet() {
             config.reactor as Address,
             manifest.reactor as Address,
         ) ||
-        !isAddressEqual(config.permit2 as Address, manifest.permit2 as Address)
+        !isAddressEqual(
+            config.permit2 as Address,
+            manifest.permit2 as Address,
+        ) ||
+        !isAddressEqual(config.filler as Address, manifest.filler as Address)
     )
         throw new Error("API and RPC do not match the deployment manifest");
     for (const [symbol, token] of Object.entries(manifest.tokens)) {

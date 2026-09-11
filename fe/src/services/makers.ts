@@ -108,10 +108,11 @@ export function usePosition(
   hash: string | undefined,
   options?: MakerReadOptions,
 ) {
+  const { makers } = useServices();
   return useMakerRead(
     "position",
     hash,
-    useServices().makers.position,
+    (id) => makers.position(id),
     undefined,
     options,
   );
@@ -134,7 +135,8 @@ export function useMakerSettlements(
 }
 
 export function usePositionHistory(hash: string | undefined) {
-  return useMakerRead("history", hash, useServices().makers.history);
+  const { makers } = useServices();
+  return useMakerRead("history", hash, (id) => makers.history(id));
 }
 
 export function usePositionDepth(

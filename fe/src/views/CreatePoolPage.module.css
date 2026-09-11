@@ -1153,8 +1153,15 @@
   transition: border-color 140ms ease;
 }
 
-.useFull:hover {
+.useFull:hover:not(:disabled) {
   border-color: var(--ink);
+}
+
+.useFull:disabled,
+.quick:disabled {
+  background: var(--line-faint);
+  color: var(--text-muted);
+  cursor: not-allowed;
 }
 
 .pairNote {
@@ -1240,7 +1247,7 @@
   transition: background 130ms ease;
 }
 
-.quick:hover {
+.quick:hover:not(:disabled) {
   background: var(--lime-wash);
 }
 

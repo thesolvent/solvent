@@ -52,6 +52,7 @@ impl ReconcileService {
         let now = self.clock.now_unix();
         for fill in &settled {
             self.settle_trade(fill, now).await?;
+            self.execution.forget(fill.intent).await?;
         }
 
         let in_flight = self.execution.tracked_reservations().await?;
@@ -120,7 +121,7 @@ mod tests {
     use super::*;
     use crate::primitives::ingest::OrderSource;
     use std::collections::{BTreeMap, HashMap};
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::Mutex as StdMutex;
 
     use alloy_primitives::{Address, B256, U256};
@@ -284,6 +285,7 @@ mod tests {
     #[derive(Default)]
     struct MemTrades {
         rows: StdMutex<BTreeMap<B256, Trade>>,
+        fail_settle: AtomicBool,
     }
     impl MemTrades {
         fn seed(&self, trade: Trade) {
@@ -296,6 +298,9 @@ mod tests {
                 .get(&order_hash.0)
                 .cloned()
                 .unwrap()
+        }
+        fn fail_next_settle(&self) {
+            self.fail_settle.store(true, Ordering::SeqCst);
         }
     }
     #[async_trait]
@@ -317,6 +322,9 @@ mod tests {
             Ok(())
         }
         async fn settle(&self, id: &TradeId, outcome: &Settlement) -> Result<(), TradeStoreError> {
+            if self.fail_settle.swap(false, Ordering::SeqCst) {
+                return Err(TradeStoreError::Db("temporarily unavailable".to_string()));
+            }
             let mut rows = self.rows.lock().unwrap();
             if let Some(trade) = rows.values_mut().find(|t| t.id == *id) {
                 if trade.settled_at.is_none() {
@@ -516,5 +524,36 @@ mod tests {
         // No trade seeded — reconcile must not error.
         let report = reconcile.tick().await.unwrap();
         assert_eq!(report.settled, 1);
+    }
+
+    #[tokio::test]
+    async fn trade_store_failure_retains_terminal_fill_for_retry() {
+        let (intent, rid) = ids(5);
+        let (reconcile, trades, ledger, _clock) = setup(
+            ExecStatus::Confirmed {
+                block: 42,
+                tx: B256::from([8; 32]),
+            },
+            vec![U256::from(100u64)],
+            &[(intent, rid)],
+            1000,
+        )
+        .await;
+        ledger
+            .reserve(rid, intent, vec![source(100)], 60)
+            .await
+            .unwrap();
+        trades.seed(trade(intent));
+        trades.fail_next_settle();
+
+        assert!(matches!(
+            reconcile.tick().await,
+            Err(SolventError::TradeStore(_))
+        ));
+        assert_eq!(reconcile.execution.pending().await.unwrap(), 1);
+
+        reconcile.tick().await.unwrap();
+        assert_eq!(trades.get(intent).status, TradeStatus::Confirmed);
+        assert_eq!(reconcile.execution.pending().await.unwrap(), 0);
     }
 }

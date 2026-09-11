@@ -22,7 +22,7 @@ import { useApp } from "@/state";
 
 import styles from "./SwapPage.module.css";
 
-const SWAP_TABS = ["Swap", "Send", "Buy"];
+const SWAP_TABS = ["Swap"];
 
 export function SwapPage() {
   const { state, set, config } = useApp();
@@ -40,6 +40,7 @@ export function SwapPage() {
   }, [assets, state.fromToken, state.toToken, set]);
 
   const typed = state.amount;
+  const hasAmount = typed.trim() !== "";
   const numericAmount = Number(typed);
   const amt = Number.isFinite(numericAmount) ? numericAmount : 0;
   const fromUsdNum = amt * (from?.price ?? 0);
@@ -47,11 +48,10 @@ export function SwapPage() {
   // The output is the server's price for this size, not the mid — it carries fee and impact.
   const { quote, pricing, problem } = useQuote(from, to, typed);
   // Nothing in means nothing out; anything else without a price is unknown, not zero.
-  const outStr = quote?.amountOut ?? (amt > 0 ? DASH : "0");
+  const outStr = quote?.amountOut ?? (hasAmount && amt > 0 && to ? DASH : "");
   const dotAt = outStr.indexOf(".");
 
   const routeStats = [
-    { label: "Resolver", value: "Zero-inventory" },
     {
       label: "Fills",
       value: quote
@@ -89,17 +89,19 @@ export function SwapPage() {
     submission.send();
   };
 
-  const action = swapAction({
-    connected: isConnected,
-    switchTo,
-    submitting: submission.submitting,
-    submitted: submission.result !== undefined,
-    amount: amt,
-    pricing,
-    quote,
-    problem,
-    submissionProblem: submission.problem,
-  });
+  const action = to
+    ? swapAction({
+        connected: isConnected,
+        switchTo,
+        submitting: submission.submitting,
+        submitted: submission.result !== undefined,
+        amount: amt,
+        pricing,
+        quote,
+        problem,
+        submissionProblem: submission.problem,
+      })
+    : { label: "Select receive asset", ready: false };
 
   const matches = useMemo(() => {
     const q = state.pQuery.trim().toLowerCase();
@@ -156,12 +158,7 @@ export function SwapPage() {
         <div className={styles.cardHead}>
           <div className={styles.tabs}>
             {SWAP_TABS.map((t) => (
-              <button
-                key={t}
-                type="button"
-                className={t === state.swapTab ? styles.tabActive : styles.tab}
-                onClick={() => set({ swapTab: t })}
-              >
+              <button key={t} type="button" className={styles.tabActive}>
                 {t}
               </button>
             ))}
@@ -185,7 +182,9 @@ export function SwapPage() {
             <span className={styles.assetChip}>
               {state.fromToken.slice(0, 2)}
             </span>
-            <span className={styles.assetSymbol}>{state.fromToken}</span>
+            <span className={styles.assetSymbol}>
+              {state.fromToken || "Select"}
+            </span>
             <span className={styles.assetCaret}>▾</span>
           </button>
           <div className={styles.amountCol}>
@@ -196,11 +195,15 @@ export function SwapPage() {
                 style={{ fontSize: fit(state.amount) }}
                 value={state.amount}
                 onChange={(e) => set({ amount: e.target.value })}
+                placeholder="Enter amount"
+                aria-label="Swap amount"
                 inputMode="decimal"
                 maxLength={258}
               />
             </div>
-            <div className={styles.amountUsd}>~$ {money(fromUsdNum)}</div>
+            {hasAmount && (
+              <div className={styles.amountUsd}>~$ {money(fromUsdNum)}</div>
+            )}
           </div>
         </div>
 
@@ -208,6 +211,7 @@ export function SwapPage() {
           <button
             type="button"
             className={styles.flip}
+            disabled={!from || !to}
             onClick={() =>
               set({
                 fromToken: state.toToken,
@@ -228,7 +232,9 @@ export function SwapPage() {
             <span className={styles.assetChip}>
               {state.toToken.slice(0, 2)}
             </span>
-            <span className={styles.assetSymbol}>{state.toToken}</span>
+            <span className={styles.assetSymbol}>
+              {state.toToken || "Select"}
+            </span>
             <span className={styles.assetCaret}>▾</span>
           </button>
           <div className={styles.amountCol}>
@@ -244,9 +250,11 @@ export function SwapPage() {
                 </span>
               </div>
             </div>
-            <div className={styles.amountUsd}>
-              ~$ {money(quote?.amountOutUsd ?? 0)}
-            </div>
+            {quote && (
+              <div className={styles.amountUsd}>
+                ~$ {money(quote.amountOutUsd)}
+              </div>
+            )}
           </div>
         </div>
 
@@ -389,10 +397,6 @@ export function SwapPage() {
           </div>
         )}
       </section>
-
-      <p className={styles.footnote}>
-        *Resolver rewards are non-monetary points and hold no direct value
-      </p>
     </div>
   );
 }

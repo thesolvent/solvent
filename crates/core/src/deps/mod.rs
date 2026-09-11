@@ -9,6 +9,7 @@ pub mod ledger;
 pub mod maker_metrics;
 pub mod order_log;
 pub mod quote_log;
+pub mod rebate;
 pub mod registry;
 pub mod routing;
 pub mod trade;

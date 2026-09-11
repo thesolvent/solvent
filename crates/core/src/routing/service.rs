@@ -10,7 +10,29 @@ use crate::primitives::registry::Snapshot;
 use crate::primitives::routing::gas::per_leg_cost as compute_leg_cost;
 use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 
-use super::{price_impact_pct, select, solve_sparse};
+use super::{price_impact_pct, select, solve_sparse, GuardSnapshot};
+
+/// The coherent registry, inventory, and policy snapshots used by one route calculation.
+#[derive(Debug, Clone, Copy)]
+pub struct RoutingBook<'a> {
+    snapshot: &'a Snapshot,
+    caps: &'a AvailableSnapshot,
+    guards: &'a GuardSnapshot,
+}
+
+impl<'a> RoutingBook<'a> {
+    pub fn new(
+        snapshot: &'a Snapshot,
+        caps: &'a AvailableSnapshot,
+        guards: &'a GuardSnapshot,
+    ) -> Self {
+        Self {
+            snapshot,
+            caps,
+            guards,
+        }
+    }
+}
 
 /// Resolve the per-leg gas cost in the **spread token**'s base units from the live cache — gas
 /// price and the native + spread-token USD prices. The spread token is `token_out` for exact-in
@@ -70,15 +92,20 @@ impl Routed {
 /// exact-in, input for exact-out); `warm` is the last λ for this pair. A bound the split cannot
 /// beat yields no plan, but still reports what the split would have cost.
 pub fn route(
-    snapshot: &Snapshot,
-    caps: &AvailableSnapshot,
+    book: RoutingBook<'_>,
     request: &RouteRequest,
     bound: U256,
     config: &RoutingConfig,
     per_leg_cost: U256,
     warm: Option<&Ratio>,
 ) -> Routed {
-    let selection = select(snapshot, caps, request, config.max_candidates);
+    let selection = select(
+        book.snapshot,
+        book.caps,
+        book.guards,
+        request,
+        config.max_candidates,
+    );
     let Some(split) = solve_sparse(
         &selection.chosen,
         request,
@@ -183,11 +210,11 @@ mod tests {
     #[test]
     fn routes_when_output_clears_the_min_and_declines_otherwise() {
         let (snap, caps, req) = fixture();
+        let guards = GuardSnapshot::default();
         let cfg = RoutingConfig::new(64, 8, 150_000);
         // ~90 out for 100 in; a min-out below that yields a plan with the surplus as profit.
         let plan = route(
-            &snap,
-            &caps,
+            RoutingBook::new(&snap, &caps, &guards),
             &req,
             U256::from(50u64),
             &cfg,
@@ -200,8 +227,7 @@ mod tests {
         assert!(plan.expected_profit > U256::ZERO);
         // A min-out above the achievable output declines the route.
         assert!(route(
-            &snap,
-            &caps,
+            RoutingBook::new(&snap, &caps, &guards),
             &req,
             U256::from(200u64),
             &cfg,
@@ -215,12 +241,12 @@ mod tests {
     #[test]
     fn exact_out_spread_charges_gas() {
         let (snap, caps, mut req) = fixture();
+        let guards = GuardSnapshot::default();
         req.exact_in = false; // deliver `amount` of token_out for at most `max_in`
         let cfg = RoutingConfig::new(64, 8, 150_000);
         // ~102 in for 100 out; a generous max_in with no gas leaves surplus.
         let plan = route(
-            &snap,
-            &caps,
+            RoutingBook::new(&snap, &caps, &guards),
             &req,
             U256::from(200u64),
             &cfg,
@@ -232,8 +258,7 @@ mod tests {
         assert!(plan.expected_profit > U256::ZERO);
         // The same max_in, but per-leg gas that swallows the surplus, declines the route.
         assert!(route(
-            &snap,
-            &caps,
+            RoutingBook::new(&snap, &caps, &guards),
             &req,
             U256::from(200u64),
             &cfg,

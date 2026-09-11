@@ -24,6 +24,7 @@ export type Snap = {
 
 export type Crumb = { snap: Snap; label: string };
 export type CreateSpan = "7d" | "3m" | "All";
+export type RebateExplorerStatus = "Active" | "Confirmed";
 
 export type AppState = {
   page: Page | null;
@@ -94,34 +95,67 @@ export type AppState = {
   xpEnt: string;
   xpStatus: string;
   xpPair: string;
+  xpRebateStatus: RebateExplorerStatus;
   xpOpen: string | null;
   xpOrderSource: string;
   xpOrderPair: string;
   xpOrderState: string;
 };
 
-export const INITIAL_STATE: AppState = {
-  page: null,
-  trail: [],
+type SwapState = Pick<
+  AppState,
+  | "swapTab"
+  | "fromToken"
+  | "toToken"
+  | "amount"
+  | "picker"
+  | "pQuery"
+  | "pTag"
+  | "pNet"
+>;
 
+export const INITIAL_SWAP_STATE: SwapState = {
   swapTab: "Swap",
-  fromToken: "ETH",
-  toToken: "SOL",
-  amount: "2.500",
-  openCell: null,
+  fromToken: "",
+  toToken: "",
+  amount: "",
+  picker: null,
+  pQuery: "",
+  pTag: "All",
+  pNet: "All networks",
+};
 
-  poolQuery: {
-    ptype: "All pools",
-    sell: "Any",
-    buy: "Any",
-    fee: "Any",
-    apr: "Any",
-  },
-  poolSort: "Best",
-  poolPage: 0,
+type CreatePositionState = Pick<
+  AppState,
+  | "create"
+  | "createFee"
+  | "customFeePct"
+  | "createPreset"
+  | "corePair"
+  | "flipped"
+  | "strategy"
+  | "pegSym"
+  | "dragging"
+  | "chartHover"
+  | "chartZoom"
+  | "volHover"
+  | "tokenTag"
+  | "pickerSlot"
+  | "slotA"
+  | "slotB"
+  | "q1"
+  | "q2"
+  | "step"
+  | "stepDirty"
+  | "createSpan"
+  | "bandMax"
+  | "bandMin"
+  | "amtA"
+  | "amtB"
+  | "hoverFrac"
+>;
 
-  detail: null,
-
+export const INITIAL_CREATE_POSITION_STATE: CreatePositionState = {
   create: false,
   createFee: "Auto 0.01%",
   customFeePct: "0.10",
@@ -140,24 +174,40 @@ export const INITIAL_STATE: AppState = {
   slotB: null,
   q1: "",
   q2: "",
-
   step: 1,
   stepDirty: {},
   createSpan: "3m",
   bandMax: 0.05,
   bandMin: -0.05,
-  amtA: "253.79",
-  amtB: "264.02",
+  amtA: "",
+  amtB: "",
   hoverFrac: null,
+};
+
+export const INITIAL_STATE: AppState = {
+  page: null,
+  trail: [],
+
+  ...INITIAL_SWAP_STATE,
+  openCell: null,
+
+  poolQuery: {
+    ptype: "All pools",
+    sell: "Any",
+    buy: "Any",
+    fee: "Any",
+    apr: "Any",
+  },
+  poolSort: "Best",
+  poolPage: 0,
+
+  detail: null,
+
+  ...INITIAL_CREATE_POSITION_STATE,
 
   makerSort: "Virtual",
   filterPick: { 0: 0 },
   tvlMin: 0,
-
-  picker: null,
-  pQuery: "",
-  pTag: "All",
-  pNet: "All networks",
 
   xpStrat: null,
   maker: null,
@@ -175,6 +225,7 @@ export const INITIAL_STATE: AppState = {
   xpEnt: "All entities",
   xpStatus: "All status",
   xpPair: "All pairs",
+  xpRebateStatus: "Active",
   xpOpen: null,
   xpOrderSource: "All sources",
   xpOrderPair: "All pairs",

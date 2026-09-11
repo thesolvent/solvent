@@ -17,6 +17,8 @@ const CONFIG: AppConfig = {
   networks: ["Ethereum"],
   reactor: "0x0",
   permit2: "0x0",
+  filler: "0x0",
+  taker_credential: "0x0",
   cosigner: "0x0",
 };
 

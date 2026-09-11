@@ -69,18 +69,17 @@ describe("settling the legs", () => {
     expect(settleLegs(ASSETS, "DAI", "USDC")).toBeNull();
   });
 
-  it("moves the output leg when the input one no longer pairs with it", () => {
+  it("clears the output leg when the input one no longer pairs with it", () => {
     expect(settleLegs(ASSETS, "WETH", "DAI")).toEqual({
       fromToken: "WETH",
-      toToken: "USDC",
+      toToken: "",
     });
   });
 
-  it("falls back to a real pair when neither leg is served", () => {
-    // The mock opens on ETH -> SOL, which no deployment need serve.
-    expect(settleLegs(ASSETS, "ETH", "SOL")).toEqual({
+  it("selects only a valid source when neither leg is served", () => {
+    expect(settleLegs(ASSETS, "", "")).toEqual({
       fromToken: "DAI",
-      toToken: "USDC",
+      toToken: "",
     });
   });
 

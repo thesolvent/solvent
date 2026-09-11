@@ -14,12 +14,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use alloy::primitives::{Address, Bytes, U256};
+use alloy::providers::Provider;
 use alloy::signers::{local::PrivateKeySigner, Signer};
 use alloy::sol;
 use alloy::sol_types::SolValue;
 use futures::stream::BoxStream;
 
-use common::{first_supported, ledger, setup, synced, Harness, MockERC20, Stack};
+use common::{first_supported, ledger, synced, Harness, MockERC20};
 use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
 use solvent_adapters::ingest::oneinch::{OneInchFillBuilder, OneInchNormalizer};
 use solvent_adapters::ledger::SystemClock;
@@ -38,7 +39,7 @@ use solvent_core::primitives::ingest::{Intent, OrderSource, ProtocolId, RawOrder
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::ChainId;
 use solvent_core::reconcile::ReconcileService;
-use solvent_core::routing::LegCostResolver;
+use solvent_core::routing::{LegCostResolver, StrategyGuard};
 use solvent_core::swap::{SwapConfig, SwapService};
 use solvent_core::valuation::Valuation;
 use walletkit::adapters::policy::{AllowAll, DefaultPolicyEngine};
@@ -179,9 +180,9 @@ impl OrderFeed for OneShotFeed {
     }
 }
 
-fn assets(stack: &Stack) -> Arc<AssetManager> {
+fn assets(h: &Harness, chain_id: u64) -> Arc<AssetManager> {
     let token = |address, symbol: &str| TokenMeta {
-        chain_id: stack.chain_id,
+        chain_id,
         address,
         symbol: symbol.to_string(),
         name: symbol.to_string(),
@@ -192,7 +193,7 @@ fn assets(stack: &Stack) -> Arc<AssetManager> {
     Arc::new(AssetManager::new(
         TokenList {
             name: "e2e".to_string(),
-            tokens: vec![token(stack.h.t0, "T0"), token(stack.h.t1, "T1")],
+            tokens: vec![token(h.t0, "T0"), token(h.t1, "T1")],
         },
         Arc::new(solvent_core::registry::SharedSnapshot::default()),
     ))
@@ -247,11 +248,13 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
     if common::skip_without_anvil() {
         return;
     }
-    let stack = setup().await;
-    let spec = first_supported(&stack.h);
-    stack.h.ship(&spec).await;
-    let (snapshot, _rp, _rd) = synced(&stack.h).await;
-    let (svc_ledger, _ld) = ledger(&stack.h, &snapshot).await;
+    let h = Harness::setup().await;
+    common::etch_multicall3(&h).await;
+    let chain_id = h.maker_provider.get_chain_id().await.expect("chain id");
+    let spec = first_supported(&h);
+    h.ship(&spec).await;
+    let (snapshot, _rp, _rd) = synced(&h).await;
+    let (svc_ledger, _ld) = ledger(&h, &snapshot).await;
     let led = Arc::new(svc_ledger);
     led.sync_budgets(&snapshot.load())
         .await
@@ -260,22 +263,22 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
     // Deploy a real 1inch Limit Order Protocol v4 (needs a WETH-like token, unused otherwise) and
     // our filler, targeting it — independent contracts from the UniswapX reactor/filler `setup()`
     // also deploys, sharing only Aqua/SwapVM and the two tokens.
-    let weth = WETHMock::deploy(stack.h.maker_provider.clone())
+    let weth = WETHMock::deploy(h.maker_provider.clone())
         .await
         .expect("deploy WETH mock");
     let protocol_address = deploy_bytecode(
-        &stack.h.maker_provider,
+        &h.maker_provider,
         include_str!("fixtures/artifacts/LimitOrderProtocol.json"),
         &weth.address().abi_encode(),
     )
     .await;
     let filler_address = deploy_bytecode(
-        &stack.h.maker_provider,
+        &h.maker_provider,
         include_str!("fixtures/artifacts/OneInchLimitOrderAquaFiller.json"),
-        &(stack.h.maker, protocol_address).abi_encode_params(),
+        &(h.maker, protocol_address).abi_encode_params(),
     )
     .await;
-    let protocol = ILimitOrderProtocolView::new(protocol_address, stack.h.maker_provider.clone());
+    let protocol = ILimitOrderProtocolView::new(protocol_address, h.maker_provider.clone());
 
     // The order's signer: gives t0 (makerAsset), wants t1 (takerAsset) — same roles UniswapX's
     // swapper plays in the sibling E2Es, output sized to what the shipped strategy can source.
@@ -284,7 +287,7 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
     let making_amount = spec.ship_lo / U256::from(2u64);
     let taking_amount = spec.ship_hi / U256::from(10u64);
 
-    MockERC20::new(stack.h.t0, stack.h.maker_provider.clone())
+    MockERC20::new(h.t0, h.maker_provider.clone())
         .mint(signer_address, making_amount)
         .send()
         .await
@@ -296,20 +299,18 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
         use alloy::{network::EthereumWallet, providers::Provider, providers::ProviderBuilder};
         ProviderBuilder::new()
             .wallet(EthereumWallet::from(signer_key.clone()))
-            .connect_http(stack.h.endpoint.parse().expect("endpoint"))
+            .connect_http(h.endpoint.parse().expect("endpoint"))
             .erased()
     };
     // A freshly-random signer starts with no ETH; fund it for the approve tx's gas.
     {
         use alloy::providers::ext::AnvilApi;
-        stack
-            .h
-            .maker_provider
+        h.maker_provider
             .anvil_set_balance(signer_address, U256::from(10u64).pow(U256::from(18u64)))
             .await
             .expect("fund signer with gas");
     }
-    MockERC20::new(stack.h.t0, signer_provider.clone())
+    MockERC20::new(h.t0, signer_provider.clone())
         .approve(*protocol.address(), U256::MAX)
         .send()
         .await
@@ -330,8 +331,8 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
         salt: U256::from(1u64),
         maker: signer_address,
         receiver: Address::ZERO,
-        makerAsset: stack.h.t0,
-        takerAsset: stack.h.t1,
+        makerAsset: h.t0,
+        takerAsset: h.t1,
         makingAmount: making_amount,
         takingAmount: taking_amount,
         makerTraits: U256::from(expiration) << 80,
@@ -377,7 +378,7 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
         Arc::clone(&clock) as Arc<dyn Clock>,
         Admission {
             supported_chains: BTreeSet::from([ONE_INCH_CHAIN]),
-            tokens: BTreeSet::from([stack.h.t0, stack.h.t1]),
+            tokens: BTreeSet::from([h.t0, h.t1]),
             max_outputs: 4,
         },
         None,
@@ -406,7 +407,7 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
         .await
         .expect("migrate exec");
     let execution = execution(
-        &stack.h,
+        &h,
         Arc::clone(&led),
         exec_pool,
         &dir.path().join("wallet.redb"),
@@ -419,18 +420,19 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
     let leg_cost = Arc::new(LegCostResolver::new(
         gas,
         oracle,
-        assets(&stack),
+        assets(&h, chain_id),
         Address::ZERO,
         0,
     ));
     let fill_builders: BTreeMap<ProtocolId, Arc<dyn FillBuilder>> = BTreeMap::from([(
         ProtocolId::OneInchLimitOrder,
-        Arc::new(OneInchFillBuilder::new(stack.h.app, filler_address)) as Arc<dyn FillBuilder>,
+        Arc::new(OneInchFillBuilder::new(h.app, filler_address)) as Arc<dyn FillBuilder>,
     )]);
     let routing = RoutingConfig::new(16, 4, 0);
     let swap = Arc::new(SwapService::new(
         Arc::clone(&snapshot),
         Arc::clone(&led),
+        Arc::new(StrategyGuard::default()),
         Arc::clone(&trades),
         Arc::clone(&execution),
         fill_builders,
@@ -438,9 +440,9 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
         Arc::clone(&clock) as Arc<dyn Clock>,
         SwapConfig {
             routing,
-            chain_id: stack.chain_id,
+            chain_id: chain_id,
             filler: Address::ZERO, // unused: 1inch intents never carry UniswapX-style exclusivity
-            filler_owner: stack.h.maker,
+            filler_owner: h.maker,
             reservation_ttl_secs: 600,
         },
     ));
@@ -492,10 +494,10 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
         Arc::clone(&led),
         Arc::clone(&clock) as Arc<dyn Clock>,
     );
-    drive(&reconcile, &execution, &stack.h).await;
+    drive(&reconcile, &execution, &h).await;
     assert_eq!(execution.pending().await.expect("pending"), 0, "it settled");
 
-    let signer_balance = MockERC20::new(stack.h.t1, stack.h.maker_provider.clone())
+    let signer_balance = MockERC20::new(h.t1, h.maker_provider.clone())
         .balanceOf(signer_address)
         .call()
         .await

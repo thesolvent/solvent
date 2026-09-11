@@ -4,7 +4,10 @@
 //! two protocols never share one filler contract.
 
 use alloy_primitives::{Address, Bytes};
+use async_trait::async_trait;
 use thiserror::Error;
+
+use crate::deps::execution::ExecutionAuthorizerError;
 
 use crate::primitives::ingest::Intent;
 use crate::primitives::registry::Snapshot;
@@ -26,8 +29,9 @@ impl BuiltFill {
 
 /// Builds the ABI-encoded fill calldata for a routed plan, and names the contract it targets.
 /// `snapshot` resolves each leg's maker strategy (the on-chain order to source from).
+#[async_trait]
 pub trait FillBuilder: Send + Sync {
-    fn build(
+    async fn build(
         &self,
         intent: &Intent,
         plan: &RoutePlan,
@@ -48,4 +52,10 @@ pub enum FillBuilderError {
     UndecodableProgram,
     #[error("intent raw/signature did not decode: {0}")]
     MalformedIntent(&'static str),
+    #[error("a routed leg's maker does not match its shipped order")]
+    StrategyMakerMismatch,
+    #[error("a routed leg is not protected by the configured taker credential")]
+    UnprotectedStrategy,
+    #[error("a routed leg could not be policy-authorized: {0}")]
+    Authorization(#[from] ExecutionAuthorizerError),
 }

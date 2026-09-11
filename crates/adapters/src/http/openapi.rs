@@ -33,6 +33,8 @@ use utoipa::OpenApi;
         crate::http::app::pairs::pairs,
         crate::http::app::pairs::pair_history,
         crate::http::app::positions::preview,
+        crate::http::app::rebates::rebates,
+        crate::http::app::rebates::rebate_detail,
     ),
     components(schemas(
         crate::http::primitives::Status,
@@ -90,6 +92,9 @@ use utoipa::OpenApi;
         solvent_core::primitives::asset::PriceHistoryPeriod,
         crate::http::app::positions::PreviewRequest,
         crate::http::app::positions::AmountIn,
+        crate::http::app::rebates::RebateStatus,
+        crate::http::app::rebates::RebateAllocationView,
+        crate::http::app::rebates::RebateWork,
     ))
 )]
 pub struct ApiDoc;

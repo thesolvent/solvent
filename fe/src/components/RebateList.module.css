@@ -1,0 +1,176 @@
+.root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  container-type: inline-size;
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--paper);
+}
+
+.row {
+  display: grid;
+  grid-template-columns:
+    minmax(100px, 0.9fr) minmax(170px, 1.35fr) minmax(100px, 0.9fr)
+    minmax(100px, 0.9fr) minmax(120px, 1fr) 102px;
+  align-items: center;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--surface);
+  min-width: 0;
+  composes: row200 from "../styles/animations.module.css";
+}
+
+.pair,
+.cell,
+.actionCell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pair {
+  padding-right: 14px;
+}
+
+.pairName {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.flow,
+.cell,
+.actionCell {
+  padding: 0 12px;
+  background-image: linear-gradient(var(--surface), var(--surface));
+  background-size: 1px 68%;
+  background-position: left center;
+  background-repeat: no-repeat;
+}
+
+.flow {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.flow strong,
+.cell strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+
+.arrow {
+  color: var(--line-strong);
+  font-size: 11px;
+}
+
+.sub {
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.actionCell {
+  align-items: flex-start;
+}
+
+.earnButton {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--text-strong);
+  padding: 7px 12px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.earnButton:hover {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.earnButton:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.ready,
+.executed,
+.expired {
+  padding: 4px 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ready {
+  color: var(--info-ink);
+  background: var(--info-bg);
+}
+
+.executed {
+  color: var(--green-darkest);
+  background: var(--lime-wash-soft);
+}
+
+.expired {
+  color: var(--warn-ink);
+  background: var(--warn-bg);
+}
+
+.error {
+  color: var(--err-ink);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
+.emptyNote {
+  margin: 0;
+  padding: 20px 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.emptyNote button {
+  border: 0;
+  border-bottom: 1px solid var(--line-mid);
+  background: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+@container (max-width: 900px) {
+  .row {
+    grid-template-columns:
+      minmax(90px, 0.8fr) minmax(150px, 1.2fr) minmax(100px, 0.9fr)
+      minmax(110px, 1fr) 82px;
+  }
+
+  .row > :nth-child(4) {
+    display: none;
+  }
+}

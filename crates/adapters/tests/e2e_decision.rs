@@ -32,7 +32,7 @@ use common::{
 use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
 use solvent_adapters::ingest::uniswapx::{
     FeedHealth, HostedFeed, OrderSpec, OrdersApiClient, Scope, SignedOrderBuilder,
-    UniswapXFillBuilder, UniswapXV2Normalizer,
+    UniswapXV2Normalizer,
 };
 use solvent_adapters::routing::MarketCache;
 use solvent_adapters::trade::SqliteTradeStore;
@@ -49,7 +49,7 @@ use solvent_core::primitives::ingest::{Intent, ProtocolId};
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::ChainId;
 use solvent_core::reconcile::ReconcileService;
-use solvent_core::routing::LegCostResolver;
+use solvent_core::routing::{LegCostResolver, StrategyGuard};
 use solvent_core::swap::{SwapConfig, SwapService};
 use solvent_core::valuation::Valuation;
 use sqlx::SqlitePool;
@@ -356,12 +356,13 @@ async fn e2e_the_loop_waits_for_the_price_then_fills_from_the_feed() {
     ));
     let fill_builders: BTreeMap<ProtocolId, Arc<dyn FillBuilder>> = BTreeMap::from([(
         ProtocolId::UniswapXV2,
-        Arc::new(UniswapXFillBuilder::new(stack.h.app, stack.filler)) as Arc<dyn FillBuilder>,
+        Arc::new(stack.fill_builder()) as Arc<dyn FillBuilder>,
     )]);
     let routing = RoutingConfig::new(16, 4, 0);
     let swap = Arc::new(SwapService::new(
         Arc::clone(&snapshot),
         Arc::clone(&led),
+        Arc::new(StrategyGuard::default()),
         Arc::clone(&trades),
         Arc::clone(&execution),
         fill_builders,

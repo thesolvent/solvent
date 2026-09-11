@@ -19,7 +19,7 @@ use common::{
 };
 use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
 use solvent_adapters::ingest::uniswapx::{
-    OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXFillBuilder, UniswapXV2Normalizer,
+    OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXV2Normalizer,
 };
 use solvent_core::deps::ingest::{BuiltFill, FillBuilder, Normalizer, OrderFeed};
 use solvent_core::execution::ExecutionService;
@@ -29,7 +29,7 @@ use solvent_core::primitives::ingest::{Intent, RawOrder};
 use solvent_core::primitives::ledger::{AccountKey, ReservationSource};
 use solvent_core::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 use solvent_core::registry::SharedSnapshot;
-use solvent_core::routing::route;
+use solvent_core::routing::{route, GuardSnapshot, RoutingBook};
 
 use sqlx::SqlitePool;
 use std::path::Path;
@@ -121,9 +121,16 @@ async fn reserve_order(
         amount: output,
         exact_in: false,
     };
-    let plan = route(&snap, &caps, &req, input, &cfg, U256::ZERO, None)
-        .plan
-        .expect("a routable plan");
+    let plan = route(
+        RoutingBook::new(&snap, &caps, &GuardSnapshot::default()),
+        &req,
+        input,
+        &cfg,
+        U256::ZERO,
+        None,
+    )
+    .plan
+    .expect("a routable plan");
     let sources: Vec<ReservationSource> = plan
         .legs
         .iter()
@@ -137,8 +144,10 @@ async fn reserve_order(
     svc.reserve(rid(1), intent.id, sources, 60)
         .await
         .expect("reserve the routed plan");
-    let built = UniswapXFillBuilder::new(h.app, stack.filler)
+    let built = stack
+        .fill_builder()
         .build(&intent, &plan, &snap)
+        .await
         .expect("fill calldata");
     (intent, plan, built, caps)
 }
@@ -198,7 +207,9 @@ async fn drive(svc: &ExecutionService, h: &Harness) {
             .raw_request("anvil_mine".into(), (2u64,))
             .await
             .expect("anvil_mine");
-        svc.reconcile().await.expect("reconcile");
+        for fill in svc.reconcile().await.expect("reconcile") {
+            svc.forget(fill.intent).await.expect("forget settled fill");
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 .banner {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -36,4 +37,131 @@
 
 .action:hover {
   background: var(--ink-soft);
+}
+
+.anchor {
+  position: static;
+}
+
+.card {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 12px);
+  left: 50%;
+  width: min(660px, calc(100vw - 48px));
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -8px) scale(0.99);
+  transform-origin: top center;
+  visibility: hidden;
+  transition:
+    opacity 140ms ease-out,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 180ms;
+}
+
+.cardOpen {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0) scale(1);
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.field {
+  padding: clamp(20px, 3vh, 32px) 26px clamp(16px, 2.5vh, 26px);
+  background: var(--paper);
+}
+
+.label {
+  display: block;
+  color: var(--text-mid);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  height: clamp(58px, 9vh, 92px);
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: clamp(15px, 2vw, 22px);
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+.submit {
+  width: 100%;
+  border: 0;
+  background: var(--green);
+  padding: clamp(16px, 2.4vh, 24px);
+  color: var(--paper);
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.submit:hover:not(:disabled) {
+  background: var(--green-mid);
+}
+
+.submit:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.submit:disabled,
+.input:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.problem,
+.success {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.problem {
+  color: var(--err-ink);
+}
+
+.success {
+  color: var(--green);
+}
+
+@media (max-width: 640px) {
+  .banner {
+    gap: 10px;
+    padding-inline: 12px;
+  }
+
+  .copy {
+    display: none;
+  }
+
+  .field {
+    padding-inline: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    transition: none;
+  }
 }

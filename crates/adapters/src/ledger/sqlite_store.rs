@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use solvent_core::{
     deps::ledger::{LedgerStore, LedgerStoreError},
     primitives::{
-        ledger::{Reservation, ReservationSource},
-        IntentId, ReservationId,
+        ledger::{Reservation, ReservationOwner, ReservationSource},
+        IntentId, RebateBatchId, ReservationId,
     },
 };
 use sqlx::SqlitePool;
@@ -65,19 +65,47 @@ fn b256(bytes: &[u8]) -> Result<B256, LedgerStoreError> {
 impl LedgerStore for SqliteLedgerStore {
     async fn reserve(&self, reservation: &Reservation) -> Result<(), LedgerStoreError> {
         let sources = serde_json::to_string(&reservation.sources).map_err(db)?;
-        sqlx::query(
-            "INSERT INTO ledger_reservation (id, intent, sources, state, expires_at)
-             VALUES (?, ?, ?, 'pending', ?)
+        let owner_kind = reservation.owner.kind();
+        let owner_id = reservation.owner.id();
+        let mut transaction = self.pool.begin().await.map_err(db)?;
+        let inserted = sqlx::query(
+            "INSERT INTO ledger_reservation (id, owner_kind, owner_id, sources, state, expires_at)
+             VALUES (?, ?, ?, ?, 'pending', ?)
              ON CONFLICT DO NOTHING",
         )
         .bind(reservation.id.0.to_vec())
-        .bind(reservation.intent.0.to_vec())
+        .bind(owner_kind)
+        .bind(owner_id.to_vec())
         .bind(sources)
         .bind(i64_of(reservation.expires_at)?)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
+        .await
+        .map_err(db)?
+        .rows_affected();
+        if inserted == 1 {
+            transaction.commit().await.map_err(db)?;
+            return Ok(());
+        }
+
+        let stored: (String, Vec<u8>, String, String, i64) = sqlx::query_as(
+            "SELECT owner_kind, owner_id, sources, state, expires_at
+             FROM ledger_reservation WHERE id = ?",
+        )
+        .bind(reservation.id.0.to_vec())
+        .fetch_one(&mut *transaction)
         .await
         .map_err(db)?;
-        Ok(())
+        let stored_sources: Vec<ReservationSource> = serde_json::from_str(&stored.2).map_err(db)?;
+        let exact = stored.3 == "pending"
+            && stored.0 == owner_kind
+            && b256(&stored.1)? == owner_id
+            && stored_sources == reservation.sources
+            && stored.4 == i64_of(reservation.expires_at)?;
+        transaction.commit().await.map_err(db)?;
+        match exact {
+            true => Ok(()),
+            false => Err(LedgerStoreError::Conflict(reservation.id)),
+        }
     }
 
     async fn post(&self, id: ReservationId, filled: &[U256]) -> Result<(), LedgerStoreError> {
@@ -107,8 +135,8 @@ impl LedgerStore for SqliteLedgerStore {
     }
 
     async fn open_reservations(&self) -> Result<Vec<Reservation>, LedgerStoreError> {
-        let rows: Vec<(Vec<u8>, Vec<u8>, String, i64)> = sqlx::query_as(
-            "SELECT id, intent, sources, expires_at FROM ledger_reservation
+        let rows: Vec<(Vec<u8>, String, Vec<u8>, String, i64)> = sqlx::query_as(
+            "SELECT id, owner_kind, owner_id, sources, expires_at FROM ledger_reservation
              WHERE state = 'pending' ORDER BY id",
         )
         .fetch_all(&self.pool)
@@ -116,11 +144,21 @@ impl LedgerStore for SqliteLedgerStore {
         .map_err(db)?;
 
         rows.into_iter()
-            .map(|(id, intent, sources, expires_at)| {
+            .map(|(id, owner_kind, owner_id, sources, expires_at)| {
                 let sources: Vec<ReservationSource> = serde_json::from_str(&sources).map_err(db)?;
+                let owner_id = b256(&owner_id)?;
+                let owner = match owner_kind.as_str() {
+                    "swap" => ReservationOwner::Swap(IntentId(owner_id)),
+                    "rebate" => ReservationOwner::Rebate(RebateBatchId(owner_id)),
+                    value => {
+                        return Err(LedgerStoreError::Db(format!(
+                            "unknown reservation owner kind '{value}'"
+                        )))
+                    }
+                };
                 Ok(Reservation::new(
                     ReservationId(b256(&id)?),
-                    IntentId(b256(&intent)?),
+                    owner,
                     sources,
                     expires_at as u64,
                 ))

@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { formatUnits } from "viem";
+import { useAccount } from "wagmi";
 
 import { Crumbs } from "@/components/Crumbs";
 import { BAND_K0 } from "@/data";
@@ -73,6 +74,11 @@ function pairDefaults(pair: CreatePair, corePair: number) {
   return {
     corePair,
     flipped: false,
+    slotA: pair.base.symbol,
+    slotB: pair.quote.symbol,
+    q1: "",
+    q2: "",
+    pickerSlot: 1,
     createPreset: "Market",
     strategy: pair.type === "Stable" ? "Pegged" : "Concentrated",
     pegSym: pair.type === "Stable",
@@ -112,8 +118,6 @@ function cloneDefaults(
     amtA: "",
     amtB: "",
     customFeePct: "0.10",
-    slotA: null,
-    slotB: null,
     chartHover: null,
     hoverFrac: null,
   };
@@ -173,7 +177,8 @@ function cloneDefaults(
 }
 
 export function CreatePoolPage() {
-  const { state, set, pop } = useApp();
+  const { state, set } = useApp();
+  const { isConnected: walletConnected } = useAccount();
   const navigate = useNavigate();
   const { pair: routePair } = useParams();
   const [searchParams] = useSearchParams();
@@ -483,7 +488,11 @@ export function CreatePoolPage() {
   return (
     <div className={styles.root}>
       <div className={styles.head}>
-        <button type="button" className={styles.back} onClick={pop}>
+        <button
+          type="button"
+          className={styles.back}
+          onClick={() => navigate(routePair ? `/pools/${routePair}` : "/pools")}
+        >
           ←
         </button>
         <div className={styles.headTitle}>
@@ -1225,6 +1234,7 @@ export function CreatePoolPage() {
                     <button
                       type="button"
                       className={styles.useFull}
+                      disabled={!walletConnected}
                       onClick={() => set(c.maxAmounts)}
                     >
                       Use full balances
@@ -1246,7 +1256,7 @@ export function CreatePoolPage() {
                       <div className={styles.amountHead}>
                         <span className={styles.amountSym}>{c.A}</span>
                         <span className={styles.amountBal}>
-                          bal {c.walletA}
+                          bal {walletConnected ? c.walletA : "—"}
                         </span>
                       </div>
                       <div className={styles.amountRow}>
@@ -1260,6 +1270,7 @@ export function CreatePoolPage() {
                           <button
                             type="button"
                             className={styles.quick}
+                            disabled={!walletConnected}
                             onClick={() => set(c.halfFromA)}
                           >
                             50%
@@ -1267,6 +1278,7 @@ export function CreatePoolPage() {
                           <button
                             type="button"
                             className={styles.quickNext}
+                            disabled={!walletConnected}
                             onClick={() => set(c.maxFromA)}
                           >
                             Max
@@ -1281,7 +1293,9 @@ export function CreatePoolPage() {
                             color: c.fgA,
                           }}
                         >
-                          {c.covA} · {c.stateA}
+                          {walletConnected
+                            ? `${c.covA} · ${c.stateA}`
+                            : "Wallet not connected"}
                         </span>
                       </div>
                     </div>
@@ -1295,7 +1309,7 @@ export function CreatePoolPage() {
                       <div className={styles.amountHead}>
                         <span className={styles.amountSym}>{c.B}</span>
                         <span className={styles.amountBal}>
-                          bal {c.walletB}
+                          bal {walletConnected ? c.walletB : "—"}
                         </span>
                       </div>
                       <div className={styles.amountRow}>
@@ -1309,6 +1323,7 @@ export function CreatePoolPage() {
                           <button
                             type="button"
                             className={styles.quick}
+                            disabled={!walletConnected}
                             onClick={() => set(c.halfFromB)}
                           >
                             50%
@@ -1316,6 +1331,7 @@ export function CreatePoolPage() {
                           <button
                             type="button"
                             className={styles.quickNext}
+                            disabled={!walletConnected}
                             onClick={() => set(c.maxFromB)}
                           >
                             Max
@@ -1330,7 +1346,9 @@ export function CreatePoolPage() {
                             color: c.fgB,
                           }}
                         >
-                          {c.covB} · {c.stateB}
+                          {walletConnected
+                            ? `${c.covB} · ${c.stateB}`
+                            : "Wallet not connected"}
                         </span>
                       </div>
                     </div>

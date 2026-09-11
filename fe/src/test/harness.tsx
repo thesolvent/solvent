@@ -10,8 +10,10 @@ import { anvil } from "wagmi/chains";
 import { AppProvider } from "@/AppProvider";
 import type { AssetsPort } from "@/ports/assets";
 import type { ExplorerPort } from "@/ports/explorer";
+import type { FaucetPort } from "@/ports/faucet";
 import type { PoolsPort } from "@/ports/pools";
 import type { PositionsPort } from "@/ports/positions";
+import type { RebatesPort } from "@/ports/rebates";
 import type { SwapPort } from "@/ports/swap";
 import type { SystemPort } from "@/ports/system";
 import { ServicesProvider } from "@/services/ServicesProvider";
@@ -41,9 +43,11 @@ const wagmiConfig = createConfig({
 export interface Stubs {
   makers?: Partial<MakersPort>;
   explorer?: Partial<ExplorerPort>;
+  faucet?: Partial<FaucetPort>;
   assets?: Partial<AssetsPort>;
   pools?: Partial<PoolsPort>;
   positions?: Partial<PositionsPort>;
+  rebates?: Partial<RebatesPort>;
   swap?: Partial<SwapPort>;
   system?: Partial<SystemPort>;
 }
@@ -52,9 +56,11 @@ export function fakeServices(stubs: Stubs): Services {
   return {
     makers: port("makers", stubs.makers ?? {}),
     explorer: port("explorer", stubs.explorer ?? {}),
+    faucet: port("faucet", stubs.faucet ?? {}),
     assets: port("assets", stubs.assets ?? {}),
     pools: port("pools", stubs.pools ?? {}),
     positions: port("positions", stubs.positions ?? {}),
+    rebates: port("rebates", stubs.rebates ?? {}),
     swap: port("swap", stubs.swap ?? {}),
     system: port("system", stubs.system ?? {}),
   };

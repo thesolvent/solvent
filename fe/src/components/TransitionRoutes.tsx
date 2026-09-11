@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Routes, useLocation, useNavigationType } from "react-router-dom";
 import { useAppStore } from "@/store";
 import type { RouteState } from "@/routes";
+import { INITIAL_CREATE_POSITION_STATE, INITIAL_SWAP_STATE } from "@/state";
 
 import styles from "./TransitionRoutes.module.css";
 
@@ -14,7 +15,17 @@ export function TransitionRoutes({ children }: { children: ReactNode }) {
   const set = useAppStore((store) => store.set);
 
   useLayoutEffect(() => {
+    const outgoing = previous.current;
+    const leftCreatePosition =
+      /^\/pools\/[^/]+\/new$/.test(outgoing.pathname) &&
+      outgoing.pathname !== location.pathname;
+    const leftSwap =
+      outgoing.pathname === "/swap" && outgoing.pathname !== location.pathname;
     const reveal = () => {
+      if (leftCreatePosition) {
+        set({ ...INITIAL_CREATE_POSITION_STATE, stepDirty: {} });
+      }
+      if (leftSwap) set(INITIAL_SWAP_STATE);
       if (
         navigationType !== "POP" &&
         (location.state as RouteState | null)?.resetSubviews
@@ -23,7 +34,7 @@ export function TransitionRoutes({ children }: { children: ReactNode }) {
       }
       setDisplayed(location);
     };
-    const changed = previous.current !== location;
+    const changed = outgoing !== location;
     previous.current = location;
     if (
       !changed ||

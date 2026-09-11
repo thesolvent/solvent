@@ -52,10 +52,6 @@ export function Header() {
             placeholder="Search"
           />
         </label>
-        <div className={styles.currency}>
-          <span className={styles.currencyGlyph} />
-          <span>USD</span>
-        </div>
         <ConnectButton.Custom>
           {({
             account,
@@ -78,7 +74,7 @@ export function Header() {
                     {account.displayName}
                   </span>
                 ) : (
-                  <span className={styles.accountGlyph} />
+                  <span className={styles.accountConnect}>Connect</span>
                 )}
               </button>
             );

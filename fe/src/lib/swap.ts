@@ -53,13 +53,9 @@ export function choices(
   return assets.filter((asset) => allowed.has(asset.symbol));
 }
 
-/** The first pair this deployment quotes at all. */
-function firstPair(assets: Asset[]): Legs | null {
-  for (const asset of assets) {
-    const [base, quote] = (asset.pairs[0] ?? "").split("/");
-    if (base && quote) return { fromToken: base, toToken: quote };
-  }
-  return null;
+/** The first asset this deployment can quote from. */
+function firstSource(assets: Asset[]): string | undefined {
+  return assets.find((asset) => asset.pairs.length > 0)?.symbol;
 }
 
 export interface Legs {
@@ -68,10 +64,10 @@ export interface Legs {
 }
 
 /**
- * The legs moved onto a pair this deployment quotes, or `null` when they already name one.
+ * The source moved onto an asset this deployment quotes, with an incompatible output cleared.
  *
- * The mock opens on a pair no server need serve, and changing the input leg can strand the output
- * one — both leave the widget asking for a price that cannot exist.
+ * A destination is a user's choice. Loading the catalog may select a valid source, but it must not
+ * silently choose the other side of the trade.
  */
 export function settleLegs(
   assets: Asset[],
@@ -79,11 +75,16 @@ export function settleLegs(
   toToken: string,
 ): Legs | null {
   if (!assets.length) return null;
-  const allowed = counterparts(assets, fromToken);
-  if (allowed.includes(toToken)) return null;
-  return allowed.length
-    ? { fromToken, toToken: allowed[0] }
-    : firstPair(assets);
+  const source = assets.find(
+    (asset) => asset.symbol === fromToken && asset.pairs.length > 0,
+  )?.symbol;
+  const settledSource = source ?? firstSource(assets);
+  if (!settledSource) return null;
+  if (settledSource !== fromToken)
+    return { fromToken: settledSource, toToken: "" };
+  if (!toToken || counterparts(assets, settledSource).includes(toToken))
+    return null;
+  return { fromToken: settledSource, toToken: "" };
 }
 
 /** What the action button says, and whether there is anything to press it for. */

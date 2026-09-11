@@ -5,35 +5,64 @@
 
 mod common;
 
-use alloy::primitives::{address, U256};
+use std::sync::Arc;
+
+use alloy::primitives::{address, keccak256, B256, U256};
 use alloy::providers::Provider;
 use alloy::rpc::types::{TransactionInput, TransactionRequest};
 use alloy::signers::local::PrivateKeySigner;
 use futures::StreamExt;
+use ulid::Ulid;
 
 use common::{
-    balance_of, budget_source, first_supported, ledger, quote_caps, rid, setup, synced, MockERC20,
-    PERMIT2,
+    balance_of, budget_source, ledger, pipeline, quote_caps, rid, setup, MockERC20, StrategySpec,
+    CHAIN, PERMIT2,
 };
+use solvent_adapters::execution::LocalPolicySigner;
 use solvent_adapters::ingest::uniswapx::{
-    OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXFillBuilder, UniswapXV2Normalizer,
+    OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXV2Normalizer,
 };
+use solvent_adapters::rebate::FillerRebateCallBuilder;
 use solvent_core::deps::ingest::{FillBuilder, Normalizer, OrderFeed};
+use solvent_core::deps::rebate::RebateCallBuilder;
 use solvent_core::primitives::ingest::RawOrder;
 use solvent_core::primitives::ledger::{AccountKey, ReservationSource};
+use solvent_core::primitives::rebate::{RebateAllocation, RebatePlan};
 use solvent_core::primitives::routing::{RouteRequest, RoutingConfig};
-use solvent_core::routing::route;
+use solvent_core::primitives::trade::TradeId;
+use solvent_core::primitives::{RebateBatchId, ReservationId};
+use solvent_core::registry::price;
+use solvent_core::registry::SharedSnapshot;
+use solvent_core::routing::{route, GuardSnapshot, RoutingBook};
 
 #[tokio::test]
-async fn e2e_self_hosted_order_fills_on_chain() {
+async fn e2e_protected_curves_support_user_fills_and_rebates() {
     if common::skip_without_anvil() {
         return;
     }
+    for label in ["xyc", "concentrate", "pegged_18_18"] {
+        exercise_protected_curve(label).await;
+    }
+}
+
+async fn exercise_protected_curve(label: &str) {
     let stack = setup().await;
     let h = &stack.h;
-    let spec = first_supported(h);
+    let spec = strategy(h, label);
+    let order = spec.order();
+    assert_eq!(order.data[0], 0x0e, "{label}: credential opcode");
+    assert_eq!(order.data[1], 20, "{label}: credential address length");
+    assert_eq!(
+        &order.data[2..22],
+        stack.credential.as_slice(),
+        "{label}: deployed filler credential"
+    );
     h.ship(&spec).await;
-    let (snapshot, _rp, _rd) = synced(h).await;
+    let (registry_sync, snapshot, _rp, _rd) = pipeline(h, CHAIN).await;
+    registry_sync
+        .sync_once(h.latest_block().await)
+        .await
+        .expect("initial registry sync");
     let (svc, _ld) = ledger(h, &snapshot).await;
     let budgets = budget_source(h, &snapshot);
 
@@ -110,9 +139,16 @@ async fn e2e_self_hosted_order_fills_on_chain() {
         amount: output,
         exact_in: false,
     };
-    let plan = route(&snap, &caps, &req, input, &cfg, U256::ZERO, None)
-        .plan
-        .expect("a routable plan");
+    let plan = route(
+        RoutingBook::new(&snap, &caps, &GuardSnapshot::default()),
+        &req,
+        input,
+        &cfg,
+        U256::ZERO,
+        None,
+    )
+    .plan
+    .expect("a routable plan");
     let sources: Vec<ReservationSource> = plan
         .legs
         .iter()
@@ -128,8 +164,10 @@ async fn e2e_self_hosted_order_fills_on_chain() {
         .expect("reserve the routed plan");
 
     // Build the fill calldata and settle it on-chain as the filler's owner.
-    let built = UniswapXFillBuilder::new(h.app, stack.filler)
+    let built = stack
+        .fill_builder()
         .build(&intent, &plan, &snap)
+        .await
         .expect("fill calldata");
     let receipt = h
         .maker_provider
@@ -154,4 +192,145 @@ async fn e2e_self_hosted_order_fills_on_chain() {
         token: h.t1,
     };
     assert!(svc.available(&held) < caps.available(&held));
+
+    execute_rebate(&stack, &spec, &registry_sync, &snapshot).await;
+}
+
+fn strategy(h: &common::Harness, label: &str) -> StrategySpec {
+    h.fx.strategies
+        .iter()
+        .find(|strategy| strategy.label == label)
+        .cloned()
+        .unwrap_or_else(|| panic!("missing {label} fixture"))
+}
+
+async fn execute_rebate(
+    stack: &common::Stack,
+    spec: &StrategySpec,
+    registry_sync: &solvent_core::registry::RegistrySync,
+    snapshot: &Arc<SharedSnapshot>,
+) {
+    let h = &stack.h;
+    registry_sync
+        .sync_once(h.latest_block().await)
+        .await
+        .expect("post-fill registry sync");
+    let strategy = snapshot
+        .load()
+        .strategy(&spec.key(h.maker, h.app))
+        .cloned()
+        .expect("displaced strategy");
+    let (before_lo, before_hi) = h.on_chain_balances(spec).await;
+    let amount_out = (before_lo - spec.ship_lo) / U256::from(2u64);
+    assert!(!amount_out.is_zero(), "{}: displaced t0", spec.label);
+    let amount_in = price(&strategy, h.t1, h.t0, amount_out, false).expect("reverse quote");
+    let maker_rebate = (amount_in / U256::from(100u64)).max(U256::from(1u64));
+    let trade_id = TradeId(Ulid::new());
+    let plan = RebatePlan::new(
+        RebateBatchId(keccak256(
+            [spec.label.as_bytes(), b"batch".as_slice()].concat(),
+        )),
+        strategy.key,
+        h.t1,
+        h.t0,
+        amount_in,
+        amount_out,
+        maker_rebate + U256::from(1u64),
+        U256::ZERO,
+        maker_rebate,
+        U256::from(1u64),
+        100,
+        vec![RebateAllocation::new(trade_id, maker_rebate)],
+    );
+    let builder = FillerRebateCallBuilder::new(
+        stack.credential,
+        Arc::new(LocalPolicySigner::new(
+            stack.chain_id,
+            stack.filler,
+            stack.policy_signer.clone(),
+        )),
+    );
+    let execution = builder
+        .build(
+            &strategy,
+            plan,
+            ReservationId(B256::from([0x55; 32])),
+            h.latest_block().await + 100,
+            1,
+        )
+        .await
+        .expect("rebate calldata");
+    let deposit = amount_in + maker_rebate;
+    MockERC20::new(h.t1, h.taker_provider.clone())
+        .mint(h.taker, deposit)
+        .send()
+        .await
+        .expect("mint rebate input")
+        .watch()
+        .await
+        .expect("rebate input minted");
+    MockERC20::new(h.t1, h.taker_provider.clone())
+        .approve(stack.filler, deposit)
+        .send()
+        .await
+        .expect("approve rebate")
+        .watch()
+        .await
+        .expect("rebate approval mined");
+    let maker_input_before = balance_of(h, h.t1, h.maker).await;
+    let executor_output_before = balance_of(h, h.t0, h.taker).await;
+    let filler_input_before = balance_of(h, h.t1, stack.filler).await;
+    let filler_output_before = balance_of(h, h.t0, stack.filler).await;
+
+    let receipt = h
+        .taker_provider
+        .send_transaction(
+            TransactionRequest::default()
+                .to(stack.filler)
+                .input(TransactionInput::new(execution.calldata)),
+        )
+        .await
+        .expect("send rebate")
+        .get_receipt()
+        .await
+        .expect("rebate receipt");
+    assert!(receipt.status(), "{}: rebate reverted", spec.label);
+
+    assert_eq!(
+        balance_of(h, h.t1, h.maker).await,
+        maker_input_before + deposit,
+        "{}: maker receives curve input and rebate",
+        spec.label
+    );
+    assert_eq!(
+        balance_of(h, h.t0, h.taker).await,
+        executor_output_before + amount_out,
+        "{}: executor receives exact output",
+        spec.label
+    );
+    assert_eq!(
+        balance_of(h, h.t1, stack.filler).await,
+        filler_input_before,
+        "{}: filler retains no rebate input",
+        spec.label
+    );
+    assert_eq!(
+        balance_of(h, h.t0, stack.filler).await,
+        filler_output_before,
+        "{}: filler retains no rebate output",
+        spec.label
+    );
+    let (after_lo, after_hi) = h.on_chain_balances(spec).await;
+    assert_eq!(
+        after_lo,
+        before_lo - amount_out,
+        "{}: t0 restored",
+        spec.label
+    );
+    assert_eq!(
+        after_hi,
+        before_hi + amount_in,
+        "{}: t1 restored",
+        spec.label
+    );
 }

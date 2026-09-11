@@ -2,6 +2,7 @@
   "name": "@solvent/contracts",
   "version": "0.0.0",
   "private": true,
+  "packageManager": "yarn@1.22.22",
   "description": "On-chain filler (UniswapXAquaFiller) + tests for Solvent, a zero-inventory intent resolver on 1inch Aqua",
   "license": "MIT",
   "comment": "1inch Aqua/SwapVM ship as npm packages (their foundry.toml uses libs=[node_modules]); pins mirror swap-vm@v1.0.1 exactly. Uniswap (UniswapX/permit2) ship as git submodules and are fetched by `forge install` (see justfile `setup`). limit-order-protocol's own contracts pin an exact solc (0.8.23), incompatible with this workspace's single-solc-version build (foundry.toml solc=0.8.30); postinstall relaxes that pin to a caret range so both compile together.",

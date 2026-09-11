@@ -85,8 +85,9 @@ impl OneInchFillBuilder {
     }
 }
 
+#[async_trait::async_trait]
 impl FillBuilder for OneInchFillBuilder {
-    fn build(
+    async fn build(
         &self,
         intent: &Intent,
         plan: &RoutePlan,

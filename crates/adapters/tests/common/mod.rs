@@ -17,6 +17,8 @@ use alloy::{
     sol_types::SolValue,
 };
 use serde::Deserialize;
+use solvent_adapters::execution::LocalPolicySigner;
+use solvent_adapters::ingest::uniswapx::UniswapXFillBuilder;
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::registry::{AlloyChainSource, SqliteStore};
 use solvent_core::{
@@ -582,6 +584,8 @@ pub async fn pipeline(
 // root also defines — isolate the reactor + filler in a submodule so that generated type can't
 // collide with the router's own.
 mod fill_abi {
+    #![allow(clippy::too_many_arguments)]
+
     use super::sol;
     sol!(
         #[sol(rpc)]
@@ -610,13 +614,40 @@ pub struct Stack {
     pub h: Harness,
     pub reactor: Address,
     pub filler: Address,
+    pub credential: Address,
     pub chain_id: u64,
+    pub policy_signer: PrivateKeySigner,
+}
+
+impl Stack {
+    pub fn fill_builder(&self) -> UniswapXFillBuilder {
+        UniswapXFillBuilder::new(
+            self.h.app,
+            self.filler,
+            self.credential,
+            Arc::new(LocalPolicySigner::new(
+                self.chain_id,
+                self.filler,
+                self.policy_signer.clone(),
+            )),
+        )
+    }
 }
 
 /// Deploy the ingest→fill stack: the base harness, etched Permit2 + Multicall3, and the reactor +
 /// `UniswapXAquaFiller` (owned by the maker, who is the filler's `onlyOwner`).
+/// Etch just Multicall3 — every protocol's budget/depth reads batch through it, whether or not
+/// that protocol's own fill path touches Permit2 or a protected UniswapX strategy.
+pub async fn etch_multicall3(h: &Harness) {
+    let bytes: Bytes = MULTICALL3_CODE.trim().parse().expect("bytecode");
+    h.maker_provider
+        .anvil_set_code(MULTICALL3, bytes)
+        .await
+        .expect("etch multicall3");
+}
+
 pub async fn setup() -> Stack {
-    let h = Harness::setup().await;
+    let mut h = Harness::setup().await;
     for (addr, code) in [(MULTICALL3, MULTICALL3_CODE), (PERMIT2, PERMIT2_CODE)] {
         let bytes: Bytes = code.trim().parse().expect("bytecode");
         h.maker_provider
@@ -627,16 +658,55 @@ pub async fn setup() -> Stack {
     let reactor = V2DutchOrderReactor::deploy(h.maker_provider.clone(), PERMIT2, Address::ZERO)
         .await
         .expect("deploy reactor");
-    let filler = UniswapXAquaFiller::deploy(h.maker_provider.clone(), h.maker)
+    let policy_signer = PrivateKeySigner::random();
+    let filler = UniswapXAquaFiller::deploy(
+        h.maker_provider.clone(),
+        h.maker,
+        h.app,
+        *reactor.address(),
+        policy_signer.address(),
+    )
+    .await
+    .expect("deploy filler");
+    for token in [h.t0, h.t1] {
+        filler
+            .setTokenAllowed(token, true)
+            .send()
+            .await
+            .expect("allow token")
+            .watch()
+            .await
+            .expect("allow token mined");
+    }
+    let credential = filler
+        .TAKER_CREDENTIAL()
+        .call()
         .await
-        .expect("deploy filler");
+        .expect("taker credential");
+    protect_fixture(&mut h.fx, credential);
     let chain_id = h.maker_provider.get_chain_id().await.expect("chain id");
     Stack {
         h,
         reactor: *reactor.address(),
         filler: *filler.address(),
+        credential,
         chain_id,
+        policy_signer,
     }
+}
+
+fn protect_fixture(fixture: &mut Fixture, credential: Address) {
+    for spec in &mut fixture.strategies {
+        spec.strategy_hex = protected_strategy(&spec.strategy_hex, credential);
+    }
+    fixture.second_maker.strategy_hex =
+        protected_strategy(&fixture.second_maker.strategy_hex, credential);
+}
+
+fn protected_strategy(encoded: &Bytes, credential: Address) -> Bytes {
+    let mut order = ISwapVM::Order::abi_decode(encoded).expect("decode strategy");
+    order.data = Bytes::from([vec![0x0e, 0x14], credential.to_vec(), order.data.to_vec()].concat());
+    Bytes::from(order.abi_encode())
 }
 
 /// Sync the registry once against the current head, returning the live snapshot.

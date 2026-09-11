@@ -143,6 +143,9 @@ pub struct Config {
     /// trade for nothing). Set this only once a real contract is deployed.
     #[serde(default)]
     pub oneinch_filler: Address,
+
+    #[serde(default)]
+    pub rebate: RebateConfig,
 }
 
 /// One Binance price symbol and the tokens whose USD price it feeds.
@@ -155,6 +158,35 @@ pub struct Config {
 pub struct PriceSymbol {
     pub symbol: String,
     pub tokens: Vec<Address>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RebateConfig {
+    #[serde(default)]
+    pub start_block: u64,
+    #[serde(default = "default_rebate_deviation_bps")]
+    pub deviation_threshold_bps: u64,
+    #[serde(default = "default_rebate_gas_safety_bps")]
+    pub gas_safety_bps: u64,
+    #[serde(default = "default_rebate_gas_units")]
+    pub gas_units: u64,
+    #[serde(default = "default_rebate_market_max_age_secs")]
+    pub market_max_age_secs: u64,
+    #[serde(default = "default_rebate_authorization_ttl_blocks")]
+    pub authorization_ttl_blocks: u64,
+}
+
+impl Default for RebateConfig {
+    fn default() -> Self {
+        Self {
+            start_block: 0,
+            deviation_threshold_bps: default_rebate_deviation_bps(),
+            gas_safety_bps: default_rebate_gas_safety_bps(),
+            gas_units: default_rebate_gas_units(),
+            market_max_age_secs: default_rebate_market_max_age_secs(),
+            authorization_ttl_blocks: default_rebate_authorization_ttl_blocks(),
+        }
+    }
 }
 
 impl Config {
@@ -175,7 +207,7 @@ impl Config {
     }
 
     /// The subset the FE reads at bootstrap (the `/config` payload). `earn`/`send_buy` are MVP-off.
-    pub fn app_config(&self, cosigner: Address) -> AppConfig {
+    pub fn app_config(&self, cosigner: Address, taker_credential: Address) -> AppConfig {
         AppConfig {
             chain_id: self.chain_id,
             features: Features {
@@ -190,6 +222,8 @@ impl Config {
             app: self.app_address,
             reactor: self.reactor,
             permit2: self.permit2,
+            filler: self.filler,
+            taker_credential,
             cosigner,
         }
     }
@@ -263,6 +297,21 @@ fn default_dedup_ttl_secs() -> u64 {
 fn default_wallet_state_db() -> String {
     "walletkit.redb".to_string()
 }
+fn default_rebate_deviation_bps() -> u64 {
+    50
+}
+fn default_rebate_gas_safety_bps() -> u64 {
+    12_000
+}
+fn default_rebate_gas_units() -> u64 {
+    350_000
+}
+fn default_rebate_market_max_age_secs() -> u64 {
+    10
+}
+fn default_rebate_authorization_ttl_blocks() -> u64 {
+    30
+}
 
 /// Read and parse the token list JSON at `path`.
 pub fn load_token_list(path: &str) -> Result<TokenList, StartupError> {
@@ -288,6 +337,8 @@ pub enum StartupError {
     WalletStore(String),
     #[error("orders feed: {0}")]
     OrdersFeed(String),
+    #[error("filler configuration: {0}")]
+    FillerConfiguration(String),
     #[error("token list: {0}")]
     TokenList(String),
     #[error(transparent)]
