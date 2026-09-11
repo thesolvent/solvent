@@ -3,6 +3,13 @@ import { SolventApiError } from "@solvent/sdk/client";
 
 import assets from "@/data/fixtures/assets.json";
 
+// The two deployments serve different chains; an asset is named by the chain it reports, so the
+// destination's copies have to carry the destination's id.
+const destinationAssets = {
+  ...assets,
+  items: assets.items.map((asset) => ({ ...asset, chain_id: 31338 })),
+};
+
 const api = vi.hoisted(() => ({
   solvent: { tradeDetail: vi.fn(), trades: vi.fn() },
   origin: { assets: vi.fn(), config: vi.fn() },
@@ -20,9 +27,13 @@ vi.mock("./client", () => ({
 beforeEach(() => {
   vi.resetAllMocks();
   api.origin.assets.mockResolvedValue(assets);
-  api.origin.config.mockResolvedValue({ networks: ["Chain A"] });
-  api.destination.assets.mockResolvedValue(assets);
-  api.destination.config.mockResolvedValue({ networks: ["Base"] });
+  api.origin.config.mockResolvedValue({
+    chains: [{ chain_id: 31337, name: "Chain A" }],
+  });
+  api.destination.assets.mockResolvedValue(destinationAssets);
+  api.destination.config.mockResolvedValue({
+    chains: [{ chain_id: 31338, name: "Base" }],
+  });
 });
 
 describe("explorer trade lookup", () => {

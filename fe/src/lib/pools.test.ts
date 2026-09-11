@@ -6,6 +6,7 @@ import type { PoolQuery } from "@/state";
 import {
   aprOptions,
   bestByApr,
+  curveMark,
   feeTierOptions,
   filterPools,
   poolTypeOptions,
@@ -131,7 +132,7 @@ describe("sortPools", () => {
   const unvalued = pool({ pair: "NONE / USDC", tvlUsd: null, aprPct: null });
 
   it("ranks by the requested magnitude, sinking unvalued pools", () => {
-    expect(pairs(sortPools([low, unvalued, high], "Most TVL"))).toEqual([
+    expect(pairs(sortPools([low, unvalued, high], "Depth"))).toEqual([
       "HIGH / USDC",
       "LOW / USDC",
       "NONE / USDC",
@@ -182,5 +183,28 @@ describe("filter options", () => {
 
   it("offers no yields while the server has valued none", () => {
     expect(aprOptions([pool({ aprPct: null })])).toEqual([]);
+  });
+});
+
+describe("curveMark", () => {
+  it("names each curve shape in a maker's terms", () => {
+    expect(curveMark(["Constant product"]).name).toBe("curveXyc");
+    expect(curveMark(["Concentrated"]).name).toBe("curveConcentrated");
+    expect(curveMark(["Concentrated"]).label).toContain("price band");
+    expect(curveMark(["Pegged"]).name).toBe("curvePegged");
+  });
+
+  it("reports a pool whose makers disagree as mixed, naming both shapes", () => {
+    const mark = curveMark(["Constant product", "Pegged"]);
+
+    expect(mark.name).toBe("curveMixed");
+    expect(mark.label).toBe(
+      "Mixed — makers price on constant product and pegged",
+    );
+  });
+
+  it("does not claim a shape for a pool that reports none", () => {
+    expect(curveMark([]).label).toBe("Curve shape unknown");
+    expect(curveMark(undefined).label).toBe("Curve shape unknown");
   });
 });
