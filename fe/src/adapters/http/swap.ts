@@ -1,5 +1,9 @@
 import type { OrderTerms } from "@solvent/sdk/orders";
-import { createSwapClient, type SwapIntent } from "@solvent/sdk/swap";
+import {
+  createSwapClient,
+  type SwapIntent as SdkSwapIntent,
+  type SwapSubmissionOptions,
+} from "@solvent/sdk/swap";
 import {
   approveCompact,
   compactBalance,
@@ -58,7 +62,8 @@ function directIntent(
   };
   let pending: Promise<{ tradeId: string; status: string }> | undefined;
 
-  async function execute() {
+  async function execute(options?: SwapSubmissionOptions) {
+    options?.onStatus?.({ kind: "preparing" });
     const draft = await crossChainApi.draft(request);
     const compactId = BigInt(draft.order.compact_id);
     const amount = BigInt(draft.commitment.amount);
@@ -70,21 +75,35 @@ function directIntent(
     );
     if (balance < amount) {
       const depositAmount = amount - balance;
-      await approveCompact(clients.publicClient, clients.walletClient, {
-        compact: draft.compact,
-        token: draft.commitment.token,
-        amount: depositAmount,
-        sponsor: request.sponsor,
-      });
-      await depositCompact(clients.publicClient, clients.walletClient, {
-        compact: draft.compact,
-        token: draft.commitment.token,
-        lockTag: draft.commitment.lock_tag,
-        amount: depositAmount,
-        sponsor: request.sponsor,
-      });
+      const onBroadcast = () => options?.onStatus?.({ kind: "confirming" });
+      options?.onStatus?.({ kind: "approving", token: draft.commitment.token });
+      await approveCompact(
+        clients.publicClient,
+        clients.walletClient,
+        {
+          compact: draft.compact,
+          token: draft.commitment.token,
+          amount: depositAmount,
+          sponsor: request.sponsor,
+        },
+        { onBroadcast },
+      );
+      options?.onStatus?.({ kind: "submitting" });
+      await depositCompact(
+        clients.publicClient,
+        clients.walletClient,
+        {
+          compact: draft.compact,
+          token: draft.commitment.token,
+          lockTag: draft.commitment.lock_tag,
+          amount: depositAmount,
+          sponsor: request.sponsor,
+        },
+        { onBroadcast },
+      );
     }
     const terms = draft.commitment;
+    options?.onStatus?.({ kind: "signing" });
     const signature = await signCompactMandate(
       clients.walletClient,
       draft.compact,
@@ -111,6 +130,7 @@ function directIntent(
         },
       },
     );
+    options?.onStatus?.({ kind: "submitting" });
     const order = await crossChainApi.submitDirect({
       draft: request,
       sponsor_signature: signature,
@@ -119,8 +139,8 @@ function directIntent(
   }
 
   return {
-    submit() {
-      pending ??= execute().finally(() => {
+    submit(options?: SwapSubmissionOptions) {
+      pending ??= execute(options).finally(() => {
         pending = undefined;
       });
       return pending;
@@ -266,12 +286,12 @@ export const swapAdapter: SwapPort = {
       api: sameChainApi(input.from.chainId),
       ...clients,
     });
-    let intent: SwapIntent | undefined;
+    let intent: SdkSwapIntent | undefined;
     return {
-      async submit() {
+      async submit(options?: SwapSubmissionOptions) {
         // Validate display units inside the async operation so failures reach mutation state.
         intent ??= swaps.createIntent(orderTerms(input));
-        const result = await intent.submit();
+        const result = await intent.submit(options);
         return { tradeId: result.trade_id, status: result.status };
       },
     };

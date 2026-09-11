@@ -3,7 +3,11 @@ import { Route, useLocation, useParams } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TransitionRoutes } from "@/components/TransitionRoutes";
-import type { CreatePair, CreatedPosition } from "@/ports/positions";
+import type {
+  CreatePair,
+  CreatedPosition,
+  PositionSubmissionOptions,
+} from "@/ports/positions";
 import { INITIAL_STATE } from "@/state";
 import { useAppStore } from "@/store";
 import { renderWithServices } from "@/test/harness";
@@ -298,11 +302,19 @@ describe("CreatePoolPage", () => {
     useAppStore.setState({ step: 3 });
     let loadPairs!: (pairs: CreatePair[]) => void;
     let confirm!: (position: CreatedPosition) => void;
-    const submit = vi.fn().mockReturnValue(
-      new Promise<CreatedPosition>((resolve) => {
-        confirm = resolve;
-      }),
-    );
+    const submit = vi
+      .fn()
+      .mockImplementation((options?: PositionSubmissionOptions) => {
+        options?.onStatus?.({
+          kind: "approving",
+          token: pair.base.address,
+          index: 0,
+          total: 1,
+        });
+        return new Promise<CreatedPosition>((resolve) => {
+          confirm = resolve;
+        });
+      });
     renderWithServices(
       <TransitionRoutes>
         <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
@@ -345,6 +357,11 @@ describe("CreatePoolPage", () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     });
     await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(
+      await screen.findByRole("button", {
+        name: "Approve WETH — step 1 of 2",
+      }),
+    ).toBeDisabled();
     expect(screen.queryByText(/Created strategy/)).not.toBeInTheDocument();
 
     vi.useFakeTimers();

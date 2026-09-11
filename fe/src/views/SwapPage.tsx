@@ -1,8 +1,7 @@
-import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useAccount, useSwitchChain } from "wagmi";
 
+import { chain } from "@/adapters/wallet/config";
 import { DASH, type Asset } from "@/data";
 import { fit, money } from "@/lib/format";
 import {
@@ -19,9 +18,9 @@ import {
 import { useAssets } from "@/services/assets";
 import { useQuote } from "@/services/quote";
 import { useSubmitSwap } from "@/services/swap";
-import { chain } from "@/adapters/wallet/config";
 import { useApp } from "@/state";
 import { AssetIdentity } from "@/components/AssetIdentity";
+import { useWalletAction } from "@/services/wallet";
 
 import styles from "./SwapPage.module.css";
 
@@ -70,13 +69,11 @@ export function SwapPage() {
     { label: "Max slippage", value: `${config.slippage}%` },
   ];
 
-  const { isConnected, chainId } = useAccount();
-  const { openConnectModal } = useConnectModal();
-  const { switchChain } = useSwitchChain();
+  const wallet = useWalletAction();
   const walletNetwork =
-    isConnected && chainId !== undefined
-      ? (assets.find((asset) => asset.chainId === chainId)?.net ??
-        (chainId === chain.id ? chain.name : `Chain ${chainId}`))
+    wallet.connected && wallet.chainId !== undefined
+      ? (assets.find((asset) => asset.chainId === wallet.chainId)?.net ??
+        (wallet.chainId === chain.id ? chain.name : `Chain ${wallet.chainId}`))
       : undefined;
   const submission = useSubmitSwap(
     {
@@ -93,19 +90,15 @@ export function SwapPage() {
     },
   );
 
-  const switchTo = isConnected && chainId !== chain.id ? chain.name : undefined;
-
   // One button, whichever of the three things is missing.
   const act = () => {
-    if (!isConnected) return openConnectModal?.();
-    if (switchTo) return switchChain({ chainId: chain.id });
-    submission.send();
+    if (wallet.prepare()) submission.send();
   };
 
   const action = to
     ? swapAction({
-        connected: isConnected,
-        switchTo,
+        connected: wallet.connected,
+        switchTo: wallet.switchTo,
         submitting: submission.submitting,
         submitted: submission.result !== undefined,
         amount: amt,
@@ -113,6 +106,8 @@ export function SwapPage() {
         quote,
         problem,
         submissionProblem: submission.problem,
+        submissionStatus: submission.status,
+        inputToken: from?.symbol,
       })
     : { label: "Select receive asset", ready: false };
 
@@ -304,7 +299,7 @@ export function SwapPage() {
 
         <button
           type="button"
-          className={styles.cta}
+          className={`${styles.cta} ${action.retry ? styles.ctaRetry : ""}`}
           disabled={!action.ready}
           onClick={act}
         >

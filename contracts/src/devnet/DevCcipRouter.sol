@@ -26,7 +26,10 @@ contract DevCcipRouter is IRouterClient {
         return FEE;
     }
 
-    function ccipSend(uint64 selector, Client.EVM2AnyMessage calldata message)
+    function ccipSend(
+        uint64 selector,
+        Client.EVM2AnyMessage calldata message
+    )
         external
         payable
         returns (bytes32 messageId)
@@ -43,7 +46,9 @@ contract DevCcipRouter is IRouterClient {
         address sourceOutbox,
         address receiver,
         bytes calldata payload
-    ) external {
+    )
+        external
+    {
         Client.EVMTokenAmount[] memory noTokens = new Client.EVMTokenAmount[](0);
         Client.Any2EVMMessage memory message = Client.Any2EVMMessage({
             messageId: messageId,

@@ -52,6 +52,16 @@ export interface WalletTransaction {
     value: bigint;
 }
 
+export type WalletActionStatus =
+    | { kind: "approving"; token: Address }
+    | { kind: "signing" }
+    | { kind: "submitting" }
+    | { kind: "confirming" };
+
+export interface WalletActionOptions {
+    onStatus?(status: WalletActionStatus): void;
+}
+
 /** Internal wallet adapter; clients are bound once and never owned by the SDK. */
 export function createWalletSession({
     publicClient,
@@ -120,7 +130,10 @@ export function createWalletSession({
     }
 
     /** Cover an input with an exact allowance; reuse existing approval and await successful receipts. */
-    async function ensureAllowance(approval: AllowanceRequest): Promise<void> {
+    async function ensureAllowance(
+        approval: AllowanceRequest,
+        options?: WalletActionOptions,
+    ): Promise<void> {
         const { amount, chainId } = approval;
         if (amount <= 0n) throw new Error("Token amount must be positive");
         if ((await getChainId(publicClient)) !== chainId)
@@ -135,12 +148,16 @@ export function createWalletSession({
         if (target < amount)
             throw new Error("Approval cannot be below the required amount");
         const amounts = allowance === 0n ? [target] : [0n, target];
-        for (const value of amounts) await approve(approval, value);
+        for (const value of amounts) {
+            options?.onStatus?.({ kind: "approving", token: approval.token });
+            await approve(approval, value, options);
+        }
     }
 
     async function approve(
         approval: OrderApproval,
         value: bigint,
+        options?: WalletActionOptions,
     ): Promise<void> {
         const { owner, token, spender } = approval;
         const signer = await account(approval);
@@ -169,6 +186,7 @@ export function createWalletSession({
             account: signer,
             chain: walletClient.chain,
         });
+        options?.onStatus?.({ kind: "confirming" });
         await requireSuccessfulReceipt(hash, "Approval reverted");
         // A successful receipt can be a cancellation or an approve that returned false.
         const current = await tokenAccount(approval);
@@ -179,18 +197,22 @@ export function createWalletSession({
         }
     }
 
-    async function sign(order: UnsignedOrder) {
+    async function sign(order: UnsignedOrder, options?: WalletActionOptions) {
         assertFutureDeadline(order.deadline);
-        await ensureAllowance(order.approval);
+        await ensureAllowance(order.approval, options);
         const signer = await account(order.approval);
         assertFutureDeadline(order.deadline);
+        options?.onStatus?.({ kind: "signing" });
         return signTypedData(walletClient, {
             ...order.permit,
             account: signer,
         });
     }
 
-    async function sendTransaction(request: WalletTransaction): Promise<Hex> {
+    async function sendTransaction(
+        request: WalletTransaction,
+        options?: WalletActionOptions,
+    ): Promise<Hex> {
         if ((await getChainId(publicClient)) !== request.chainId) {
             throw new Error("Wrong RPC network");
         }
@@ -201,6 +223,7 @@ export function createWalletSession({
             data: request.data,
             value: request.value,
         });
+        options?.onStatus?.({ kind: "submitting" });
         return broadcastTransaction(walletClient, {
             account: signer,
             chain: walletClient.chain,
@@ -210,7 +233,11 @@ export function createWalletSession({
         });
     }
 
-    async function confirmTransaction(hash: Hex): Promise<void> {
+    async function confirmTransaction(
+        hash: Hex,
+        options?: WalletActionOptions,
+    ): Promise<void> {
+        options?.onStatus?.({ kind: "confirming" });
         await requireSuccessfulReceipt(hash, "Transaction reverted");
     }
 

@@ -1,7 +1,11 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { CreatePair, PositionForm } from "@/ports/positions";
+import type {
+  CreatePair,
+  PositionForm,
+  PositionSubmissionOptions,
+} from "@/ports/positions";
 import {
   useCreatePairs,
   useCreatePosition,
@@ -68,6 +72,7 @@ function Probe({ onCreated }: { onCreated: (hash: string) => void }) {
   return (
     <>
       <p>{pairs.data?.[0]?.base.symbol ?? "loading"}</p>
+      <p>{creation.status?.kind ?? "idle"}</p>
       <button onClick={creation.send}>{creation.problem ?? "Create"}</button>
     </>
   );
@@ -120,5 +125,46 @@ describe("position services", () => {
     await vi.waitFor(() =>
       expect(onCreated).toHaveBeenCalledWith("0xstrategy"),
     );
+  });
+
+  it("surfaces the SDK's current position-creation phase", async () => {
+    const submit = vi
+      .fn()
+      .mockImplementation(async (options?: PositionSubmissionOptions) => {
+        options?.onStatus?.({
+          kind: "approving",
+          token: pair.base.address,
+          index: 0,
+          total: 1,
+        });
+        return { strategyHash: "0xstrategy", transactionHash: "0xtx" };
+      });
+    renderWithServices(<Probe onCreated={vi.fn()} />, {
+      positions: { createIntent: () => ({ submit }) },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(await screen.findByText("approving")).toBeVisible();
+  });
+
+  it("shows a stable message when the wallet rejects position creation", async () => {
+    const submit = vi.fn().mockRejectedValue(
+      Object.assign(new Error("signed payload must stay private"), {
+        cause: { code: 4001 },
+      }),
+    );
+    renderWithServices(<Probe onCreated={vi.fn()} />, {
+      positions: { createIntent: () => ({ submit }) },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Wallet request rejected" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("signed payload must stay private"),
+    ).not.toBeInTheDocument();
   });
 });
