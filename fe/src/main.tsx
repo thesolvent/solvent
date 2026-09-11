@@ -15,8 +15,7 @@ import { RainbowKitProvider } from "@rainbow-me/rainbowkit";
 import { WagmiProvider } from "wagmi";
 
 import { httpServices } from "./adapters/http";
-import { devnetConnector, wagmiConfig } from "./adapters/wallet/config";
-import { DevnetWalletConnector } from "./adapters/wallet/DevnetWalletConnector";
+import { wagmiConfig } from "./adapters/wallet/config";
 import { ServicesProvider } from "./services/ServicesProvider";
 import { App } from "./App";
 
@@ -25,8 +24,7 @@ if (!root) throw new Error("#root missing from index.html");
 
 createRoot(root).render(
   <StrictMode>
-    <WagmiProvider config={wagmiConfig} reconnectOnMount={!devnetConnector}>
-      <DevnetWalletConnector />
+    <WagmiProvider config={wagmiConfig}>
       <ServicesProvider services={httpServices}>
         <RainbowKitProvider>
           <App />
