@@ -254,7 +254,7 @@
 
 .route {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-top: 1px solid var(--line);
 }
 
@@ -276,6 +276,26 @@
   font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+/* Impact reads as a number to scan past until it is large enough to change the decision. */
+.routeValue[data-impact="high"] {
+  color: var(--warn-ink);
+}
+
+.routeValue[data-impact="severe"] {
+  color: var(--err-ink);
+}
+
+.routeNote {
+  margin: 0;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--warn-ink);
 }
 
 .cta {

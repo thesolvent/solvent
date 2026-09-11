@@ -1,4 +1,8 @@
+import { formatUnits } from "viem";
+import { parseTokenAmount } from "@solvent/sdk/validation";
+
 import type { Asset, Quote } from "@/data";
+import { trimmedAmount } from "./format";
 
 /** The unfiltered choice in each list; not a value any asset carries. */
 export const ANY_TAG = "All";
@@ -167,6 +171,64 @@ export function settleLegs(
   return { fromToken: settledSource, toToken: "" };
 }
 
+const BPS = 10_000n;
+
+/**
+ * The output floor an order names.
+ *
+ * The widget and the order call this from one place, so the amount shown as protected is the
+ * amount the order actually enforces. A slippage outside the representable range is clamped
+ * rather than printed as a nonsense floor; submission rejects it separately.
+ */
+export function minimumOutput(
+  amountOutRaw: bigint,
+  slippagePct: number,
+): bigint {
+  const requested = Number.isFinite(slippagePct)
+    ? BigInt(Math.round(slippagePct * 100))
+    : BPS;
+  const tolerance = requested < 0n ? 0n : requested > BPS ? BPS : requested;
+  return (amountOutRaw * (BPS - tolerance)) / BPS;
+}
+
+/** The floor as the widget prints it, in the output token's units. */
+export function minimumReceived(
+  quote: Quote,
+  decimalsOut: number,
+  slippagePct: number,
+): string {
+  return trimmedAmount(
+    formatUnits(minimumOutput(quote.amountOutRaw, slippagePct), decimalsOut),
+  );
+}
+
+/** Whether the wallet is short of what the trade would spend. Unknown holdings block nothing. */
+export function isAboveBalance(
+  amount: string,
+  decimals: number,
+  balance: bigint | undefined,
+): boolean {
+  if (balance === undefined) return false;
+  try {
+    return parseTokenAmount(amount, decimals, "Swap amount") > balance;
+  } catch {
+    // An unparseable amount is already reported as a pricing problem.
+    return false;
+  }
+}
+
+/** How far the trade moves the price against itself, in bands that change what the button does. */
+export type ImpactLevel = "normal" | "high" | "severe";
+
+const HIGH_IMPACT_PCT = 1;
+const SEVERE_IMPACT_PCT = 5;
+
+export function impactLevel(priceImpact: string | undefined): ImpactLevel {
+  const pct = Number.parseFloat(priceImpact ?? "");
+  if (!Number.isFinite(pct) || pct < HIGH_IMPACT_PCT) return "normal";
+  return pct < SEVERE_IMPACT_PCT ? "high" : "severe";
+}
+
 /** What the action button says, and whether there is anything to press it for. */
 export interface SwapAction {
   label: string;
@@ -189,6 +251,10 @@ export function swapAction(input: {
   quote: Quote | undefined;
   problem: string | undefined;
   submissionProblem?: string;
+  /** The symbol the wallet is short of, or `undefined` when it can cover the trade. */
+  short?: string;
+  impact?: ImpactLevel;
+  impactAcknowledged?: boolean;
 }): SwapAction {
   const {
     connected,
@@ -200,6 +266,9 @@ export function swapAction(input: {
     quote,
     problem,
     submissionProblem,
+    short,
+    impact = "normal",
+    impactAcknowledged = false,
   } = input;
   if (submitting) return { label: "Confirm in your wallet", ready: false };
   if (submitted) return { label: "Intent submitted to Aqua", ready: false };
@@ -207,11 +276,16 @@ export function swapAction(input: {
   if (problem) return { label: problem, ready: false };
   if (amount <= 0) return { label: "Enter an amount", ready: false };
   if (!connected) return { label: "Connect a wallet", ready: true };
+  // Signing a trade the wallet cannot pay for fails deep in the wallet, with no reason given here.
+  if (short) return { label: `Insufficient ${short} balance`, ready: false };
   // An order names its chain, and a wallet will not sign for one it is not on.
   if (switchTo) return { label: `Switch to ${switchTo}`, ready: true };
   if (pricing || !quote) {
     return { label: "Finding the best price", ready: false };
   }
+  // A trade this far out of line is worth a second press rather than one stray click.
+  if (impact === "severe" && !impactAcknowledged)
+    return { label: "Confirm price impact", ready: true };
   return {
     label: submissionProblem ? `${submissionProblem} — try again` : "Swap",
     ready: true,

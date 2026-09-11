@@ -10,6 +10,8 @@ import { TransitionRoutes } from "@/components/TransitionRoutes";
 import * as swapService from "@/services/swap";
 import { SwapPage } from "@/views/SwapPage";
 
+const wallet = vi.hoisted(() => ({ balance: undefined as bigint | undefined }));
+
 vi.mock("wagmi", async (original) => ({
   ...(await original<typeof import("wagmi")>()),
   useAccount: () => ({
@@ -19,16 +21,18 @@ vi.mock("wagmi", async (original) => ({
   }),
   useClient: () => ({}),
   useConnectorClient: () => ({ data: {} }),
+  useReadContract: () => ({ data: wallet.balance }),
 }));
 
-beforeEach(() =>
+beforeEach(() => {
+  wallet.balance = undefined;
   useAppStore.setState({
     ...INITIAL_STATE,
     fromToken: "WETH",
     toToken: "USDC",
     amount: "1",
-  }),
-);
+  });
+});
 
 function TradeDestination() {
   const { tradeId } = useParams();
@@ -302,6 +306,56 @@ describe("SwapPage", () => {
     expect(await screen.findByText("2,477")).toBeInTheDocument();
     expect(await screen.findByText("0.12%")).toBeInTheDocument();
     expect(await screen.findByText("3 makers")).toBeInTheDocument();
+  });
+
+  it("shows the floor the order enforces, not only the slippage setting", async () => {
+    renderWithServices(<SwapPage />, {
+      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    // 0.5% off 2,477.852376 USDC — the number the wallet can actually be held to.
+    expect(await screen.findByText("2,465.46")).toBeInTheDocument();
+  });
+
+  it("stops a trade the wallet cannot pay for before the wallet does", async () => {
+    wallet.balance = 500_000_000_000_000_000n;
+    renderWithServices(<SwapPage />, {
+      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    const button = await screen.findByRole("button", {
+      name: "Insufficient WETH balance",
+    });
+    expect(button).toBeDisabled();
+  });
+
+  it("marks a severe price impact and takes a second press to sign it", async () => {
+    const submit = vi.fn().mockResolvedValue({
+      tradeId: "trade",
+      status: "submitted",
+    } satisfies SubmittedSwap);
+    renderWithServices(<SwapPage />, {
+      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
+      swap: {
+        quote: vi.fn().mockResolvedValue({ ...QUOTE, priceImpact: "24.10%" }),
+        createIntent: () => ({ submit }),
+      },
+    });
+
+    expect(await screen.findByText("24.10%")).toHaveAttribute(
+      "data-impact",
+      "severe",
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Confirm price impact" }),
+    );
+    expect(submit).not.toHaveBeenCalled();
+
+    // The tab above the widget carries the same word; the action is the last one.
+    fireEvent.click(screen.getAllByRole("button", { name: "Swap" }).at(-1)!);
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
   });
 
   it("identifies the selected token and its chain on both swap legs", async () => {

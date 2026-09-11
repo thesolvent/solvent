@@ -56,6 +56,8 @@ export interface QuoteState {
   pricing: boolean;
   /** Why no price could be had, in the server's own words. */
   problem: string | undefined;
+  /** The price on screen is the last good one and the refresh behind it is failing. */
+  stale: boolean;
 }
 
 /** Reprice settled inputs and refresh before expiry; hide the old quote as soon as inputs change. */
@@ -100,14 +102,23 @@ export function useQuote(
     refetchOnWindowFocus: true,
   });
 
+  // A failed refresh does not unmake the price already in hand; only expiry does.
+  const usable =
+    data !== undefined && amount === settled && data.expiresAt > Date.now();
+  const failing = error !== null || failureReason !== null;
+
   return {
-    quote: amount === settled && !error && !failureReason ? data : undefined,
-    pricing: amount !== settled || (quotable && isFetching),
+    quote: usable ? data : undefined,
+    // Only a first read leaves nothing to act on; a refresh behind a live price must not
+    // disable the button under the cursor.
+    pricing:
+      amount !== settled || (quotable && isFetching && data === undefined),
     // `error` only lands once retries are spent, and never while they are paused; the
     // reason is known from the first failure, and a trade that cannot happen should say so.
     problem:
-      amount === settled
+      amount === settled && !usable
         ? (inputProblem ?? reason(error ?? failureReason))
         : undefined,
+    stale: usable && failing,
   };
 }

@@ -1,4 +1,4 @@
-import { onlineManager } from "@tanstack/react-query";
+import { focusManager, onlineManager } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -237,4 +237,57 @@ it("quotes matching token addresses when their chains differ", async () => {
       to: expect.objectContaining({ chainId: 31338 }),
     }),
   );
+});
+
+function StateProbe() {
+  const { quote, pricing, stale } = useQuote(
+    ASSET,
+    { ...ASSET, address: "0x3333333333333333333333333333333333333333" },
+    "1",
+  );
+  return (
+    <>
+      <p>{quote?.amountOut ?? "no price"}</p>
+      <p>{pricing ? "pricing" : "actionable"}</p>
+      <p>{stale ? "stale" : "fresh"}</p>
+    </>
+  );
+}
+
+/** Refetch the way a returning tab does, rather than waiting out the refresh interval. */
+async function refresh(request: ReturnType<typeof vi.fn>) {
+  const calls = request.mock.calls.length;
+  act(() => {
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+  });
+  await waitFor(() => expect(request.mock.calls.length).toBeGreaterThan(calls));
+}
+
+it("leaves a live price actionable while it is refreshing", async () => {
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce(QUOTE)
+    .mockReturnValue(new Promise(() => {}));
+  renderWithServices(<StateProbe />, { swap: { quote: request } });
+  expect(await screen.findByText("actionable")).toBeInTheDocument();
+
+  await refresh(request);
+
+  expect(screen.getByText("100")).toBeInTheDocument();
+  expect(screen.getByText("actionable")).toBeInTheDocument();
+});
+
+it("keeps the last unexpired price when a refresh fails, and says it is stale", async () => {
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce(QUOTE)
+    .mockRejectedValue(new Error("resolver unavailable"));
+  renderWithServices(<StateProbe />, { swap: { quote: request } });
+  expect(await screen.findByText("100")).toBeInTheDocument();
+
+  await refresh(request);
+
+  expect(await screen.findByText("stale")).toBeInTheDocument();
+  expect(screen.getByText("100")).toBeInTheDocument();
 });

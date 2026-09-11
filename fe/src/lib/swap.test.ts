@@ -4,6 +4,10 @@ import type { Asset, Quote } from "@/data";
 
 import {
   assetKey,
+  impactLevel,
+  isAboveBalance,
+  minimumOutput,
+  minimumReceived,
   choices,
   networkOptions,
   settleLegs,
@@ -132,19 +136,19 @@ describe("settling the legs", () => {
   });
 });
 
-describe("the action button", () => {
-  const QUOTE = {
-    tokenIn: "0x1111111111111111111111111111111111111111",
-    tokenOut: "0x2222222222222222222222222222222222222222",
-    amountInRaw: 1_000_000n,
-    amountOut: "1",
-    amountOutUsd: 1,
-    priceImpact: "0.1%",
-    makersSourced: 1,
-    amountOutRaw: 1_000_000n,
-    expiresAt: 0,
-  } satisfies Quote;
+const QUOTE = {
+  tokenIn: "0x1111111111111111111111111111111111111111",
+  tokenOut: "0x2222222222222222222222222222222222222222",
+  amountInRaw: 1_000_000n,
+  amountOut: "1",
+  amountOutUsd: 1,
+  priceImpact: "0.1%",
+  makersSourced: 1,
+  amountOutRaw: 1_000_000n,
+  expiresAt: 0,
+} satisfies Quote;
 
+describe("the action button", () => {
   const base = {
     connected: true,
     switchTo: undefined,
@@ -204,6 +208,80 @@ describe("submission errors", () => {
 
     expect(submissionProblem(error)).toBe(
       "Quote expires too soon; request a fresh price",
+    );
+  });
+});
+
+describe("minimum received", () => {
+  it("prints the floor the order will enforce, not the quoted output", () => {
+    // 0.5% off a 2,477.852376 USDC quote, floored in base units.
+    expect(minimumOutput(2_477_852_376n, 0.5)).toBe(2_465_463_114n);
+    expect(
+      minimumReceived({ ...QUOTE, amountOutRaw: 2_477_852_376n }, 6, 0.5),
+    ).toBe("2,465.46");
+  });
+
+  it("never promises a floor above the quote when slippage is unusable", () => {
+    expect(minimumOutput(1_000n, Number.NaN)).toBe(0n);
+    expect(minimumOutput(1_000n, -5)).toBe(1_000n);
+  });
+});
+
+describe("insufficient funds", () => {
+  it("reads the amount at the token's own precision", () => {
+    // 1 USDC against a 0.5 USDC balance, both in 6-decimal base units.
+    expect(isAboveBalance("1", 6, 500_000n)).toBe(true);
+    expect(isAboveBalance("0.4", 6, 500_000n)).toBe(false);
+  });
+
+  it("blocks nothing while the holding is unknown", () => {
+    expect(isAboveBalance("1000000", 18, undefined)).toBe(false);
+  });
+
+  it("says which token is short instead of letting the wallet fail", () => {
+    expect(
+      swapAction({
+        connected: true,
+        switchTo: undefined,
+        submitting: false,
+        submitted: false,
+        amount: 1,
+        pricing: false,
+        quote: QUOTE,
+        problem: undefined,
+        short: "WETH",
+      }),
+    ).toEqual({ label: "Insufficient WETH balance", ready: false });
+  });
+});
+
+describe("price impact", () => {
+  it("bands an impact by what it should do to the decision", () => {
+    expect(impactLevel("0.12%")).toBe("normal");
+    expect(impactLevel("1.00%")).toBe("high");
+    expect(impactLevel("24.10%")).toBe("severe");
+    expect(impactLevel(undefined)).toBe("normal");
+  });
+
+  it("asks for a second press before signing a severe impact", () => {
+    const trade = {
+      connected: true,
+      switchTo: undefined,
+      submitting: false,
+      submitted: false,
+      amount: 1,
+      pricing: false,
+      quote: QUOTE,
+      problem: undefined,
+      impact: "severe" as const,
+    };
+
+    expect(swapAction(trade)).toEqual({
+      label: "Confirm price impact",
+      ready: true,
+    });
+    expect(swapAction({ ...trade, impactAcknowledged: true }).label).toBe(
+      "Swap",
     );
   });
 });

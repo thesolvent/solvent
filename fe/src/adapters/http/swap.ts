@@ -14,6 +14,7 @@ import {
 } from "@solvent/sdk/validation";
 import { bytesToHex, toHex, type Address } from "viem";
 import { chain } from "@/adapters/wallet/config";
+import { minimumOutput } from "@/lib/swap";
 import type { SwapInput, SwapPort } from "@/ports/swap";
 import { toCrossChainQuote, toQuote } from "../mappers/quote";
 import {
@@ -24,7 +25,6 @@ import {
 } from "./client";
 
 const ORDER_TTL_SECS = 600;
-const BPS = 10_000n;
 const COMPACT_TTL_SECS = 900;
 
 function sameChainApi(chainId: number) {
@@ -239,7 +239,7 @@ function orderTerms({
     );
   }
   validatedUint(quote.amountOutRaw, 256, "quoted output", { positive: true });
-  const minAmountOut = (quote.amountOutRaw * (BPS - tolerance)) / BPS;
+  const minAmountOut = minimumOutput(quote.amountOutRaw, slippagePct);
   validatedUint(minAmountOut, 256, "minimum output", { positive: true });
   return {
     swapper,

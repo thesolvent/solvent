@@ -3,16 +3,7 @@ import type { AggregateQuote } from "@solvent/sdk/cross-chain";
 import { formatUnits } from "viem";
 
 import { DASH, type Asset, type Quote } from "@/data";
-
-/** Small outputs need more places to say anything; large ones read as noise with them. */
-function trimmed(amount: string): string {
-  const value = Number(amount);
-  const digits = value >= 1000 ? 2 : value >= 1 ? 4 : 6;
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
-}
+import { trimmedAmount } from "@/lib/format";
 
 /**
  * One priced route.
@@ -27,7 +18,9 @@ export function toQuote(
 ): Quote {
   return {
     ...input,
-    amountOut: trimmed(formatUnits(BigInt(api.amount_out.raw), decimalsOut)),
+    amountOut: trimmedAmount(
+      formatUnits(BigInt(api.amount_out.raw), decimalsOut),
+    ),
     amountOutUsd: api.amount_out.usd ?? 0,
     priceImpact: `${api.price_impact_pct.toFixed(2)}%`,
     makersSourced: api.makers_sourced,
@@ -62,7 +55,7 @@ export function toCrossChainQuote(
     tokenIn: from.address,
     tokenOut: to.address,
     amountInRaw,
-    amountOut: trimmed(amountOutUnits),
+    amountOut: trimmedAmount(amountOutUnits),
     amountOutUsd,
     priceImpact,
     makersSourced: makers.size,

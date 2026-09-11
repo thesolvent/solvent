@@ -1,5 +1,5 @@
 import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAccount, useSwitchChain } from "wagmi";
 
@@ -10,15 +10,20 @@ import {
   ANY_TAG,
   assetKey,
   choices,
+  impactLevel,
+  isAboveBalance,
+  minimumReceived,
   networkOptions,
   selectedAsset,
   settleLegs,
   swapAction,
   tagOptions,
+  type ImpactLevel,
 } from "@/lib/swap";
 import { useAssets } from "@/services/assets";
 import { AsyncNote } from "@/components/AsyncNote";
 import { useQuote } from "@/services/quote";
+import { useTokenBalance } from "@/services/balance";
 import { useSubmitSwap } from "@/services/swap";
 import { chain } from "@/adapters/wallet/config";
 import { useApp } from "@/state";
@@ -59,12 +64,18 @@ export function SwapPage() {
   const fromUsdNum = amt * (from?.price ?? 0);
 
   // The output is the server's price for this size, not the mid — it carries fee and impact.
-  const { quote, pricing, problem } = useQuote(from, to, typed);
+  const { quote, pricing, problem, stale } = useQuote(from, to, typed);
   // Nothing in means nothing out; anything else without a price is unknown, not zero.
   const outStr = quote?.amountOut ?? (hasAmount && amt > 0 && to ? DASH : "");
   const dotAt = outStr.indexOf(".");
 
-  const routeStats: { label: string; term: GlossaryKey; value: string }[] = [
+  const impact = impactLevel(quote?.priceImpact);
+  const routeStats: {
+    label: string;
+    term: GlossaryKey;
+    value: string;
+    impact?: ImpactLevel;
+  }[] = [
     {
       label: "Fills",
       term: "fills",
@@ -76,6 +87,16 @@ export function SwapPage() {
       label: "Price impact",
       term: "priceImpact",
       value: quote?.priceImpact ?? DASH,
+      impact,
+    },
+    {
+      // The slippage percentage is the setting; this is what it costs at worst.
+      label: "Min received",
+      term: "minimumReceived",
+      value:
+        quote && to
+          ? minimumReceived(quote, to.decimals, config.slippage)
+          : DASH,
     },
     {
       label: "Max slippage",
@@ -107,12 +128,25 @@ export function SwapPage() {
     },
   );
 
+  const balance = useTokenBalance(from);
+  const short =
+    from && isAboveBalance(typed, from.decimals, balance)
+      ? from.symbol
+      : undefined;
+
+  const [impactAcknowledged, setImpactAcknowledged] = useState(false);
+  useEffect(() => {
+    setImpactAcknowledged(false);
+  }, [state.fromToken, state.toToken, typed]);
+
   const switchTo = isConnected && chainId !== chain.id ? chain.name : undefined;
 
-  // One button, whichever of the three things is missing.
+  // One button, whichever step the trade is missing.
   const act = () => {
     if (!isConnected) return openConnectModal?.();
     if (switchTo) return switchChain({ chainId: chain.id });
+    if (impact === "severe" && !impactAcknowledged)
+      return setImpactAcknowledged(true);
     submission.send();
   };
 
@@ -127,6 +161,9 @@ export function SwapPage() {
         quote,
         problem,
         submissionProblem: submission.problem,
+        short,
+        impact,
+        impactAcknowledged,
       })
     : { label: "Select receive asset", ready: false };
 
@@ -312,10 +349,18 @@ export function SwapPage() {
                 <div className={styles.routeLabel}>
                   <Term term={s.term}>{s.label}</Term>
                 </div>
-                <div className={styles.routeValue}>{s.value}</div>
+                <div className={styles.routeValue} data-impact={s.impact}>
+                  {s.value}
+                </div>
               </div>
             ))}
           </div>
+        )}
+
+        {stale && (
+          <p className={styles.routeNote} role="status">
+            Refresh failed — showing the last price
+          </p>
         )}
 
         <button

@@ -14,6 +14,16 @@ export function fit(str: string | number): string {
   return `min(${cap}px, ${(132 / Math.max(n, 1)).toFixed(1)}cqi, 8vh)`;
 }
 
+/** Small outputs need more places to say anything; large ones read as noise with them. */
+export function trimmedAmount(amount: string): string {
+  const value = Number(amount);
+  const digits = value >= 1000 ? 2 : value >= 1 ? 4 : 6;
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
 export function money(n: number): string {
   if (n >= 1e9) {
     return n.toLocaleString("en-US", {
