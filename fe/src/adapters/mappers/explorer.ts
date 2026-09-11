@@ -127,7 +127,7 @@ export function toCrossChainTrade(
     signaturePresent: true,
     id: order.order_id,
     status,
-    taker: "",
+    taker: order.taker ?? "",
     input: {
       symbol: input?.symbol ?? "TOKEN",
       display: formatUnits(BigInt(order.quote.amount_in), inputDecimals),

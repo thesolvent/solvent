@@ -64,6 +64,7 @@ describe("Explorer records", () => {
     const order = {
       order_id:
         "0xf969850128c5f806c513dc6db68ced83cf92fdf84dd6f23d73c1d920bb33e0fd",
+      taker: "0x3333333333333333333333333333333333333333",
       state: "complete",
       quote: {
         id: "0x01",
@@ -137,6 +138,7 @@ describe("Explorer records", () => {
 
     expect(trade).toMatchObject({
       status: "confirmed",
+      taker: "0x3333333333333333333333333333333333333333",
       input: { symbol: "LINK", display: "1" },
       output: { symbol: "USDC", display: "11.467239" },
       makers: 1,

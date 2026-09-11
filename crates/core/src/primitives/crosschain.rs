@@ -443,6 +443,9 @@ pub struct StepEvidence {
 pub struct CrossChainSaga {
     #[schema(value_type = String)]
     pub order_id: CrossChainOrderId,
+    #[serde(default)]
+    #[schema(value_type = Option<String>)]
+    pub taker: Option<Address>,
     pub quote: AggregateQuote,
     pub state: SagaState,
     #[serde(default)]

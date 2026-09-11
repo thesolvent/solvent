@@ -666,6 +666,12 @@
           },
           "state": {
             "$ref": "#/components/schemas/SagaState"
+          },
+          "taker": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

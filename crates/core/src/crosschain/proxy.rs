@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use alloy_primitives::keccak256;
+use alloy_primitives::{keccak256, Address};
 
 use crate::deps::crosschain::{
     CctpCompletion, CctpCompletionError, RemoteProgress, RemoteSolvent, RemoteSolventError,
@@ -105,6 +105,26 @@ impl CrossChainProxy {
         destination_plan: &ChainExecutionPlan,
         now_unix: u64,
     ) -> Result<CrossChainSaga, SolventError> {
+        self.start_with_taker(
+            order_id,
+            None,
+            quote,
+            origin_plan,
+            destination_plan,
+            now_unix,
+        )
+        .await
+    }
+
+    async fn start_with_taker(
+        &self,
+        order_id: CrossChainOrderId,
+        taker: Option<Address>,
+        quote: AggregateQuote,
+        origin_plan: &ChainExecutionPlan,
+        destination_plan: &ChainExecutionPlan,
+        now_unix: u64,
+    ) -> Result<CrossChainSaga, SolventError> {
         if let Some(existing) = self.sagas.load(order_id).await? {
             if existing.quote == quote {
                 return Ok(existing);
@@ -158,6 +178,7 @@ impl CrossChainProxy {
 
         let mut saga = CrossChainSaga {
             order_id,
+            taker,
             quote,
             state: SagaState::Quoted,
             lifecycle: Vec::new(),
@@ -183,9 +204,11 @@ impl CrossChainProxy {
         authorization: DirectOrderAuthorization,
         now_unix: u64,
     ) -> Result<CrossChainSaga, SolventError> {
+        let taker = authorization.order.user;
         let plans = self.destination.author_direct(&authorization).await?;
-        self.start(
+        self.start_with_taker(
             authorization.order_id,
+            Some(taker),
             authorization.quote,
             &plans.origin,
             &plans.destination,
@@ -1173,6 +1196,32 @@ mod tests {
 
         let saga = proxy.advance(order_id, 11).await.unwrap();
         assert_eq!(saga.state, SagaState::Prepared);
+    }
+
+    #[tokio::test]
+    async fn direct_order_persists_its_taker() {
+        let quote =
+            aggregate_quote(leg(LegRole::Origin, 50), leg(LegRole::Destination, 50), 10).unwrap();
+        let origin = Arc::new(FakeRemote::new(quote.origin.clone()));
+        let destination = Arc::new(FakeRemote::new(quote.destination.clone()));
+        let store = Arc::new(MemorySagas(Mutex::new(BTreeMap::new())));
+        let proxy = CrossChainProxy::new(origin, destination, store);
+        let order_id = CrossChainOrderId(B256::from([6; 32]));
+        let taker = Address::from([7; 20]);
+
+        proxy
+            .start_with_taker(
+                order_id,
+                Some(taker),
+                quote.clone(),
+                &plan(&quote, LegRole::Origin),
+                &plan(&quote, LegRole::Destination),
+                10,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(proxy.status(order_id).await.unwrap().taker, Some(taker));
     }
 
     #[tokio::test]

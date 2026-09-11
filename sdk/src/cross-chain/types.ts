@@ -181,6 +181,7 @@ export interface CrossChainLifecycleEvent {
 
 export interface CrossChainOrder {
     order_id: Hex;
+    taker?: Address | null;
     quote: AggregateQuote;
     state: SagaState;
     lifecycle?: CrossChainLifecycleEvent[];
