@@ -15,6 +15,10 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { MakerAssets } from "./MakerAssets";
 import { MakerPositions } from "./MakerPositions";
+import { PairMark } from "@/components/TokenIcon";
+import { Term } from "@/components/Tooltip";
+import { useTokenIcon } from "@/services/assets";
+
 import styles from "./MakersPage.module.css";
 
 function ChartTooltip({
@@ -42,6 +46,7 @@ function sameAddress(left: string | undefined, right: string | undefined) {
 }
 
 export function MakersPage() {
+  const iconOf = useTokenIcon();
   const navigate = useNavigate();
   const { state, set } = useApp();
   const { maker } = useParams();
@@ -171,7 +176,13 @@ export function MakersPage() {
               backgroundImage: `linear-gradient(${k.sep}, ${k.sep})`,
             }}
           >
-            <div className={styles.kpiLabel}>{k.label}</div>
+            <div className={styles.kpiLabel}>
+              {"term" in k && k.term ? (
+                <Term term={k.term}>{k.label}</Term>
+              ) : (
+                k.label
+              )}
+            </div>
             <div className={styles.kpiRow}>
               <span className={styles.kpiValue}>{k.value}</span>
               <span className={styles.kpiDelta} style={{ color: k.deltaFg }}>
@@ -231,6 +242,7 @@ export function MakersPage() {
           {mk.tab === "Assets" && (
             <MakerAssets
               assets={mk.assets}
+              iconOf={iconOf}
               onToggle={(index) =>
                 set({ mkAsset: mk.assets[index]?.open ? -1 : index })
               }
@@ -268,7 +280,10 @@ export function MakersPage() {
                   }}
                 >
                   <span className={styles.settlePair}>
-                    <span className={styles.settlePairName}>{t.pair}</span>
+                    <span className={styles.settlePairName}>
+                      <PairMark pair={t.pair} size={16} />
+                      {t.pair}
+                    </span>
                     <span className={styles.settleBlk}>{t.blk}</span>
                   </span>
                   <span className={styles.settleFlow}>

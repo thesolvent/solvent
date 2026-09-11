@@ -1,10 +1,14 @@
 import type { MouseEvent, ReactNode } from "react";
 import type { DepthChartModel } from "@/lib/depth-chart";
+import type { GlossaryKey } from "@/lib/glossary";
+import { Term } from "./Tooltip";
+
 import styles from "./DepthChart.module.css";
 
 export function DepthChart({
   data: d,
   title,
+  titleTerm,
   legend,
   onHoverChange,
   className,
@@ -13,6 +17,8 @@ export function DepthChart({
 }: {
   data: DepthChartModel;
   title: string;
+  /** Defines the title, for a chart whose name is not self-explanatory. */
+  titleTerm?: GlossaryKey;
   legend: ReactNode;
   onHoverChange: (fraction: number | null) => void;
   className?: string;
@@ -30,7 +36,9 @@ export function DepthChart({
     <section className={className ?? styles.depth}>
       <div className={styles.depthHead}>
         <span className={styles.kpiSwatch} />
-        <span className={styles.depthTitle}>{title}</span>
+        <span className={styles.depthTitle}>
+          {titleTerm ? <Term term={titleTerm}>{title}</Term> : title}
+        </span>
         <span className={styles.depthSub}>{d.priceTitle}</span>
       </div>
 

@@ -250,7 +250,31 @@ the project is pre-1.0 and evolving.
     each side (a backend test vs `ApiDoc::openapi()`, and the SDK's `codegen:check` vs the generated
     types), so a renamed Rust field surfaces as a compile/gate failure, never a runtime one.
 
+  - **A token's icon travels with its identity.** `logo_uri` reached `Asset` from the token list but
+    not `Token` — the identity embedded in pools, trades, the maker roster and wallet balances — so
+    every surface that named a token without the full `Asset` had nothing to draw.
+  - **Chains are named, not just listed.** `Chain { chain_id, name, logo_uri }` replaces
+    `networks: Vec<String>`: an asset reports only its chain id, so nothing could turn that id into
+    a name or an icon. The example config's `[[chains]]` block sits below every root key, since an
+    array-of-tables scopes the keys above it.
+
 ### Added — frontend (`fe/`, React + Vite)
+- **Token, chain and interface icons.** Tokens drew the first two letters of their symbol; they now
+  draw their icon with those initials layered underneath, so a request that is slow, blocked or
+  never answered degrades to initials rather than an empty circle — `onError` never fires on a
+  request that hangs. Icons are served from `fe/public` (32 KB, no third-party request), verified by
+  PNG magic bytes because a 404 page arrives as a `200`. `Icon` maps names like `search` and
+  `curvePegged` onto `lucide-react`, so the drawing is one table's problem.
+- **A pool row says how it prices.** The empty circle beside the fee tier now carries the pool's
+  curve shape — constant product, concentrated, pegged, or mixed where its makers disagree. The
+  census was already served and used only to filter, while no row ever said which curve it was.
+- **Price history on pool detail.** A pair page showed depth — what it can fill right now — and
+  nothing about what it has done. The chart spans the served windows (7D / 3M / All) and states
+  when a pair has no upstream series rather than drawing an empty frame.
+- **Terms explain themselves.** One glossary behind a `Term` component: hover or focus, keyboard
+  reachable, announced through `aria-describedby`, and portalled so the panels that clip their
+  overflow cannot clip it. Wired first where a number decides money — Net APR, Virtual/Actual,
+  Pullable, max slippage, price impact, and every trade status and Aqua event type.
 - **Live Makers and strategy details** — connect the original dashboard and strategy panels to
   address-based reads, rolling maker periods, confirmed-order fill share and submission-to-confirmation
   latency. Keep the existing chart/control placement, restore the prior Explorer/Trade layout,

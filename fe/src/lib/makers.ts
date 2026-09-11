@@ -300,6 +300,7 @@ export function makerView(
   const kpis = [
     {
       label: "Shared liquidity",
+      term: "sharedLiquidity" as const,
       value: usd(d?.sharedLiquidityUsd),
       change: d?.liquidityChangePct,
     },
@@ -308,10 +309,26 @@ export function makerView(
       value: usd(d?.volumeUsd),
       change: d?.volumeChangePct,
     },
-    { label: "Wallet balance", value: usd(d?.walletUsd) },
-    { label: "Pullable", value: usd(d?.pullableUsd) },
-    { label: "Shared-liq ratio", value: ratioText(d?.coverage) },
-    { label: "Active positions", value: numberText(d?.activePositions) },
+    {
+      label: "Wallet balance",
+      term: "walletBalance" as const,
+      value: usd(d?.walletUsd),
+    },
+    {
+      label: "Pullable",
+      term: "pullable" as const,
+      value: usd(d?.pullableUsd),
+    },
+    {
+      label: "Shared-liq ratio",
+      term: "sharedLiqRatio" as const,
+      value: ratioText(d?.coverage),
+    },
+    {
+      label: "Active positions",
+      term: "activePositions" as const,
+      value: numberText(d?.activePositions),
+    },
     {
       label: `Fees, ${span}`,
       value: usd(d?.feesUsd),

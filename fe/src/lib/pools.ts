@@ -110,3 +110,36 @@ export function sortPools(pools: Pool[], sort: string): Pool[] {
       return pools;
   }
 }
+
+/** How a pool's makers price, as a glyph and the sentence behind it. */
+export function curveMark(curves?: string[]): {
+  name: "curveXyc" | "curveConcentrated" | "curvePegged" | "curveMixed";
+  label: string;
+} {
+  const shapes = curves ?? [];
+  if (shapes.length > 1) {
+    return {
+      name: "curveMixed",
+      label: `Mixed — makers price on ${shapes.join(" and ").toLowerCase()}`,
+    };
+  }
+  switch (shapes[0]) {
+    case "Constant product":
+      return {
+        name: "curveXyc",
+        label: "Constant product — makers quote across the whole price range",
+      };
+    case "Concentrated":
+      return {
+        name: "curveConcentrated",
+        label: "Concentrated — makers quote inside a price band",
+      };
+    case "Pegged":
+      return {
+        name: "curvePegged",
+        label: "Pegged — makers quote around a fixed price",
+      };
+    default:
+      return { name: "curveMixed", label: "Curve shape unknown" };
+  }
+}

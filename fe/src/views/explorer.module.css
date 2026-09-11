@@ -97,6 +97,9 @@
 .titleSm {
   composes: title;
   font-size: clamp(18px, 1.9vw, 25px);
+  display: flex;
+  align-items: center;
+  gap: 9px;
 }
 
 .statusPill {
@@ -584,6 +587,9 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .tradeBlk {

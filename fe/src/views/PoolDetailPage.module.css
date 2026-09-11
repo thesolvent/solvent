@@ -46,6 +46,9 @@
   font-weight: 500;
   letter-spacing: -0.035em;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .limeSquare {
@@ -472,4 +475,14 @@
   color: var(--text-dim);
   white-space: nowrap;
   flex: none;
+}
+
+/* Price spans the whole grid above depth: what the pair did, then what it can fill right now. */
+.priceRow {
+  grid-column: 1 / -1;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }

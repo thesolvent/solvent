@@ -37,6 +37,7 @@ it("opens an asset's individual position and keeps the asset disclosure separate
   render(
     <MakerAssets
       assets={[asset]}
+      iconOf={() => null}
       onToggle={onToggle}
       onOpenPosition={onOpenPosition}
     />,

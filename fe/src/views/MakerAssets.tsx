@@ -1,5 +1,7 @@
 import type { makerView } from "@/lib/makers";
 
+import { TokenIcon } from "@/components/TokenIcon";
+
 import styles from "./MakersPage.module.css";
 
 type AssetRow = ReturnType<typeof makerView>["assets"][number];
@@ -8,10 +10,13 @@ export function MakerAssets({
   assets,
   onToggle,
   onOpenPosition,
+  iconOf,
 }: {
   assets: AssetRow[];
   onToggle: (index: number) => void;
   onOpenPosition: (hash: string) => void;
+  /** Injected rather than read here, so this stays a view with no service of its own. */
+  iconOf: (symbol: string) => string | null;
 }) {
   return (
     <>
@@ -42,12 +47,11 @@ export function MakerAssets({
                 >
                   ▸
                 </span>
-                <span
+                <TokenIcon
                   className={styles.assetChip}
-                  style={{ background: asset.tint }}
-                >
-                  {asset.sym}
-                </span>
+                  logoUri={iconOf(asset.sym)}
+                  symbol={asset.sym}
+                />
               </span>
               <span className={styles.stack}>
                 <span className={styles.cellStrong}>{asset.sym}</span>

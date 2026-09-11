@@ -69,18 +69,21 @@ export function explorerStats(stats: ExplorerStats | undefined) {
   return [
     {
       label: "Block height",
+      term: "blockHeight" as const,
       value: numberText(stats?.blockHeight),
       sub: "live",
       accent: "var(--green)",
     },
     {
       label: "Events, 24h",
+      term: "events24h" as const,
       value: numberText(stats?.events24h),
       sub: "",
       accent: "var(--green-deep)",
     },
     {
       label: "Trades settled",
+      term: "tradesSettled" as const,
       value: numberText(stats?.tradesSettled),
       sub:
         stats?.confirmedPct == null
@@ -90,12 +93,14 @@ export function explorerStats(stats: ExplorerStats | undefined) {
     },
     {
       label: "Median impact",
+      term: "medianImpact" as const,
       value: percent(stats?.medianImpactPct),
       sub: "",
       accent: "var(--text-muted)",
     },
     {
       label: "Active makers",
+      term: "activeMakers" as const,
       value: numberText(stats?.activeMakers),
       sub:
         stats?.quotingNow == null

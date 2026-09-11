@@ -1,13 +1,19 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { DepthChart } from "@/components/DepthChart";
+import { PriceChart } from "@/components/PriceChart";
 import { Crumbs } from "@/components/Crumbs";
 import { poolDetail } from "@/lib/pool-detail";
+import { priceChart } from "@/lib/price-chart";
 import { tokenText } from "@/lib/explorer";
 import { useTrades } from "@/services/explorer";
+import { usePairHistory } from "@/services/positions";
 import { usePool, usePoolDepth, usePoolRoster } from "@/services/pools";
 import { useApp } from "@/state";
 import { QueryFreshness } from "./QueryFreshness";
+
+import { PairMark } from "@/components/TokenIcon";
+import { Term } from "@/components/Tooltip";
 
 import styles from "./PoolDetailPage.module.css";
 
@@ -23,6 +29,20 @@ export function PoolDetailPage() {
       ? { status: "confirmed", base: pool.ref.base, quote: pool.ref.quote }
       : undefined,
   );
+  // The history read is keyed by the pair's two addresses, which the pool row already carries.
+  const historyQuery = usePairHistory(
+    pool?.ref
+      ? { base: { address: pool.ref.base }, quote: { address: pool.ref.quote } }
+      : undefined,
+    state.poolSpan,
+  );
+  const history = priceChart(historyQuery.data ?? [], pool?.pair ?? "");
+  const historyNotice = historyQuery.isPending
+    ? "Loading price history…"
+    : historyQuery.isError
+      ? "Couldn't load price history."
+      : undefined;
+
   const d = poolDetail({
     pool,
     roster: usePoolRoster(pool),
@@ -43,7 +63,10 @@ export function PoolDetailPage() {
         </button>
         <div className={styles.headTitle}>
           <Crumbs current={d.pair} trail={[{ label: "Pools", to: "/pools" }]} />
-          <div className={styles.pair}>{d.pair}</div>
+          <div className={styles.pair}>
+            <PairMark pair={d.pair} size={26} />
+            {d.pair}
+          </div>
         </div>
         <span className={styles.limeSquare} />
         <span className={styles.spacer} />
@@ -61,11 +84,22 @@ export function PoolDetailPage() {
       </div>
 
       <div className={styles.grid}>
+        <PriceChart
+          className={styles.priceRow}
+          data={history}
+          notice={historyNotice}
+          onSpanChange={(poolSpan) => set({ poolSpan })}
+          span={state.poolSpan}
+          title={`${d.pair} price`}
+        />
+
         <div className={styles.kpis}>
           <section className={styles.kpiWide}>
             <div className={styles.kpiTag}>
               <span className={styles.kpiSwatch} />
-              <span className={styles.kpiLabel}>Depth</span>
+              <span className={styles.kpiLabel}>
+                <Term term="tvl">Depth</Term>
+              </span>
             </div>
             <div>
               <div className={styles.kpiRow}>
@@ -74,25 +108,29 @@ export function PoolDetailPage() {
                   <span className={styles.kpiDelta}>{d.tvlChange}</span>
                 )}
               </div>
-              <div className={styles.kpiSub}>Total value locked</div>
+              <div className={styles.kpiSub}>
+                <Term term="tvl">Total value locked</Term>
+              </div>
             </div>
             <div className={styles.kpiFoot}>
-              Zero-inventory fills routed through{" "}
-              <span className={styles.kpiFootMark}>Aqua</span>
+              <Term term="zeroInventory">Zero-inventory</Term> fills routed
+              through <span className={styles.kpiFootMark}>Aqua</span>
             </div>
           </section>
 
           <section className={styles.kpiDark}>
             <div className={styles.kpiTag}>
               <span className={styles.kpiSwatch} />
-              <span className={styles.kpiLabelDark}>Net APR</span>
+              <span className={styles.kpiLabelDark}>
+                <Term term="netApr">Net APR</Term>
+              </span>
             </div>
             <div>
               <div className={styles.kpiValueLime}>{d.apr}</div>
               <div className={styles.kpiSubDark}>
                 After {d.fee} fee
                 <br />
-                {d.spread} spread
+                <Term term="spread">{d.spread} spread</Term>
               </div>
             </div>
           </section>
@@ -110,6 +148,7 @@ export function PoolDetailPage() {
         <DepthChart
           data={d}
           title="Aggregated depth"
+          titleTerm="aggregatedDepth"
           legend={`${d.makerTotal} ${d.makerTotal === 1 ? "maker" : "makers"}`}
           onHoverChange={(hoverFrac) => set({ hoverFrac })}
         />
@@ -133,7 +172,7 @@ export function PoolDetailPage() {
                   }
                   onClick={() => set({ makerSort: t })}
                 >
-                  {t}
+                  <Term term={t === "Virtual" ? "virtual" : "actual"}>{t}</Term>
                 </button>
               ))}
             </div>

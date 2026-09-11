@@ -6,11 +6,15 @@ import type { Pool } from "@/data";
 import {
   aprOptions,
   bestByApr,
+  curveMark,
   feeTierOptions,
   filterPools,
   poolTypeOptions,
   sortPools,
 } from "@/lib/pools";
+import { Icon } from "@/components/Icon";
+import { Term } from "@/components/Tooltip";
+import { PairMark } from "@/components/TokenIcon";
 import { useAssetSymbols } from "@/services/assets";
 import { slug, usePools } from "@/services/pools";
 import { useApp, type PoolQuery } from "@/state";
@@ -164,8 +168,14 @@ export function PoolsPage() {
             </div>
           );
         })}
-        <button type="button" className={styles.searchAction}>
-          <span className={styles.searchActionGlyph} />
+        <button
+          type="button"
+          className={styles.searchAction}
+          aria-label="Search pools"
+          aria-disabled="true"
+          title="Pool search — not available yet"
+        >
+          <Icon className={styles.searchActionGlyph} name="search" />
         </button>
       </div>
 
@@ -174,13 +184,16 @@ export function PoolsPage() {
           <>
             <span className={styles.recommendTag}>
               <span className={styles.pulse} />
-              <span className={styles.recommendTagText}>Recommended</span>
+              <span className={styles.recommendTagText}>
+                <Term term="recommended">Recommended</Term>
+              </span>
             </span>
             <span
               key={ptype + recommendation.pair}
               className={styles.recommendBody}
             >
               <span className={styles.recommendPair}>
+                <PairMark pair={recommendation.pair} size={18} />
                 {recommendation.pair}
               </span>
               <span className={styles.recommendMeta}>
@@ -284,16 +297,23 @@ export function PoolsPage() {
                     <span className={styles.poolRuleLine} />
                     <span className={styles.poolRuleValue}>{p.range}</span>
                     <span className={styles.poolRuleLine} />
-                    <span className={styles.poolRuleTag}>Depth</span>
+                    <span className={styles.poolRuleTag}>
+                      <Term term="tvl">Depth</Term>
+                    </span>
                   </div>
                   <div className={styles.poolFigures}>
                     <div style={{ minWidth: 0 }}>
-                      <div className={styles.poolBig}>{p.pair}</div>
+                      <div className={styles.poolBig}>
+                        <PairMark pair={p.pair} size={20} />
+                        {p.pair}
+                      </div>
                       <div className={styles.poolSub}>{p.venue}</div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div className={styles.poolBig}>{p.tvl}</div>
-                      <div className={styles.poolSub}>Depth</div>
+                      <div className={styles.poolSub}>
+                        <Term term="tvl">Depth</Term>
+                      </div>
                     </div>
                   </div>
                   <div className={styles.poolFoot}>
@@ -303,14 +323,28 @@ export function PoolsPage() {
                 </div>
                 <div className={styles.poolSide}>
                   <div className={styles.poolFee}>
-                    <span className={styles.poolFeeChip} />
+                    <span
+                      aria-label={curveMark(p.curves).label}
+                      className={styles.poolFeeChip}
+                      role="img"
+                      title={curveMark(p.curves).label}
+                    >
+                      <Icon
+                        className={styles.poolFeeGlyph}
+                        name={curveMark(p.curves).name}
+                      />
+                    </span>
                     <div style={{ minWidth: 0 }}>
-                      <div className={styles.poolMicro}>Fee tier</div>
+                      <div className={styles.poolMicro}>
+                        <Term term="feeTier">Fee tier</Term>
+                      </div>
                       <div className={styles.poolFeeValue}>{p.fee}</div>
                     </div>
                   </div>
                   <div className={styles.poolApr}>
-                    <div className={styles.poolMicro}>Net APR</div>
+                    <div className={styles.poolMicro}>
+                      <Term term="netApr">Net APR</Term>
+                    </div>
                     <div className={styles.poolAprValue}>{p.apr}</div>
                   </div>
                 </div>

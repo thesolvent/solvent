@@ -13,6 +13,9 @@ import { Crumbs } from "@/components/Crumbs";
 import { strategyDetail, rangeDescription } from "@/lib/strategy";
 import type { RouteState } from "@/routes";
 
+import { PairIcons } from "@/components/TokenIcon";
+import { useTokenIcon } from "@/services/assets";
+
 import styles from "./explorer.module.css";
 
 export function StrategyPage() {
@@ -39,6 +42,7 @@ export function StrategyPage() {
     history.data,
     settlements.data?.items ?? [],
   );
+  const iconOf = useTokenIcon();
   const [baseSymbol = "", quoteSymbol = ""] = (position.data?.pair ?? "").split(
     /\s*\/\s*/,
   );
@@ -83,7 +87,14 @@ export function StrategyPage() {
           </button>
           <div className={styles.headTitle}>
             <Crumbs current="Strategy" />
-            <div className={styles.titleSm}>{sd.title}</div>
+            <div className={styles.titleSm}>
+              <PairIcons
+                base={{ symbol: baseSymbol, logoUri: iconOf(baseSymbol) }}
+                quote={{ symbol: quoteSymbol, logoUri: iconOf(quoteSymbol) }}
+                size={18}
+              />
+              {sd.title}
+            </div>
           </div>
           <span
             className={styles.statePill}

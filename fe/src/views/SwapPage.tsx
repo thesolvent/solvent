@@ -14,7 +14,11 @@ import {
   swapAction,
   tagOptions,
 } from "@/lib/swap";
-import { useAssets } from "@/services/assets";
+import { Icon } from "@/components/Icon";
+import { Term } from "@/components/Tooltip";
+import type { GlossaryKey } from "@/lib/glossary";
+import { TokenIcon } from "@/components/TokenIcon";
+import { useAssets, useTokenIcon } from "@/services/assets";
 import { useQuote } from "@/services/quote";
 import { useSubmitSwap } from "@/services/swap";
 import { chain } from "@/adapters/wallet/config";
@@ -30,6 +34,7 @@ export function SwapPage() {
   const navigate = useNavigate();
 
   const assets = useAssets();
+  const iconOf = useTokenIcon();
   const bySymbol = (symbol: string) => assets.find((a) => a.symbol === symbol);
   const from = bySymbol(state.fromToken);
   const to = bySymbol(state.toToken);
@@ -51,15 +56,24 @@ export function SwapPage() {
   const outStr = quote?.amountOut ?? (hasAmount && amt > 0 && to ? DASH : "");
   const dotAt = outStr.indexOf(".");
 
-  const routeStats = [
+  const routeStats: { label: string; term: GlossaryKey; value: string }[] = [
     {
       label: "Fills",
+      term: "fills",
       value: quote
         ? `${quote.makersSourced} ${quote.makersSourced === 1 ? "maker" : "makers"}`
         : DASH,
     },
-    { label: "Price impact", value: quote?.priceImpact ?? DASH },
-    { label: "Max slippage", value: `${config.slippage}%` },
+    {
+      label: "Price impact",
+      term: "priceImpact",
+      value: quote?.priceImpact ?? DASH,
+    },
+    {
+      label: "Max slippage",
+      term: "maxSlippage",
+      value: `${config.slippage}%`,
+    },
   ];
 
   const { isConnected, chainId } = useAccount();
@@ -164,11 +178,23 @@ export function SwapPage() {
             ))}
           </div>
           <div className={styles.headActions}>
-            <button type="button" className={styles.iconButton}>
-              <span className={styles.iconGlyph} />
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="Swap settings"
+              aria-disabled="true"
+              title="Swap settings — not available yet"
+            >
+              <Icon className={styles.iconGlyph} name="settings" />
             </button>
-            <button type="button" className={styles.moreButton}>
-              ···
+            <button
+              type="button"
+              className={styles.moreButton}
+              aria-label="More actions"
+              aria-disabled="true"
+              title="More actions — not available yet"
+            >
+              <Icon className={styles.iconGlyph} name="more" />
             </button>
           </div>
         </div>
@@ -179,9 +205,11 @@ export function SwapPage() {
             className={styles.assetButton}
             onClick={() => set({ picker: "from", pQuery: "" })}
           >
-            <span className={styles.assetChip}>
-              {state.fromToken.slice(0, 2)}
-            </span>
+            <TokenIcon
+              className={styles.assetChip}
+              logoUri={iconOf(state.fromToken)}
+              symbol={state.fromToken}
+            />
             <span className={styles.assetSymbol}>
               {state.fromToken || "Select"}
             </span>
@@ -229,9 +257,11 @@ export function SwapPage() {
             className={styles.assetButton}
             onClick={() => set({ picker: "to", pQuery: "" })}
           >
-            <span className={styles.assetChip}>
-              {state.toToken.slice(0, 2)}
-            </span>
+            <TokenIcon
+              className={styles.assetChip}
+              logoUri={iconOf(state.toToken)}
+              symbol={state.toToken}
+            />
             <span className={styles.assetSymbol}>
               {state.toToken || "Select"}
             </span>
@@ -262,7 +292,9 @@ export function SwapPage() {
           <div className={styles.route}>
             {routeStats.map((s) => (
               <div key={s.label} className={styles.routeCell}>
-                <div className={styles.routeLabel}>{s.label}</div>
+                <div className={styles.routeLabel}>
+                  <Term term={s.term}>{s.label}</Term>
+                </div>
                 <div className={styles.routeValue}>{s.value}</div>
               </div>
             ))}
@@ -295,8 +327,9 @@ export function SwapPage() {
               </div>
 
               <label className={styles.searchField}>
-                <span className={styles.searchGlyph} />
+                <Icon className={styles.searchGlyph} name="search" />
                 <input
+                  aria-label="Search assets by name or address"
                   className={styles.searchInput}
                   value={state.pQuery}
                   onChange={(e) => set({ pQuery: e.target.value })}
@@ -336,9 +369,11 @@ export function SwapPage() {
                       }
                       onClick={() => choose(t.symbol)}
                     >
-                      <span className={styles.tokenChip}>
-                        {t.symbol.slice(0, 2)}
-                      </span>
+                      <TokenIcon
+                        className={styles.tokenChip}
+                        logoUri={t.logoUri}
+                        symbol={t.symbol}
+                      />
                       <span className={styles.tokenMain}>
                         <span className={styles.tokenName}>{t.name}</span>
                         <span className={styles.tokenMeta}>

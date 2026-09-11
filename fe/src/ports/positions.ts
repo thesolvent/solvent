@@ -50,6 +50,18 @@ export interface CreatedPosition {
 
 export type PriceHistoryPeriod = "7d" | "3m" | "all";
 
+/**
+ * The two addresses a pair's history is keyed by.
+ *
+ * Narrower than `CreatePair`, which structurally satisfies it: the history read never needed the
+ * curve defaults or wallet balances a create pair carries, and typing it that way kept the read
+ * off every surface that only knows a pair's addresses.
+ */
+export interface PairAddresses {
+  base: { address: string };
+  quote: { address: string };
+}
+
 export interface PairPricePoint {
   timestampMs: number;
   price: number;
@@ -90,7 +102,7 @@ export interface PositionActionIntent {
 export interface PositionsPort {
   pairs(wallet?: string): Promise<CreatePair[]>;
   history(
-    pair: CreatePair,
+    pair: PairAddresses,
     period: PriceHistoryPeriod,
   ): Promise<PairPricePoint[]>;
   createIntent(input: PositionInput, clients: WalletClients): PositionIntent;

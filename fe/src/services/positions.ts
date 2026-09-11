@@ -6,6 +6,7 @@ import type {
   CreatedPosition,
   CreatePair,
   DockPositionInput,
+  PairAddresses,
   PairPricePoint,
   PositionActionIntent,
   PositionActionResult,
@@ -73,8 +74,15 @@ export function usePairPriceHistory(
   pair: CreatePair | undefined,
   span: CreateSpan,
 ) {
+  return usePairHistory(pair, HISTORY_PERIOD[span]);
+}
+
+/** One pair's price history over a served period. */
+export function usePairHistory(
+  pair: PairAddresses | undefined,
+  period: PriceHistoryPeriod,
+) {
   const { positions } = useServices();
-  const period = HISTORY_PERIOD[span];
   return useQuery<PairPricePoint[]>({
     queryKey: [
       "create-position",

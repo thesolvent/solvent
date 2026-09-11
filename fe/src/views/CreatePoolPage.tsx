@@ -29,6 +29,9 @@ import { usePosition } from "@/services/makers";
 import { slug } from "@/services/pools";
 import { useApp, type AppState } from "@/state";
 
+import { useTokenIcon } from "@/services/assets";
+import { PairIcons } from "@/components/TokenIcon";
+
 import styles from "./CreatePoolPage.module.css";
 
 const STRATEGIES: readonly PositionCurve[] = [
@@ -188,6 +191,7 @@ export function CreatePoolPage() {
   const pairs = pairQuery.data ?? EMPTY_PAIRS;
   const selectedPair = pairs[state.corePair] ?? pairs[0];
   const historyQuery = usePairPriceHistory(selectedPair, state.createSpan);
+  const iconOf = useTokenIcon();
   const c = createPosition(
     state,
     pairs,
@@ -593,6 +597,11 @@ export function CreatePoolPage() {
                                 ? "var(--ink)"
                                 : "var(--line-soft)",
                             }}
+                          />
+                          <PairIcons
+                            base={{ symbol: q.a, logoUri: iconOf(q.a) }}
+                            quote={{ symbol: q.b, logoUri: iconOf(q.b) }}
+                            size={16}
                           />
                           <span className={styles.pairLabel}>
                             {q.a} / {q.b}

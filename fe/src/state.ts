@@ -25,6 +25,8 @@ export type Snap = {
 export type Crumb = { snap: Snap; label: string };
 export type CreateSpan = "7d" | "3m" | "All";
 
+import type { PriceSpan } from "@/lib/price-chart";
+
 export type AppState = {
   page: Page | null;
   trail: Crumb[];
@@ -63,6 +65,7 @@ export type AppState = {
   step: number;
   stepDirty: Record<number, boolean>;
   createSpan: CreateSpan;
+  poolSpan: PriceSpan;
   bandMax: number;
   bandMin: number;
   amtA: string;
@@ -143,6 +146,7 @@ type CreatePositionState = Pick<
   | "step"
   | "stepDirty"
   | "createSpan"
+  | "poolSpan"
   | "bandMax"
   | "bandMin"
   | "amtA"
@@ -172,6 +176,7 @@ export const INITIAL_CREATE_POSITION_STATE: CreatePositionState = {
   step: 1,
   stepDirty: {},
   createSpan: "3m",
+  poolSpan: "7d",
   bandMax: 0.05,
   bandMin: -0.05,
   amtA: "",

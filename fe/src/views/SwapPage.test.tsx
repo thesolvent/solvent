@@ -78,6 +78,7 @@ function asset(
     change: "+0.00%",
     tags: ["Majors"],
     net: "Ethereum",
+    logoUri: null,
     pairs,
   };
 }

@@ -5,6 +5,10 @@ import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
 import { useActivity, useExplorerStats, useTrades } from "@/services/explorer";
 import { usePools } from "@/services/pools";
 import { useApp } from "@/state";
+import { PairMark } from "@/components/TokenIcon";
+import { Term } from "@/components/Tooltip";
+import { EVENT_TERMS, STATUS_TERMS } from "@/lib/glossary";
+
 import styles from "./explorer.module.css";
 
 const TABS = ["Trades", "Activity"];
@@ -101,7 +105,10 @@ function TradeList({ filter }: { filter: TradeFilter }) {
             aria-label={`Open trade ${trade.id}`}
           >
             <span className={styles.tradePair}>
-              <span className={styles.tradePairName}>{trade.pair}</span>
+              <span className={styles.tradePairName}>
+                <PairMark pair={trade.pair} size={18} />
+                {trade.pair}
+              </span>
               <span className={styles.tradeBlk}>{trade.blockLabel}</span>
             </span>
             <span className={styles.tradeFlow}>
@@ -119,7 +126,11 @@ function TradeList({ filter }: { filter: TradeFilter }) {
             </span>
             <span className={styles.tradeStatusCell}>
               <span className={styles.statusPill} style={trade.statusStyle}>
-                {trade.status}
+                {STATUS_TERMS[trade.status] ? (
+                  <Term term={STATUS_TERMS[trade.status]}>{trade.status}</Term>
+                ) : (
+                  trade.status
+                )}
               </span>
               <span className={styles.tradeTx}>{trade.transactionLabel}</span>
             </span>
@@ -199,7 +210,11 @@ function ActivityList({ filter }: { filter: ActivityFilter }) {
                 className={styles.kindTag}
                 style={{ background: row.kindBg, color: row.kindFg }}
               >
-                {row.kind}
+                {EVENT_TERMS[row.kind] ? (
+                  <Term term={EVENT_TERMS[row.kind]}>{row.kind}</Term>
+                ) : (
+                  row.kind
+                )}
               </span>
               <span className={styles.who} title={row.maker}>
                 {row.who}
@@ -277,7 +292,9 @@ export function ExplorerPage() {
               backgroundImage: `linear-gradient(${stat.sep}, ${stat.sep})`,
             }}
           >
-            <div className={styles.statLabel}>{stat.label}</div>
+            <div className={styles.statLabel}>
+              <Term term={stat.term}>{stat.label}</Term>
+            </div>
             <div className={styles.statRow}>
               <span className={styles.statValue}>{stat.value}</span>
               <span className={styles.statSub} style={{ color: stat.accent }}>
