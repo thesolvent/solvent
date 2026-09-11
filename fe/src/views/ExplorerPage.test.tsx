@@ -6,7 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import detail from "@/data/fixtures/trade-detail.json";
 import activity from "@/data/fixtures/activity.json";
@@ -220,5 +220,97 @@ describe("Explorer live lists", () => {
     );
     expect(readActivity).toHaveBeenLastCalledWith({}, "older-events");
     expect(screen.getByRole("button", { name: "Next →" })).toBeDisabled();
+  });
+});
+
+/** Reads back the address the page wrote, and steps history, so both directions are observable. */
+function UrlProbe() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <output aria-label="Current URL">
+        {location.pathname}
+        {location.search}
+      </output>
+      <button onClick={() => navigate(-1)}>Back</button>
+    </>
+  );
+}
+
+describe("Explorer view addressing", () => {
+  const explorerStubs = {
+    ...common,
+    explorer: {
+      trades: vi.fn().mockResolvedValue({ items: [] }),
+      activity: vi.fn().mockResolvedValue({ items: [] }),
+      stats: vi.fn().mockResolvedValue(toStats(stats)),
+    },
+  };
+
+  it("opens the tab and filter named in the URL", async () => {
+    const activityRead = vi.fn().mockResolvedValue({ items: [] });
+    renderWithServices(
+      <ExplorerPage />,
+      {
+        ...explorerStubs,
+        explorer: { ...explorerStubs.explorer, activity: activityRead },
+      },
+      "/explorer?tab=activity&type=pull&entity=maker",
+    );
+    expect(screen.getByText("Protocol activity")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /pull/ })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(activityRead).toHaveBeenCalledWith(
+        { kind: "pull", entity: "Maker" },
+        undefined,
+      ),
+    );
+  });
+
+  it("writes the tab and filter into the URL, and Back restores the previous view", async () => {
+    renderWithServices(
+      <>
+        <ExplorerPage />
+        <UrlProbe />
+      </>,
+      explorerStubs,
+      "/explorer",
+    );
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent("/explorer");
+
+    fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      "/explorer?tab=activity",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "All types" }));
+    fireEvent.click(screen.getByRole("button", { name: "dock" }));
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      "/explorer?tab=activity&type=dock",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+        "/explorer?tab=activity",
+      ),
+    );
+    expect(
+      screen.getByRole("button", { name: "All types" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the unfiltered Trades view as the bare address", async () => {
+    const trades = vi.fn().mockResolvedValue({ items: [] });
+    renderWithServices(
+      <ExplorerPage />,
+      { ...explorerStubs, explorer: { ...explorerStubs.explorer, trades } },
+      "/explorer",
+    );
+    await waitFor(() => expect(trades).toHaveBeenCalledWith({}, undefined));
+    expect(
+      screen.getByRole("button", { name: "All status" }),
+    ).toBeInTheDocument();
   });
 });

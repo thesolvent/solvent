@@ -1,0 +1,99 @@
+.root {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  padding: 0 20px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: none;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.headTitle {
+  line-height: 1.05;
+  flex: none;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.title {
+  font-size: clamp(20px, 2.1vw, 28px);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+}
+
+.limeSquare {
+  width: 20px;
+  height: 20px;
+  background: var(--lime);
+  flex: none;
+}
+
+.pageDesc {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 28px 18px;
+}
+
+.path {
+  margin: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.home {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0 18px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: inherit;
+  text-decoration: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition:
+    background 130ms ease,
+    color 130ms ease;
+}
+
+.home:hover {
+  background: var(--ink);
+  color: var(--paper);
+}

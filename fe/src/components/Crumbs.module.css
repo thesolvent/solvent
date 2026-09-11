@@ -23,6 +23,12 @@
   color: var(--green-deep);
 }
 
+/* Where you already are: same type, no affordance. */
+.current {
+  composes: crumb;
+  cursor: default;
+}
+
 .sep {
   font-size: 10px;
   color: var(--line-soft);

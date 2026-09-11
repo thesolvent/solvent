@@ -31,6 +31,9 @@ function Controls() {
       >
         Trade two
       </button>
+      <button onClick={() => navigate("/pools?status=failed")}>
+        Filter pools
+      </button>
       <button onClick={() => navigate(-1)}>Back</button>
       <button onClick={() => navigate(1)}>Forward</button>
     </>
@@ -102,6 +105,18 @@ describe("TransitionRoutes", () => {
     expect(useAppStore.getState().xpStrat).toEqual(strategy);
     await advance(210);
     expect(useAppStore.getState().xpStrat).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Pools page" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not sweep when only the query changes", () => {
+    renderRoutes();
+    fireEvent.click(screen.getByRole("button", { name: "Filter pools" }));
+    expect(screen.queryByTestId("route-transition")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Current URL")).toHaveTextContent(
+      "/pools?status=failed",
+    );
     expect(
       screen.getByRole("heading", { name: "Pools page" }),
     ).toBeInTheDocument();

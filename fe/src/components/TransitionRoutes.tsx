@@ -34,7 +34,8 @@ export function TransitionRoutes({ children }: { children: ReactNode }) {
       }
       setDisplayed(location);
     };
-    const changed = outgoing !== location;
+    // Only a page change is worth a sweep; a filter written into the query is not.
+    const changed = outgoing.pathname !== location.pathname;
     previous.current = location;
     if (
       !changed ||

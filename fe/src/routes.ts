@@ -13,7 +13,6 @@ export const PATHS: Record<Page, string> = {
   Pools: "/pools",
   Makers: "/makers",
   Explorer: "/explorer",
-  Docs: "/docs",
 };
 
 const BY_PATH = new Map(

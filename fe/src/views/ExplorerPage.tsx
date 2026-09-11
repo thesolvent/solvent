@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useAccount, useSwitchChain } from "wagmi";
 import { Pagination } from "@/components/Pagination";
@@ -17,19 +17,18 @@ import {
   useExecuteRebate,
   useRebates,
 } from "@/services/rebates";
-import type { RebateExplorerStatus } from "@/state";
-import { useApp } from "@/state";
 import { Term } from "@/components/Tooltip";
 import { EVENT_TERMS, STATUS_TERMS } from "@/lib/glossary";
 
 import styles from "./explorer.module.css";
 
-const TABS = ["Trades", "Activity", "Rebates"];
+const TABS = ["Trades", "Activity", "Rebates"] as const;
 
-const DROP_OPTIONS = {
-  xpType: ["All types", "pull", "push", "dock", "register"],
-  xpEnt: ["All entities", "Maker", "Resolver"],
-  xpStatus: [
+/** Each filter's options, the first being its default. Tab and filters live in the query string so
+ *  a view can be shared, restored by Back and survive a reload; a default is left out of the URL,
+ *  so a bare /explorer still opens on unfiltered Trades. */
+const FILTERS = {
+  status: [
     "All status",
     "created",
     "quoted",
@@ -40,24 +39,47 @@ const DROP_OPTIONS = {
     "declined",
     "failed",
   ],
-  xpPair: ["All pairs"],
-  xpRebateStatus: ["Active", "Confirmed"],
-};
-type DropKey = keyof typeof DROP_OPTIONS;
+  pair: ["All pairs"],
+  type: ["All types", "pull", "push", "dock", "register"],
+  entity: ["All entities", "Maker", "Resolver"],
+  rebates: ["Active", "Confirmed"],
+} as const;
 
-function FilterDrop({ dkey, options }: { dkey: DropKey; options: string[] }) {
-  const { state, set } = useApp();
-  const open = state.xpOpen === dkey;
-  const current = state[dkey];
+type FilterKey = keyof typeof FILTERS;
+type Options = readonly [string, ...string[]];
+
+/** Matched case-insensitively, so `?type=pull` and `?entity=maker` read the way anyone would type
+ *  them. Anything unrecognised falls back to the default rather than filtering to nothing. */
+function chosen(options: Options, raw: string | null): string {
+  if (!raw) return options[0];
+  return (
+    options.find((option) => option.toLowerCase() === raw.toLowerCase()) ??
+    options[0]
+  );
+}
+
+function FilterDrop({
+  value,
+  options,
+  open,
+  onToggle,
+  onSelect,
+}: {
+  value: string;
+  options: readonly string[];
+  open: boolean;
+  onToggle: () => void;
+  onSelect: (value: string) => void;
+}) {
   return (
     <div className={styles.dropWrap}>
       <button
         type="button"
         className={open ? styles.dropButtonOpen : styles.dropButton}
         aria-expanded={open}
-        onClick={() => set({ xpOpen: open ? null : dkey })}
+        onClick={onToggle}
       >
-        <span>{current}</span>
+        <span>{value}</span>
         <span
           aria-hidden="true"
           className={open ? styles.dropCaretOpen : styles.dropCaret}
@@ -71,14 +93,12 @@ function FilterDrop({ dkey, options }: { dkey: DropKey; options: string[] }) {
             <button
               key={option}
               type="button"
-              className={
-                current === option ? styles.dropItemOn : styles.dropItem
-              }
-              onClick={() => set({ [dkey]: option, xpOpen: null })}
+              className={value === option ? styles.dropItemOn : styles.dropItem}
+              onClick={() => onSelect(option)}
             >
               <span>{option}</span>
               <span className={styles.dropMark}>
-                {current === option ? "✓" : ""}
+                {value === option ? "✓" : ""}
               </span>
             </button>
           ))}
@@ -268,7 +288,7 @@ function ExplorerRebates({
   status,
 }: {
   currentBlock?: number;
-  status: RebateExplorerStatus;
+  status: string;
 }) {
   const assets = useAssets().data ?? [];
   const active = status === "Active";
@@ -326,22 +346,64 @@ function ExplorerRebates({
 }
 
 export function ExplorerPage() {
-  const { state, set } = useApp();
-  const pools = usePools().data ?? [];
+  const [params, setParams] = useSearchParams();
+  const [openDrop, setOpenDrop] = useState<FilterKey | null>(null);
+  const poolQuery = usePools();
+  const pools = poolQuery.data ?? [];
   const stats = useExplorerStats();
-  const isTrades = state.xpTab === "Trades";
-  const isActivity = state.xpTab === "Activity";
-  const pairs = [...new Set(pools.map((pool) => pool.pair.replace(/\s/g, "")))];
+
+  const tab = chosen(TABS, params.get("tab"));
+  const isTrades = tab === "Trades";
+  const isActivity = tab === "Activity";
+  const status = chosen(FILTERS.status, params.get("status"));
+  const type = chosen(FILTERS.type, params.get("type"));
+  const entity = chosen(FILTERS.entity, params.get("entity"));
+  const rebateStatus = chosen(FILTERS.rebates, params.get("rebates"));
+
+  const pairNames = [
+    ...new Set(pools.map((pool) => pool.pair.replace(/\s/g, ""))),
+  ];
+  const pairOptions: Options = ["All pairs", ...pairNames];
+  // An unknown pair keeps its URL spelling rather than collapsing to the default, so a link to a
+  // pair this deployment does not serve says so instead of quietly showing everything.
+  const pairParam = params.get("pair");
+  const selectedPair = pairParam
+    ? (pairOptions.find(
+        (option) => option.toLowerCase() === pairParam.toLowerCase(),
+      ) ?? pairParam)
+    : pairOptions[0];
   const pair = pools.find(
-    (pool) => pool.pair.replace(/\s/g, "") === state.xpPair,
+    (pool) => pool.pair.replace(/\s/g, "") === selectedPair,
   )?.ref;
+
+  /** Each change is a new history entry: Back steps through views instead of leaving the Explorer. */
+  function select(key: "tab" | FilterKey, options: Options, value: string) {
+    const next = new URLSearchParams(params);
+    if (value === options[0]) next.delete(key);
+    else next.set(key, value.toLowerCase());
+    setOpenDrop(null);
+    setParams(next);
+  }
+
+  function drop(key: FilterKey, value: string, options: Options) {
+    return (
+      <FilterDrop
+        value={value}
+        options={options}
+        open={openDrop === key}
+        onToggle={() => setOpenDrop(openDrop === key ? null : key)}
+        onSelect={(next) => select(key, options, next)}
+      />
+    );
+  }
+
   const filter: TradeFilter = {
-    ...(state.xpStatus === "All status" ? {} : { status: state.xpStatus }),
+    ...(status === "All status" ? {} : { status }),
     ...(pair ? { base: pair.base, quote: pair.quote } : {}),
   };
   const activityFilter: ActivityFilter = {
-    ...(state.xpType === "All types" ? {} : { kind: state.xpType }),
-    ...(state.xpEnt === "All entities" ? {} : { entity: state.xpEnt }),
+    ...(type === "All types" ? {} : { kind: type }),
+    ...(entity === "All entities" ? {} : { entity }),
   };
   return (
     <div className={styles.root}>
@@ -391,39 +453,40 @@ export function ExplorerPage() {
       )}
       <div className={styles.filterBar}>
         <div className={styles.tabGroup}>
-          {TABS.map((tab) => (
+          {TABS.map((name) => (
             <button
-              key={tab}
+              key={name}
               type="button"
-              className={tab === state.xpTab ? styles.tabOn : styles.tab}
-              onClick={() => set({ xpTab: tab, xpOpen: null })}
+              className={name === tab ? styles.tabOn : styles.tab}
+              onClick={() => select("tab", TABS, name)}
             >
-              {tab}
+              {name}
             </button>
           ))}
         </div>
         <div className={styles.drops}>
           {isTrades ? (
             <>
-              <FilterDrop dkey="xpStatus" options={DROP_OPTIONS.xpStatus} />
-              <FilterDrop dkey="xpPair" options={["All pairs", ...pairs]} />
+              {drop("status", status, FILTERS.status)}
+              {drop("pair", selectedPair, pairOptions)}
             </>
           ) : isActivity ? (
             <>
-              <FilterDrop dkey="xpType" options={DROP_OPTIONS.xpType} />
-              <FilterDrop dkey="xpEnt" options={DROP_OPTIONS.xpEnt} />
+              {drop("type", type, FILTERS.type)}
+              {drop("entity", entity, FILTERS.entity)}
             </>
           ) : (
-            <FilterDrop
-              dkey="xpRebateStatus"
-              options={DROP_OPTIONS.xpRebateStatus}
-            />
+            drop("rebates", rebateStatus, FILTERS.rebates)
           )}
         </div>
       </div>
       {isTrades ? (
-        state.xpPair === "All pairs" || pair ? (
+        selectedPair === "All pairs" || pair ? (
           <TradeList key={JSON.stringify(filter)} filter={filter} />
+        ) : poolQuery.isPending ? (
+          <p className={styles.emptyNote} role="status">
+            Loading trades…
+          </p>
         ) : (
           <p className={styles.emptyNote}>Selected pair is unavailable.</p>
         )
@@ -434,9 +497,9 @@ export function ExplorerPage() {
         />
       ) : (
         <ExplorerRebates
-          key={state.xpRebateStatus}
+          key={rebateStatus}
           currentBlock={stats.data?.blockHeight}
-          status={state.xpRebateStatus}
+          status={rebateStatus}
         />
       )}
     </div>

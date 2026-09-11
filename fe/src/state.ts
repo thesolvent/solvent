@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-export type Page = "Home" | "Swap" | "Pools" | "Makers" | "Explorer" | "Docs";
+export type Page = "Home" | "Swap" | "Pools" | "Makers" | "Explorer";
 export type ProductMode = "Solvent" | "SolventX";
 
 /** Explorer strategy selector — identifies a maker's curve on a pair. */
@@ -25,7 +25,6 @@ export type Snap = {
 
 export type Crumb = { snap: Snap; label: string };
 export type CreateSpan = "7d" | "3m" | "All";
-export type RebateExplorerStatus = "Active" | "Confirmed";
 
 export type AppState = {
   page: Page | null;
@@ -91,14 +90,6 @@ export type AppState = {
   mkTip: number | null;
   mkBar: number | null;
   mkLat: number | null;
-
-  xpTab: string;
-  xpType: string;
-  xpEnt: string;
-  xpStatus: string;
-  xpPair: string;
-  xpRebateStatus: RebateExplorerStatus;
-  xpOpen: string | null;
 };
 
 type SwapState = Pick<
@@ -219,14 +210,6 @@ export const INITIAL_STATE: AppState = {
   mkTip: null,
   mkBar: null,
   mkLat: null,
-
-  xpTab: "Trades",
-  xpType: "All types",
-  xpEnt: "All entities",
-  xpStatus: "All status",
-  xpPair: "All pairs",
-  xpRebateStatus: "Active",
-  xpOpen: null,
 };
 
 /** Canvas-level knobs the design exposed as editor props. */

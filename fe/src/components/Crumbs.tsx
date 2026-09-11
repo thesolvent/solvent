@@ -32,20 +32,30 @@ export function Crumbs({
     : crumbs(current);
 
   return (
-    <div className={styles.crumbs}>
+    <nav aria-label="Breadcrumb" className={styles.crumbs}>
       {items.map((c, i) => (
         <Fragment key={`${c.label}-${i}`}>
-          <button
-            type="button"
-            className={styles.crumb}
-            style={{ color: c.fg }}
-            onClick={c.go}
-          >
-            {c.label}
-          </button>
+          {i === items.length - 1 ? (
+            <span
+              aria-current="page"
+              className={styles.current}
+              style={{ color: c.fg }}
+            >
+              {c.label}
+            </span>
+          ) : (
+            <button
+              type="button"
+              className={styles.crumb}
+              style={{ color: c.fg }}
+              onClick={c.go}
+            >
+              {c.label}
+            </button>
+          )}
           <span className={styles.sep}>{c.sep}</span>
         </Fragment>
       ))}
-    </div>
+    </nav>
   );
 }
