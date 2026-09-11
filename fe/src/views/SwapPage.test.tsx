@@ -70,6 +70,7 @@ function asset(
   pairs: string[] = [],
 ): Asset {
   return {
+    chainId: 31337,
     address: `0x${symbol}`,
     symbol,
     name: symbol,
@@ -301,6 +302,68 @@ describe("SwapPage", () => {
     expect(await screen.findByText("2,477")).toBeInTheDocument();
     expect(await screen.findByText("0.12%")).toBeInTheDocument();
     expect(await screen.findByText("3 makers")).toBeInTheDocument();
+  });
+
+  it("identifies the selected token and its chain on both swap legs", async () => {
+    renderWithServices(<SwapPage />, {
+      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    expect(
+      await screen.findByLabelText("WETH token on Ethereum"),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText("USDC token on Ethereum"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the wallet's connected network in the card header", async () => {
+    renderWithServices(<SwapPage />, {
+      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Connected network: Ethereum",
+      }),
+    ).toHaveTextContent("E");
+  });
+
+  it("loads both catalogs in SolventX and selects an output on Base", async () => {
+    useAppStore.setState({ productMode: "SolventX" });
+    const baseWeth = {
+      ...ASSETS[0],
+      chainId: 31338,
+      address: "0xbase-weth" as `0x${string}`,
+      net: "Base",
+    };
+    const baseUsdc = {
+      ...ASSETS[1],
+      chainId: 31338,
+      address: "0xbase-usdc" as `0x${string}`,
+      net: "Base",
+    };
+    const list = vi
+      .fn()
+      .mockResolvedValue([
+        { ...ASSETS[0], pairs: [] },
+        { ...ASSETS[1], pairs: [] },
+        baseWeth,
+        baseUsdc,
+      ]);
+    renderWithServices(<SwapPage />, {
+      assets: { list },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    await waitFor(() => expect(list).toHaveBeenCalledWith(true));
+    fireEvent.click(await screen.findByRole("button", { name: "Select ▾" }));
+    fireEvent.click(screen.getByRole("button", { name: /USDC USDC · Base/ }));
+
+    expect(screen.getByLabelText("USDC token on Base")).toBeInTheDocument();
+    expect(useAppStore.getState().toToken).toBe("31338:0xbase-usdc");
   });
 
   it("puts the server's reason on the button and stops the trade", async () => {
