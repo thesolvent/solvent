@@ -2,6 +2,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
 import type { Pool } from "@/data";
+import { AsyncNote } from "@/components/AsyncNote";
 import { Pagination } from "@/components/Pagination";
 
 import {
@@ -65,7 +66,8 @@ const CURVE_GROUP = 0;
 export function PoolsPage() {
   const { state, set } = useApp();
   const navigate = useNavigate();
-  const pools = usePools();
+  const poolsQuery = usePools();
+  const pools = poolsQuery.data ?? [];
   const cells = queryCells(useAssetSymbols(), pools);
   const ptype = state.poolQuery.ptype;
 
@@ -90,13 +92,16 @@ export function PoolsPage() {
   // The best yield among the pools the query admits; recommending an excluded pool would misdirect.
   const recommendation = bestByApr(matching);
 
+  // An unread or failed list has no count to report, and no filter verdict to report either.
   const pageLabel =
-    matching.length === 0
-      ? "No pools match this type"
-      : `Showing ${Math.min(state.poolPage * PAGE_SIZE + 1, matching.length)}–${Math.min(
-          state.poolPage * PAGE_SIZE + PAGE_SIZE,
-          matching.length,
-        )} of ${matching.length} pools`;
+    poolsQuery.isPending || poolsQuery.isError
+      ? ""
+      : matching.length === 0
+        ? "No pools match this type"
+        : `Showing ${Math.min(state.poolPage * PAGE_SIZE + 1, matching.length)}–${Math.min(
+            state.poolPage * PAGE_SIZE + PAGE_SIZE,
+            matching.length,
+          )} of ${matching.length} pools`;
 
   const onTvlDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -276,6 +281,11 @@ export function PoolsPage() {
           </div>
 
           <div className={styles.poolList}>
+            <AsyncNote
+              className={styles.listNote}
+              query={poolsQuery}
+              subject="pools"
+            />
             {page.map((p) => (
               <button
                 key={p.pair}

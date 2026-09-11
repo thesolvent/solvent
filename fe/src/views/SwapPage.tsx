@@ -17,6 +17,7 @@ import {
   tagOptions,
 } from "@/lib/swap";
 import { useAssets } from "@/services/assets";
+import { AsyncNote } from "@/components/AsyncNote";
 import { useQuote } from "@/services/quote";
 import { useSubmitSwap } from "@/services/swap";
 import { chain } from "@/adapters/wallet/config";
@@ -35,7 +36,9 @@ export function SwapPage() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
-  const assets = useAssets(crossChain);
+  const assetsQuery = useAssets(crossChain);
+  // A fresh [] on every render would restart the leg-settling effect below on every render.
+  const assets = useMemo(() => assetsQuery.data ?? [], [assetsQuery.data]);
   const from = selectedAsset(assets, state.fromToken);
   const to = selectedAsset(assets, state.toToken);
 
@@ -416,11 +419,16 @@ export function SwapPage() {
                     </button>
                   );
                 })}
-                {matches.length === 0 && (
-                  <div className={styles.empty}>
-                    No assets match that filter.
-                  </div>
-                )}
+                <AsyncNote
+                  className={styles.empty}
+                  empty={
+                    matches.length === 0
+                      ? "No assets match that filter."
+                      : undefined
+                  }
+                  query={assetsQuery}
+                  subject="assets"
+                />
               </div>
             </div>
 

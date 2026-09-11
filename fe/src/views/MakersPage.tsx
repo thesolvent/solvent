@@ -68,11 +68,11 @@ export function MakersPage() {
   const period = PERIODS[state.mkSpan] ?? "7d";
   const dashboard = useMakerDashboard(address, period);
   const positions = useMakerPositions(address, period);
-  const pools = usePools();
+  const pools = usePools().data ?? [];
   const creationPair = positions.data?.[0]?.pair ?? pools[0]?.pair;
   const inventory = useMakerInventory(address, period);
   const settlements = useMakerSettlements(address, period);
-  const assets = useAssets();
+  const assets = useAssets().data ?? [];
   const rebates = useRebates(
     address ? { maker: address, status: "executed" } : undefined,
   );

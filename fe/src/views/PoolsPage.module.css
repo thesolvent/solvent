@@ -585,3 +585,11 @@
   height: 17px;
   color: var(--text-mid);
 }
+
+.listNote {
+  margin: 0;
+  padding: 24px 18px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}

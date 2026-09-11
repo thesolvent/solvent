@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Pool } from "@/data";
@@ -46,5 +46,34 @@ describe("PoolsPage", () => {
     expect(container.querySelector(`.${styles.recommend}`)).toBeInTheDocument();
     // ...but recommends nothing, and must not assume pools[0] exists.
     expect(screen.queryByText("Recommended")).not.toBeInTheDocument();
+  });
+
+  it("says the list is unread rather than that nothing matches it", async () => {
+    const unresolved = () => new Promise<never>(() => {});
+    renderWithServices(<PoolsPage />, {
+      pools: { list: vi.fn(unresolved) },
+      assets: { list: vi.fn(unresolved) },
+    });
+
+    expect(await screen.findByText("Loading pools…")).toBeInTheDocument();
+    expect(
+      screen.queryByText("No pools match this type"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reports a failed list and reads again when asked", async () => {
+    const list = vi.fn().mockRejectedValue(new Error("pools unavailable"));
+    renderWithServices(<PoolsPage />, {
+      pools: { list },
+      assets: { list: vi.fn().mockResolvedValue(SYMBOLS) },
+    });
+
+    expect(await screen.findByText("Couldn’t load pools.")).toBeInTheDocument();
+    expect(
+      screen.queryByText("No pools match this type"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
   });
 });

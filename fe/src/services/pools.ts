@@ -1,24 +1,27 @@
-import { skipToken, useQuery } from "@tanstack/react-query";
+import {
+  skipToken,
+  useQuery,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 
 import type { DepthCurve, PairRef, Pool, PoolRoster } from "@/data";
 
 import { useServices } from "./context";
 import { LIVE_QUERY_OPTIONS } from "./live";
 
-/** Every pool, already formatted for display. Empty until the first read resolves. */
-export function usePools(): Pool[] {
+/**
+ * Every pool, as a read a caller can tell apart from an answered-and-empty one.
+ *
+ * The whole query is returned, not `data ?? []`: a bare array makes "not read yet" and "the API is
+ * down" indistinguishable from "no pools", and the page then states the last of the three.
+ */
+export function usePools(): UseQueryResult<Pool[], Error> {
   const { pools } = useServices();
-  const { data } = useQuery({
+  return useQuery({
     ...LIVE_QUERY_OPTIONS,
     queryKey: ["pools"],
     queryFn: () => pools.list(),
   });
-  return data ?? [];
-}
-
-/** The pool a URL names, once the list it belongs to has loaded. */
-export function usePool(pair: string | undefined): Pool | undefined {
-  return usePools().find((pool) => slug(pool.pair) === pair);
 }
 
 /** URL-safe form of a pair label: "WETH / USDC" -> "weth-usdc". */
@@ -31,22 +34,25 @@ function usePairQuery<T>(
   name: string,
   pool: Pool | undefined,
   read: (ref: PairRef) => Promise<T>,
-): T | undefined {
+): UseQueryResult<T, Error> {
   const ref = pool?.ref;
-  const { data } = useQuery({
+  return useQuery({
     ...LIVE_QUERY_OPTIONS,
     queryKey: [name, ref?.base, ref?.quote],
     queryFn: ref ? () => read(ref) : skipToken,
   });
-  return data;
 }
 
-export function usePoolRoster(pool: Pool | undefined): PoolRoster | undefined {
+export function usePoolRoster(
+  pool: Pool | undefined,
+): UseQueryResult<PoolRoster, Error> {
   const { pools } = useServices();
   return usePairQuery("pool-detail", pool, (ref) => pools.detail(ref));
 }
 
-export function usePoolDepth(pool: Pool | undefined): DepthCurve | undefined {
+export function usePoolDepth(
+  pool: Pool | undefined,
+): UseQueryResult<DepthCurve, Error> {
   const { pools } = useServices();
   return usePairQuery("pool-depth", pool, (ref) => pools.depth(ref));
 }

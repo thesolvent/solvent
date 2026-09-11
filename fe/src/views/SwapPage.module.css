@@ -511,6 +511,7 @@
 }
 
 .empty {
+  margin: 0;
   padding: 34px 18px;
   text-align: center;
   font-size: 14px;

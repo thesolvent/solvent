@@ -1,12 +1,13 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import { AsyncNote } from "@/components/AsyncNote";
 import { DepthChart } from "@/components/DepthChart";
 import { Crumbs } from "@/components/Crumbs";
 import { poolDetail } from "@/lib/pool-detail";
 import { tokenText } from "@/lib/explorer";
 import { useTrades } from "@/services/explorer";
 import { Term } from "@/components/Tooltip";
-import { usePool, usePoolDepth, usePoolRoster } from "@/services/pools";
+import { slug, usePoolDepth, usePools, usePoolRoster } from "@/services/pools";
 import { useApp } from "@/state";
 import { QueryFreshness } from "./QueryFreshness";
 
@@ -18,16 +19,19 @@ export function PoolDetailPage() {
   const { state, set } = useApp();
   const navigate = useNavigate();
   const { pair } = useParams();
-  const pool = usePool(pair);
+  const poolsQuery = usePools();
+  const pool = poolsQuery.data?.find((row) => slug(row.pair) === pair);
   const settlements = useTrades(
     pool?.ref
       ? { status: "confirmed", base: pool.ref.base, quote: pool.ref.quote }
       : undefined,
   );
+  const roster = usePoolRoster(pool);
+  const depth = usePoolDepth(pool);
   const d = poolDetail({
     pool,
-    roster: usePoolRoster(pool),
-    depth: usePoolDepth(pool),
+    roster: roster.data,
+    depth: depth.data,
     hoverFrac: state.hoverFrac,
     makerSort: state.makerSort,
   });
@@ -147,6 +151,14 @@ export function PoolDetailPage() {
           </div>
 
           <div data-scroll="1" className={styles.makerList}>
+            <AsyncNote
+              className={styles.settleLive}
+              empty={
+                d.makers.length === 0 ? "No makers in this pool." : undefined
+              }
+              query={roster}
+              subject="makers"
+            />
             {d.makers.map((m) => (
               <button
                 key={m.addr}
@@ -187,27 +199,16 @@ export function PoolDetailPage() {
             className={styles.settleList}
             aria-busy={settlements.isFetching}
           >
-            {settlements.isLoading && (
-              <p className={styles.settleLive} role="status">
-                Loading settlements…
-              </p>
-            )}
-            {settlements.isError && (
-              <p className={styles.settleLive} role="alert">
-                Couldn’t refresh settlements.{" "}
-                <button
-                  type="button"
-                  onClick={() => void settlements.refetch()}
-                >
-                  Try again
-                </button>
-              </p>
-            )}
-            {settlements.isSuccess && settlements.data.items.length === 0 && (
-              <p className={styles.settleLive}>
-                No confirmed trades for this pair yet.
-              </p>
-            )}
+            <AsyncNote
+              className={styles.settleLive}
+              empty={
+                settlements.data?.items.length === 0
+                  ? "No confirmed trades for this pair yet."
+                  : undefined
+              }
+              query={settlements}
+              subject="settlements"
+            />
             {settlements.data?.items.map((trade) => {
               const settledAt =
                 trade.settledAt == null

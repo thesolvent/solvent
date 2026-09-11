@@ -1,0 +1,14 @@
+.error {
+  color: var(--err-ink);
+  background: var(--err-bg);
+}
+
+.retry {
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}

@@ -381,4 +381,41 @@ describe("SwapPage", () => {
     });
     expect(button).toBeDisabled();
   });
+
+  it("says the token list is unread rather than that nothing matches", async () => {
+    const list = vi.fn(() => new Promise<never>(() => {}));
+    renderWithServices(<SwapPage />, {
+      assets: { list },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    await waitFor(() => expect(list).toHaveBeenCalled());
+    act(() => useAppStore.setState({ picker: "from" }));
+
+    expect(await screen.findByText("Loading assets…")).toBeInTheDocument();
+    expect(
+      screen.queryByText("No assets match that filter."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reports a failed token list and reads again when asked", async () => {
+    const list = vi.fn().mockRejectedValue(new Error("assets unavailable"));
+    renderWithServices(<SwapPage />, {
+      assets: { list },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    await waitFor(() => expect(list).toHaveBeenCalled());
+    act(() => useAppStore.setState({ picker: "from" }));
+
+    expect(
+      await screen.findByText("Couldn’t load assets."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("No assets match that filter."),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+  });
 });

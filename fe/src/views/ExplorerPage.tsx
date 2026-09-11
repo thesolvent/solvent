@@ -270,7 +270,7 @@ function ExplorerRebates({
   currentBlock?: number;
   status: RebateExplorerStatus;
 }) {
-  const assets = useAssets();
+  const assets = useAssets().data ?? [];
   const active = status === "Active";
   const query = useRebates({ status: active ? "ready" : "executed" });
   const continuity = useActiveRebatePages(
@@ -327,7 +327,7 @@ function ExplorerRebates({
 
 export function ExplorerPage() {
   const { state, set } = useApp();
-  const pools = usePools();
+  const pools = usePools().data ?? [];
   const stats = useExplorerStats();
   const isTrades = state.xpTab === "Trades";
   const isActivity = state.xpTab === "Activity";
