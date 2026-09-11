@@ -29,13 +29,22 @@ pub struct Features {
     pub send_buy: bool,
 }
 
+/// A chain this deployment serves: the id an asset reports, the name people read, and the icon
+/// that stands for it. An asset carries only the id, so the name and icon have to come from here.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct Chain {
+    pub chain_id: u64,
+    pub name: String,
+    pub logo_uri: Option<String>,
+}
+
 /// Runtime config the FE reads instead of hardcoding — also the `/config` response body.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct AppConfig {
     pub chain_id: u64,
     pub features: Features,
     pub default_fee_bps: u32,
-    pub networks: Vec<String>,
+    pub chains: Vec<Chain>,
     pub block_explorer_url: String,
     /// The Aqua deployment holding maker virtual balances.
     #[schema(value_type = String)]

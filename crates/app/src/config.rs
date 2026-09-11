@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 
 use alloy::primitives::{address, Address};
 use serde::Deserialize;
-use solvent_adapters::http::state::{AppConfig, Features};
+use solvent_adapters::http::state::{AppConfig, Chain, Features};
 use solvent_core::asset::TokenList;
 use solvent_core::SolventError;
 
@@ -27,8 +27,8 @@ pub struct Config {
     pub default_fee_bps: u32,
     #[serde(default = "default_explorer")]
     pub block_explorer_url: String,
-    #[serde(default = "default_networks")]
-    pub networks: Vec<String>,
+    #[serde(default = "default_chains")]
+    pub chains: Vec<ChainConfig>,
     #[serde(default = "default_true")]
     pub faucet: bool,
     #[serde(default = "default_token_list")]
@@ -75,6 +75,26 @@ pub struct Config {
     pub wallet_state_db: String,
 }
 
+/// One chain this deployment serves, as the config file names it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChainConfig {
+    pub chain_id: u64,
+    pub name: String,
+    #[serde(default)]
+    pub logo_uri: Option<String>,
+}
+
+impl ChainConfig {
+    fn to_chain(&self) -> Chain {
+        Chain {
+            chain_id: self.chain_id,
+            name: self.name.clone(),
+            logo_uri: self.logo_uri.clone(),
+        }
+    }
+}
+
 /// One Binance price symbol and the tokens whose USD price it feeds.
 #[derive(Debug, Deserialize)]
 pub struct PriceSymbol {
@@ -109,7 +129,7 @@ impl Config {
                 send_buy: false,
             },
             default_fee_bps: self.default_fee_bps,
-            networks: self.networks.clone(),
+            chains: self.chains.iter().map(ChainConfig::to_chain).collect(),
             block_explorer_url: self.block_explorer_url.clone(),
             aqua: self.aqua_address,
             app: self.app_address,
@@ -126,8 +146,12 @@ fn default_fee_bps() -> u32 {
 fn default_explorer() -> String {
     "http://localhost:5100".to_string()
 }
-fn default_networks() -> Vec<String> {
-    vec!["Ethereum".to_string()]
+fn default_chains() -> Vec<ChainConfig> {
+    vec![ChainConfig {
+        chain_id: 1,
+        name: "Ethereum".to_string(),
+        logo_uri: None,
+    }]
 }
 fn default_true() -> bool {
     true

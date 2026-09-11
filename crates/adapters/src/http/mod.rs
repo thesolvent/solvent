@@ -150,7 +150,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::chain::ChainHead;
-    use crate::http::state::{AppConfig, Features};
+    use crate::http::state::{AppConfig, Chain, Features};
     use crate::ingest::uniswapx::ServerCosigner;
     use crate::ledger::SystemClock;
     use crate::routing::MarketCache;
@@ -560,7 +560,11 @@ mod tests {
                     send_buy: false,
                 },
                 default_fee_bps: 5,
-                networks: vec!["Ethereum".to_string()],
+                chains: vec![Chain {
+                    chain_id: 31337,
+                    name: "Ethereum".to_string(),
+                    logo_uri: None,
+                }],
                 block_explorer_url: "http://localhost:5100".to_string(),
                 aqua: Address::ZERO,
                 app: Address::ZERO,

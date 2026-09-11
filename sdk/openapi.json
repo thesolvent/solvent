@@ -1130,7 +1130,7 @@
           "chain_id",
           "features",
           "default_fee_bps",
-          "networks",
+          "chains",
           "block_explorer_url",
           "aqua",
           "app",
@@ -1155,6 +1155,12 @@
             "format": "int64",
             "minimum": 0
           },
+          "chains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Chain"
+            }
+          },
           "cosigner": {
             "type": "string",
             "description": "The resolver authorized to cosign taker orders."
@@ -1166,12 +1172,6 @@
           },
           "features": {
             "$ref": "#/components/schemas/Features"
-          },
-          "networks": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           },
           "permit2": {
             "type": "string",
@@ -1258,6 +1258,30 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "Chain": {
+        "type": "object",
+        "description": "A chain this deployment serves: the id an asset reports, the name people read, and the icon\nthat stands for it. An asset carries only the id, so the name and icon have to come from here.",
+        "required": [
+          "chain_id",
+          "name"
+        ],
+        "properties": {
+          "chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
           }
         }
       },
@@ -2479,7 +2503,7 @@
               "chain_id",
               "features",
               "default_fee_bps",
-              "networks",
+              "chains",
               "block_explorer_url",
               "aqua",
               "app",
@@ -2504,6 +2528,12 @@
                 "format": "int64",
                 "minimum": 0
               },
+              "chains": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Chain"
+                }
+              },
               "cosigner": {
                 "type": "string",
                 "description": "The resolver authorized to cosign taker orders."
@@ -2515,12 +2545,6 @@
               },
               "features": {
                 "$ref": "#/components/schemas/Features"
-              },
-              "networks": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
               },
               "permit2": {
                 "type": "string",
@@ -4453,6 +4477,13 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The token list's icon, when it carried one."
           },
           "symbol": {
             "type": "string"

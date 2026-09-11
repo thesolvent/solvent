@@ -12,6 +12,7 @@
       "symbol": "WETH",
       "name": "Wrapped Ether",
       "decimals": 18,
+      "logoURI": "/tokens/weth.png",
       "tags": [
         "Majors"
       ]
@@ -22,6 +23,7 @@
       "symbol": "USDC",
       "name": "USD Coin",
       "decimals": 6,
+      "logoURI": "/tokens/usdc.png",
       "tags": [
         "Stables"
       ]
@@ -32,6 +34,7 @@
       "symbol": "USDT",
       "name": "Tether USD",
       "decimals": 6,
+      "logoURI": "/tokens/usdt.png",
       "tags": [
         "Stables"
       ]
@@ -42,6 +45,7 @@
       "symbol": "WBTC",
       "name": "Wrapped BTC",
       "decimals": 8,
+      "logoURI": "/tokens/wbtc.png",
       "tags": [
         "Majors"
       ]
@@ -52,6 +56,7 @@
       "symbol": "DAI",
       "name": "Dai Stablecoin",
       "decimals": 18,
+      "logoURI": "/tokens/dai.png",
       "tags": [
         "Stables"
       ]
@@ -62,6 +67,7 @@
       "symbol": "LINK",
       "name": "ChainLink Token",
       "decimals": 18,
+      "logoURI": "/tokens/link.png",
       "tags": [
         "DeFi"
       ]

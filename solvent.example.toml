@@ -16,7 +16,6 @@ app_address = "0x0000000000000000000000000000000000000000"
 
 default_fee_bps = 5
 block_explorer_url = "http://localhost:5100"
-networks = ["Ethereum"]
 faucet = true
 
 # Token metadata (Uniswap Token List JSON). Addresses must match the devnet deploy.
@@ -71,3 +70,10 @@ tokens = ["0x6b175474e89094c44da98b954eedeac495271d0f"]  # DAI
 [[price_symbols]]
 symbol = "LINKUSDT"
 tokens = ["0x514910771af9ca656af840dff83e8264ecf986ca"]  # LINK
+
+# Chains this deployment serves. An asset reports only its chain id; the name and icon come from
+# here. Array-of-tables, so this must stay below every root-level key.
+[[chains]]
+chain_id = 31337
+name = "Ethereum"
+logo_uri = "/chains/ethereum.png"

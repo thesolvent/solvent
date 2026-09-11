@@ -191,6 +191,7 @@ mod tests {
             chain_id: 31337,
             symbol: format!("T{n}"),
             decimals: 18,
+            logo_uri: None,
         }
     }
 
