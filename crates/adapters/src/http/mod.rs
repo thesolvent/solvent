@@ -136,7 +136,7 @@ mod tests {
     use solvent_core::deps::execution::{
         Execution, ExecutionError, SettlementError, SettlementReader, SimError, SimGate,
     };
-    use solvent_core::deps::ingest::{FillBuilder, FillBuilderError};
+    use solvent_core::deps::ingest::{BuiltFill, FillBuilder, FillBuilderError};
     use solvent_core::deps::ledger::{
         BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError,
     };
@@ -468,8 +468,8 @@ mod tests {
             _: &Intent,
             _: &RoutePlan,
             _: &Snapshot,
-        ) -> Result<Bytes, FillBuilderError> {
-            Ok(Bytes::new())
+        ) -> Result<BuiltFill, FillBuilderError> {
+            Ok(BuiltFill::new(Address::ZERO, Bytes::new()))
         }
     }
 

@@ -128,15 +128,15 @@ async fn e2e_self_hosted_order_fills_on_chain() {
         .expect("reserve the routed plan");
 
     // Build the fill calldata and settle it on-chain as the filler's owner.
-    let calldata = UniswapXFillBuilder::new(h.app)
+    let built = UniswapXFillBuilder::new(h.app, stack.filler)
         .build(&intent, &plan, &snap)
         .expect("fill calldata");
     let receipt = h
         .maker_provider
         .send_transaction(
             TransactionRequest::default()
-                .to(stack.filler)
-                .input(TransactionInput::new(calldata)),
+                .to(built.target)
+                .input(TransactionInput::new(built.calldata)),
         )
         .await
         .expect("send fill")

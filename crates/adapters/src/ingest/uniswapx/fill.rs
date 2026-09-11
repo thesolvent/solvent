@@ -6,7 +6,7 @@ use alloy::primitives::{Address, Bytes};
 use alloy::sol;
 use alloy::sol_types::{SolCall, SolValue};
 
-use solvent_core::deps::ingest::{FillBuilder, FillBuilderError};
+use solvent_core::deps::ingest::{BuiltFill, FillBuilder, FillBuilderError};
 use solvent_core::primitives::ingest::Intent;
 use solvent_core::primitives::registry::{Snapshot, StrategyKey};
 use solvent_core::primitives::routing::{RouteLeg, RoutePlan};
@@ -33,14 +33,16 @@ sol! {
 }
 
 /// `router` is the deployment's single AquaSwapVMRouter — the `app` that keys strategies and the
-/// SwapVM each source runs on.
+/// SwapVM each source runs on. `filler` is this builder's own deployed `UniswapXAquaFiller` — the
+/// contract a built fill must be sent to.
 pub struct UniswapXFillBuilder {
     router: Address,
+    filler: Address,
 }
 
 impl UniswapXFillBuilder {
-    pub fn new(router: Address) -> UniswapXFillBuilder {
-        UniswapXFillBuilder { router }
+    pub fn new(router: Address, filler: Address) -> UniswapXFillBuilder {
+        UniswapXFillBuilder { router, filler }
     }
 }
 
@@ -50,7 +52,7 @@ impl FillBuilder for UniswapXFillBuilder {
         intent: &Intent,
         plan: &RoutePlan,
         snapshot: &Snapshot,
-    ) -> Result<Bytes, FillBuilderError> {
+    ) -> Result<BuiltFill, FillBuilderError> {
         if plan.legs.is_empty() {
             return Err(FillBuilderError::NoLegs);
         }
@@ -68,7 +70,7 @@ impl FillBuilder for UniswapXFillBuilder {
             },
             sources,
         };
-        Ok(Bytes::from(call.abi_encode()))
+        Ok(BuiltFill::new(self.filler, Bytes::from(call.abi_encode())))
     }
 }
 
@@ -112,6 +114,10 @@ mod tests {
         address!("9999999999999999999999999999999999999999")
     }
 
+    fn filler() -> Address {
+        address!("8888888888888888888888888888888888888888")
+    }
+
     fn leg() -> RouteLeg {
         RouteLeg {
             maker: MakerId(Address::from([1u8; 20])),
@@ -145,7 +151,7 @@ mod tests {
         let snap = snapshot_with(Bytes::from(order.abi_encode()));
 
         let l = leg();
-        let src = UniswapXFillBuilder::new(router())
+        let src = UniswapXFillBuilder::new(router(), filler())
             .source_for(&l, &snap)
             .expect("maps");
         assert_eq!(src.router, router());
@@ -160,14 +166,15 @@ mod tests {
 
     #[test]
     fn missing_strategy_errors() {
-        let r = UniswapXFillBuilder::new(router()).source_for(&leg(), &Snapshot::default());
+        let r =
+            UniswapXFillBuilder::new(router(), filler()).source_for(&leg(), &Snapshot::default());
         assert!(matches!(r, Err(FillBuilderError::MissingStrategy)));
     }
 
     #[test]
     fn undecodable_program_errors() {
         let snap = snapshot_with(Bytes::from(vec![1, 2, 3]));
-        let r = UniswapXFillBuilder::new(router()).source_for(&leg(), &snap);
+        let r = UniswapXFillBuilder::new(router(), filler()).source_for(&leg(), &snap);
         assert!(matches!(r, Err(FillBuilderError::UndecodableProgram)));
     }
 }

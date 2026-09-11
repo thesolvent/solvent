@@ -1,22 +1,38 @@
-//! The fill-builder port: turn a routed plan into the calldata that settles it on-chain. One impl
-//! per protocol; the caller sends the returned calldata to that protocol's filler contract.
+//! The fill-builder port: turn a routed plan into the calldata that settles it on-chain, and the
+//! contract it must be sent to. One impl per protocol, each targeting its own deployed filler
+//! contract — the target travels with the calldata rather than being assumed by the caller, since
+//! two protocols never share one filler contract.
 
-use alloy_primitives::Bytes;
+use alloy_primitives::{Address, Bytes};
 use thiserror::Error;
 
 use crate::primitives::ingest::Intent;
 use crate::primitives::registry::Snapshot;
 use crate::primitives::routing::RoutePlan;
 
-/// Builds the ABI-encoded fill calldata for a routed plan. `snapshot` resolves each leg's maker
-/// strategy (the on-chain order to source from).
+/// One protocol's fill, ready to submit: the calldata, and the filler contract it targets.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct BuiltFill {
+    pub target: Address,
+    pub calldata: Bytes,
+}
+
+impl BuiltFill {
+    pub fn new(target: Address, calldata: Bytes) -> BuiltFill {
+        BuiltFill { target, calldata }
+    }
+}
+
+/// Builds the ABI-encoded fill calldata for a routed plan, and names the contract it targets.
+/// `snapshot` resolves each leg's maker strategy (the on-chain order to source from).
 pub trait FillBuilder: Send + Sync {
     fn build(
         &self,
         intent: &Intent,
         plan: &RoutePlan,
         snapshot: &Snapshot,
-    ) -> Result<Bytes, FillBuilderError>;
+    ) -> Result<BuiltFill, FillBuilderError>;
 }
 
 /// A fill-build failure. All are unreachable on the normal route→fill path (a routed leg always has
@@ -30,4 +46,6 @@ pub enum FillBuilderError {
     MissingStrategy,
     #[error("a routed leg's shipped program did not decode")]
     UndecodableProgram,
+    #[error("intent raw/signature did not decode: {0}")]
+    MalformedIntent(&'static str),
 }

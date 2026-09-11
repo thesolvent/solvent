@@ -8,7 +8,7 @@ mod common;
 
 use std::sync::Arc;
 
-use alloy::primitives::{address, Address, Bytes, U256};
+use alloy::primitives::{address, Address, U256};
 use alloy::providers::Provider;
 use alloy::signers::local::PrivateKeySigner;
 use futures::StreamExt;
@@ -21,7 +21,7 @@ use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, Walletk
 use solvent_adapters::ingest::uniswapx::{
     OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXFillBuilder, UniswapXV2Normalizer,
 };
-use solvent_core::deps::ingest::{FillBuilder, Normalizer, OrderFeed};
+use solvent_core::deps::ingest::{BuiltFill, FillBuilder, Normalizer, OrderFeed};
 use solvent_core::execution::ExecutionService;
 use solvent_core::ledger::{AvailableSnapshot, LedgerService};
 use solvent_core::primitives::execution::{FillOutcome, FillTx, PendingFill};
@@ -50,7 +50,7 @@ async fn reserve_order(
     output: U256,
     input: U256,
     stale: bool,
-) -> (Intent, RoutePlan, Bytes, AvailableSnapshot) {
+) -> (Intent, RoutePlan, BuiltFill, AvailableSnapshot) {
     let h = &stack.h;
     let budgets = budget_source(h, snapshot);
 
@@ -137,10 +137,10 @@ async fn reserve_order(
     svc.reserve(rid(1), intent.id, sources, 60)
         .await
         .expect("reserve the routed plan");
-    let calldata = UniswapXFillBuilder::new(h.app)
+    let built = UniswapXFillBuilder::new(h.app, stack.filler)
         .build(&intent, &plan, &snap)
         .expect("fill calldata");
-    (intent, plan, calldata, caps)
+    (intent, plan, built, caps)
 }
 
 /// A migrated SQLite pool for the executor's durable in-flight tracking, in `dir`. Kept across a
@@ -216,7 +216,7 @@ async fn e2e_fill_confirms_and_posts_the_actual_pulled_amount() {
 
     let output = spec.ship_hi / U256::from(10u64);
     let input = spec.ship_lo / U256::from(2u64);
-    let (intent, plan, calldata, caps) =
+    let (intent, plan, built, caps) =
         reserve_order(&stack, &snapshot, &led, output, input, false).await;
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -227,8 +227,8 @@ async fn e2e_fill_confirms_and_posts_the_actual_pulled_amount() {
             intent.id,
             stack.chain_id,
             stack.h.maker,
-            stack.filler,
-            calldata,
+            built.target,
+            built.calldata,
         ),
         rid(1),
     );
@@ -270,7 +270,7 @@ async fn e2e_stale_order_is_rejected_by_sim_and_voided() {
 
     let output = spec.ship_hi / U256::from(10u64);
     let input = spec.ship_lo / U256::from(2u64);
-    let (intent, plan, calldata, caps) =
+    let (intent, plan, built, caps) =
         reserve_order(&stack, &snapshot, &led, output, input, true).await;
     let held = AccountKey::StrategyVirtual {
         maker: plan.legs[0].maker,
@@ -291,8 +291,8 @@ async fn e2e_stale_order_is_rejected_by_sim_and_voided() {
             intent.id,
             stack.chain_id,
             stack.h.maker,
-            stack.filler,
-            calldata,
+            built.target,
+            built.calldata,
         ),
         rid(1),
     );
@@ -328,7 +328,7 @@ async fn e2e_recovers_an_in_flight_fill_after_restart() {
 
     let output = spec.ship_hi / U256::from(10u64);
     let input = spec.ship_lo / U256::from(2u64);
-    let (intent, plan, calldata, caps) =
+    let (intent, plan, built, caps) =
         reserve_order(&stack, &snapshot, &led, output, input, false).await;
 
     // Durable execution stores that outlive the "crashed" service instance.
@@ -345,8 +345,8 @@ async fn e2e_recovers_an_in_flight_fill_after_restart() {
                     intent.id,
                     stack.chain_id,
                     stack.h.maker,
-                    stack.filler,
-                    calldata,
+                    built.target,
+                    built.calldata,
                 ),
                 rid(1),
             ))

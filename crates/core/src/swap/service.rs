@@ -30,8 +30,13 @@ use crate::SolventError;
 pub struct SwapConfig {
     pub routing: RoutingConfig,
     pub chain_id: u64,
-    /// The filler contract and the account authorized to call it.
+    /// Matched against an order's exclusive filler (`Intent::required_output`) to decide whether
+    /// we owe the toll. Protocol-agnostic in practice: only a UniswapX-sourced intent ever carries
+    /// exclusivity, so this is unused for any other protocol's intent. Not the same thing as a
+    /// fill's target contract — that comes from the intent's own `FillBuilder::build`.
     pub filler: Address,
+    /// The account authorized to call a fill's target contract — whichever one the intent's
+    /// protocol builder names in its `BuiltFill`.
     pub filler_owner: Address,
     /// How long a reservation holds before the TTL sweep may release it.
     pub reservation_ttl_secs: u64,
@@ -241,14 +246,14 @@ impl SwapService {
         reservation: ReservationId,
         now: u64,
     ) -> Result<SwapOutcome, SolventError> {
-        let calldata = fill_builder.build(intent, plan, snapshot)?;
+        let built = fill_builder.build(intent, plan, snapshot)?;
         let pending = PendingFill::new(
             FillTx::new(
                 intent.id,
                 self.config.chain_id,
                 self.config.filler_owner,
-                self.config.filler,
-                calldata,
+                built.target,
+                built.calldata,
             ),
             reservation,
         );
@@ -467,7 +472,7 @@ mod tests {
     use crate::deps::execution::{
         Execution, ExecutionError, SettlementError, SettlementReader, SimError, SimGate,
     };
-    use crate::deps::ingest::FillBuilderError;
+    use crate::deps::ingest::{BuiltFill, FillBuilderError};
     use crate::deps::ledger::{BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError};
     use crate::deps::routing::{GasPrice, GasPriceError, PriceOracle, PriceOracleError};
     use crate::deps::trade::{
@@ -644,8 +649,11 @@ mod tests {
             _: &Intent,
             _: &RoutePlan,
             _: &Snapshot,
-        ) -> Result<Bytes, FillBuilderError> {
-            Ok(Bytes::from(vec![0x01, 0x02]))
+        ) -> Result<BuiltFill, FillBuilderError> {
+            Ok(BuiltFill {
+                target: addr(0xF1),
+                calldata: Bytes::from(vec![0x01, 0x02]),
+            })
         }
     }
 
