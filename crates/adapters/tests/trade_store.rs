@@ -34,6 +34,7 @@ fn tid(i: u64) -> TradeId {
 
 fn trade(id: TradeId, order: u8, taker: u8, status: TradeStatus) -> Trade {
     Trade {
+        decline_reason: None,
         indicative_amount_in: None,
         source: OrderSource::UniswapX,
         id,
@@ -194,6 +195,7 @@ async fn settle_is_terminal_and_idempotent() {
                 amount_out: Some(U256::from(950u64)),
                 tx_hash: Some(B256::from([9; 32])),
                 block_number: Some(123),
+                reason: None,
                 at: 1_700_000_010,
             },
         )
@@ -216,6 +218,7 @@ async fn settle_is_terminal_and_idempotent() {
                 amount_out: None,
                 tx_hash: None,
                 block_number: None,
+                reason: None,
                 at: 1_700_000_099,
             },
         )
@@ -340,6 +343,7 @@ async fn stats_counts_settled_confirmed_and_median_impact() {
         amount_out: Some(U256::from(900u64)),
         tx_hash: None,
         block_number: None,
+        reason: None,
         at: 1_700_000_100,
     };
     // Settle two confirmed, one failed; leave the fourth open.
@@ -597,4 +601,70 @@ async fn maker_period_filters_settlement_time_before_pagination() {
         .unwrap();
     assert_eq!(fills.len(), 1);
     assert_eq!(fills[0].trade.id, tid(1));
+}
+
+/// A decline's real reason (the sim gate's on-chain revert text, here) round-trips through
+/// `settle`, and a later no-reason settle (the terminal `settled_at` stamp) does not clear it.
+#[tokio::test]
+async fn settle_persists_the_decline_reason_without_a_later_settle_clearing_it() {
+    let store = setup().await;
+    let id = tid(1);
+    store
+        .create(
+            &trade(id, 1, 7, TradeStatus::Submitted),
+            &[],
+            &created(1_700_000_000),
+        )
+        .await
+        .unwrap();
+
+    store
+        .settle(
+            &id,
+            &Settlement {
+                status: TradeStatus::Declined,
+                amount_out: None,
+                tx_hash: None,
+                block_number: None,
+                reason: Some("TRANSFER_FROM_FAILED".to_string()),
+                at: 1_700_000_010,
+            },
+        )
+        .await
+        .unwrap();
+    let t = store.info(&id).await.unwrap().unwrap().trade;
+    assert_eq!(t.status, TradeStatus::Declined);
+    assert_eq!(t.decline_reason.as_deref(), Some("TRANSFER_FROM_FAILED"));
+
+    // A later settle carrying no reason (e.g. a reconcile stamping `settled_at`) must not clobber it.
+    store
+        .settle(
+            &id,
+            &Settlement {
+                status: TradeStatus::Declined,
+                amount_out: None,
+                tx_hash: None,
+                block_number: None,
+                reason: None,
+                at: 1_700_000_011,
+            },
+        )
+        .await
+        .unwrap();
+    let t = store.info(&id).await.unwrap().unwrap().trade;
+    assert_eq!(t.decline_reason.as_deref(), Some("TRANSFER_FROM_FAILED"));
+}
+
+/// A 1inch-sourced trade round-trips as `OrderSource::OneInch`, not the `Solvent` fallback.
+#[tokio::test]
+async fn one_inch_source_round_trips() {
+    let store = setup().await;
+    let mut row = trade(tid(1), 1, 7, TradeStatus::Submitted);
+    row.source = OrderSource::OneInch;
+    store
+        .create(&row, &[], &created(1_700_000_000))
+        .await
+        .unwrap();
+    let t = store.info(&tid(1)).await.unwrap().unwrap().trade;
+    assert_eq!(t.source, OrderSource::OneInch);
 }

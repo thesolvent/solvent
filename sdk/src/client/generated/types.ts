@@ -723,15 +723,33 @@ export interface components {
             required_out?: string | null;
             /** Format: int64 */
             seen_at: number;
-            /** @description Where it came from: `uniswapx` (the public book) or `solvent` (our own endpoint). */
+            /**
+             * @description Where it came from: `uniswapx` (the public book), `oneinch` (the public book), or `solvent`
+             *     (our own endpoint).
+             */
             source: string;
             token_in: string;
             token_out?: string | null;
+            /** @description Why the trade declined — the sim gate's real on-chain revert reason, or the margin call. */
+            trade_decline_reason?: string | null;
+            /** @description The trade's own id — what the explorer links to for the trade's full detail. */
+            trade_id?: string | null;
+            /**
+             * @description The trade this order became, if it was ever attempted — absent when it was refused at the
+             *     door or declined as unprofitable before routing ever reserved anything.
+             */
+            trade_status?: string | null;
+            trade_tx_hash?: string | null;
             /** @description `admitted` or `dropped`. */
             verdict: string;
         };
         ObservedOrders: {
             items: components["schemas"]["ObservedOrder"][];
+            /**
+             * Format: int64
+             * @description How many orders the feed has ever shown us — the denominator this page sits inside.
+             */
+            total: number;
         };
         /**
          * @description One tradeable pair offered by the Create wizard: the two tokens, their kind, mid price, the
@@ -1280,6 +1298,11 @@ export interface components {
                      * @description Signed order expiry as Unix seconds.
                      */
                     deadline_block?: number | null;
+                    /**
+                     * @description Why this trade declined — the admission rule, the sim gate's real on-chain revert reason,
+                     *     or the margin call. Absent for a trade that has not declined.
+                     */
+                    decline_reason?: string | null;
                     id: string;
                     indicative_input?: null | components["schemas"]["Amount"];
                     /** @description The swapper's input token and the maximum it authorized. */
@@ -1507,6 +1530,11 @@ export interface components {
                  * @description Signed order expiry as Unix seconds.
                  */
                 deadline_block?: number | null;
+                /**
+                 * @description Why this trade declined — the admission rule, the sim gate's real on-chain revert reason,
+                 *     or the margin call. Absent for a trade that has not declined.
+                 */
+                decline_reason?: string | null;
                 id: string;
                 indicative_input?: null | components["schemas"]["Amount"];
                 /** @description The swapper's input token and the maximum it authorized. */
@@ -1643,6 +1671,11 @@ export interface components {
              * @description Signed order expiry as Unix seconds.
              */
             deadline_block?: number | null;
+            /**
+             * @description Why this trade declined — the admission rule, the sim gate's real on-chain revert reason,
+             *     or the margin call. Absent for a trade that has not declined.
+             */
+            decline_reason?: string | null;
             id: string;
             indicative_input?: null | components["schemas"]["Amount"];
             /** @description The swapper's input token and the maximum it authorized. */
@@ -1874,6 +1907,11 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                offset?: number;
+                source?: string;
+                token_in?: string;
+                token_out?: string;
+                state?: string;
             };
             header?: never;
             path?: never;

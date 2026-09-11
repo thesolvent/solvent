@@ -1,5 +1,14 @@
-import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
+import {
+  keepPreviousData,
+  skipToken,
+  useInfiniteQuery,
+  useQuery,
+} from "@tanstack/react-query";
+import type {
+  ActivityFilter,
+  OrderFeedFilter,
+  TradeFilter,
+} from "@/ports/explorer";
 import { SolventApiError } from "@solvent/sdk/client";
 import { isTerminalTrade } from "@/lib/trade-lifecycle";
 import { useServices } from "./context";
@@ -60,12 +69,23 @@ export function tradeProblem(error: unknown): string {
   return "Couldn’t load this trade. Try again.";
 }
 
-/** Every order the feed showed us — the denominator behind the trade list. */
-export function useObservedOrders() {
+/** One page of the order feed, newest first and narrowed by `filter` — the denominator behind the
+ *  trade list. */
+export function useObservedOrders(
+  page: number,
+  pageSize: number,
+  filter: OrderFeedFilter,
+) {
   const { explorer } = useServices();
   return useQuery({
     ...LIVE_QUERY_OPTIONS,
-    queryKey: ["observed-orders"],
-    queryFn: () => explorer.orders(200),
+    queryKey: ["observed-orders", page, pageSize, filter],
+    queryFn: () =>
+      explorer.orders({
+        ...filter,
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      }),
+    placeholderData: keepPreviousData,
   });
 }

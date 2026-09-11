@@ -82,8 +82,15 @@ export interface SolventClient {
     poolDepth(query: PoolDepthQuery): Promise<PoolDepth>;
     quote(body: QuoteRequest): Promise<QuoteResponse>;
     swap(body: SwapRequest): Promise<SwapResponse>;
-    /** Every order the feed showed the resolver, newest first. */
-    orders(query?: { limit?: number }): Promise<ObservedOrders>;
+    /** Every order the feed showed the resolver, newest first, narrowed by the filter fields. */
+    orders(query?: {
+        limit?: number;
+        offset?: number;
+        source?: string;
+        token_in?: string;
+        token_out?: string;
+        state?: string;
+    }): Promise<ObservedOrders>;
     trades(query?: TradesQuery): Promise<List<Trade>>;
     tradeDetail(id: string): Promise<Trade>;
     activity(query?: ActivityQuery): Promise<List<ActivityEvent>>;

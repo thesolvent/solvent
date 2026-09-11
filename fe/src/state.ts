@@ -95,6 +95,9 @@ export type AppState = {
   xpStatus: string;
   xpPair: string;
   xpOpen: string | null;
+  xpOrderSource: string;
+  xpOrderPair: string;
+  xpOrderState: string;
 };
 
 export const INITIAL_STATE: AppState = {
@@ -173,6 +176,9 @@ export const INITIAL_STATE: AppState = {
   xpStatus: "All status",
   xpPair: "All pairs",
   xpOpen: null,
+  xpOrderSource: "All sources",
+  xpOrderPair: "All pairs",
+  xpOrderState: "All states",
 };
 
 /** Canvas-level knobs the design exposed as editor props. */

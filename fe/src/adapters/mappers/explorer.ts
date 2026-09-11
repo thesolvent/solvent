@@ -33,6 +33,7 @@ export function toTrade(api: Trade): TradeRecord {
       : null,
     source: api.source,
     priceImpactPct: api.price_impact_pct ?? null,
+    declineReason: api.decline_reason ?? null,
     makers:
       api.legs == null
         ? null
@@ -108,6 +109,10 @@ export function toObservedOrder(api: {
   verdict: string;
   reason?: string | null;
   seen_at: number;
+  trade_status?: string | null;
+  trade_id?: string | null;
+  trade_tx_hash?: string | null;
+  trade_decline_reason?: string | null;
 }): ObservedOrder {
   return {
     orderHash: api.order_hash,
@@ -120,5 +125,9 @@ export function toObservedOrder(api: {
     verdict: api.verdict,
     reason: api.reason ?? null,
     seenAt: api.seen_at,
+    tradeStatus: api.trade_status ?? null,
+    tradeId: api.trade_id ?? null,
+    tradeTxHash: api.trade_tx_hash ?? null,
+    tradeDeclineReason: api.trade_decline_reason ?? null,
   };
 }

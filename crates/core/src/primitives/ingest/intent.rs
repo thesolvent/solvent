@@ -16,6 +16,7 @@ const BPS: u64 = 10_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ProtocolId {
+    UniswapXV1,
     UniswapXV2,
     OneInchLimitOrder,
 }

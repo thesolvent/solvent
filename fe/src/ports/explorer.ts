@@ -1,6 +1,6 @@
 import type {
   ActivityRecord,
-  ObservedOrder,
+  ObservedOrderPage,
   ExplorerStats,
   RecordPage,
   TradeRecord,
@@ -18,9 +18,18 @@ export interface ActivityFilter {
   entity?: string;
 }
 
+export interface OrderFeedFilter {
+  source?: string;
+  tokenIn?: string;
+  tokenOut?: string;
+  state?: string;
+}
+
 export interface ExplorerPort {
-  /** Every order the feed showed us, newest first. */
-  orders(limit?: number): Promise<ObservedOrder[]>;
+  /** One page of every order the feed showed us, newest first, narrowed by the filter fields. */
+  orders(
+    query?: { limit?: number; offset?: number } & OrderFeedFilter,
+  ): Promise<ObservedOrderPage>;
   trades(
     filter: TradeFilter,
     cursor?: string,

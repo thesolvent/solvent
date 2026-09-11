@@ -391,6 +391,7 @@ async fn fetch_live() -> Vec<LiveOrder> {
         "https://api.uniswap.org/v2".to_string(),
         ChainId(1),
         "Dutch_V2".to_string(),
+        ProtocolId::UniswapXV2,
     )
     .expect("client builds");
     client

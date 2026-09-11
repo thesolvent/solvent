@@ -343,8 +343,64 @@ the project is pre-1.0 and evolving.
     entirely while unset (there is no real mainnet deployment yet), since a call to an address with
     no code would otherwise simulate as a trivial on-chain success and broadcast a real,
     gas-spending transaction that settles nothing, rather than declining cleanly.
+  - **1inch orders needing an epoch-manager check are no longer refused** — `NEED_CHECK_EPOCH_MANAGER`
+    only gates *whether* an order can still be filled (a soft-cancellation the real protocol
+    enforces on-chain), it never changes the maker/taker amounts, so it is treated the same as a
+    `FeeTaker` whitelist rejection: accepted at its real stated amounts, left to decline at
+    execution time if the epoch has moved on. Verified against real live orderbook data: every
+    liquid-pair order this codebase currently has liquidity for (UNI/USDT, USDC/USDT, USDT/USDC)
+    carries this bit, so refusing it outright meant refusing real, sourceable flow for no reason.
+  - **A second UniswapX feed: `Limit`-type orders, the original `ExclusiveDutchOrderReactor`** —
+    a separate deployment and order struct (`ExclusiveDutchOrder`, `ProtocolId::UniswapXV1`) from
+    the V2 reactor's `Dutch_V2` feed, wired up as its own independent feed/normalizer pair,
+    `uniswapx_v1_orders_api_url`/`uniswapx_v1_reactor`. Reuses the existing `UniswapXFillBuilder`
+    and deployed `UniswapXAquaFiller` unchanged — both only ever forward `intent.settler`/`raw`/
+    `signature` opaquely, with no reactor-generation-specific logic to duplicate. The wire format
+    was pinned against a real order pulled from the live API rather than assumed from the plain
+    (non-exclusive) `DutchOrderLib` docs, which are two fields short of what the reactor this
+    order type actually serves carries (`exclusiveFiller`/`exclusivityOverrideBps`) — decoding the
+    assumed shape against real data failed outright until corrected. A second real-data mismatch:
+    a fully flat order (no price movement, `decayStartTime == decayEndTime`) is common in live
+    `Limit` flow, and the real `DutchDecayLib.decay` special-cases `startAmount == endAmount`
+    before it ever looks at the window — a flat leg never reverts on `EndTimeBeforeStartTime`, even
+    with a zero-width window. The normalizer initially rejected these outright; fixed to only
+    require a valid window for a leg that actually decays, mirroring the contract's own check
+    order, verified against real fetched orders that were being wrongly refused.
+    Proven end to end on a mainnet fork: `UniswapXV1AquaFillerFork.t.sol` fills a real order
+    against the real deployed `ExclusiveDutchOrderReactor` through the unchanged
+    `UniswapXAquaFiller` contract — no contract change needed for this reactor generation.
+  - **The order-feed pipeline and decision loop now start whenever at least one feed is
+    configured** (UniswapX V2, UniswapX V1, or 1inch), not only under UniswapX V2's own key —
+    previously a deployment running only the 1inch or V1 feed would have left the entire ingest
+    pipeline inert despite looking fully configured.
+- **The order feed records why a trade declined, and `/v1/orders` exposes it end to end.**
+  `Settlement`/`Trade`/`TradeView` carry a `decline_reason` (`crates/adapters/migrations/
+  0014_trade_decline_reason.sql`), populated with the real admission rule, the sim gate's actual
+  on-chain revert reason, or the margin call — not just the terminal status. A `settle()`'s `reason:
+  None` leaves an already-recorded reason as-is (`COALESCE` on write), so the reconcile loop's own
+  terminal settle can't clobber the reason the swap service set at creation. Fixed a real decode bug
+  along the way: `row_to_trade`'s source match only recognized `"uniswapx"`, silently mapping every
+  `"oneinch"` trade to `OrderSource::Solvent`.
+- **`GET /v1/orders` gained real pagination and filtering.** `offset`/`total` replace the previous
+  fixed 200-row window — a deployment with heavier 1inch volume was pushing genuinely-filled
+  UniswapX orders out of the only window the API could return. Filtering is server-side, not
+  client-side: `source`, `token_in`/`token_out` (a directional pair), and `state` (a derived bucket
+  — `filled`/`declined`/`failed_onchain`/`unprofitable`/`refused`/`pricing` — built from verdict
+  plus trade lifecycle the same way the explorer UI computes it, not a stored column) all narrow
+  both the page and its `total`, so a filtered page count is never wrong. The feed's `trade.id`
+  is exposed too, so a filled order can link straight to its trade's own detail page.
 
 ### Added — frontend (`fe/`, React + Vite)
+- **The order feed is a full peer of Trades/Activity**, with real protocol icons (sourced from
+  CoinGecko, not fabricated), a source badge whose hover tooltip names the actual order type
+  (e.g. "UniswapX — Dutch-auction intent order (V2 reactor)"), and a state pill whose hover tooltip
+  carries the real reason (an admission rule, a decline reason, an on-chain revert) instead of
+  showing it as a permanently-visible line. Filters for source, pair, and state are backed by the
+  new server-side `/v1/orders` query params, so a filtered result's page count is always correct
+  rather than only ever reflecting one page's worth of client-side filtering. Ten rows per page,
+  with a `‹ page / total ›` control sitting beside the summary line. A row that became a trade
+  (has a `trade_id`) routes straight to its trade detail page on click; a row with nothing to route
+  to (refused, or not yet a trade) stays a plain row.
 - **Live Makers and strategy details** — connect the original dashboard and strategy panels to
   address-based reads, rolling maker periods, confirmed-order fill share and submission-to-confirmation
   latency. Keep the existing chart/control placement, restore the prior Explorer/Trade layout,

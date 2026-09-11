@@ -1,16 +1,25 @@
-//! Decodes a 1inch Limit Order Protocol v4 order into the canonical `Intent` — for observation,
-//! not (yet) for filling: this codebase has no `FillBuilder` for this protocol, so every 1inch
-//! `Intent` only ever reaches the order log and the decision loop's quote pricing, never a
-//! submitted trade.
+//! Decodes a 1inch Limit Order Protocol v4 order into the canonical `Intent`.
 //!
-//! Because nothing here builds fill calldata, the bar for accepting an order is "can this
-//! codebase determine its real making/taking amounts", not "can this codebase fill it". That
-//! excludes only shapes whose amounts depend on state this normalizer cannot evaluate:
+//! The bar for accepting an order is "can this codebase determine its real making/taking
+//! amounts and construct a fill for it", not "will the fill definitely succeed" — the real
+//! protocol enforces its own fillability checks on-chain regardless of what this normalizer
+//! thinks, the same way a wrong-nonce UniswapX order fails at the reactor rather than here. That
+//! excludes only shapes whose *amounts* depend on state this normalizer cannot evaluate, or whose
+//! fill requires extra calldata this codebase does not construct:
 //!
-//! - A **pre-interaction**, **epoch check**, or **Permit2** flag changes how the fill itself is
-//!   authorized or funded, not the order's stated amounts — but this codebase has no way to
-//!   confirm any of those succeed, so an order carrying one is refused rather than recorded on an
-//!   assumption.
+//! - A **pre-interaction** or **Permit2** flag means the fill needs data this codebase does not
+//!   build — arbitrary maker-specified interaction calldata, or a Permit2 signature blob — not
+//!   just a bit this normalizer could pass through unchanged, so an order carrying either is
+//!   refused.
+//! - An **epoch-manager check** gates *whether* the order is still live (the maker's own
+//!   bulk-invalidate-by-series mechanism, `SeriesEpochManager.epochEquals`), evaluated purely
+//!   from the order's own encoded `maker`/`series`/`epoch` fields against on-chain state — it
+//!   requires no extra calldata from the taker and never touches `makingAmount`/`takingAmount`
+//!   (confirmed against `OrderMixin.sol`'s `needCheckEpochManager` check, which runs before any
+//!   transfer and only ever reverts `WrongSeriesNonce`, exactly like the `FeeTaker` whitelist
+//!   check below). So it is accepted at its stated amounts, and a maker who has since
+//!   invalidated the epoch is discovered the same way an unwhitelisted taker is: a real revert
+//!   at fill time, not a guess made here.
 //! - An **extension** field the protocol reserves for maker/taker asset suffixes, permits, a
 //!   predicate, or a runtime amount calculator (making/taking amount data) can only change what
 //!   this order actually costs — refused unless the extension is provably just 1inch's own
@@ -39,21 +48,22 @@ use super::codec::{
     router_address, WireOrder, POST_INTERACTION_DATA,
 };
 
-// `MakerTraits` bit positions, per `MakerTraitsLib.sol`. `ALLOW_MULTIPLE_FILLS` (bit 254) is
-// deliberately absent: this normalizer never checks it, per the module doc.
+// `MakerTraits` bit positions, per `MakerTraitsLib.sol`. `ALLOW_MULTIPLE_FILLS` (bit 254) and
+// `NEED_CHECK_EPOCH_MANAGER` (bit 250) are deliberately absent: this normalizer never checks
+// either, per the module doc.
 const PRE_INTERACTION: usize = 252;
 const POST_INTERACTION: usize = 251;
-const NEED_CHECK_EPOCH_MANAGER: usize = 250;
 const HAS_EXTENSION: usize = 249;
 const USE_PERMIT2: usize = 248;
 const EXPIRATION_SHIFT: usize = 80;
 const EXPIRATION_BITS: usize = 40;
 const ALLOWED_SENDER_BITS: usize = 80;
 
-/// Flags refused outright: each implies fill-authorization state this normalizer cannot evaluate,
-/// regardless of what the extension (if any) turns out to contain.
+/// Flags refused outright: each means the fill needs calldata this codebase does not construct
+/// (arbitrary pre-interaction data, a Permit2 blob), regardless of what the extension (if any)
+/// turns out to contain.
 fn always_unsupported_mask() -> U256 {
-    [PRE_INTERACTION, NEED_CHECK_EPOCH_MANAGER, USE_PERMIT2]
+    [PRE_INTERACTION, USE_PERMIT2]
         .into_iter()
         .fold(U256::ZERO, |mask, bit| mask | (U256::from(1u8) << bit))
 }
@@ -191,9 +201,10 @@ mod tests {
 
     use super::super::codec::Order;
 
-    // Exercised only by these tests, which build orders setting bit 254 directly — production
-    // code never checks it, per the module doc.
+    // Exercised only by these tests, which build orders setting these bits directly — production
+    // code never checks either, per the module doc.
     const ALLOW_MULTIPLE_FILLS: usize = 254;
+    const NEED_CHECK_EPOCH_MANAGER: usize = 250;
 
     const FEE_TAKER: Address = address!("c0DFdB9E7a392c3dBBE7c6FBe8FBC1789C9FE05e");
 
@@ -309,6 +320,18 @@ mod tests {
         let intent = OneInchNormalizer
             .normalize(&raw_of(&o, Vec::new(), 1))
             .expect("multi-fill order, still quotable at its stated amounts");
+        assert_eq!(
+            intent.input.curve,
+            AmountCurve::scalar(U256::from(1_000u64))
+        );
+    }
+
+    #[test]
+    fn an_order_needing_epoch_check_is_accepted_at_its_stated_amounts() {
+        let o = order(U256::from(1u8) << NEED_CHECK_EPOCH_MANAGER);
+        let intent = OneInchNormalizer
+            .normalize(&raw_of(&o, Vec::new(), 1))
+            .expect("epoch-gated order, still quotable at its stated amounts");
         assert_eq!(
             intent.input.curve,
             AmountCurve::scalar(U256::from(1_000u64))

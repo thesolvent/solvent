@@ -57,7 +57,10 @@ impl ReconcileService {
         let in_flight = self.execution.tracked_reservations().await?;
         let swept = self.ledger.sweep_expired(&in_flight).await?;
         for intent in &swept {
-            self.apply(*intent, |_| failed(now)).await?;
+            self.apply(*intent, |_| {
+                failed("reservation expired before the fill confirmed", now)
+            })
+            .await?;
         }
 
         Ok(ReconcileReport {
@@ -75,9 +78,10 @@ impl ReconcileService {
                 amount_out: Some(trade.min_amount_out),
                 tx_hash: Some(tx),
                 block_number: Some(block),
+                reason: None,
                 at: now,
             },
-            SettledOutcome::Failed => failed(now),
+            SettledOutcome::Failed => failed("fill reverted on-chain after submission", now),
         })
         .await
     }
@@ -100,12 +104,13 @@ impl ReconcileService {
 }
 
 /// A terminal `Failed` settlement — a fill that reverted, dropped, or timed out unfilled.
-fn failed(now: u64) -> Settlement {
+fn failed(reason: &'static str, now: u64) -> Settlement {
     Settlement {
         status: TradeStatus::Failed,
         amount_out: None,
         tx_hash: None,
         block_number: None,
+        reason: Some(reason.to_string()),
         at: now,
     }
 }
@@ -356,6 +361,7 @@ mod tests {
 
     fn trade(order_hash: IntentId) -> Trade {
         Trade {
+            decline_reason: None,
             indicative_amount_in: None,
             source: OrderSource::UniswapX,
             id: TradeId(Ulid::from_parts(1, u128::from(order_hash.0 .0[0]))),
