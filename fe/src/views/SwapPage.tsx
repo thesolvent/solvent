@@ -228,7 +228,8 @@ export function SwapPage() {
 
   return (
     <div data-scroll="1" className={styles.root}>
-      <section className={styles.card}>
+      <h1 className="srOnly">Swap</h1>
+      <section className={styles.card} aria-label="Swap">
         <div className={styles.cardHead}>
           <div className={styles.tabs}>
             {SWAP_TABS.map((t) => (
@@ -392,6 +393,7 @@ export function SwapPage() {
                 <span className={styles.searchGlyph} />
                 <input
                   className={styles.searchInput}
+                  aria-label="Search assets"
                   value={state.pQuery}
                   onChange={(e) => set({ pQuery: e.target.value })}
                   placeholder="Search name or paste address"

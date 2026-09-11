@@ -96,7 +96,6 @@
   font-size: clamp(15px, 2vw, 22px);
   font-weight: 400;
   letter-spacing: -0.025em;
-  outline: none;
 }
 
 .input::placeholder {

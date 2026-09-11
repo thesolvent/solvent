@@ -64,7 +64,7 @@ export function TradeDetailPage() {
             current={detail.title}
             trail={[{ label: "Explorer", to: "/explorer" }]}
           />
-          <div className={styles.title}>{detail.title}</div>
+          <h1 className={styles.title}>{detail.title}</h1>
         </div>
         <span
           key={detail.status}
@@ -140,7 +140,7 @@ export function TradeDetailPage() {
       </div>
 
       <div className={styles.split}>
-        <section className={styles.mainCol}>
+        <section className={styles.mainCol} aria-label="Trade route">
           <TradeLifecycle trade={trade} />
 
           <div className={styles.sourcedHead}>
@@ -227,7 +227,11 @@ export function TradeDetailPage() {
           </div>
         </section>
 
-        <section data-scroll="1" className={styles.sideCol}>
+        <section
+          data-scroll="1"
+          className={styles.sideCol}
+          aria-label="Order details"
+        >
           <div className={styles.profit}>
             <div className={styles.profitHead}>
               <span className={styles.profitSwatch} />

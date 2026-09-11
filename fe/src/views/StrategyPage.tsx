@@ -95,7 +95,7 @@ export function StrategyPage() {
           </button>
           <div className={styles.headTitle}>
             <Crumbs current="Strategy" />
-            <div className={styles.titleSm}>{sd.title}</div>
+            <h1 className={styles.titleSm}>{sd.title}</h1>
           </div>
           <span
             className={styles.statePill}
@@ -208,7 +208,11 @@ export function StrategyPage() {
             notice={notice}
           />
 
-          <section data-scroll="1" className={styles.fillsPane}>
+          <section
+            data-scroll="1"
+            className={styles.fillsPane}
+            aria-label="Recent settlements"
+          >
             <div className={styles.fillsHead}>
               <span className={styles.curveTag}>Recent settlements</span>
               <span className={styles.curveNote}>this strategy</span>

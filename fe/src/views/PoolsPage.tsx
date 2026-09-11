@@ -124,6 +124,7 @@ export function PoolsPage() {
 
   return (
     <div data-scroll="1" className={styles.root}>
+      <h1 className="srOnly">Pools</h1>
       <div className={styles.queryBar}>
         {cells.map((c) => {
           const open = state.openCell === c.key;

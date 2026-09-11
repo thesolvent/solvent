@@ -29,10 +29,18 @@ button {
   color: inherit;
 }
 
-input:focus,
-select:focus,
-button:focus {
-  outline: none;
+/* Two-tone ring: the ink edge reads on light ground, the paper edge on the dark
+   header and the lime panels, so one rule covers every surface in the app. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--paper);
 }
 
 ::selection {
@@ -77,8 +85,25 @@ button:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
   }
+}
+
+/* For a page whose title is carried by the layout rather than by any text — a screen reader
+   still needs one, and the design has nowhere to put it. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

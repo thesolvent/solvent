@@ -78,12 +78,13 @@ export function Header() {
         )}
       </div>
 
-      <nav className={styles.nav}>
+      <nav className={styles.nav} aria-label="Primary">
         {NAV.map((label) => (
           <button
             key={label}
             type="button"
             className={styles.navItem}
+            aria-current={label === page ? "page" : undefined}
             onClick={() => navTo(label)}
           >
             <span
@@ -102,6 +103,7 @@ export function Header() {
           <span className={styles.searchGlyph} />
           <input
             className={styles.searchInput}
+            aria-label="Search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search"

@@ -14,9 +14,15 @@ function Shell() {
 
   return (
     <div className={styles.app}>
+      <a className={styles.skipLink} href="#main">
+        Skip to main content
+      </a>
       {config.showFaucet && <FaucetBanner />}
       <Header />
-      <TransitionRoutes>{routes}</TransitionRoutes>
+      {/* `display: contents` keeps the landmark out of the shell's flex layout. */}
+      <main id="main" className={styles.main} tabIndex={-1}>
+        <TransitionRoutes>{routes}</TransitionRoutes>
+      </main>
     </div>
   );
 }

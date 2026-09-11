@@ -15,7 +15,7 @@ export function MakerAssets({
 }) {
   return (
     <>
-      <div className={styles.assetHead}>
+      <div className={styles.assetHead} aria-hidden="true">
         <span />
         <span>Token</span>
         <span className={styles.right}>Wallet</span>
@@ -29,7 +29,7 @@ export function MakerAssets({
             <button
               type="button"
               className={asset.open ? styles.assetRowOpen : styles.assetRow}
-              aria-label={`${asset.open ? "Collapse" : "Expand"} ${asset.sym} positions`}
+              aria-label={`${asset.sym} — wallet ${asset.wallet}, shared liquidity ${asset.shared}, fees ${asset.fees}, APY ${asset.apy}, ratio ${asset.ratio}. ${asset.open ? "Collapse" : "Expand"} positions`}
               aria-expanded={asset.open}
               onClick={() => onToggle(index)}
             >
@@ -70,7 +70,7 @@ export function MakerAssets({
 
             {asset.open && (
               <div className={styles.legPanel}>
-                <div className={styles.legHead}>
+                <div className={styles.legHead} aria-hidden="true">
                   <span>Position</span>
                   <span className={styles.right}>Current</span>
                   <span className={styles.right}>Opening</span>
@@ -82,7 +82,7 @@ export function MakerAssets({
                     type="button"
                     key={position.hash}
                     className={styles.legRow}
-                    aria-label={`Open ${position.pair} position ${position.hash}`}
+                    aria-label={`${position.pair} — current ${position.cur}, opening ${position.op}, fees ${position.fees}, APY ${position.apy}, coverage ${position.cov}. Open position ${position.hash}`}
                     onClick={() => onOpenPosition(position.hash)}
                   >
                     <span className={styles.stack}>

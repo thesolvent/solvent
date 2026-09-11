@@ -15,7 +15,9 @@ function renderAt(path: string) {
 describe("route table", () => {
   it("answers an unknown path with not-found instead of redirecting home", () => {
     renderAt("/pols?from=email");
-    expect(screen.getByText("No such page")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "No such page" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("/pols")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to home" })).toHaveAttribute(
       "href",

@@ -536,7 +536,7 @@ export function CreatePoolPage() {
         </button>
         <div className={styles.headTitle}>
           <Crumbs current="Create position" trail={crumbTrail} />
-          <div className={styles.title}>Create a position</div>
+          <h1 className={styles.title}>Create a position</h1>
         </div>
         <span className={styles.spacer} />
         {catalogReady && (
@@ -695,6 +695,7 @@ export function CreatePoolPage() {
                           ) : (
                             <input
                               className={styles.slotInput}
+                              aria-label="Search token 1"
                               value={state.q1}
                               onChange={(e) =>
                                 set({
@@ -743,6 +744,7 @@ export function CreatePoolPage() {
                           ) : (
                             <input
                               className={styles.slotInputRight}
+                              aria-label="Search token 2"
                               value={state.q2}
                               onChange={(e) =>
                                 set({
@@ -1323,6 +1325,7 @@ export function CreatePoolPage() {
                         <div className={styles.amountRow}>
                           <input
                             className={styles.amountInput}
+                            aria-label={`${c.A} deposit amount`}
                             value={state.amtA}
                             inputMode="decimal"
                             onChange={(e) =>
@@ -1378,6 +1381,7 @@ export function CreatePoolPage() {
                         <div className={styles.amountRow}>
                           <input
                             className={styles.amountInput}
+                            aria-label={`${c.B} deposit amount`}
                             value={state.amtB}
                             inputMode="decimal"
                             onChange={(e) =>

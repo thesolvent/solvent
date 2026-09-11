@@ -410,9 +410,9 @@ export function ExplorerPage() {
       <div className={styles.headWide}>
         <div className={styles.headTitle}>
           <div className={styles.eyebrow}>Explorer</div>
-          <div className={styles.titleLg}>
+          <h1 className={styles.titleLg}>
             {isTrades ? "Trades" : isActivity ? "Protocol activity" : "Rebates"}
-          </div>
+          </h1>
         </div>
         <span className={styles.limeSquare} />
         <p className={styles.pageDesc}>

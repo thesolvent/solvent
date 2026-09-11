@@ -22,7 +22,7 @@ export function PriceChart({
   const empty = notice ?? (d.linePath ? undefined : d.summary);
 
   return (
-    <section className={className ?? styles.price}>
+    <section className={className ?? styles.price} aria-label={title}>
       <div className={styles.head}>
         <span className={styles.title}>{title}</span>
         {d.change && !empty && (

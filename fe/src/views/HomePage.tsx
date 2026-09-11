@@ -490,7 +490,7 @@ export function HomePage() {
       data-scroll="1"
       className={styles.root}
     >
-      <section className={styles.hero}>
+      <section className={styles.hero} aria-label="Solvent">
         <h1 data-reveal="1" className={`${styles.heroTitle} ${styles.reveal}`}>
           Every intent.
           <br />
@@ -867,11 +867,11 @@ export function HomePage() {
               >
                 Scene 01
               </div>
-              <h3 className={styles.copyTitle}>
+              <h2 className={styles.copyTitle}>
                 Makers keep
                 <br />
                 <span className={styles.copyMark}>their tokens.</span>
-              </h3>
+              </h2>
               <p className={styles.copyBody}>
                 They never deposit. Their coins stay in their own wallet — they
                 just allow Solvent to use them when an order needs filling.
@@ -889,11 +889,11 @@ export function HomePage() {
               >
                 Scene 02
               </div>
-              <h3 className={styles.copyTitle}>
+              <h2 className={styles.copyTitle}>
                 An order
                 <br />
                 <span className={styles.copyMark}>shows up.</span>
-              </h3>
+              </h2>
               <p className={styles.copyBody}>
                 Someone signs a swap: “I want 1 WETH.” Solvent picks it up. The
                 maker never has to be online.
@@ -911,11 +911,11 @@ export function HomePage() {
               >
                 Scene 03
               </div>
-              <h3 className={styles.copyTitle}>
+              <h2 className={styles.copyTitle}>
                 Best price,
                 <br />
                 <span className={styles.copyMark}>zero inventory.</span>
-              </h3>
+              </h2>
               <p className={styles.copyBody}>
                 Solvent splits the order across many makers for the best price
                 and fills it in one transaction — holding nothing itself.
@@ -933,9 +933,9 @@ export function HomePage() {
               >
                 Scene 04
               </div>
-              <h3 className={styles.copyTitle}>
+              <h2 className={styles.copyTitle}>
                 The <span className={styles.copyMark}>price moves.</span>
-              </h3>
+              </h2>
               <p className={styles.copyBody}>
                 The swap nudges the maker&apos;s price up: a little more USDC, a
                 little less WETH.
@@ -954,11 +954,11 @@ export function HomePage() {
               >
                 Scene 05
               </div>
-              <h3 className={styles.copyTitleInk}>
+              <h2 className={styles.copyTitleInk}>
                 Arbitrage,
                 <br />
                 the <span className={styles.copyMarkInvert}>rebate.</span>
-              </h3>
+              </h2>
               <p className={styles.copyBodyInk}>
                 Traders arbitrage the price back to normal, paying the
                 maker&apos;s fee on the way. The maker ends where they started,
@@ -978,11 +978,11 @@ export function HomePage() {
                 >
                   The payoff
                 </div>
-                <h3 className={styles.payoffTitle}>
+                <h2 className={styles.payoffTitle}>
                   Same balance.
                   <br />
                   <span className={styles.copyMark}>Twice the flow.</span>
-                </h3>
+                </h2>
                 <p className={styles.payoffBody}>
                   The maker never deposited, never gave up custody, never chose
                   an order — and got paid twice.

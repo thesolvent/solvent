@@ -27,7 +27,7 @@ export function DepthChart({
     );
   };
   return (
-    <section className={className ?? styles.depth}>
+    <section className={className ?? styles.depth} aria-label={title}>
       <div className={styles.depthHead}>
         <span className={styles.kpiSwatch} />
         <span className={styles.depthTitle}>{title}</span>

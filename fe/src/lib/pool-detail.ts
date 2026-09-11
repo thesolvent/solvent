@@ -11,6 +11,8 @@ export type DetailMaker = {
   gap: string;
   stateBg: string;
   stateFg: string;
+  /** What those colours mean, for anyone who cannot see them. */
+  stateLabel: string;
 };
 
 export interface PoolDetail extends DepthChartModel {
@@ -68,6 +70,7 @@ function rosterBy(
         gap: short ? "var(--ok-ink)" : "var(--green)",
         stateBg: short ? "var(--ok-bg)" : "var(--lime-wash-soft)",
         stateFg: short ? "var(--ok-ink-deep)" : "var(--green-darkest)",
+        stateLabel: short ? "Short of committed size" : "At committed size",
       };
     });
 }

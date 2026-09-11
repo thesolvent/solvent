@@ -48,7 +48,7 @@ export function PoolDetailPage() {
         </button>
         <div className={styles.headTitle}>
           <Crumbs current={d.pair} trail={[{ label: "Pools", to: "/pools" }]} />
-          <div className={styles.pair}>{d.pair}</div>
+          <h1 className={styles.pair}>{d.pair}</h1>
         </div>
         <span className={styles.limeSquare} />
         <span className={styles.spacer} />
@@ -125,7 +125,7 @@ export function PoolDetailPage() {
           onHoverChange={(hoverFrac) => set({ hoverFrac })}
         />
 
-        <section className={styles.side}>
+        <section className={styles.side} aria-label="Makers">
           <div className={styles.sideHead}>
             <div className={styles.sideTitleGroup}>
               <span className={styles.kpiSwatch} />
@@ -171,6 +171,7 @@ export function PoolDetailPage() {
                 <span
                   className={styles.makerDot}
                   style={{ background: m.gap }}
+                  aria-hidden="true"
                 />
                 <span className={styles.makerAddr}>{m.addr}</span>
                 <span className={styles.makerAct}>{m.act}</span>
@@ -181,7 +182,8 @@ export function PoolDetailPage() {
                     color: m.stateFg,
                   }}
                 >
-                  {m.up}
+                  <span aria-hidden="true">{m.up}</span>
+                  <span className="srOnly">{m.stateLabel}</span>
                 </span>
               </button>
             ))}

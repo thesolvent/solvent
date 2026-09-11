@@ -10,7 +10,7 @@ export function NotFoundPage() {
       <div className={styles.head}>
         <div className={styles.headTitle}>
           <div className={styles.eyebrow}>404</div>
-          <div className={styles.title}>No such page</div>
+          <h1 className={styles.title}>No such page</h1>
         </div>
         <span className={styles.limeSquare} />
         <p className={styles.pageDesc}>

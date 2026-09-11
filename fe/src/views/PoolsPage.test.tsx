@@ -34,6 +34,17 @@ describe("PoolsPage", () => {
     expect(await screen.findByText("0.05% spread")).toBeInTheDocument();
   });
 
+  it("names itself with a first-level heading", async () => {
+    renderWithServices(<PoolsPage />, {
+      pools: { list: vi.fn().mockResolvedValue([POOL]) },
+      assets: { list: vi.fn().mockResolvedValue(SYMBOLS) },
+    });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Pools" }),
+    ).toBeInTheDocument();
+  });
+
   it("keeps the recommendation bar in place when nothing matches", async () => {
     const list = vi.fn().mockResolvedValue([]);
     const { container } = renderWithServices(<PoolsPage />, {

@@ -113,9 +113,7 @@ export function MakersPage() {
       <div className={styles.head}>
         <div className={styles.headTitle}>
           <div className={styles.headLabel}>Maker</div>
-          <div className={styles.addr}>
-            {canManage ? "Your maker" : mk.addr}
-          </div>
+          <h1 className={styles.addr}>{canManage ? "Your maker" : mk.addr}</h1>
         </div>
         <div className={styles.segmented}>
           {makers.map(({ address: a }) => (
@@ -192,7 +190,7 @@ export function MakersPage() {
       </div>
 
       <div className={styles.body}>
-        <section className={styles.main}>
+        <section className={styles.main} aria-label="Maker detail">
           <div className={styles.tabBar}>
             <div className={styles.tabGroup}>
               {mk.tabs.map((t) => (
@@ -334,7 +332,7 @@ export function MakersPage() {
         </section>
 
         <div data-scroll="1" className={styles.rail}>
-          <section className={styles.card}>
+          <section className={styles.card} aria-label="Fill share">
             <div className={styles.cardHead}>
               <span className={styles.swatch} />
               <span className={styles.cardTitle}>Fill share</span>
@@ -406,7 +404,7 @@ export function MakersPage() {
             )}
           </section>
 
-          <section className={styles.card}>
+          <section className={styles.card} aria-label="Fills">
             <div className={styles.cardHead}>
               <span className={styles.swatch} />
               <span className={styles.cardTitle}>Fills</span>
@@ -448,7 +446,7 @@ export function MakersPage() {
             {mk.fillsTip && <ChartTooltip {...mk.fillsTip} />}
           </section>
 
-          <section className={styles.cardLast}>
+          <section className={styles.cardLast} aria-label="Fill latency">
             <div className={styles.cardHead}>
               <span className={styles.swatch} />
               <span className={styles.cardTitle}>Fill latency</span>

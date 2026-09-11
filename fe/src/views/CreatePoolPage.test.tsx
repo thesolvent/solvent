@@ -263,7 +263,14 @@ describe("CreatePoolPage", () => {
         /1 USDT pairs with 0\.9992 USDC at the live market price/,
       ),
     ).toBeVisible();
-    const [baseAmount, quoteAmount] = screen.getAllByRole("textbox");
+    // By name, not by position: the boxes carry no visible label, so the name is all a maker
+    // filling this in without sight has to tell them apart.
+    const baseAmount = screen.getByRole("textbox", {
+      name: "USDT deposit amount",
+    });
+    const quoteAmount = screen.getByRole("textbox", {
+      name: "USDC deposit amount",
+    });
     fireEvent.change(baseAmount, { target: { value: "99.49" } });
 
     expect(baseAmount).toHaveValue("99.49");

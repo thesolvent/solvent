@@ -44,14 +44,16 @@ it("opens an asset's individual position and keeps the asset disclosure separate
 
   fireEvent.click(
     screen.getByRole("button", {
-      name: "Open WBTC/DAI position position-a",
+      name: /^WBTC\/DAI — current 10,750\.98 DAI, opening 10,750\.98 DAI, fees \$0\.00, APY 0\.0%, coverage 1\.00×\. Open position position-a$/,
     }),
   );
   expect(onOpenPosition).toHaveBeenCalledExactlyOnceWith("position-a");
   expect(onToggle).not.toHaveBeenCalled();
 
   fireEvent.click(
-    screen.getByRole("button", { name: "Collapse DAI positions" }),
+    screen.getByRole("button", {
+      name: /^DAI — wallet \$10\.75K, shared liquidity \$10\.75K, fees \$0\.00, APY 0\.0%, ratio 1\.00×\. Collapse positions$/,
+    }),
   );
   expect(onToggle).toHaveBeenCalledExactlyOnceWith(0);
   expect(onOpenPosition).toHaveBeenCalledTimes(1);

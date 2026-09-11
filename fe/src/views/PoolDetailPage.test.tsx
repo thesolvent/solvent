@@ -99,3 +99,44 @@ describe("Pool settlements", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("Pool roster status", () => {
+  const maker = (address: string, actualUsd: number, virtualUsd: number) => ({
+    address,
+    strategyHash: `${address}-strategy`,
+    curve: "Concentrated",
+    feeBps: 5,
+    virtualUsd,
+    actualUsd,
+    balances: [],
+  });
+
+  it("says in words what the roster's status colours mean", async () => {
+    renderWithServices(
+      <Routes>
+        <Route path="/pools/:pair" element={<PoolDetailPage />} />
+      </Routes>,
+      {
+        pools: {
+          list: vi.fn().mockResolvedValue([pool]),
+          detail: vi.fn().mockResolvedValue({
+            pool,
+            makers: [maker("0xshort", 40, 100), maker("0xfull", 100, 100)],
+          }),
+          depth: vi.fn().mockResolvedValue({ levels: [] }),
+        },
+        explorer: { trades: vi.fn().mockResolvedValue({ items: [] }) },
+      },
+      "/pools/dai-usdc",
+    );
+
+    expect(
+      await screen.findByRole("button", {
+        name: /0xfull .*At committed size/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /0xshort .*Short of committed size/ }),
+    ).toBeInTheDocument();
+  });
+});

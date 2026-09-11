@@ -83,6 +83,7 @@
 }
 
 .title {
+  margin: 0;
   font-size: clamp(19px, 2vw, 26px);
   font-weight: 500;
   letter-spacing: -0.035em;
