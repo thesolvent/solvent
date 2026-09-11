@@ -48,6 +48,11 @@
       "import": "./dist/swap.js",
       "require": "./dist/swap.cjs"
     },
+    "./cross-chain": {
+      "types": "./dist/cross-chain.d.ts",
+      "import": "./dist/cross-chain.js",
+      "require": "./dist/cross-chain.cjs"
+    },
     "./validation": {
       "types": "./dist/validation.d.ts",
       "import": "./dist/validation.js",
