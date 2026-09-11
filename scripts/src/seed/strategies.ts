@@ -4,7 +4,7 @@ import type {
     BuiltStrategy,
     Strategy as StrategyBuilder,
 } from "@solvent/sdk/construction";
-import { parseUnits, type Address, type Hex } from "viem";
+import { encodeFunctionData, parseUnits, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 import { type Manifest } from "../lib/manifest.ts";
@@ -23,6 +23,21 @@ const MAKER_KEYS: readonly Hex[] = [
     "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a",
     "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
 ];
+
+const DIRECT_APP_ABI = [
+    {
+        type: "function",
+        name: "configureDirectStrategy",
+        stateMutability: "nonpayable",
+        inputs: [
+            { name: "strategyHash", type: "bytes32" },
+            { name: "outputToken", type: "address" },
+            { name: "maxOutstandingRepayment", type: "uint256" },
+            { name: "enabled", type: "bool" },
+        ],
+        outputs: [],
+    },
+] as const;
 
 /** Minted per token, well above what is shipped, so a maker keeps a wallet balance behind it. */
 const MINT_UNITS = 1_000_000;
@@ -101,6 +116,10 @@ function token(manifest: Manifest, symbol: string): TokenRef {
     return { address: found.address as Address, decimals: found.decimals };
 }
 
+function strategyApp(manifest: Manifest): Address {
+    return (process.env.SOLVENT_STRATEGY_APP ?? manifest.router) as Address;
+}
+
 function legs(manifest: Manifest, spec: PairSpec, pricing: Pricing): Legs {
     const base = token(manifest, spec.base);
     const quote = token(manifest, spec.quote);
@@ -147,7 +166,7 @@ async function tokensCount(
         address: manifest.aqua as Address,
         abi: AQUA_ABI,
         functionName: "rawBalances",
-        args: [maker, manifest.router as Address, strategyHash, token],
+        args: [maker, strategyApp(manifest), strategyHash, token],
     });
     return tokensCount;
 }
@@ -162,7 +181,7 @@ export async function seedPair(
     const account = privateKeyToAccount(key);
     const pos = positions({
         aqua: manifest.aqua as Address,
-        app: manifest.router as Address,
+        app: strategyApp(manifest),
     });
     const sized = legs(manifest, spec, pricing);
     const strategy = strategyFor(spec, sized, pricing);
@@ -212,6 +231,22 @@ export async function seedPair(
                 ],
             }),
         );
+        if (process.env.SOLVENT_STRATEGY_APP) {
+            await maker.send({
+                to: strategyApp(manifest),
+                value: 0n,
+                data: encodeFunctionData({
+                    abi: DIRECT_APP_ABI,
+                    functionName: "configureDirectStrategy",
+                    args: [
+                        built.strategyHash,
+                        sized.quote.address,
+                        2n ** 255n,
+                        true,
+                    ],
+                }),
+            });
+        }
     }
 
     return `${label}  (${pending.length} shipped; ${COPIES_PER_PAIR} active copies)`;
@@ -226,7 +261,8 @@ async function main(): Promise<void> {
     );
 
     for (const [index, spec] of PAIRS.entries()) {
-        const key = MAKER_KEYS[index % MAKER_KEYS.length];
+        const key = (process.env.SOLVENT_SEED_MAKER_KEY ??
+            MAKER_KEYS[index % MAKER_KEYS.length]) as Hex;
         try {
             const pricing = pricingFor(spec, mids);
             console.log(`  ok    ${await seedPair(env, spec, key, pricing)}`);
