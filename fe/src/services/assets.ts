@@ -6,12 +6,12 @@ import { useServices } from "./context";
 import { LIVE_QUERY_OPTIONS } from "./live";
 
 /** Assets this deployment serves. Empty until the first read resolves. */
-export function useAssets(): Asset[] {
+export function useAssets(includeCrossChain = false): Asset[] {
   const { assets } = useServices();
   const { data } = useQuery({
     ...LIVE_QUERY_OPTIONS,
-    queryKey: ["assets"],
-    queryFn: () => assets.list(),
+    queryKey: ["assets", includeCrossChain],
+    queryFn: () => assets.list(includeCrossChain),
   });
   return data ?? [];
 }
