@@ -215,7 +215,7 @@ describe("exact wallet limits", () => {
       },
     ]);
 
-    expect(view.walletA).toBe("9007199254740993123.456789");
+    expect(view.walletA).toBe("9,007,199,254,740,993,123.45");
     expect(view.maxFromA.amtA).toBe("9007199254740993123.456789");
   });
 });

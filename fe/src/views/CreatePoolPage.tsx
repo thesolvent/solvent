@@ -7,10 +7,11 @@ import {
   type PointerEvent as ReactPointerEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { formatUnits } from "viem";
 import { useAccount } from "wagmi";
 
+import { AsyncNote } from "@/components/AsyncNote";
 import { Crumbs } from "@/components/Crumbs";
 import { BAND_K0 } from "@/data";
 import {
@@ -83,11 +84,16 @@ function pairDefaults(pair: CreatePair, corePair: number) {
     strategy: pair.type === "Stable" ? "Pegged" : "Concentrated",
     pegSym: pair.type === "Stable",
     createFee: `Auto ${(pair.defaultFeeBps / 100).toFixed(2)}%`,
-    amtA: formatUnits(pair.base.balanceRaw / 2n, pair.base.decimals),
-    amtB: formatUnits(pair.quote.balanceRaw / 2n, pair.quote.decimals),
+    amtA: "",
+    amtB: "",
     bandMax: band,
     bandMin: -band,
   };
+}
+
+/** The slug is all a mistyped URL gives us to name the pair it asked for. */
+function pairFromSlug(pairSlug: string): string {
+  return pairSlug.toUpperCase().replace("-", "/");
 }
 
 function sameAddress(left: string, right: string) {
@@ -185,7 +191,24 @@ export function CreatePoolPage() {
   const cloneHash = searchParams.get("clone") ?? undefined;
   const cloneQuery = usePosition(cloneHash);
   const pairQuery = useCreatePairs();
+  const { openConnectModal } = useConnectModal();
   const pairs = pairQuery.data ?? EMPTY_PAIRS;
+  const routeIndex = routePair
+    ? pairs.findIndex(
+        ({ base, quote }) =>
+          slug(`${base.symbol}/${quote.symbol}`) === routePair,
+      )
+    : 0;
+  // A slug matching nothing must say so: falling through leaves the wizard on some other pair.
+  const unavailable = !pairQuery.isSuccess
+    ? undefined
+    : pairs.length === 0
+      ? "No pairs are available on this deployment."
+      : routeIndex < 0 && routePair
+        ? `${pairFromSlug(routePair)} isn’t an available pair.`
+        : undefined;
+  const catalogReady =
+    !pairQuery.isPending && !pairQuery.isError && unavailable === undefined;
   const selectedPair = pairs[state.corePair] ?? pairs[0];
   const historyQuery = usePairPriceHistory(selectedPair, state.createSpan);
   const c = createPosition(
@@ -215,6 +238,18 @@ export function CreatePoolPage() {
         state: { waitForStrategyIndex: true },
       }),
   );
+  const routedPair = routeIndex >= 0 ? pairs[routeIndex] : undefined;
+  // Only a pair that resolved gets a crumb: a slug that matched nothing has no pool page either.
+  const crumbTrail =
+    routedPair && routePair
+      ? [
+          { label: "Pools", to: "/pools" },
+          {
+            label: `${routedPair.base.symbol}/${routedPair.quote.symbol}`,
+            to: `/pools/${routePair}`,
+          },
+        ]
+      : [{ label: "Pools", to: "/pools" }];
   const plotRef = useRef<HTMLDivElement>(null);
   const initializedRoute = useRef<string | null>(null);
   const initializedClone = useRef<string | null>(null);
@@ -226,14 +261,11 @@ export function CreatePoolPage() {
       initializedRoute.current === routePair
     )
       return;
-    const index = pairs.findIndex(
-      ({ base, quote }) => slug(`${base.symbol}/${quote.symbol}`) === routePair,
-    );
-    if (index >= 0) {
+    if (routeIndex >= 0) {
       initializedRoute.current = routePair;
-      set(pairDefaults(pairs[index], index));
+      set(pairDefaults(pairs[routeIndex], routeIndex));
     }
-  }, [pairs, routePair, set]);
+  }, [pairs, routeIndex, routePair, set]);
 
   useLayoutEffect(() => {
     if (
@@ -411,12 +443,17 @@ export function CreatePoolPage() {
     });
   };
 
-  const flipOrientation = () =>
-    set({
-      flipped: !state.flipped,
-      amtA: state.amtB,
-      amtB: state.amtA,
-    });
+  // The amounts belong to tokens, not to slots: the pairing has to be recomputed, not transposed.
+  const flipOrientation = () => {
+    const flipped = !state.flipped;
+    const next = createPosition(
+      { ...state, flipped },
+      pairs,
+      pairQuery.isError ? "Couldn’t load supported pairs." : undefined,
+      historyQuery.data,
+    );
+    set({ flipped, ...next.amountsFromA(state.amtB) });
+  };
 
   const selectStrategy = (strategy: PositionCurve) => {
     const patch = {
@@ -491,932 +528,984 @@ export function CreatePoolPage() {
         <button
           type="button"
           className={styles.back}
-          onClick={() => navigate(routePair ? `/pools/${routePair}` : "/pools")}
+          onClick={() =>
+            navigate(routedPair && routePair ? `/pools/${routePair}` : "/pools")
+          }
         >
           ←
         </button>
         <div className={styles.headTitle}>
-          <Crumbs current="Create position" />
+          <Crumbs current="Create position" trail={crumbTrail} />
           <div className={styles.title}>Create a position</div>
         </div>
         <span className={styles.spacer} />
-        <span
-          className={styles.rangeTag}
-          style={{ background: c.rangeTagBg, color: c.rangeTagFg }}
-        >
-          {c.rangeTag}
-        </span>
-        <div className={styles.segmented}>
-          {STRATEGIES.map((x) => (
-            <button
-              key={x}
-              type="button"
-              className={
-                x === state.strategy ? styles.strategyOn : styles.strategy
-              }
-              onClick={() => selectStrategy(x)}
+        {catalogReady && (
+          <>
+            <span
+              className={styles.rangeTag}
+              style={{ background: c.rangeTagBg, color: c.rangeTagFg }}
             >
-              {x}
-            </button>
-          ))}
-        </div>
+              {c.rangeTag}
+            </span>
+            <div className={styles.segmented}>
+              {STRATEGIES.map((x) => (
+                <button
+                  key={x}
+                  type="button"
+                  className={
+                    x === state.strategy ? styles.strategyOn : styles.strategy
+                  }
+                  onClick={() => selectStrategy(x)}
+                >
+                  {x}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
-      <div className={styles.panels}>
-        {c.steps.map((st, i) => (
-          <div
-            key={st.n}
-            className={styles.panel}
-            style={{ flex: st.panelFlex, background: st.panelBg }}
-          >
-            <button
-              type="button"
-              className={styles.rail}
-              style={{ cursor: st.cursor }}
-              aria-expanded={st.open}
-              onClick={() => {
-                if (!st.locked)
-                  set({
-                    step: st.n,
-                    ...(st.n >= 3 ? c.amountsFromA(state.amtA) : {}),
-                  });
-              }}
+      {!catalogReady && (
+        <AsyncNote
+          className={styles.catalogNote}
+          query={pairQuery}
+          subject="supported pairs"
+          empty={unavailable}
+        />
+      )}
+
+      {catalogReady && (
+        <div className={styles.panels}>
+          {c.steps.map((st, i) => (
+            <div
+              key={st.n}
+              className={styles.panel}
+              style={{ flex: st.panelFlex, background: st.panelBg }}
             >
-              <span className={styles.railNum} style={{ color: st.numFg }}>
-                {String(st.n).padStart(2, "0")}
-              </span>
-              <span
-                className={styles.railTick}
-                style={{ background: st.tickBg }}
-              />
-              <span className={styles.railBarWrap}>
-                <span className={styles.railBar} style={{ color: st.barFg }}>
-                  {RAIL_LABELS[i]}
+              <button
+                type="button"
+                className={styles.rail}
+                style={{ cursor: st.cursor }}
+                aria-expanded={st.open}
+                onClick={() => {
+                  if (!st.locked)
+                    set({
+                      step: st.n,
+                      ...(st.n >= 3 ? c.amountsFromA(state.amtA) : {}),
+                    });
+                }}
+              >
+                <span className={styles.railNum} style={{ color: st.numFg }}>
+                  {String(st.n).padStart(2, "0")}
                 </span>
-              </span>
-            </button>
+                <span
+                  className={styles.railTick}
+                  style={{ background: st.tickBg }}
+                />
+                <span className={styles.railBarWrap}>
+                  <span className={styles.railBar} style={{ color: st.barFg }}>
+                    {RAIL_LABELS[i]}
+                  </span>
+                </span>
+              </button>
 
-            {st.open && st.n === 1 && (
-              <div className={styles.pane}>
-                {paneHead(0)}
-                <div data-scroll="1" className={styles.paneBody}>
-                  <div className={styles.pairHead}>
-                    <span className={styles.microLabel}>
-                      Pair · {c.pairType}
-                    </span>
-                  </div>
+              {st.open && st.n === 1 && (
+                <div className={styles.pane}>
+                  {paneHead(0)}
+                  <div data-scroll="1" className={styles.paneBody}>
+                    <div className={styles.pairHead}>
+                      <span className={styles.microLabel}>
+                        Pair · {c.pairType}
+                      </span>
+                    </div>
 
-                  <div className={styles.pairGrid}>
-                    {c.recommendations.map((q) => {
-                      const on = q.catalogIndex === state.corePair;
-                      return (
-                        <button
-                          key={`${q.a}/${q.b}`}
-                          type="button"
-                          className={on ? styles.pairChipOn : styles.pairChip}
-                          onClick={() =>
-                            set({
-                              ...pairDefaults(q.source!, q.catalogIndex),
-                              step: 2,
-                              stepDirty: {
-                                2: true,
-                                3: true,
-                                4: true,
-                              },
-                            })
-                          }
-                        >
-                          <span
-                            className={styles.pairDot}
-                            style={{
-                              background: on
-                                ? "var(--ink)"
-                                : "var(--line-soft)",
-                            }}
-                          />
-                          <span className={styles.pairLabel}>
-                            {q.a} / {q.b}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className={styles.divider}>
-                    <span className={styles.microLabel}>
-                      Or build a custom pair
-                    </span>
-                    <span className={styles.dividerLine} />
-                  </div>
-
-                  <div className={styles.custom}>
-                    <div className={styles.slots}>
-                      <div className={styles.slotA}>
-                        {state.slotA ? (
-                          <div className={styles.slotFilled}>
+                    <div className={styles.pairGrid}>
+                      {c.recommendations.map((q) => {
+                        const on = q.catalogIndex === state.corePair;
+                        return (
+                          <button
+                            key={`${q.a}/${q.b}`}
+                            type="button"
+                            className={on ? styles.pairChipOn : styles.pairChip}
+                            onClick={() =>
+                              set({
+                                ...pairDefaults(q.source!, q.catalogIndex),
+                                step: 2,
+                                stepDirty: {
+                                  2: true,
+                                  3: true,
+                                  4: true,
+                                },
+                              })
+                            }
+                          >
                             <span
-                              className={styles.slotChip}
+                              className={styles.pairDot}
                               style={{
-                                background: c.tintA,
+                                background: on
+                                  ? "var(--ink)"
+                                  : "var(--line-soft)",
                               }}
-                            >
-                              {state.slotA}
+                            />
+                            <span className={styles.pairLabel}>
+                              {q.a} / {q.b}
                             </span>
-                            <span className={styles.slotSym}>
-                              {state.slotA}
-                            </span>
-                            <button
-                              type="button"
-                              className={styles.slotClear}
-                              onClick={() =>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className={styles.divider}>
+                      <span className={styles.microLabel}>
+                        Or build a custom pair
+                      </span>
+                      <span className={styles.dividerLine} />
+                    </div>
+
+                    <div className={styles.custom}>
+                      <div className={styles.slots}>
+                        <div className={styles.slotA}>
+                          {state.slotA ? (
+                            <div className={styles.slotFilled}>
+                              <span
+                                className={styles.slotChip}
+                                style={{
+                                  background: c.tintA,
+                                }}
+                              >
+                                {state.slotA}
+                              </span>
+                              <span className={styles.slotSym}>
+                                {state.slotA}
+                              </span>
+                              <button
+                                type="button"
+                                className={styles.slotClear}
+                                onClick={() =>
+                                  set({
+                                    slotA: null,
+                                    q1: "",
+                                    pickerSlot: 1,
+                                  })
+                                }
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            <input
+                              className={styles.slotInput}
+                              value={state.q1}
+                              onChange={(e) =>
                                 set({
+                                  q1: e.target.value,
                                   slotA: null,
-                                  q1: "",
                                   pickerSlot: 1,
                                 })
                               }
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ) : (
-                          <input
-                            className={styles.slotInput}
-                            value={state.q1}
-                            onChange={(e) =>
-                              set({
-                                q1: e.target.value,
-                                slotA: null,
-                                pickerSlot: 1,
-                              })
-                            }
-                            onFocus={() =>
-                              set({
-                                pickerSlot: 1,
-                              })
-                            }
-                            placeholder="Search token 1"
-                          />
-                        )}
-                      </div>
-                      <div className={styles.slotB}>
-                        {state.slotB ? (
-                          <div className={styles.slotFilledRight}>
-                            <span
-                              className={styles.slotChip}
-                              style={{
-                                background: c.tintB,
-                              }}
-                            >
-                              {state.slotB}
-                            </span>
-                            <span className={styles.slotSym}>
-                              {state.slotB}
-                            </span>
-                            <button
-                              type="button"
-                              className={styles.slotClear}
-                              onClick={() =>
+                              onFocus={() =>
                                 set({
+                                  pickerSlot: 1,
+                                })
+                              }
+                              placeholder="Search token 1"
+                            />
+                          )}
+                        </div>
+                        <div className={styles.slotB}>
+                          {state.slotB ? (
+                            <div className={styles.slotFilledRight}>
+                              <span
+                                className={styles.slotChip}
+                                style={{
+                                  background: c.tintB,
+                                }}
+                              >
+                                {state.slotB}
+                              </span>
+                              <span className={styles.slotSym}>
+                                {state.slotB}
+                              </span>
+                              <button
+                                type="button"
+                                className={styles.slotClear}
+                                onClick={() =>
+                                  set({
+                                    slotB: null,
+                                    q2: "",
+                                    pickerSlot: 2,
+                                  })
+                                }
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            <input
+                              className={styles.slotInputRight}
+                              value={state.q2}
+                              onChange={(e) =>
+                                set({
+                                  q2: e.target.value,
                                   slotB: null,
-                                  q2: "",
                                   pickerSlot: 2,
                                 })
                               }
+                              onFocus={() =>
+                                set({
+                                  pickerSlot: 2,
+                                })
+                              }
+                              placeholder="Search token 2"
+                            />
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          className={styles.swapSlots}
+                          onClick={() =>
+                            set({
+                              slotA: state.slotB,
+                              slotB: state.slotA,
+                              q1: "",
+                              q2: "",
+                            })
+                          }
+                        >
+                          ⇄
+                        </button>
+                      </div>
+
+                      <div className={styles.tokenTags}>
+                        {TOKEN_TAGS.map(({ label, value }) => (
+                          <button
+                            key={label}
+                            type="button"
+                            className={
+                              state.tokenTag === value
+                                ? styles.tokenTagOn
+                                : styles.tokenTag
+                            }
+                            onClick={() => set({ tokenTag: value })}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className={styles.walletHead}>
+                        <span className={styles.walletTitle}>Your tokens</span>
+                        <span className={styles.walletHint}>{c.slotHint}</span>
+                      </div>
+
+                      {c.pairWarn && (
+                        <div className={styles.warn}>{c.pairWarn}</div>
+                      )}
+
+                      <div data-scroll="1" className={styles.walletList}>
+                        {c.walletRows.map((row) => (
+                          <button
+                            key={row.token.sym}
+                            type="button"
+                            className={styles.walletRow}
+                            style={{
+                              background: row.rowBg,
+                              opacity: row.dim,
+                            }}
+                            onClick={() => pickWalletToken(row.token.sym)}
+                          >
+                            <span
+                              className={styles.walletChip}
+                              style={{
+                                background: row.token.tint,
+                              }}
                             >
-                              ✕
-                            </button>
+                              {row.token.sym}
+                            </span>
+                            <span className={styles.walletMain}>
+                              <span className={styles.walletName}>
+                                {row.token.name}
+                              </span>
+                              <span className={styles.walletMeta}>
+                                {row.amt} · {row.token.addr}
+                              </span>
+                            </span>
+                            <span className={styles.walletFigures}>
+                              <span className={styles.walletUsd}>
+                                {row.usd}
+                              </span>
+                              <span
+                                className={styles.walletDelta}
+                                style={{
+                                  color: row.deltaFg,
+                                }}
+                              >
+                                {row.delta}
+                              </span>
+                            </span>
+                            <span
+                              className={styles.walletMark}
+                              style={{
+                                background: row.markBg,
+                                color: row.markFg,
+                              }}
+                            >
+                              {row.mark}
+                            </span>
+                          </button>
+                        ))}
+                        {c.emptyList && (
+                          <div className={styles.walletEmpty}>
+                            No tokens match that search.
                           </div>
-                        ) : (
-                          <input
-                            className={styles.slotInputRight}
-                            value={state.q2}
-                            onChange={(e) =>
-                              set({
-                                q2: e.target.value,
-                                slotB: null,
-                                pickerSlot: 2,
-                              })
-                            }
-                            onFocus={() =>
-                              set({
-                                pickerSlot: 2,
-                              })
-                            }
-                            placeholder="Search token 2"
-                          />
                         )}
                       </div>
-                      <button
-                        type="button"
-                        className={styles.swapSlots}
-                        onClick={() =>
-                          set({
-                            slotA: state.slotB,
-                            slotB: state.slotA,
-                            q1: "",
-                            q2: "",
-                          })
-                        }
-                      >
-                        ⇄
-                      </button>
-                    </div>
-
-                    <div className={styles.tokenTags}>
-                      {TOKEN_TAGS.map(({ label, value }) => (
-                        <button
-                          key={label}
-                          type="button"
-                          className={
-                            state.tokenTag === value
-                              ? styles.tokenTagOn
-                              : styles.tokenTag
-                          }
-                          onClick={() => set({ tokenTag: value })}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className={styles.walletHead}>
-                      <span className={styles.walletTitle}>Your tokens</span>
-                      <span className={styles.walletHint}>{c.slotHint}</span>
-                    </div>
-
-                    {c.pairWarn && (
-                      <div className={styles.warn}>{c.pairWarn}</div>
-                    )}
-
-                    <div data-scroll="1" className={styles.walletList}>
-                      {c.walletRows.map((row) => (
-                        <button
-                          key={row.token.sym}
-                          type="button"
-                          className={styles.walletRow}
-                          style={{
-                            background: row.rowBg,
-                            opacity: row.dim,
-                          }}
-                          onClick={() => pickWalletToken(row.token.sym)}
-                        >
-                          <span
-                            className={styles.walletChip}
-                            style={{
-                              background: row.token.tint,
-                            }}
-                          >
-                            {row.token.sym}
-                          </span>
-                          <span className={styles.walletMain}>
-                            <span className={styles.walletName}>
-                              {row.token.name}
-                            </span>
-                            <span className={styles.walletMeta}>
-                              {row.amt} · {row.token.addr}
-                            </span>
-                          </span>
-                          <span className={styles.walletFigures}>
-                            <span className={styles.walletUsd}>{row.usd}</span>
-                            <span
-                              className={styles.walletDelta}
-                              style={{
-                                color: row.deltaFg,
-                              }}
-                            >
-                              {row.delta}
-                            </span>
-                          </span>
-                          <span
-                            className={styles.walletMark}
-                            style={{
-                              background: row.markBg,
-                              color: row.markFg,
-                            }}
-                          >
-                            {row.mark}
-                          </span>
-                        </button>
-                      ))}
-                      {c.emptyList && (
-                        <div className={styles.walletEmpty}>
-                          No tokens match that search.
-                        </div>
-                      )}
                     </div>
                   </div>
+                  {stepFoot}
                 </div>
-                {stepFoot}
-              </div>
-            )}
+              )}
 
-            {st.open && st.n === 2 && (
-              <div className={styles.pane}>
-                {paneHead(1)}
-                <div data-scroll="1" className={styles.paneBody}>
-                  <div className={styles.overviewRow}>
-                    <div className={styles.overview}>
-                      <div className={styles.overviewLabel}>
-                        Position overview
+              {st.open && st.n === 2 && (
+                <div className={styles.pane}>
+                  {paneHead(1)}
+                  <div data-scroll="1" className={styles.paneBody}>
+                    <div className={styles.overviewRow}>
+                      <div className={styles.overview}>
+                        <div className={styles.overviewLabel}>
+                          Position overview
+                        </div>
+                        <div className={styles.overviewFigures}>
+                          <span className={styles.overviewPrice}>
+                            {c.opening}
+                          </span>
+                          <span className={styles.overviewQuote}>
+                            {c.quote} opening
+                          </span>
+                          <span className={styles.overviewMarket}>
+                            market {c.market}
+                          </span>
+                        </div>
                       </div>
-                      <div className={styles.overviewFigures}>
-                        <span className={styles.overviewPrice}>
-                          {c.opening}
-                        </span>
-                        <span className={styles.overviewQuote}>
-                          {c.quote} opening
-                        </span>
-                        <span className={styles.overviewMarket}>
-                          market {c.market}
-                        </span>
-                      </div>
-                    </div>
-                    <div className={styles.chartTools}>
-                      {c.isPegged && (
-                        <button
-                          type="button"
-                          className={styles.pegToggle}
-                          style={{
-                            background: c.pegSymBg,
-                          }}
-                          onClick={() => {
-                            const nextSym = !c.symmetric;
-                            const w = Math.max(
-                              Math.abs(state.bandMax),
-                              Math.abs(state.bandMin),
-                            );
-                            set({
-                              pegSym: nextSym,
-                              ...(nextSym
-                                ? clampBand(
-                                    {
-                                      ...state,
-                                      pegSym: true,
-                                    },
-                                    {
-                                      bandMax: w,
-                                      bandMin: -w,
-                                    },
-                                  )
-                                : {}),
-                            });
-                          }}
-                        >
-                          {c.pegSymLabel}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className={styles.orientation}
-                        onClick={flipOrientation}
-                      >
-                        {c.flipLabel}
-                      </button>
-                      <div className={styles.zoomGroup}>
-                        <button
-                          type="button"
-                          className={styles.zoomStep}
-                          onClick={() =>
-                            set({
-                              chartZoom: Math.max(0.5, state.chartZoom / 1.5),
-                            })
-                          }
-                        >
-                          −
-                        </button>
-                        <span className={styles.zoomLabel}>{c.zoomLabel}</span>
-                        <button
-                          type="button"
-                          className={styles.zoomStep}
-                          onClick={() =>
-                            set({
-                              chartZoom: Math.min(400, state.chartZoom * 1.5),
-                            })
-                          }
-                        >
-                          +
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.zoomWord}
-                          onClick={() =>
-                            set({
-                              chartZoom: Math.max(
-                                0.5,
-                                Math.min(
-                                  400,
-                                  c.fitSpan / (c.bandScaleExtent * 2.4),
-                                ),
-                              ),
-                            })
-                          }
-                        >
-                          fit
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.zoomWord}
-                          onClick={() => set({ chartZoom: 1 })}
-                        >
-                          reset
-                        </button>
-                      </div>
-                      <div className={styles.segmented}>
-                        {SPANS.map((t) => (
+                      <div className={styles.chartTools}>
+                        {c.isPegged && (
                           <button
-                            key={t}
                             type="button"
-                            className={
-                              t === state.createSpan
-                                ? styles.spanOn
-                                : styles.span
-                            }
+                            className={styles.pegToggle}
+                            style={{
+                              background: c.pegSymBg,
+                            }}
+                            onClick={() => {
+                              const nextSym = !c.symmetric;
+                              const w = Math.max(
+                                Math.abs(state.bandMax),
+                                Math.abs(state.bandMin),
+                              );
+                              set({
+                                pegSym: nextSym,
+                                ...(nextSym
+                                  ? clampBand(
+                                      {
+                                        ...state,
+                                        pegSym: true,
+                                      },
+                                      {
+                                        bandMax: w,
+                                        bandMin: -w,
+                                      },
+                                    )
+                                  : {}),
+                              });
+                            }}
+                          >
+                            {c.pegSymLabel}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className={styles.orientation}
+                          onClick={flipOrientation}
+                        >
+                          {c.flipLabel}
+                        </button>
+                        <div className={styles.zoomGroup}>
+                          <button
+                            type="button"
+                            className={styles.zoomStep}
                             onClick={() =>
                               set({
-                                createSpan: t,
+                                chartZoom: Math.max(0.5, state.chartZoom / 1.5),
                               })
                             }
                           >
-                            {t}
+                            −
                           </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className={styles.plotGrid}>
-                    <div
-                      ref={plotRef}
-                      data-band-plot="1"
-                      data-k={c.scaleK}
-                      data-scale-max={c.bandScaleMax}
-                      data-scale-min={c.bandScaleMin}
-                      className={styles.plot}
-                      onMouseMove={onChartMove}
-                      onMouseLeave={() => set({ chartHover: null })}
-                    >
-                      <div
-                        className={styles.band}
-                        style={{
-                          top: c.bandTop,
-                          height: c.bandHeight,
-                          background: c.bandFill,
-                          cursor: c.bodyCursor,
-                        }}
-                        onPointerDown={bandDrag("body")}
-                      />
-                      <span className={styles.midLine} />
-                      <svg
-                        viewBox="0 0 1000 400"
-                        preserveAspectRatio="none"
-                        className={styles.plotSvg}
-                      >
-                        <polyline
-                          points={c.series}
-                          fill="none"
-                          stroke="var(--green)"
-                          strokeWidth="1.8"
-                          strokeLinejoin="round"
-                          strokeLinecap="round"
-                          vectorEffect="non-scaling-stroke"
-                        />
-                      </svg>
-
-                      {c.notFull && (
-                        <>
-                          <div
-                            className={styles.edge}
-                            style={{
-                              top: c.bandTop,
-                            }}
-                            onPointerDown={bandDrag("max")}
-                            onKeyDown={nudge("max")}
-                            tabIndex={0}
-                            role="slider"
-                            aria-label={c.ariaMax}
-                            aria-valuenow={state.bandMax}
-                          >
-                            <span
-                              className={styles.edgeLine}
-                              style={{
-                                borderTopColor: c.edgeColor,
-                                borderTopWidth: c.edgeW,
-                              }}
-                            />
-                            <span
-                              className={styles.edgePillMax}
-                              style={{
-                                background: c.edgeColor,
-                              }}
-                            >
-                              {c.maxPill}
-                            </span>
-                          </div>
-                          <div
-                            className={styles.edge}
-                            style={{
-                              top: c.bandBottom,
-                            }}
-                            onPointerDown={bandDrag("min")}
-                            onKeyDown={nudge("min")}
-                            tabIndex={0}
-                            role="slider"
-                            aria-label={c.ariaMin}
-                            aria-valuenow={state.bandMin}
-                          >
-                            <span
-                              className={styles.edgeLine}
-                              style={{
-                                borderTopColor: c.edgeColor,
-                                borderTopWidth: c.edgeW,
-                              }}
-                            />
-                            <span
-                              className={styles.edgePillMin}
-                              style={{
-                                background: c.edgeColor,
-                              }}
-                            >
-                              {c.minPill}
-                            </span>
-                          </div>
-                        </>
-                      )}
-
-                      {c.volTip && (
-                        <div className={styles.tipLayer}>
-                          <span
-                            className={styles.tipDot}
-                            style={{
-                              left: c.volTip.left,
-                              top: c.volTip.top,
-                            }}
-                          />
-                          <div
-                            className={styles.tip}
-                            style={{
-                              left: c.volTip.left,
-                              top: c.volTip.top,
-                              transform: c.volTip.shift,
-                            }}
-                          >
-                            <div className={styles.tipMain}>
-                              {c.volTip.px}{" "}
-                              <span className={styles.tipAccent}>
-                                {c.volTip.vol}
-                              </span>
-                            </div>
-                            <div className={styles.tipSub}>{c.volTip.when}</div>
-                          </div>
-                        </div>
-                      )}
-
-                      {c.cross && (
-                        <div className={styles.tipLayer}>
-                          <span
-                            className={styles.tipDot}
-                            style={{
-                              left: c.cross.left,
-                              top: c.cross.top,
-                            }}
-                          />
-                          <div
-                            className={styles.tipCross}
-                            style={{
-                              left: c.cross.left,
-                              top: c.cross.top,
-                              transform: c.cross.shift,
-                            }}
-                          >
-                            <div className={styles.tipMain}>
-                              {c.cross.price}{" "}
-                              <span className={styles.tipAccent}>
-                                {c.cross.pct}
-                              </span>
-                            </div>
-                            <div className={styles.tipSub}>{c.cross.date}</div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className={styles.axis}>
-                      <span className={styles.axisTop}>{c.axisHi}</span>
-                      {c.notFull && (
-                        <>
-                          <span
-                            className={styles.axisEdge}
-                            style={{
-                              top: c.bandTop,
-                              color: c.edgeColor,
-                            }}
-                          >
-                            {c.axisMax}
+                          <span className={styles.zoomLabel}>
+                            {c.zoomLabel}
                           </span>
-                          <span
-                            className={styles.axisEdge}
-                            style={{
-                              top: c.bandBottom,
-                              color: c.edgeColor,
-                            }}
-                          >
-                            {c.axisMin}
-                          </span>
-                        </>
-                      )}
-                      <span className={styles.axisMid}>{c.axisMid}</span>
-                      <span className={styles.axisBottom}>{c.axisLo}</span>
-                    </div>
-
-                    <div
-                      className={styles.volRow}
-                      onMouseLeave={() => set({ volHover: null })}
-                    >
-                      <div className={styles.volBars}>
-                        {c.vols.map((v, i) => (
-                          <span
-                            key={i}
-                            className={v.on ? styles.volBarOn : styles.volBar}
-                            style={{ height: v.h }}
-                            onMouseEnter={() =>
-                              set({
-                                volHover: i,
-                                chartHover: null,
-                              })
-                            }
-                          />
-                        ))}
-                      </div>
-                      <div className={styles.timeTicks}>
-                        {c.timeTicks.map((t) => (
-                          <span
-                            key={t.key}
-                            className={styles.timeTick}
-                            style={{
-                              left: t.left,
-                              transform: t.shift,
-                            }}
-                          >
-                            {t.label}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className={styles.volCorner} />
-                  </div>
-
-                  <div className={styles.presets}>
-                    {PRESETS.map((x) => (
-                      <button
-                        key={x}
-                        type="button"
-                        className={
-                          x === state.createPreset
-                            ? styles.presetOn
-                            : styles.preset
-                        }
-                        onClick={() => pickPreset(x)}
-                      >
-                        {x}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {stepFoot}
-              </div>
-            )}
-
-            {st.open && st.n === 3 && (
-              <div className={styles.pane}>
-                {paneHead(2)}
-                <div data-scroll="1" className={styles.paneBody}>
-                  <div className={styles.feeRow}>
-                    <span className={styles.microLabel}>Swap fee</span>
-                    <div className={styles.feeGrid}>
-                      {c.feeOptions.map((x) =>
-                        x === "Custom" && x === c.activeFee ? (
-                          <label key={x} className={styles.feeCustom}>
-                            <span>Custom</span>
-                            <span className={styles.feeCustomValue}>
-                              <input
-                                autoFocus
-                                aria-label="Custom fee percentage"
-                                className={styles.feeInput}
-                                inputMode="decimal"
-                                value={state.customFeePct}
-                                onChange={(event) =>
-                                  set({ customFeePct: event.target.value })
-                                }
-                              />
-                              <span>%</span>
-                            </span>
-                          </label>
-                        ) : (
                           <button
-                            key={x}
                             type="button"
-                            className={
-                              x === c.activeFee ? styles.feeOn : styles.fee
+                            className={styles.zoomStep}
+                            onClick={() =>
+                              set({
+                                chartZoom: Math.min(400, state.chartZoom * 1.5),
+                              })
                             }
-                            onClick={() => set({ createFee: x })}
                           >
-                            {x}
+                            +
                           </button>
-                        ),
-                      )}
+                          <button
+                            type="button"
+                            className={styles.zoomWord}
+                            onClick={() =>
+                              set({
+                                chartZoom: Math.max(
+                                  0.5,
+                                  Math.min(
+                                    400,
+                                    c.fitSpan / (c.bandScaleExtent * 2.4),
+                                  ),
+                                ),
+                              })
+                            }
+                          >
+                            fit
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.zoomWord}
+                            onClick={() => set({ chartZoom: 1 })}
+                          >
+                            reset
+                          </button>
+                        </div>
+                        <div className={styles.segmented}>
+                          {SPANS.map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              className={
+                                t === state.createSpan
+                                  ? styles.spanOn
+                                  : styles.span
+                              }
+                              onClick={() =>
+                                set({
+                                  createSpan: t,
+                                })
+                              }
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={styles.plotGrid}>
+                      <div
+                        ref={plotRef}
+                        data-band-plot="1"
+                        data-k={c.scaleK}
+                        data-scale-max={c.bandScaleMax}
+                        data-scale-min={c.bandScaleMin}
+                        className={styles.plot}
+                        onMouseMove={onChartMove}
+                        onMouseLeave={() => set({ chartHover: null })}
+                      >
+                        <div
+                          className={styles.band}
+                          style={{
+                            top: c.bandTop,
+                            height: c.bandHeight,
+                            background: c.bandFill,
+                            cursor: c.bodyCursor,
+                          }}
+                          onPointerDown={bandDrag("body")}
+                        />
+                        <span className={styles.midLine} />
+                        <svg
+                          viewBox="0 0 1000 400"
+                          preserveAspectRatio="none"
+                          className={styles.plotSvg}
+                        >
+                          <polyline
+                            points={c.series}
+                            fill="none"
+                            stroke="var(--green)"
+                            strokeWidth="1.8"
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                            vectorEffect="non-scaling-stroke"
+                          />
+                        </svg>
+
+                        {c.notFull && (
+                          <>
+                            <div
+                              className={styles.edge}
+                              style={{
+                                top: c.bandTop,
+                              }}
+                              onPointerDown={bandDrag("max")}
+                              onKeyDown={nudge("max")}
+                              tabIndex={0}
+                              role="slider"
+                              aria-label={c.ariaMax}
+                              aria-valuenow={state.bandMax}
+                            >
+                              <span
+                                className={styles.edgeLine}
+                                style={{
+                                  borderTopColor: c.edgeColor,
+                                  borderTopWidth: c.edgeW,
+                                }}
+                              />
+                              <span
+                                className={styles.edgePillMax}
+                                style={{
+                                  background: c.edgeColor,
+                                }}
+                              >
+                                {c.maxPill}
+                              </span>
+                            </div>
+                            <div
+                              className={styles.edge}
+                              style={{
+                                top: c.bandBottom,
+                              }}
+                              onPointerDown={bandDrag("min")}
+                              onKeyDown={nudge("min")}
+                              tabIndex={0}
+                              role="slider"
+                              aria-label={c.ariaMin}
+                              aria-valuenow={state.bandMin}
+                            >
+                              <span
+                                className={styles.edgeLine}
+                                style={{
+                                  borderTopColor: c.edgeColor,
+                                  borderTopWidth: c.edgeW,
+                                }}
+                              />
+                              <span
+                                className={styles.edgePillMin}
+                                style={{
+                                  background: c.edgeColor,
+                                }}
+                              >
+                                {c.minPill}
+                              </span>
+                            </div>
+                          </>
+                        )}
+
+                        {c.volTip && (
+                          <div className={styles.tipLayer}>
+                            <span
+                              className={styles.tipDot}
+                              style={{
+                                left: c.volTip.left,
+                                top: c.volTip.top,
+                              }}
+                            />
+                            <div
+                              className={styles.tip}
+                              style={{
+                                left: c.volTip.left,
+                                top: c.volTip.top,
+                                transform: c.volTip.shift,
+                              }}
+                            >
+                              <div className={styles.tipMain}>
+                                {c.volTip.px}{" "}
+                                <span className={styles.tipAccent}>
+                                  {c.volTip.vol}
+                                </span>
+                              </div>
+                              <div className={styles.tipSub}>
+                                {c.volTip.when}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {c.cross && (
+                          <div className={styles.tipLayer}>
+                            <span
+                              className={styles.tipDot}
+                              style={{
+                                left: c.cross.left,
+                                top: c.cross.top,
+                              }}
+                            />
+                            <div
+                              className={styles.tipCross}
+                              style={{
+                                left: c.cross.left,
+                                top: c.cross.top,
+                                transform: c.cross.shift,
+                              }}
+                            >
+                              <div className={styles.tipMain}>
+                                {c.cross.price}{" "}
+                                <span className={styles.tipAccent}>
+                                  {c.cross.pct}
+                                </span>
+                              </div>
+                              <div className={styles.tipSub}>
+                                {c.cross.date}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className={styles.axis}>
+                        <span className={styles.axisTop}>{c.axisHi}</span>
+                        {c.notFull && (
+                          <>
+                            <span
+                              className={styles.axisEdge}
+                              style={{
+                                top: c.bandTop,
+                                color: c.edgeColor,
+                              }}
+                            >
+                              {c.axisMax}
+                            </span>
+                            <span
+                              className={styles.axisEdge}
+                              style={{
+                                top: c.bandBottom,
+                                color: c.edgeColor,
+                              }}
+                            >
+                              {c.axisMin}
+                            </span>
+                          </>
+                        )}
+                        <span className={styles.axisMid}>{c.axisMid}</span>
+                        <span className={styles.axisBottom}>{c.axisLo}</span>
+                      </div>
+
+                      <div
+                        className={styles.volRow}
+                        onMouseLeave={() => set({ volHover: null })}
+                      >
+                        <div className={styles.volBars}>
+                          {c.vols.map((v, i) => (
+                            <span
+                              key={i}
+                              className={v.on ? styles.volBarOn : styles.volBar}
+                              style={{ height: v.h }}
+                              onMouseEnter={() =>
+                                set({
+                                  volHover: i,
+                                  chartHover: null,
+                                })
+                              }
+                            />
+                          ))}
+                        </div>
+                        <div className={styles.timeTicks}>
+                          {c.timeTicks.map((t) => (
+                            <span
+                              key={t.key}
+                              className={styles.timeTick}
+                              style={{
+                                left: t.left,
+                                transform: t.shift,
+                              }}
+                            >
+                              {t.label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className={styles.volCorner} />
+                    </div>
+
+                    <div className={styles.presets}>
+                      {PRESETS.map((x) => (
+                        <button
+                          key={x}
+                          type="button"
+                          className={
+                            x === state.createPreset
+                              ? styles.presetOn
+                              : styles.preset
+                          }
+                          onClick={() => pickPreset(x)}
+                        >
+                          {x}
+                        </button>
+                      ))}
                     </div>
                   </div>
+                  {stepFoot}
+                </div>
+              )}
 
-                  <div className={styles.curveRow}>
-                    <span className={styles.curveLabel}>{c.curveLabel}</span>
+              {st.open && st.n === 3 && (
+                <div className={styles.pane}>
+                  {paneHead(2)}
+                  <div data-scroll="1" className={styles.paneBody}>
+                    <div className={styles.feeRow}>
+                      <span className={styles.microLabel}>Swap fee</span>
+                      <div className={styles.feeGrid}>
+                        {c.feeOptions.map((x) =>
+                          x === "Custom" && x === c.activeFee ? (
+                            <label key={x} className={styles.feeCustom}>
+                              <span>Custom</span>
+                              <span className={styles.feeCustomValue}>
+                                <input
+                                  autoFocus
+                                  aria-label="Custom fee percentage"
+                                  className={styles.feeInput}
+                                  inputMode="decimal"
+                                  value={state.customFeePct}
+                                  onChange={(event) =>
+                                    set({ customFeePct: event.target.value })
+                                  }
+                                />
+                                <span>%</span>
+                              </span>
+                            </label>
+                          ) : (
+                            <button
+                              key={x}
+                              type="button"
+                              className={
+                                x === c.activeFee ? styles.feeOn : styles.fee
+                              }
+                              onClick={() => set({ createFee: x })}
+                            >
+                              {x}
+                            </button>
+                          ),
+                        )}
+                      </div>
+                    </div>
+
+                    <div className={styles.curveRow}>
+                      <span className={styles.curveLabel}>{c.curveLabel}</span>
+                      <button
+                        type="button"
+                        className={styles.useFull}
+                        disabled={!walletConnected}
+                        onClick={() => set(c.maxAmounts)}
+                      >
+                        Use full balances
+                      </button>
+                    </div>
+
+                    <div className={styles.pairNote}>
+                      {c.pairNote} · funds are never locked, quoting is capped
+                      to your wallet balance.
+                    </div>
+
+                    <div className={styles.amounts}>
+                      <div
+                        className={styles.amountCard}
+                        style={{
+                          border: `1px solid ${c.bdA}`,
+                        }}
+                      >
+                        <div className={styles.amountHead}>
+                          <span className={styles.amountSym}>{c.A}</span>
+                          <span className={styles.amountBal}>
+                            bal {walletConnected ? c.walletA : "—"}
+                          </span>
+                        </div>
+                        <div className={styles.amountRow}>
+                          <input
+                            className={styles.amountInput}
+                            value={state.amtA}
+                            inputMode="decimal"
+                            onChange={(e) =>
+                              set(c.amountsFromA(e.target.value))
+                            }
+                          />
+                          <span className={styles.quickGroup}>
+                            <button
+                              type="button"
+                              className={styles.quick}
+                              disabled={!walletConnected}
+                              onClick={() => set(c.halfFromA)}
+                            >
+                              50%
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.quickNext}
+                              disabled={!walletConnected}
+                              onClick={() => set(c.maxFromA)}
+                            >
+                              Max
+                            </button>
+                          </span>
+                        </div>
+                        <div className={styles.amountState}>
+                          <span
+                            className={styles.amountStateTag}
+                            style={{
+                              background: c.tagA,
+                              color: c.fgA,
+                            }}
+                          >
+                            {walletConnected
+                              ? `${c.covA} · ${c.stateA}`
+                              : "Wallet not connected"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div
+                        className={styles.amountCard}
+                        style={{
+                          border: `1px solid ${c.bdB}`,
+                        }}
+                      >
+                        <div className={styles.amountHead}>
+                          <span className={styles.amountSym}>{c.B}</span>
+                          <span className={styles.amountBal}>
+                            bal {walletConnected ? c.walletB : "—"}
+                          </span>
+                        </div>
+                        <div className={styles.amountRow}>
+                          <input
+                            className={styles.amountInput}
+                            value={state.amtB}
+                            inputMode="decimal"
+                            onChange={(e) =>
+                              set(c.amountsFromB(e.target.value))
+                            }
+                          />
+                          <span className={styles.quickGroup}>
+                            <button
+                              type="button"
+                              className={styles.quick}
+                              disabled={!walletConnected}
+                              onClick={() => set(c.halfFromB)}
+                            >
+                              50%
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.quickNext}
+                              disabled={!walletConnected}
+                              onClick={() => set(c.maxFromB)}
+                            >
+                              Max
+                            </button>
+                          </span>
+                        </div>
+                        <div className={styles.amountState}>
+                          <span
+                            className={styles.amountStateTag}
+                            style={{
+                              background: c.tagB,
+                              color: c.fgB,
+                            }}
+                          >
+                            {walletConnected
+                              ? `${c.covB} · ${c.stateB}`
+                              : "Wallet not connected"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {stepFoot}
+                </div>
+              )}
+
+              {st.open && st.n === 4 && (
+                <div className={styles.pane}>
+                  {paneHead(3)}
+                  <div data-scroll="1" className={styles.paneBody}>
+                    <div className={styles.recap}>
+                      {c.recap.map((r) => (
+                        <div key={r.label} className={styles.recapRow}>
+                          <span className={styles.recapLabel}>{r.label}</span>
+                          <span className={styles.recapValue}>{r.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className={styles.immutable}>
+                      <strong className={styles.immutableLead}>
+                        Immutable:
+                      </strong>{" "}
+                      a shipped position can&apos;t be edited — to change it,
+                      dock and ship a new one. You can always push more
+                      inventory.
+                    </p>
+                    <p className={styles.signing}>
+                      <strong className={styles.immutableLead}>Signing:</strong>{" "}
+                      an approval for each of {c.A} and {c.B} Aqua doesn&apos;t
+                      already hold, then one transaction.
+                    </p>
+                  </div>
+                  <div className={styles.paneFoot}>
                     <button
                       type="button"
-                      className={styles.useFull}
-                      disabled={!walletConnected}
-                      onClick={() => set(c.maxAmounts)}
+                      className={styles.goBack}
+                      style={{
+                        visibility: c.backVis as "visible" | "hidden",
+                      }}
+                      onClick={() =>
+                        set({
+                          step: Math.max(1, state.step - 1),
+                        })
+                      }
                     >
-                      Use full balances
+                      Go back
+                    </button>
+                    <p className={styles.footNote} style={{ color: c.footFg }}>
+                      {walletConnected
+                        ? (creation.problem ?? c.footNote)
+                        : "Connect a wallet to deposit and create."}
+                    </p>
+                    <button
+                      type="button"
+                      className={styles.cta}
+                      disabled={
+                        walletConnected &&
+                        (c.ctaDisabled || creation.submitting)
+                      }
+                      style={{
+                        background: walletConnected ? c.ctaBg : "var(--green)",
+                        color: walletConnected ? c.ctaFg : "var(--paper)",
+                        cursor: creation.submitting
+                          ? "wait"
+                          : walletConnected
+                            ? c.ctaCursor
+                            : "pointer",
+                      }}
+                      onClick={
+                        walletConnected
+                          ? creation.send
+                          : () => openConnectModal?.()
+                      }
+                    >
+                      {!walletConnected
+                        ? "Connect wallet"
+                        : creation.submitting
+                          ? "Creating position…"
+                          : creation.problem
+                            ? "Could not create — try again"
+                            : c.cta}
                     </button>
                   </div>
-
-                  <div className={styles.pairNote}>
-                    {c.pairNote} · funds are never locked, quoting is capped to
-                    your wallet balance.
-                  </div>
-
-                  <div className={styles.amounts}>
-                    <div
-                      className={styles.amountCard}
-                      style={{
-                        border: `1px solid ${c.bdA}`,
-                      }}
-                    >
-                      <div className={styles.amountHead}>
-                        <span className={styles.amountSym}>{c.A}</span>
-                        <span className={styles.amountBal}>
-                          bal {walletConnected ? c.walletA : "—"}
-                        </span>
-                      </div>
-                      <div className={styles.amountRow}>
-                        <input
-                          className={styles.amountInput}
-                          value={state.amtA}
-                          inputMode="decimal"
-                          onChange={(e) => set(c.amountsFromA(e.target.value))}
-                        />
-                        <span className={styles.quickGroup}>
-                          <button
-                            type="button"
-                            className={styles.quick}
-                            disabled={!walletConnected}
-                            onClick={() => set(c.halfFromA)}
-                          >
-                            50%
-                          </button>
-                          <button
-                            type="button"
-                            className={styles.quickNext}
-                            disabled={!walletConnected}
-                            onClick={() => set(c.maxFromA)}
-                          >
-                            Max
-                          </button>
-                        </span>
-                      </div>
-                      <div className={styles.amountState}>
-                        <span
-                          className={styles.amountStateTag}
-                          style={{
-                            background: c.tagA,
-                            color: c.fgA,
-                          }}
-                        >
-                          {walletConnected
-                            ? `${c.covA} · ${c.stateA}`
-                            : "Wallet not connected"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div
-                      className={styles.amountCard}
-                      style={{
-                        border: `1px solid ${c.bdB}`,
-                      }}
-                    >
-                      <div className={styles.amountHead}>
-                        <span className={styles.amountSym}>{c.B}</span>
-                        <span className={styles.amountBal}>
-                          bal {walletConnected ? c.walletB : "—"}
-                        </span>
-                      </div>
-                      <div className={styles.amountRow}>
-                        <input
-                          className={styles.amountInput}
-                          value={state.amtB}
-                          inputMode="decimal"
-                          onChange={(e) => set(c.amountsFromB(e.target.value))}
-                        />
-                        <span className={styles.quickGroup}>
-                          <button
-                            type="button"
-                            className={styles.quick}
-                            disabled={!walletConnected}
-                            onClick={() => set(c.halfFromB)}
-                          >
-                            50%
-                          </button>
-                          <button
-                            type="button"
-                            className={styles.quickNext}
-                            disabled={!walletConnected}
-                            onClick={() => set(c.maxFromB)}
-                          >
-                            Max
-                          </button>
-                        </span>
-                      </div>
-                      <div className={styles.amountState}>
-                        <span
-                          className={styles.amountStateTag}
-                          style={{
-                            background: c.tagB,
-                            color: c.fgB,
-                          }}
-                        >
-                          {walletConnected
-                            ? `${c.covB} · ${c.stateB}`
-                            : "Wallet not connected"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
                 </div>
-                {stepFoot}
-              </div>
-            )}
-
-            {st.open && st.n === 4 && (
-              <div className={styles.pane}>
-                {paneHead(3)}
-                <div data-scroll="1" className={styles.paneBody}>
-                  <div className={styles.recap}>
-                    {c.recap.map((r) => (
-                      <div key={r.label} className={styles.recapRow}>
-                        <span className={styles.recapLabel}>{r.label}</span>
-                        <span className={styles.recapValue}>{r.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <p className={styles.immutable}>
-                    <strong className={styles.immutableLead}>Immutable:</strong>{" "}
-                    a shipped position can&apos;t be edited — to change it, dock
-                    and ship a new one. You can always push more inventory.
-                  </p>
-                </div>
-                <div className={styles.paneFoot}>
-                  <button
-                    type="button"
-                    className={styles.goBack}
-                    style={{
-                      visibility: c.backVis as "visible" | "hidden",
-                    }}
-                    onClick={() =>
-                      set({
-                        step: Math.max(1, state.step - 1),
-                      })
-                    }
-                  >
-                    Go back
-                  </button>
-                  <p className={styles.footNote} style={{ color: c.footFg }}>
-                    {creation.problem ?? c.footNote}
-                  </p>
-                  <button
-                    type="button"
-                    className={styles.cta}
-                    disabled={c.ctaDisabled || creation.submitting}
-                    style={{
-                      background: c.ctaBg,
-                      color: c.ctaFg,
-                      cursor: creation.submitting ? "wait" : c.ctaCursor,
-                    }}
-                    onClick={creation.send}
-                  >
-                    {creation.submitting
-                      ? "Creating position…"
-                      : creation.problem
-                        ? "Could not create — try again"
-                        : c.cta}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

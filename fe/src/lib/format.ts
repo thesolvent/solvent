@@ -24,6 +24,23 @@ export function trimmedAmount(amount: string): string {
   });
 }
 
+/**
+ * The one rendering of a wallet balance. Balances arrive as exact decimal strings straight from
+ * base units, and `Number()` silently rounds the large ones away, so the integer part is grouped
+ * as text. The fraction is truncated rather than rounded: a balance must never read higher than
+ * what is held.
+ */
+export function tokenBalance(amount: string): string {
+  const negative = amount.startsWith("-");
+  const [whole = "0", fraction = ""] = (
+    negative ? amount.slice(1) : amount
+  ).split(".");
+  const digits = whole.replace(/^0+(?=\d)/, "") || "0";
+  const places = digits.length > 3 ? 2 : digits === "0" ? 6 : 4;
+  const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${negative ? "-" : ""}${grouped}.${fraction.padEnd(places, "0").slice(0, places)}`;
+}
+
 export function money(n: number): string {
   if (n >= 1e9) {
     return n.toLocaleString("en-US", {

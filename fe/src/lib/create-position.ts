@@ -8,6 +8,7 @@ import { MAX_UINT248, parseTokenAmount } from "@solvent/sdk/validation";
 import { formatUnits } from "viem";
 
 import { BAND_K0 } from "@/data";
+import { tokenBalance } from "@/lib/format";
 import type {
   CreatePair,
   CreateToken,
@@ -372,8 +373,14 @@ function amountControls(
   const unavailable = { amtA: "0", amtB: "0" };
   if (!allocator || !tokenA || !tokenB) {
     return {
-      amountsFromA: (amtA: string): AmountFields => ({ amtA, amtB: "0" }),
-      amountsFromB: (amtB: string): AmountFields => ({ amtA: "0", amtB }),
+      amountsFromA: (amtA: string): AmountFields => ({
+        amtA,
+        amtB: amtA.trim() === "" ? "" : "0",
+      }),
+      amountsFromB: (amtB: string): AmountFields => ({
+        amtA: amtB.trim() === "" ? "" : "0",
+        amtB,
+      }),
       halfFromA: unavailable,
       maxFromA: unavailable,
       halfFromB: unavailable,
@@ -382,19 +389,22 @@ function amountControls(
     };
   }
 
+  // An empty box is "nothing typed yet", not a zero deposit, so it must not seed the other side.
   const fromA = (amtA: string): AmountFields => {
-    const reserve = reserveAmount(amtA, tokenA.decimals);
+    const reserve =
+      amtA.trim() === "" ? undefined : reserveAmount(amtA, tokenA.decimals);
     return reserve === undefined
-      ? { amtA, amtB: "0" }
+      ? { amtA, amtB: amtA.trim() === "" ? "" : "0" }
       : {
           amtA,
           amtB: formatUnits(allocator.fromBase(reserve).quote, tokenB.decimals),
         };
   };
   const fromB = (amtB: string): AmountFields => {
-    const reserve = reserveAmount(amtB, tokenB.decimals);
+    const reserve =
+      amtB.trim() === "" ? undefined : reserveAmount(amtB, tokenB.decimals);
     return reserve === undefined
-      ? { amtA: "0", amtB }
+      ? { amtA: amtB.trim() === "" ? "" : "0", amtB }
       : {
           amtA: formatUnits(allocator.fromQuote(reserve).base, tokenA.decimals),
           amtB,
@@ -451,7 +461,7 @@ function walletTokens(pairs: readonly CreatePair[]) {
     sym: token.symbol,
     name: token.name,
     usd: token.valueUsd,
-    bal: token.balance.toLocaleString("en-US", { maximumFractionDigits: 8 }),
+    bal: tokenBalance(formatUnits(token.balanceRaw, token.decimals)),
     addr: shortAddress(token.address),
     chg: token.changePct,
     tags: token.tags,
@@ -867,12 +877,12 @@ export function createPosition(
     stateA: okA
       ? "sufficient"
       : reserveA !== undefined && reserveA > wallet.rawA && tokenA
-        ? `over by ${formatUnits(reserveA - wallet.rawA, tokenA.decimals)}`
+        ? `over by ${tokenBalance(formatUnits(reserveA - wallet.rawA, tokenA.decimals))}`
         : "enter an amount",
     stateB: okB
       ? "sufficient"
       : reserveB !== undefined && reserveB > wallet.rawB && tokenB
-        ? `over by ${formatUnits(reserveB - wallet.rawB, tokenB.decimals)}`
+        ? `over by ${tokenBalance(formatUnits(reserveB - wallet.rawB, tokenB.decimals))}`
         : "enter an amount",
     bdA: okA ? "var(--line)" : "var(--ok-ink)",
     bdB: okB ? "var(--line)" : "var(--ok-ink)",
@@ -880,8 +890,12 @@ export function createPosition(
     tagB: okB ? "var(--lime-wash-soft)" : "var(--ok-bg)",
     fgA: okA ? "var(--green-darkest)" : "var(--ok-ink-deep)",
     fgB: okB ? "var(--green-darkest)" : "var(--ok-ink-deep)",
-    walletA: tokenA ? formatUnits(wallet.rawA, tokenA.decimals) : "0",
-    walletB: tokenB ? formatUnits(wallet.rawB, tokenB.decimals) : "0",
+    walletA: tokenA
+      ? tokenBalance(formatUnits(wallet.rawA, tokenA.decimals))
+      : tokenBalance("0"),
+    walletB: tokenB
+      ? tokenBalance(formatUnits(wallet.rawB, tokenB.decimals))
+      : tokenBalance("0"),
 
     rangeTag: full ? "Full range" : inRange ? "In range" : "Out of range",
     rangeTagBg: full
@@ -920,7 +934,7 @@ export function createPosition(
                   ? "Enter a deposit amount"
                   : !amountsMatch
                     ? "Recalculate deposit amounts"
-                    : `Approve ${A} & ${B} — step 1 of 2`,
+                    : "Create position",
     ctaDisabled: !canSubmit,
     ctaBg: canSubmit ? "var(--green)" : "#ecece7",
     ctaFg: canSubmit ? "var(--paper)" : "var(--text-muted)",

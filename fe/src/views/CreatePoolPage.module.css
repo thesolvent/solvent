@@ -1314,6 +1314,21 @@
   text-wrap: pretty;
 }
 
+.signing {
+  composes: immutable;
+  border-left-color: var(--line-mid);
+}
+
 .immutableLead {
   color: var(--text-strong);
+}
+
+.catalogNote {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 16px 18px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--text-mid);
 }

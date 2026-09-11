@@ -41,14 +41,25 @@ const pair: CreatePair = {
   defaultFeeBps: 5,
 };
 
+/** What 1,875 USDC pairs with on the ±5% concentrated curve at a 2,500 mid. */
+const FLIPPED_WETH = "0.7879867893524485";
+
+const wallet = vi.hoisted(() => ({ connected: true }));
+const openConnectModal = vi.hoisted(() => vi.fn());
+
 vi.mock("wagmi", async (original) => ({
   ...(await original<typeof import("wagmi")>()),
   useAccount: () => ({
+    isConnected: wallet.connected,
     address: "0x1111111111111111111111111111111111111111",
     chainId: 31337,
   }),
   useClient: () => ({}),
   useConnectorClient: () => ({ data: {} }),
+}));
+
+vi.mock("@rainbow-me/rainbowkit", () => ({
+  useConnectModal: () => ({ openConnectModal }),
 }));
 
 function StrategyDestination() {
@@ -62,6 +73,8 @@ function StrategyDestination() {
 }
 
 beforeEach(() => {
+  wallet.connected = true;
+  openConnectModal.mockClear();
   useAppStore.setState({
     ...INITIAL_STATE,
     step: 4,
@@ -74,7 +87,7 @@ beforeEach(() => {
 });
 
 describe("CreatePoolPage", () => {
-  it("changes orientation beside the price chart without reassigning deposit amounts", async () => {
+  it("re-derives both deposits when the orientation flips", async () => {
     useAppStore.setState({ step: 1, flipped: false });
     renderWithServices(
       <TransitionRoutes>
@@ -99,11 +112,12 @@ describe("CreatePoolPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "WETH ⇄ USDC" }));
 
-    expect(useAppStore.getState()).toMatchObject({
-      flipped: true,
-      amtA: "1875",
-      amtB: "0.75",
-    });
+    // The 1,875 USDC keeps its token; the WETH side is re-quoted against it, not handed the 0.75.
+    const flipped = useAppStore.getState();
+    expect(flipped.flipped).toBe(true);
+    expect(flipped.amtA).toBe("1875");
+    expect(flipped.amtB).not.toBe("0.75");
+    expect(flipped.amtB).toBe(FLIPPED_WETH);
     expect(screen.getByRole("button", { name: "USDC ⇄ WETH" })).toBeVisible();
   });
 
@@ -261,12 +275,7 @@ describe("CreatePoolPage", () => {
   });
 
   it("recalculates paired deposits when the curve changes", async () => {
-    useAppStore.setState({
-      step: 3,
-      strategy: "Concentrated",
-      amtA: "1",
-      amtB: "123",
-    });
+    useAppStore.setState({ step: 3, strategy: "Concentrated" });
     renderWithServices(
       <TransitionRoutes>
         <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
@@ -285,6 +294,9 @@ describe("CreatePoolPage", () => {
         /1 WETH pairs with 2,626\.62 USDC at the live market price/,
       ),
     ).toBeVisible();
+    fireEvent.change(screen.getAllByRole("textbox")[0], {
+      target: { value: "1" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Full range" }));
 
     expect(useAppStore.getState()).toMatchObject({
@@ -339,9 +351,7 @@ describe("CreatePoolPage", () => {
     fireEvent.change(baseAmount, { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", { name: /Approve WETH & USDC/ }),
-      );
+      fireEvent.click(screen.getByRole("button", { name: "Create position" }));
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     });
     await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
@@ -364,5 +374,206 @@ describe("CreatePoolPage", () => {
     });
     expect(screen.queryByTestId("route-transition")).not.toBeInTheDocument();
     vi.useRealTimers();
+  });
+  it("names the pool it came from in the breadcrumb trail", async () => {
+    useAppStore.setState({ step: 1 });
+    renderWithServices(
+      <TransitionRoutes>
+        <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
+        <Route path="/pools" element={<p>Pools index</p>} />
+      </TransitionRoutes>,
+      {
+        positions: {
+          pairs: vi.fn().mockResolvedValue([pair]),
+          history: vi.fn().mockResolvedValue([]),
+        },
+      },
+      "/pools/weth-usdc/new",
+    );
+
+    expect(await screen.findByText("WETH / USDC")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "WETH/USDC" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pools" }));
+    expect(await screen.findByText("Pools index")).toBeVisible();
+  });
+
+  it("refuses a pair slug the deployment does not serve", async () => {
+    renderWithServices(
+      <TransitionRoutes>
+        <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
+      </TransitionRoutes>,
+      {
+        positions: {
+          pairs: vi.fn().mockResolvedValue([pair]),
+          history: vi.fn().mockResolvedValue([]),
+        },
+      },
+      "/pools/aave-usdc/new",
+    );
+
+    expect(
+      await screen.findByText("AAVE/USDC isn’t an available pair."),
+    ).toBeVisible();
+    expect(screen.queryByText("WETH / USDC")).not.toBeInTheDocument();
+    expect(screen.queryByText("In range")).not.toBeInTheDocument();
+  });
+
+  it("draws no price until the pair catalog has answered", async () => {
+    useAppStore.setState({ step: 2 });
+    let loadPairs!: (pairs: CreatePair[]) => void;
+    renderWithServices(
+      <TransitionRoutes>
+        <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
+      </TransitionRoutes>,
+      {
+        positions: {
+          pairs: vi.fn().mockReturnValue(
+            new Promise<CreatePair[]>((resolve) => {
+              loadPairs = resolve;
+            }),
+          ),
+          history: vi.fn().mockResolvedValue([]),
+        },
+      },
+      "/pools/weth-usdc/new",
+    );
+
+    expect(screen.getByText("Loading supported pairs…")).toBeVisible();
+    expect(screen.queryByText("In range")).not.toBeInTheDocument();
+    expect(screen.queryByText("1.00")).not.toBeInTheDocument();
+
+    await act(async () => {
+      loadPairs([pair]);
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    expect(screen.getByText("In range")).toBeVisible();
+  });
+
+  it("offers a retry when the pair catalog fails", async () => {
+    useAppStore.setState({ step: 2 });
+    const pairs = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("down"))
+      .mockResolvedValue([pair]);
+    renderWithServices(
+      <TransitionRoutes>
+        <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
+      </TransitionRoutes>,
+      { positions: { pairs, history: vi.fn().mockResolvedValue([]) } },
+      "/pools/weth-usdc/new",
+    );
+
+    expect(
+      await screen.findByText("Couldn’t load supported pairs."),
+    ).toBeVisible();
+    expect(screen.queryByText("In range")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("In range")).toBeVisible();
+    expect(pairs).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens with no deposit the maker did not type", async () => {
+    useAppStore.setState({ step: 2 });
+    renderWithServices(
+      <TransitionRoutes>
+        <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
+      </TransitionRoutes>,
+      {
+        positions: {
+          pairs: vi.fn().mockResolvedValue([pair]),
+          history: vi.fn().mockResolvedValue([]),
+        },
+      },
+      "/pools/weth-usdc/new",
+    );
+
+    expect(await screen.findByText("In range")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Next step" }));
+
+    await screen.findByText(/1 WETH pairs with/);
+    const [baseAmount, quoteAmount] = screen.getAllByRole("textbox");
+    expect(baseAmount).toHaveValue("");
+    expect(quoteAmount).toHaveValue("");
+    expect(screen.queryByText(/uses 50% of balance/)).not.toBeInTheDocument();
+  });
+
+  it("renders every wallet balance through one formatter", async () => {
+    const raw = {
+      ...pair,
+      base: { ...pair.base, balanceRaw: 1_234_567_812_345_678_901n },
+    };
+    useAppStore.setState({ step: 3 });
+    renderWithServices(
+      <TransitionRoutes>
+        <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
+      </TransitionRoutes>,
+      {
+        positions: {
+          pairs: vi.fn().mockResolvedValue([raw]),
+          history: vi.fn().mockResolvedValue([]),
+        },
+      },
+      "/pools/weth-usdc/new",
+    );
+
+    expect(await screen.findByText("bal 1.2345")).toBeVisible();
+    expect(screen.queryByText(/1\.234567812345678901/)).not.toBeInTheDocument();
+
+    act(() => useAppStore.setState({ step: 1 }));
+    expect(screen.getByText(/^1\.2345 WETH ·/)).toBeVisible();
+  });
+
+  it("asks for a wallet before it asks for a signature", async () => {
+    wallet.connected = false;
+    renderWithServices(
+      <TransitionRoutes>
+        <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
+      </TransitionRoutes>,
+      {
+        positions: {
+          pairs: vi.fn().mockResolvedValue([pair]),
+          history: vi.fn().mockResolvedValue([]),
+        },
+      },
+      "/pools/weth-usdc/new",
+    );
+
+    const cta = await screen.findByRole("button", { name: "Connect wallet" });
+    expect(cta).toBeEnabled();
+    fireEvent.click(cta);
+    expect(openConnectModal).toHaveBeenCalledOnce();
+  });
+
+  it("promises only the signatures it will ask for", async () => {
+    useAppStore.setState({ step: 3 });
+    renderWithServices(
+      <TransitionRoutes>
+        <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
+      </TransitionRoutes>,
+      {
+        positions: {
+          pairs: vi.fn().mockResolvedValue([pair]),
+          history: vi.fn().mockResolvedValue([]),
+        },
+      },
+      "/pools/weth-usdc/new",
+    );
+
+    await screen.findByText(/1 WETH pairs with/);
+    fireEvent.change(screen.getAllByRole("textbox")[0], {
+      target: { value: "1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+
+    expect(
+      screen.getByRole("button", { name: "Create position" }),
+    ).toBeVisible();
+    expect(screen.queryByText(/step 1 of 2/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/an approval for each of WETH and USDC/),
+    ).toBeVisible();
   });
 });
