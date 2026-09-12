@@ -104,6 +104,20 @@ impl SwapService {
         prices: TradePrices,
     ) -> Result<SwapOutcome, SolventError> {
         let now = self.clock.now_unix();
+        if !self.fill_builder.supports(intent.protocol) {
+            // Observed and quoted upstream, but this protocol has no builder to fill it with.
+            return self
+                .declined(
+                    trade_id,
+                    &intent,
+                    taker,
+                    now,
+                    prices,
+                    None,
+                    "no fill builder registered for this protocol",
+                )
+                .await;
+        }
         let Some(amounts) = swap_amounts(&intent, self.config.filler, now) else {
             // No single delivery to source, so there is no cost to quote either.
             return self
@@ -655,6 +669,9 @@ mod tests {
         }
     }
 
+    /// Stands in for a single-protocol builder (like the real ones), so it fills only the
+    /// protocol these fixtures normally submit — 1inch is deliberately absent, to exercise the
+    /// pre-route decline for a protocol this deployment has no builder for.
     struct FakeFill;
     #[async_trait]
     impl FillBuilder for FakeFill {
@@ -665,6 +682,10 @@ mod tests {
             _: &Snapshot,
         ) -> Result<PreparedFill, FillBuilderError> {
             Ok(PreparedFill::new(addr(0xF1), Bytes::from(vec![0x01, 0x02])))
+        }
+
+        fn supports(&self, protocol: ProtocolId) -> bool {
+            protocol != ProtocolId::OneInchLimitOrder
         }
     }
 
