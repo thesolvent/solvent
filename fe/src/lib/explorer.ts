@@ -192,7 +192,7 @@ export function activityRow(record: ActivityRecord) {
       : record.kind === "docked"
         ? "Position closed"
         : `Strategy ${shortHash(record.strategyHash)}`,
-    position: `position ${shortHash(record.strategyHash)}`,
+    position: shortHash(record.strategyHash),
   };
 }
 
