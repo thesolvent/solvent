@@ -5,5 +5,5 @@ pub mod order_log;
 pub mod quote_log;
 
 pub use maker_metrics::SqliteMakerMetrics;
-pub use order_log::{ObservedRow, SqliteOrderLog};
+pub use order_log::{ObservedRow, OrderFeedFilter, OrderStateFilter, SqliteOrderLog};
 pub use quote_log::SqliteQuoteLog;

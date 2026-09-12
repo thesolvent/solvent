@@ -97,6 +97,9 @@ export type AppState = {
   xpPair: string;
   xpRebateStatus: RebateExplorerStatus;
   xpOpen: string | null;
+  xpOrderSource: string;
+  xpOrderPair: string;
+  xpOrderState: string;
 };
 
 type SwapState = Pick<
@@ -224,6 +227,9 @@ export const INITIAL_STATE: AppState = {
   xpPair: "All pairs",
   xpRebateStatus: "Active",
   xpOpen: null,
+  xpOrderSource: "All sources",
+  xpOrderPair: "All pairs",
+  xpOrderState: "All states",
 };
 
 /** Canvas-level knobs the design exposed as editor props. */

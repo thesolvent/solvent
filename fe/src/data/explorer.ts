@@ -29,6 +29,9 @@ export interface TradeRecord {
   indicativeInput: TokenQuantity | null;
   /** Which venue the order arrived from: the public book, or our own endpoint. */
   source: string;
+  /** Why this trade declined — the admission rule, the sim gate's real on-chain revert reason, or
+   *  the margin call. */
+  declineReason: string | null;
   priceImpactPct: number | null;
   makers: number | null;
   txHash: string | null;
@@ -79,4 +82,19 @@ export interface ObservedOrder {
   verdict: string;
   reason: string | null;
   seenAt: number;
+  /** The trade this order became, if it was ever attempted — `null` when it was refused at the
+   *  door or declined as unprofitable before routing ever reserved anything. */
+  tradeStatus: string | null;
+  /** The trade's own id — what the explorer links to for the trade's full detail. */
+  tradeId: string | null;
+  tradeTxHash: string | null;
+  /** Why the trade declined — the sim gate's real on-chain revert reason, or the margin call. */
+  tradeDeclineReason: string | null;
+}
+
+/** One page of the order feed, plus how many orders the feed has ever shown us — the denominator
+ *  this page sits inside. */
+export interface ObservedOrderPage {
+  items: ObservedOrder[];
+  total: number;
 }

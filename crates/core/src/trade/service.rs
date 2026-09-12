@@ -131,6 +131,7 @@ impl TradeService {
             indicative_input,
             source: trade.source.as_str().to_string(),
             price_impact_pct: trade.price_impact_pct,
+            decline_reason: trade.decline_reason.clone(),
             tx_hash: trade.tx_hash.map(|h| h.to_string()),
             block_number: trade.block_number,
             created_at: trade.created_at,
@@ -341,6 +342,7 @@ mod tests {
 
     fn a_trade() -> Trade {
         Trade {
+            decline_reason: None,
             indicative_amount_in: None,
             source: OrderSource::UniswapX,
             id: TradeId(Ulid::from_parts(1, 2)),

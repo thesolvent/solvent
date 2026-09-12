@@ -45,11 +45,61 @@ function sourceLabel(source: string): string {
   return source;
 }
 
+const SOURCE_KEYS: Record<string, string> = {
+  UniswapX: "uniswapx",
+  "1inch": "oneinch",
+  "Solvent API": "solvent",
+};
+
+/** The wire value the `/v1/orders` source filter expects, from the label the source dropdown
+ *  shows — the inverse of `sourceLabel`. */
+export function sourceKey(label: string): string | undefined {
+  return SOURCE_KEYS[label];
+}
+
+const STATE_KEYS: Record<string, string> = {
+  Filled: "filled",
+  Declined: "declined",
+  "Failed on-chain": "failed_onchain",
+  Unprofitable: "unprofitable",
+  Refused: "refused",
+  "Pricing…": "pricing",
+};
+
+/** The wire value the `/v1/orders` state filter expects, from the label the state dropdown shows
+ *  — the backend buckets verdict plus trade lifecycle the same way `orderState` does below. */
+export function stateKey(label: string): string | undefined {
+  return STATE_KEYS[label];
+}
+
+/** The single letter a venue's badge shows — a mark of our own, not a reproduction of the
+ *  protocol's real logo artwork. */
+function sourceGlyph(source: string): string {
+  if (source === "uniswapx") return "X";
+  if (source === "oneinch") return "1";
+  return "S";
+}
+
+/** What a reader sees on hover: the order type this venue actually sent, so "UniswapX" or "1inch"
+ *  reads as more than a label. */
+function sourceDetail(source: string): string {
+  if (source === "uniswapx")
+    return "UniswapX — Dutch-auction intent order (V2 reactor)";
+  if (source === "oneinch") return "1inch — Limit Order Protocol v4.1 order";
+  if (source === "solvent")
+    return "Solvent — submitted straight to our own endpoint";
+  return source;
+}
+
 /** Why a trade earned nothing. When routing priced the delivery, say what it would have cost —
- *  "declined" alone gives the reader no way to tell a near miss from an empty book. */
+ *  "declined" alone gives the reader no way to tell a near miss from an empty book. The real reason
+ *  the trade lifecycle recorded (an admission rule, a margin call, or the sim gate's actual on-chain
+ *  revert text) comes first, since it is the specific answer; the sourcing comparison is the account
+ *  behind it. */
 function declineTag(trade: TradeRecord): string {
-  if (!trade.indicativeInput) return `not earned — ${trade.status}`;
-  return `not earned — ${trade.status} · sourcing ${tokenText(trade.indicativeInput)} vs ${tokenText(trade.input)} paid`;
+  const why = trade.declineReason ? ` — ${trade.declineReason}` : "";
+  if (!trade.indicativeInput) return `not earned — ${trade.status}${why}`;
+  return `not earned — ${trade.status}${why} · sourcing ${tokenText(trade.indicativeInput)} vs ${tokenText(trade.input)} paid`;
 }
 
 function timestamp(at: number | null): string {
@@ -249,8 +299,117 @@ export function tradeDetail(trade: TradeRecord) {
   };
 }
 
+/** The venue's accent, for the source pill — reuses the palette's own semantic colors rather than
+ *  inventing new ones: `info` (blue) for the public UniswapX book, the brand lime for 1inch (the
+ *  protocol this resolver's own on-chain filler was built for), neutral for our own endpoint. */
+function sourceTone(source: string): { background: string; color: string } {
+  if (source === "uniswapx")
+    return { background: "var(--info-bg)", color: "var(--info-ink)" };
+  if (source === "oneinch")
+    return { background: "var(--lime-wash)", color: "var(--green-darkest)" };
+  return { background: "var(--surface)", color: "var(--text-mid)" };
+}
+
+/** Real token icons, so a reader identifies the pair by its actual mark rather than decoding an
+ *  address or two initials. `null` for anything outside this set — the badge falls back to a
+ *  monogram rather than a broken image. */
+const TOKEN_ICONS: Record<string, string> = {
+  WETH: "/tokens/weth.png",
+  USDC: "/tokens/usdc.png",
+  USDT: "/tokens/usdt.png",
+  DAI: "/tokens/dai.png",
+  WBTC: "/tokens/wbtc.png",
+  LINK: "/tokens/link.png",
+  UNI: "/tokens/uni.png",
+};
+
+function tokenIcon(symbol: string): string | null {
+  return TOKEN_ICONS[symbol.toUpperCase()] ?? null;
+}
+
+/** Real venue icons — the protocol's own real mark, sourced properly (CoinGecko's public asset
+ *  CDN), not a reproduction drawn from memory. `null` for anything outside this set. */
+const SOURCE_ICONS: Record<string, string> = {
+  uniswapx: "/sources/uniswapx.png",
+  oneinch: "/sources/1inch.png",
+};
+
+function sourceIcon(source: string): string | null {
+  return SOURCE_ICONS[source] ?? null;
+}
+
+/** A token's at-a-glance badge letters — the fallback for a symbol with no real icon, so a reader
+ *  can still tell the pair apart without decoding an address. */
+function tokenMonogram(symbol: string): string {
+  return symbol.slice(0, 2).toUpperCase();
+}
+
+/** What actually became of an order, one tier richer than the door verdict: whether it was ever
+ *  attempted, and — once it was — whether it filled, declined, or reverted, with the real reason
+ *  the trade lifecycle recorded (not a guess). Reuses `STATUS_TONE`'s existing palette. */
+function orderState(order: ObservedOrder): {
+  label: string;
+  detail: string;
+  tone: { background: string; color: string };
+} {
+  if (order.verdict !== "admitted") {
+    return {
+      label: "Refused",
+      detail: order.reason ?? "refused at the door",
+      tone: { background: "var(--surface)", color: "var(--text-mid)" },
+    };
+  }
+  if (order.tradeStatus === "confirmed" || order.tradeStatus === "submitted") {
+    // A submitted fill that passed the sim gate is broadcast to a real filler contract call —
+    // by the time it's tracked here it has already cleared the on-chain profitability/delivery
+    // checks. `tx_hash` is populated once confirmation tracking catches up; until then, the fill
+    // itself is real even though the hash isn't shown yet.
+    return {
+      label: "Filled",
+      detail: order.tradeTxHash
+        ? shortHash(order.tradeTxHash)
+        : "filled — confirming",
+      tone: STATUS_TONE.confirmed,
+    };
+  }
+  if (order.tradeStatus === "failed") {
+    return {
+      label: "Failed on-chain",
+      detail: order.tradeDeclineReason ?? "reverted after submission",
+      tone: STATUS_TONE.failed,
+    };
+  }
+  if (order.tradeStatus === "declined") {
+    return {
+      label: "Declined",
+      detail: order.tradeDeclineReason ?? "declined",
+      tone: STATUS_TONE.declined,
+    };
+  }
+  if (order.tradeStatus) {
+    return {
+      label: "Pending",
+      detail: order.tradeStatus,
+      tone: STATUS_TONE.pending,
+    };
+  }
+  if (order.indicativeIn) {
+    return {
+      label: "Unprofitable",
+      detail: "priced, not yet worth a reservation",
+      tone: STATUS_TONE.declined,
+    };
+  }
+  return {
+    label: "Pricing…",
+    detail: "admitted, not priced yet",
+    tone: STATUS_TONE.pending,
+  };
+}
+
 /** One observed order as a row, in the same shape `tradeRow` produces: a pair, the flow through
- *  it, the numbers that decide it, and a state pill. */
+ *  it, the numbers that decide it, and a state pill — plus enough at a glance (token monograms, the
+ *  source venue, and what really became of it) that one look tells the whole story. */
 export function orderRow(
   order: ObservedOrder,
   tokenOf: (address: string) => { symbol: string; decimals: number },
@@ -263,20 +422,30 @@ export function orderRow(
   const best = order.indicativeIn
     ? `${amountText(order.indicativeIn, tin.decimals)} ${tin.symbol}`
     : "not priced";
+  const state = orderState(order);
   return {
     id: order.orderHash,
+    // Only a trade this order actually became has a detail page to route to.
+    tradeId: order.tradeId,
     pair: `${tin.symbol}/${tout.symbol}`,
+    tokenInSymbol: tin.symbol,
+    tokenOutSymbol: tout.symbol,
+    tokenInIcon: tokenIcon(tin.symbol),
+    tokenOutIcon: tokenIcon(tout.symbol),
+    tokenInMonogram: tokenMonogram(tin.symbol),
+    tokenOutMonogram: tokenMonogram(tout.symbol),
     hashLabel: shortHash(order.orderHash),
     source: sourceLabel(order.source),
+    sourceIcon: sourceIcon(order.source),
+    sourceGlyph: sourceGlyph(order.source),
+    sourceDetail: sourceDetail(order.source),
+    sourceStyle: sourceTone(order.source),
     input: `${amountText(order.amountIn, tin.decimals)} ${tin.symbol}`,
     asked,
     best,
-    state: order.verdict === "admitted" ? "admitted" : "refused",
-    detail: order.reason ?? "priced",
-    stateStyle:
-      order.verdict === "admitted"
-        ? { background: "var(--lime-wash)", color: "var(--lime-ink)" }
-        : { background: "var(--surface)", color: "var(--muted)" },
+    state: state.label,
+    detail: state.detail,
+    stateStyle: state.tone,
   };
 }
 

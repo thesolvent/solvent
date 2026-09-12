@@ -143,6 +143,9 @@ pub struct Trade {
     pub source: OrderSource,
     pub token_in_price_usd: Option<f64>,
     pub token_out_price_usd: Option<f64>,
+    /// Why this trade declined — the admission rule, the sim gate's real on-chain revert reason,
+    /// or the margin call. `None` for a trade that has not declined (yet).
+    pub decline_reason: Option<String>,
 }
 
 /// One maker's slice of the routed split. The tokens and the settlement tx are the trade's — one
@@ -208,6 +211,10 @@ pub struct TradeView {
     pub created_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settled_at: Option<u64>,
+    /// Why this trade declined — the admission rule, the sim gate's real on-chain revert reason,
+    /// or the margin call. Absent for a trade that has not declined.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decline_reason: Option<String>,
     /// The stage timeline — detail only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<Vec<TradeAction>>,

@@ -1356,11 +1356,21 @@
 
 /* Order feed: same row language as the trade list, different columns. */
 .orderSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 10px 18px;
   border-bottom: 1px solid var(--surface);
   font-size: 12px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.orderSummaryPager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: none;
 }
 .orderHeadRow,
@@ -1376,6 +1386,18 @@
   border-bottom: 1px solid var(--surface);
   min-width: 0;
 }
+/* Only the rows that became a trade route anywhere — a modifier, not a replacement, so a plain
+ * (unclickable) row keeps looking like inert text rather than a dead link. */
+.orderRowLink {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  width: 100%;
+  transition: background 140ms ease;
+}
+.orderRowLink:hover {
+  background: var(--lime-wash-faint);
+}
 .orderHeadRow {
   font-size: 10px;
   font-weight: 700;
@@ -1385,6 +1407,11 @@
   padding-top: 8px;
   padding-bottom: 8px;
 }
+/* The Source column's icon is centered in its cell (.orderSource); its header label matches so
+   the two align, instead of a centered icon reading as off-center under left-aligned text. */
+.orderHeadRow span:nth-child(5) {
+  text-align: center;
+}
 .orderNum {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -1393,7 +1420,108 @@
   text-overflow: ellipsis;
 }
 .orderSource {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
+}
+
+/* A custom hover tooltip, not the browser's native title bubble: hidden until the badge is
+   hovered or focused, then fades in above it. */
+.hoverTip {
+  position: relative;
+  display: inline-flex;
+}
+.hoverTipBubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(2px);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: normal;
+  width: max-content;
+  max-width: 240px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+  z-index: 20;
+}
+.hoverTipBubble::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--ink);
+}
+.hoverTip:hover .hoverTipBubble,
+.hoverTip:focus-within .hoverTipBubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+/* The rightmost column's tooltip opens from its right edge instead of centering, so it grows
+   leftward into the row rather than off the table's right edge (where it would clip). */
+.hoverTipEnd .hoverTipBubble {
+  left: auto;
+  right: 0;
+  transform: translateY(2px);
+}
+.hoverTipEnd .hoverTipBubble::after {
+  left: auto;
+  right: 10px;
+  transform: none;
+}
+.hoverTipEnd:hover .hoverTipBubble,
+.hoverTipEnd:focus-within .hoverTipBubble {
+  transform: translateY(0);
+}
+
+/* The pair cell gains a token-monogram pair at a glance, ahead of the existing name/hash stack —
+   `.tradePair` itself is untouched so the Trades tab's layout stays exactly as it was. */
+.orderPairCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pairBadges {
+  display: flex;
+  flex: none;
+}
+.tokenBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  color: var(--text-strong);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  flex: none;
+}
+.tokenBadgeImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pairBadges .tokenBadge + .tokenBadge {
+  margin-left: -11px;
 }

@@ -348,6 +348,48 @@
               "format": "int32",
               "minimum": 0
             }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token_in",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token_out",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1964,6 +2006,33 @@
               "null"
             ]
           },
+          "trade_decline_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the trade declined — the sim gate's real on-chain revert reason, or the margin call."
+          },
+          "trade_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The trade's own id — what the explorer links to for the trade's full detail."
+          },
+          "trade_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The trade this order became, if it was ever attempted — absent when it was refused at the\ndoor or declined as unprofitable before routing ever reserved anything."
+          },
+          "trade_tx_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "verdict": {
             "type": "string",
             "description": "`admitted` or `dropped`."
@@ -1973,7 +2042,8 @@
       "ObservedOrders": {
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total"
         ],
         "properties": {
           "items": {
@@ -1981,6 +2051,11 @@
             "items": {
               "$ref": "#/components/schemas/ObservedOrder"
             }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many orders the feed has ever shown us — the denominator this page sits inside."
           }
         }
       },
@@ -4005,6 +4080,13 @@
                       "description": "Signed order expiry as Unix seconds.",
                       "minimum": 0
                     },
+                    "decline_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Why this trade declined — the admission rule, the sim gate's real on-chain revert reason,\nor the margin call. Absent for a trade that has not declined."
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -4898,6 +4980,13 @@
                 "description": "Signed order expiry as Unix seconds.",
                 "minimum": 0
               },
+              "decline_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Why this trade declined — the admission rule, the sim gate's real on-chain revert reason,\nor the margin call. Absent for a trade that has not declined."
+              },
               "id": {
                 "type": "string"
               },
@@ -5297,6 +5386,13 @@
             "format": "int64",
             "description": "Signed order expiry as Unix seconds.",
             "minimum": 0
+          },
+          "decline_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why this trade declined — the admission rule, the sim gate's real on-chain revert reason,\nor the margin call. Absent for a trade that has not declined."
           },
           "id": {
             "type": "string"

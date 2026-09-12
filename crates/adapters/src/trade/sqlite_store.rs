@@ -166,10 +166,12 @@ fn row_to_trade(row: &SqliteRow) -> Result<Trade, TradeStoreError> {
         indicative_amount_in: opt_amount(row, "indicative_amount_in")?,
         source: match row.try_get::<String, _>("source").map_err(db)?.as_str() {
             "uniswapx" => OrderSource::UniswapX,
+            "oneinch" => OrderSource::OneInch,
             _ => OrderSource::Solvent,
         },
         token_in_price_usd: row.try_get("token_in_price_usd").map_err(db)?,
         token_out_price_usd: row.try_get("token_out_price_usd").map_err(db)?,
+        decline_reason: row.try_get("decline_reason").map_err(db)?,
     })
 }
 
@@ -202,8 +204,8 @@ async fn insert_trade(
              id, order_hash, taker, token_in, token_out, amount_in, min_amount_out, amount_out,
              status, status_rank, deadline_block, signature, price_impact_pct, surplus, tx_hash,
              block_number, created_at, settled_at, token_in_price_usd, token_out_price_usd,
-             indicative_amount_in, source)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             indicative_amount_in, source, decline_reason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (order_hash) DO NOTHING",
     )
     .bind(trade.id.to_string())
@@ -228,6 +230,7 @@ async fn insert_trade(
     .bind(trade.token_out_price_usd)
     .bind(trade.indicative_amount_in.as_ref().map(amount_text))
     .bind(trade.source.as_str())
+    .bind(trade.decline_reason.as_deref())
     .execute(&mut **tx)
     .await
     .map_err(db)?
@@ -346,7 +349,7 @@ impl TradeStore for SqliteTradeStore {
         sqlx::query(
             "UPDATE trade
              SET status = ?, status_rank = ?, amount_out = ?, tx_hash = ?, block_number = ?,
-                 settled_at = ?
+                 settled_at = ?, decline_reason = COALESCE(?, decline_reason)
              WHERE id = ? AND settled_at IS NULL",
         )
         .bind(outcome.status.as_str())
@@ -355,6 +358,7 @@ impl TradeStore for SqliteTradeStore {
         .bind(outcome.tx_hash.map(bytes_of))
         .bind(outcome.block_number.map(i64_of).transpose()?)
         .bind(i64_of(outcome.at)?)
+        .bind(outcome.reason.as_deref())
         .bind(id.to_string())
         .execute(&mut *tx)
         .await

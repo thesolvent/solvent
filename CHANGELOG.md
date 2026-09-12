@@ -373,8 +373,34 @@ the project is pre-1.0 and evolving.
     configured** (UniswapX V2, UniswapX V1, or 1inch), not only under UniswapX V2's own key —
     previously a deployment running only the 1inch or V1 feed would have left the entire ingest
     pipeline inert despite looking fully configured.
+- **The order feed records why a trade declined, and `/v1/orders` exposes it end to end.**
+  `Settlement`/`Trade`/`TradeView` carry a `decline_reason` (`crates/adapters/migrations/
+  0018_trade_decline_reason.sql`), populated with the real admission rule, the sim gate's actual
+  on-chain revert reason, or the margin call — not just the terminal status. A `settle()`'s `reason:
+  None` leaves an already-recorded reason as-is (`COALESCE` on write), so the reconcile loop's own
+  terminal settle can't clobber the reason the swap service set at creation. Fixed a real decode bug
+  along the way: `row_to_trade`'s source match only recognized `"uniswapx"`, silently mapping every
+  `"oneinch"` trade to `OrderSource::Solvent`.
+- **`GET /v1/orders` gained real pagination and filtering.** `offset`/`total` replace the previous
+  fixed 200-row window — a deployment with heavier 1inch volume was pushing genuinely-filled
+  UniswapX orders out of the only window the API could return. Filtering is server-side, not
+  client-side: `source`, `token_in`/`token_out` (a directional pair), and `state` (a derived bucket
+  — `filled`/`declined`/`failed_onchain`/`unprofitable`/`refused`/`pricing` — built from verdict
+  plus trade lifecycle the same way the explorer UI computes it, not a stored column) all narrow
+  both the page and its `total`, so a filtered page count is never wrong. The feed's `trade.id`
+  is exposed too, so a filled order can link straight to its trade's own detail page.
 
 ### Added — frontend (`fe/`, React + Vite)
+- **The order feed is a full peer of Trades/Activity**, with real protocol icons (sourced from
+  CoinGecko, not fabricated), a source badge whose hover tooltip names the actual order type
+  (e.g. "UniswapX — Dutch-auction intent order (V2 reactor)"), and a state pill whose hover tooltip
+  carries the real reason (an admission rule, a decline reason, an on-chain revert) instead of
+  showing it as a permanently-visible line. Filters for source, pair, and state are backed by the
+  new server-side `/v1/orders` query params, so a filtered result's page count is always correct
+  rather than only ever reflecting one page's worth of client-side filtering. Ten rows per page,
+  with a `‹ page / total ›` control sitting beside the summary line. A row that became a trade
+  (has a `trade_id`) routes straight to its trade detail page on click; a row with nothing to route
+  to (refused, or not yet a trade) stays a plain row.
 - **Live Makers and strategy details** — connect the original dashboard and strategy panels to
   address-based reads, rolling maker periods, confirmed-order fill share and submission-to-confirmation
   latency. Keep the existing chart/control placement, restore the prior Explorer/Trade layout,

@@ -22,6 +22,9 @@ pub struct Settlement {
     pub amount_out: Option<U256>,
     pub tx_hash: Option<B256>,
     pub block_number: Option<u64>,
+    /// Why a decline happened — the admission rule, the sim gate's real revert reason, or the
+    /// margin call. `None` leaves an already-recorded reason as-is, rather than clearing it.
+    pub reason: Option<String>,
     /// Unix seconds.
     pub at: u64,
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useAccount, useSwitchChain } from "wagmi";
@@ -6,16 +6,21 @@ import { Pagination } from "@/components/Pagination";
 import { RebateList } from "@/components/RebateList";
 import { useLoadedPagination } from "@/components/useLoadedPagination";
 import { chain } from "@/adapters/wallet/config";
-import type { ObservedOrder } from "@/data/explorer";
 import {
   activityRow,
   explorerStats,
   orderFlow,
   orderRow,
+  sourceKey,
+  stateKey,
   tradeRow,
 } from "@/lib/explorer";
 import { loadedPageLabel } from "@/lib/pagination";
-import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
+import type {
+  ActivityFilter,
+  OrderFeedFilter,
+  TradeFilter,
+} from "@/ports/explorer";
 import { useAssets } from "@/services/assets";
 import {
   useActivity,
@@ -50,6 +55,17 @@ const DROP_OPTIONS = {
     "failed",
   ],
   xpPair: ["All pairs"],
+  xpOrderSource: ["All sources", "UniswapX", "1inch", "Solvent API"],
+  xpOrderPair: ["All pairs"],
+  xpOrderState: [
+    "All states",
+    "Filled",
+    "Declined",
+    "Failed on-chain",
+    "Unprofitable",
+    "Refused",
+    "Pricing…",
+  ],
   xpRebateStatus: ["Active", "Confirmed"],
 };
 type DropKey = keyof typeof DROP_OPTIONS;
@@ -264,6 +280,8 @@ function ActivityList({ filter }: { filter: ActivityFilter }) {
   );
 }
 
+const ORDER_PAGE_SIZE = 10;
+
 function ExplorerRebates({
   currentBlock,
   status,
@@ -330,9 +348,9 @@ export function ExplorerPage() {
   const { state, set } = useApp();
   const pools = usePools();
   const stats = useExplorerStats();
-  const observed = useObservedOrders();
   const assets = useAssets();
-  // The order log stores addresses; the catalog is what turns them into something readable.
+  // The order log stores addresses; the catalog is what turns them into something readable, and
+  // back again — the pair filter is a symbol pair, but the API filters by address.
   const tokenOf = (address: string) => {
     const asset = assets.find(
       (a) => a.address.toLowerCase() === address.toLowerCase(),
@@ -342,9 +360,39 @@ export function ExplorerPage() {
       decimals: asset?.decimals ?? 18,
     };
   };
+  const addressOf = (symbol: string) =>
+    assets.find((a) => a.symbol === symbol)?.address;
+  const [orderPage, setOrderPage] = useState(1);
+  const [inSymbol, outSymbol] = state.xpOrderPair.split("/");
+  const orderFilter: OrderFeedFilter = {
+    ...(state.xpOrderSource === "All sources"
+      ? {}
+      : { source: sourceKey(state.xpOrderSource) }),
+    ...(state.xpOrderState === "All states"
+      ? {}
+      : { state: stateKey(state.xpOrderState) }),
+    ...(state.xpOrderPair === "All pairs"
+      ? {}
+      : { tokenIn: addressOf(inSymbol), tokenOut: addressOf(outSymbol) }),
+  };
+  const observed = useObservedOrders(orderPage, ORDER_PAGE_SIZE, orderFilter);
   const isTrades = state.xpTab === "Trades";
   const isActivity = state.xpTab === "Activity";
   const isOrderFeed = state.xpTab === "Order feed";
+  const orderRows = (observed.data?.items ?? []).map((order) =>
+    orderRow(order, tokenOf),
+  );
+  // The dropdown's option list, not the filter itself: narrowed by whatever's on the current page,
+  // so it only ever offers pairs the feed has actually shown.
+  const orderPairs = [...new Set(orderRows.map((r) => r.pair))];
+  const orderTotalPages = Math.max(
+    1,
+    Math.ceil((observed.data?.total ?? 0) / ORDER_PAGE_SIZE),
+  );
+  // A filter change can strand the page past what still matches; back to page 1 reads as "start over".
+  useEffect(() => {
+    setOrderPage(1);
+  }, [state.xpOrderSource, state.xpOrderPair, state.xpOrderState]);
   const pairs = [...new Set(pools.map((pool) => pool.pair.replace(/\s/g, "")))];
   const pair = pools.find(
     (pool) => pool.pair.replace(/\s/g, "") === state.xpPair,
@@ -423,7 +471,22 @@ export function ExplorerPage() {
           ))}
         </div>
         <div className={styles.drops}>
-          {isOrderFeed ? null : isTrades ? (
+          {isOrderFeed ? (
+            <>
+              <FilterDrop
+                dkey="xpOrderSource"
+                options={DROP_OPTIONS.xpOrderSource}
+              />
+              <FilterDrop
+                dkey="xpOrderPair"
+                options={["All pairs", ...orderPairs]}
+              />
+              <FilterDrop
+                dkey="xpOrderState"
+                options={DROP_OPTIONS.xpOrderState}
+              />
+            </>
+          ) : isTrades ? (
             <>
               <FilterDrop dkey="xpStatus" options={DROP_OPTIONS.xpStatus} />
               <FilterDrop dkey="xpPair" options={["All pairs", ...pairs]} />
@@ -442,7 +505,15 @@ export function ExplorerPage() {
         </div>
       </div>
       {isOrderFeed ? (
-        <OrderFeedList orders={observed.data} tokenOf={tokenOf} />
+        <OrderFeedList
+          rows={orderRows}
+          seen={observed.data?.total ?? 0}
+          flow={orderFlow(observed.data?.items)}
+          page={orderPage}
+          totalPages={orderTotalPages}
+          isFetching={observed.isFetching}
+          onPage={setOrderPage}
+        />
       ) : isTrades ? (
         state.xpPair === "All pairs" || pair ? (
           <TradeList key={JSON.stringify(filter)} filter={filter} />
@@ -465,56 +536,156 @@ export function ExplorerPage() {
   );
 }
 
-/** The order feed as a peer of the trade and activity lists: everything the resolver was shown,
- *  what it would have cost us, and why most of it went nowhere. */
-function OrderFeedList({
-  orders,
-  tokenOf,
+/** A token's real icon when we have one; a monogram when we don't, or if the image itself fails to
+ *  load — never a broken-image glyph. */
+function TokenBadge({
+  icon,
+  monogram,
 }: {
-  orders: ObservedOrder[] | undefined;
-  tokenOf: (address: string) => { symbol: string; decimals: number };
+  icon: string | null;
+  monogram: string;
 }) {
-  const flow = orderFlow(orders);
-  const rows = (orders ?? []).map((order) => orderRow(order, tokenOf));
+  const [failed, setFailed] = useState(false);
+  if (!icon || failed) {
+    return <span className={styles.tokenBadge}>{monogram}</span>;
+  }
+  return (
+    <span className={styles.tokenBadge}>
+      <img
+        src={icon}
+        alt=""
+        className={styles.tokenBadgeImg}
+        onError={() => setFailed(true)}
+      />
+    </span>
+  );
+}
+
+/** One order-feed row's cells, shared between a clickable `Link` (once the order became a trade)
+ *  and a plain `div` (nothing to route to yet). */
+function OrderRowCells({ row }: { row: ReturnType<typeof orderRow> }) {
+  return (
+    <>
+      <span className={styles.orderPairCell}>
+        <span className={styles.pairBadges} aria-hidden="true">
+          <TokenBadge icon={row.tokenInIcon} monogram={row.tokenInMonogram} />
+          <TokenBadge icon={row.tokenOutIcon} monogram={row.tokenOutMonogram} />
+        </span>
+        <span className={styles.tradePair}>
+          <span className={styles.tradePairName}>{row.pair}</span>
+          <span className={styles.tradeBlk}>{row.hashLabel}</span>
+        </span>
+      </span>
+      <span className={styles.orderNum}>{row.input}</span>
+      <span className={styles.orderNum}>{row.asked}</span>
+      <span className={styles.orderNum}>{row.best}</span>
+      <span className={styles.orderSource}>
+        <span className={styles.hoverTip}>
+          <TokenBadge icon={row.sourceIcon} monogram={row.sourceGlyph} />
+          <span className={styles.hoverTipBubble} role="tooltip">
+            {row.sourceDetail}
+          </span>
+        </span>
+      </span>
+      <span className={styles.tradeStatusCell}>
+        <span className={`${styles.hoverTip} ${styles.hoverTipEnd}`}>
+          <span className={styles.statusPill} style={row.stateStyle}>
+            {row.state}
+          </span>
+          <span className={styles.hoverTipBubble} role="tooltip">
+            {row.detail}
+          </span>
+        </span>
+      </span>
+    </>
+  );
+}
+
+/** The order feed as a peer of the trade and activity lists: everything the resolver was shown,
+ *  what it would have cost us, and why most of it went nowhere. `rows` is already filtered;
+ *  `flow`/`seen` stay computed off the full unfiltered set, so the summary line always answers
+ *  "how much came through", not "how much matches today's filter". */
+function OrderFeedList({
+  rows,
+  seen,
+  flow,
+  page,
+  totalPages,
+  isFetching,
+  onPage,
+}: {
+  rows: ReturnType<typeof orderRow>[];
+  seen: number;
+  flow: ReturnType<typeof orderFlow>;
+  page: number;
+  totalPages: number;
+  isFetching: boolean;
+  onPage: (page: number) => void;
+}) {
   return (
     <div data-scroll="1" className={styles.list} aria-label="Order feed">
-      {rows.length === 0 ? (
+      {seen === 0 ? (
         <p className={styles.emptyNote}>
           No orders seen yet. The feed records every order it is shown,
           including the ones this resolver cannot settle.
         </p>
+      ) : rows.length === 0 ? (
+        <p className={styles.emptyNote}>
+          No orders match this filter. {flow.seen} seen so far.
+        </p>
       ) : (
         <>
           <div className={styles.orderSummary}>
-            {flow.seen} seen · {flow.admitted} admitted ({flow.admittedPct}) ·{" "}
-            {flow.dropped} refused
+            <span>
+              <strong>{flow.seen}</strong> orders seen — {flow.admitted}{" "}
+              admitted ({flow.admittedPct}), {flow.dropped} refused at the door
+            </span>
+            <span className={styles.orderSummaryPager}>
+              <button
+                type="button"
+                className={styles.footButton}
+                disabled={page <= 1 || isFetching}
+                onClick={() => onPage(page - 1)}
+              >
+                ‹
+              </button>
+              <span className={styles.footNote}>
+                {page} / {totalPages}
+              </span>
+              <button
+                type="button"
+                className={styles.footButton}
+                disabled={page >= totalPages || isFetching}
+                onClick={() => onPage(page + 1)}
+              >
+                ›
+              </button>
+            </span>
           </div>
           <div className={styles.orderHeadRow} aria-hidden="true">
             <span>Pair</span>
             <span>Taker pays</span>
             <span>Order wants</span>
-            <span>Our sourcing cost</span>
+            <span>Resolver quote</span>
             <span>Source</span>
             <span>State</span>
           </div>
-          {rows.map((row) => (
-            <div key={row.id} className={styles.orderRow}>
-              <span className={styles.tradePair}>
-                <span className={styles.tradePairName}>{row.pair}</span>
-                <span className={styles.tradeBlk}>{row.hashLabel}</span>
-              </span>
-              <span className={styles.orderNum}>{row.input}</span>
-              <span className={styles.orderNum}>{row.asked}</span>
-              <span className={styles.orderNum}>{row.best}</span>
-              <span className={styles.orderSource}>{row.source}</span>
-              <span className={styles.tradeStatusCell}>
-                <span className={styles.statusPill} style={row.stateStyle}>
-                  {row.state}
-                </span>
-                <span className={styles.tradeTx}>{row.detail}</span>
-              </span>
-            </div>
-          ))}
+          {rows.map((row) =>
+            row.tradeId ? (
+              <Link
+                key={row.id}
+                className={`${styles.orderRow} ${styles.orderRowLink}`}
+                to={`/explorer/trades/${encodeURIComponent(row.tradeId)}`}
+                aria-label={`Open the trade for order ${row.hashLabel}`}
+              >
+                <OrderRowCells row={row} />
+              </Link>
+            ) : (
+              <div key={row.id} className={styles.orderRow}>
+                <OrderRowCells row={row} />
+              </div>
+            ),
+          )}
         </>
       )}
     </div>

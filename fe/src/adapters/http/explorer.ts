@@ -24,9 +24,13 @@ export const explorerAdapter: ExplorerPort = {
     });
     return { items: page.items.map(toTrade), nextCursor: page.next_cursor };
   },
-  async orders(limit = 50) {
-    const page = await solventApi.orders({ limit });
-    return page.items.map(toObservedOrder);
+  async orders({ tokenIn, tokenOut, ...query } = {}) {
+    const page = await solventApi.orders({
+      ...query,
+      token_in: tokenIn,
+      token_out: tokenOut,
+    });
+    return { items: page.items.map(toObservedOrder), total: page.total };
   },
   async trade(id) {
     return toTrade(await solventApi.tradeDetail(id));

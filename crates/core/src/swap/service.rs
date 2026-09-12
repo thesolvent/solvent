@@ -112,13 +112,29 @@ impl SwapService {
         let Some(fill_builder) = self.fill_builders.get(&intent.protocol).cloned() else {
             // Observed and quoted upstream, but this protocol has no builder to fill it with.
             return self
-                .declined(trade_id, &intent, taker, now, prices, None)
+                .declined(
+                    trade_id,
+                    &intent,
+                    taker,
+                    now,
+                    prices,
+                    None,
+                    "no fill builder registered for this protocol",
+                )
                 .await;
         };
         let Some(amounts) = swap_amounts(&intent, self.config.filler, now) else {
             // No single delivery to source, so there is no cost to quote either.
             return self
-                .declined(trade_id, &intent, taker, now, prices, None)
+                .declined(
+                    trade_id,
+                    &intent,
+                    taker,
+                    now,
+                    prices,
+                    None,
+                    "no output to deliver",
+                )
                 .await;
         };
 
@@ -148,7 +164,15 @@ impl SwapService {
             // `indicative` is what sourcing would have cost: the account of the decline, and the
             // only number that distinguishes "priced out by a hair" from "no liquidity at all".
             return self
-                .declined(trade_id, &intent, taker, now, prices, routed.indicative)
+                .declined(
+                    trade_id,
+                    &intent,
+                    taker,
+                    now,
+                    prices,
+                    routed.indicative,
+                    "unprofitable at the current price",
+                )
                 .await;
         };
 
@@ -226,7 +250,13 @@ impl SwapService {
         if plan_is_guarded(plan, snapshot, &admission) {
             drop(admission);
             warn!(intent = %intent_id, "reserve declined: strategy guarded");
-            self.settle(id, TradeStatus::Declined, now).await?;
+            self.settle(
+                id,
+                TradeStatus::Declined,
+                now,
+                Some("strategy guarded: reserved for another execution".to_string()),
+            )
+            .await?;
             return Ok(Some(SwapOutcome {
                 trade_id: *id,
                 status: TradeStatus::Declined,
@@ -246,7 +276,13 @@ impl SwapService {
             Ok(()) => Ok(None),
             Err(SolventError::Ledger(LedgerError::Insufficient(_))) => {
                 warn!(intent = %intent_id, "reserve declined: insufficient capacity");
-                self.settle(id, TradeStatus::Declined, now).await?;
+                self.settle(
+                    id,
+                    TradeStatus::Declined,
+                    now,
+                    Some("insufficient capacity: reserved by another trade".to_string()),
+                )
+                .await?;
                 Ok(Some(SwapOutcome {
                     trade_id: *id,
                     status: TradeStatus::Declined,
@@ -289,8 +325,9 @@ impl SwapService {
                     status: TradeStatus::Submitted,
                 })
             }
-            FillOutcome::Rejected { .. } => {
-                self.settle(id, TradeStatus::Declined, now).await?;
+            FillOutcome::Rejected { reason } => {
+                self.settle(id, TradeStatus::Declined, now, Some(reason))
+                    .await?;
                 Ok(SwapOutcome {
                     trade_id: *id,
                     status: TradeStatus::Declined,
@@ -300,6 +337,7 @@ impl SwapService {
     }
 
     /// Record an unroutable order as a declined trade (no legs), so it still shows in the explorer.
+    #[allow(clippy::too_many_arguments)]
     async fn declined(
         &self,
         trade_id: TradeId,
@@ -308,6 +346,7 @@ impl SwapService {
         now: u64,
         prices: TradePrices,
         indicative_in: Option<U256>,
+        reason: &'static str,
     ) -> Result<SwapOutcome, SolventError> {
         let delivery = intent.required_output(self.config.filler, now);
         let amounts = SwapAmounts {
@@ -316,17 +355,20 @@ impl SwapService {
             amount_in: intent.input.curve.amount_at(now),
             min_out: delivery.map_or(U256::ZERO, |d| d.amount),
         };
-        let trade = self.trade(
-            trade_id,
-            intent,
-            taker,
-            &amounts,
-            None,
-            now,
-            TradeStatus::Declined,
-            &prices,
-            indicative_in,
-        );
+        let trade = Trade {
+            decline_reason: Some(reason.to_string()),
+            ..self.trade(
+                trade_id,
+                intent,
+                taker,
+                &amounts,
+                None,
+                now,
+                TradeStatus::Declined,
+                &prices,
+                indicative_in,
+            )
+        };
         let created = self
             .trades
             .create(
@@ -336,14 +378,21 @@ impl SwapService {
             )
             .await?;
         // Stamp `settled_at` like every other decline path, so /stats counts them consistently.
-        self.settle(&created.id, TradeStatus::Declined, now).await?;
+        self.settle(&created.id, TradeStatus::Declined, now, None)
+            .await?;
         Ok(SwapOutcome {
             trade_id: created.id,
             status: TradeStatus::Declined,
         })
     }
 
-    async fn settle(&self, id: &TradeId, status: TradeStatus, at: u64) -> Result<(), SolventError> {
+    async fn settle(
+        &self,
+        id: &TradeId,
+        status: TradeStatus,
+        at: u64,
+        reason: Option<String>,
+    ) -> Result<(), SolventError> {
         self.trades
             .settle(
                 id,
@@ -352,6 +401,7 @@ impl SwapService {
                     amount_out: None,
                     tx_hash: None,
                     block_number: None,
+                    reason,
                     at,
                 },
             )
@@ -374,6 +424,7 @@ impl SwapService {
     ) -> Trade {
         Trade {
             id,
+            decline_reason: None,
             indicative_amount_in,
             source: intent.source,
             order_hash: intent.id,
@@ -1125,6 +1176,7 @@ mod tests {
         let order = intent(7, addr(9), e(2, 18), e(3000, 6));
         // A crash between create and reserve strands the trade at Quoted, never reserved or filled.
         let stuck = Trade {
+            decline_reason: None,
             indicative_amount_in: None,
             source: OrderSource::UniswapX,
             id: tid(),
