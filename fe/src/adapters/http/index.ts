@@ -9,7 +9,11 @@ import { toPool } from "../mappers/pool";
 import { toDepthCurve, toPoolRoster } from "../mappers/pool-detail";
 import { swapAdapter } from "./swap";
 import { positionsAdapter } from "./positions";
-import { baseApi, solventApi } from "./client";
+import {
+  crossChainOriginApi,
+  directDestinationApi,
+  solventApi,
+} from "./client";
 import { explorerAdapter } from "./explorer";
 import { faucetAdapter } from "./faucet";
 import { rebatesAdapter } from "./rebates";
@@ -31,6 +35,9 @@ const pools: PoolsPort = {
   },
 };
 
+const SOLVENTX_ORIGIN_NETWORK = "EthDevnet";
+const SOLVENTX_DESTINATION_NETWORK = "BaseDevnet";
+
 const assets: AssetsPort = {
   // A deployment names the chain it serves, so config is read alongside the assets themselves.
   async list(includeCrossChain = false) {
@@ -42,14 +49,31 @@ const assets: AssetsPort = {
     const primary = served.items.map((asset) => toAsset(asset, network));
     if (!includeCrossChain) return primary;
 
-    const [baseServed, baseConfig] = await Promise.all([
-      baseApi.assets(),
-      baseApi.config(),
+    const [originServed, destinationServed] = await Promise.all([
+      crossChainOriginApi.assets(),
+      directDestinationApi.assets({ supported: true }),
     ]);
-    const baseNetwork = baseConfig.networks[0] ?? "Unknown";
+    const directPair = [
+      ...new Set(destinationServed.items.flatMap((asset) => asset.pairs)),
+    ][0];
+    const [originSymbol, destinationSymbol] = directPair?.split("/") ?? [];
+    if (!originSymbol || !destinationSymbol) return [];
+
+    const originAsset = originServed.items.find(
+      (asset) => asset.symbol === originSymbol,
+    );
+    const destinationInput = destinationServed.items.find(
+      (asset) => asset.symbol === originSymbol,
+    );
+    const destinationOutput = destinationServed.items.find(
+      (asset) => asset.symbol === destinationSymbol,
+    );
+    if (!originAsset || !destinationInput || !destinationOutput) return [];
+
     return [
-      ...primary,
-      ...baseServed.items.map((asset) => toAsset(asset, baseNetwork)),
+      toAsset(originAsset, SOLVENTX_ORIGIN_NETWORK),
+      toAsset(destinationInput, SOLVENTX_DESTINATION_NETWORK),
+      toAsset(destinationOutput, SOLVENTX_DESTINATION_NETWORK),
     ];
   },
 };

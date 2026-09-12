@@ -24,6 +24,7 @@ import {
   baseApi,
   crossChainApi,
   crossChainOriginApi,
+  directDestinationApi,
   solventApi,
 } from "./client";
 
@@ -43,6 +44,16 @@ function requestId(): `0x${string}` {
 
 function nonce(): `0x${string}` {
   return requestId();
+}
+
+function isWalletRpcUnavailable(error: unknown): boolean {
+  let cause = error;
+  for (let depth = 0; cause && depth < 10; depth += 1) {
+    const message = String((cause as { message?: unknown }).message ?? "");
+    if (/unable to connect to .*devnet/i.test(message)) return true;
+    cause = (cause as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 function directIntent(
@@ -140,9 +151,18 @@ function directIntent(
 
   return {
     submit(options?: SwapSubmissionOptions) {
-      pending ??= execute(options).finally(() => {
-        pending = undefined;
-      });
+      pending ??= execute(options)
+        .catch((error: unknown) => {
+          if (isWalletRpcUnavailable(error)) {
+            throw new Error(
+              "MetaMask cannot reach EthDevnet. Update its RPC URL to http://127.0.0.1:9645.",
+            );
+          }
+          throw error;
+        })
+        .finally(() => {
+          pending = undefined;
+        });
       return pending;
     },
   };
@@ -156,9 +176,9 @@ async function crossChainQuote({
   const [originConfig, destinationConfig, originAssets, destinationAssets] =
     await Promise.all([
       crossChainOriginApi.config(),
-      baseApi.config(),
+      directDestinationApi.config(),
       crossChainOriginApi.assets(),
-      baseApi.assets(),
+      directDestinationApi.assets({ supported: true }),
     ]);
   if (
     from.chainId !== originConfig.chain_id ||

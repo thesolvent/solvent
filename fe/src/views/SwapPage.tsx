@@ -8,7 +8,6 @@ import {
   ANY_TAG,
   assetKey,
   choices,
-  networkOptions,
   selectedAsset,
   settleLegs,
   swapAction,
@@ -67,6 +66,11 @@ export function SwapPage() {
   const assets = useAssets(crossChain);
   const from = selectedAsset(assets, state.fromToken);
   const to = selectedAsset(assets, state.toToken);
+  const pickerChoices = useMemo(
+    () => choices(assets, state.picker ?? "from", state.fromToken, crossChain),
+    [assets, state.picker, state.fromToken, crossChain],
+  );
+  const pickerNetwork = crossChain ? pickerChoices[0]?.net : undefined;
 
   useEffect(() => {
     const settled = settleLegs(
@@ -151,24 +155,20 @@ export function SwapPage() {
 
   const matches = useMemo(() => {
     const q = state.pQuery.trim().toLowerCase();
-    return choices(
-      assets,
-      state.picker ?? "from",
-      state.fromToken,
-      crossChain,
-    ).filter((t) => {
+    return pickerChoices.filter((t) => {
       const okQ =
         !q ||
         t.symbol.toLowerCase().includes(q) ||
         t.name.toLowerCase().includes(q);
       const okTag = state.pTag === ANY_TAG || t.tags.indexOf(state.pTag) > -1;
-      const okNet = state.pNet === ANY_NETWORK || t.net === state.pNet;
+      const okNet = crossChain
+        ? t.net === pickerNetwork
+        : state.pNet === ANY_NETWORK || t.net === state.pNet;
       return okQ && okTag && okNet;
     });
   }, [
-    assets,
-    state.picker,
-    state.fromToken,
+    pickerChoices,
+    pickerNetwork,
     state.pQuery,
     state.pTag,
     state.pNet,
@@ -219,6 +219,17 @@ export function SwapPage() {
         picker: null,
       });
     }
+  };
+
+  const openPicker = (picker: "from" | "to") => {
+    const network = crossChain
+      ? choices(assets, picker, state.fromToken, true)[0]?.net
+      : undefined;
+    set({
+      picker,
+      pQuery: "",
+      ...(network ? { pNet: network } : {}),
+    });
   };
 
   return (
@@ -309,7 +320,7 @@ export function SwapPage() {
           <button
             type="button"
             className={styles.assetButton}
-            onClick={() => set({ picker: "from", pQuery: "" })}
+            onClick={() => openPicker("from")}
           >
             <span className={styles.assetSymbol}>
               {from?.symbol || "Select"}
@@ -363,7 +374,7 @@ export function SwapPage() {
           <button
             type="button"
             className={styles.assetButton}
-            onClick={() => set({ picker: "to", pQuery: "" })}
+            onClick={() => openPicker("to")}
           >
             <span className={styles.assetSymbol}>{to?.symbol || "Select"}</span>
             <AssetIdentity asset={to} />
@@ -525,10 +536,10 @@ export function SwapPage() {
               </div>
             </div>
 
-            {crossChain && (
+            {crossChain && pickerNetwork && (
               <div className={styles.netCol}>
                 <div className={styles.netHead}>Network</div>
-                {networkOptions(assets).map((n) => (
+                {[pickerNetwork].map((n) => (
                   <button
                     key={n}
                     type="button"

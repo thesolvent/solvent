@@ -6,11 +6,11 @@ import {
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8080";
 const BASE_CHAIN_URL =
-  import.meta.env.VITE_SOLVENTX_BASE_API_URL ?? "http://127.0.0.1:8082";
+  import.meta.env.VITE_SOLVENTX_BASE_API_URL ?? "http://127.0.0.1:8400";
 const DIRECT_DESTINATION_URL =
   import.meta.env.VITE_SOLVENTX_DIRECT_API_URL ?? "http://127.0.0.1:8401";
 const CROSS_CHAIN_ORIGIN_URL =
-  import.meta.env.VITE_SOLVENTX_ORIGIN_API_URL ?? "http://127.0.0.1:8081";
+  import.meta.env.VITE_SOLVENTX_ORIGIN_API_URL ?? "http://127.0.0.1:8399";
 const CROSS_CHAIN_PROXY_URL =
   import.meta.env.VITE_SOLVENTX_PROXY_URL ?? "/solventx-api";
 
