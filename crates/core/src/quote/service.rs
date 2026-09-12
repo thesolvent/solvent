@@ -114,6 +114,7 @@ impl QuoteService {
                 .valuation
                 .amount(split.amount_out, token_out, out_decimals)
                 .await,
+            executor_fee: None,
             price_impact_pct: price_impact_pct(&selection.chosen, amount_in, split.amount_out),
             makers_sourced: split.legs.len() as u32,
             legs,

@@ -94,6 +94,16 @@ dedup_ttl_secs = 900       # longer than any order lives, so one order is admitt
 dedup_capacity = 16384     # bounded as well as expiring: the order stream is not ours to control
 max_tracked_intents = 64   # orders held for re-pricing at once; the feed's volume is not ours to control
 
+# Enable this block on each chain-local process that participates in a configured cross-chain pair.
+# Expose this listener only to the proxy (normally behind mTLS); SOLVENT_INTERNAL_TOKEN supplies
+# the application-level Bearer credential. Set only the contracts deployed on this process's chain.
+# [crosschain]
+# bind_addr = "127.0.0.1:9080"
+# destination_app = "0x0000000000000000000000000000000000000000"
+# origin_settler = "0x0000000000000000000000000000000000000000"
+# proof_outbox = "0x0000000000000000000000000000000000000000"
+# quote_ttl_secs = 300
+
 [rebate]
 start_block = 0               # filler deployment block; avoids scanning older chain history
 deviation_threshold_bps = 50 # batch below 0.50%; guard and evaluate at or above it

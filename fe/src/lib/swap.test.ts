@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { Asset, Quote } from "@/data";
 
 import {
+  assetKey,
   choices,
   networkOptions,
   settleLegs,
+  submissionProblem,
   swapAction,
   tagOptions,
 } from "./swap";
@@ -17,6 +19,7 @@ function asset(
   net = "Ethereum",
 ): Asset {
   return {
+    chainId: net === "Base" ? 31338 : 31337,
     address: `0x${symbol}`,
     symbol,
     name: symbol,
@@ -62,6 +65,22 @@ describe("pair constraints", () => {
       "WETH",
     ]);
   });
+
+  it("keeps direct swaps on one network and unlocks remote outputs for SolventX", () => {
+    const multiNetwork = [
+      asset("WETH", [], [], "Ethereum"),
+      asset("WETH", ["WETH/USDC"], [], "Base"),
+      asset("USDC", ["WETH/USDC"], [], "Base"),
+    ];
+
+    expect(choices(multiNetwork, "to", "WETH")).toEqual([]);
+    expect(choices(multiNetwork, "to", "WETH", true)).toEqual([
+      multiNetwork[2],
+    ]);
+    expect(choices(multiNetwork, "from", "WETH", true)).toEqual([
+      multiNetwork[0],
+    ]);
+  });
 });
 
 describe("settling the legs", () => {
@@ -85,6 +104,31 @@ describe("settling the legs", () => {
 
   it("waits for the assets rather than guessing", () => {
     expect(settleLegs([], "ETH", "SOL")).toBeNull();
+  });
+
+  it("clears a remote destination when returning to Solvent", () => {
+    const multiNetwork = [
+      asset("WETH", [], [], "Ethereum"),
+      asset("WETH", ["WETH/USDC"], [], "Base"),
+      asset("USDC", ["WETH/USDC"], [], "Base"),
+    ];
+
+    expect(settleLegs(multiNetwork, "WETH", "USDC", true)).toBeNull();
+    expect(settleLegs(multiNetwork, "WETH", "USDC")).toEqual({
+      fromToken: "WETH",
+      toToken: "",
+    });
+  });
+
+  it("keeps equal symbols on different chains as distinct legs", () => {
+    const ethereumWeth = asset("WETH", [], [], "Ethereum");
+    const baseWeth = asset("WETH", ["WETH/USDC"], [], "Base");
+    const baseUsdc = asset("USDC", ["WETH/USDC"], [], "Base");
+    const assets = [ethereumWeth, baseWeth, baseUsdc];
+
+    expect(
+      settleLegs(assets, assetKey(ethereumWeth), assetKey(baseUsdc), true),
+    ).toBeNull();
   });
 });
 
@@ -150,5 +194,54 @@ describe("the action button", () => {
       label: "Switch to Solvent Devnet",
       ready: true,
     });
+  });
+
+  it("keeps a submission failure visible and retryable", () => {
+    expect(
+      swapAction({
+        ...base,
+        submissionProblem: "Insufficient token balance",
+      }),
+    ).toEqual({
+      label: "Insufficient token balance — try again",
+      ready: true,
+      retry: true,
+    });
+  });
+
+  it("names the wallet phase while the swap is pending", () => {
+    expect(
+      swapAction({
+        ...base,
+        submitting: true,
+        inputToken: "DAI",
+        submissionStatus: {
+          kind: "approving",
+          token: "0x1111111111111111111111111111111111111111",
+        },
+      }),
+    ).toEqual({ label: "Approve DAI…", ready: false });
+  });
+});
+
+describe("submission errors", () => {
+  it("shows a cross-chain coordinator rejection instead of hiding it", () => {
+    const error = new Error("Quote expires too soon; request a fresh price");
+    error.name = "CrossChainApiError";
+
+    expect(submissionProblem(error)).toBe(
+      "Quote expires too soon; request a fresh price",
+    );
+  });
+
+  it("keeps the backend and balance reasons safe for the swap action", async () => {
+    const { SolventApiError } = await import("@solvent/sdk/client");
+
+    expect(submissionProblem(new SolventApiError(409, "Quote expired"))).toBe(
+      "Quote expired",
+    );
+    expect(submissionProblem(new Error("Insufficient token balance"))).toBe(
+      "Insufficient token balance",
+    );
   });
 });

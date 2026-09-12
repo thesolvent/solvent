@@ -12,6 +12,7 @@
     "@1inch/limit-order-protocol-contract": "github:1inch/limit-order-protocol#4.3.2",
     "@1inch/solidity-utils": "6.9.7",
     "@openzeppelin/contracts": "5.4.0",
+    "@openzeppelin/contracts-erc7683": "npm:@openzeppelin/contracts@5.6.1",
     "forge-std": "github:foundry-rs/forge-std#v1.11.0"
   },
   "scripts": {

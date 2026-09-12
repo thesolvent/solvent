@@ -424,10 +424,8 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
         Address::ZERO,
         0,
     ));
-    let fill_builders: BTreeMap<ProtocolId, Arc<dyn FillBuilder>> = BTreeMap::from([(
-        ProtocolId::OneInchLimitOrder,
-        Arc::new(OneInchFillBuilder::new(h.app, filler_address)) as Arc<dyn FillBuilder>,
-    )]);
+    let fill_builder: Arc<dyn FillBuilder> =
+        Arc::new(OneInchFillBuilder::new(h.app, filler_address));
     let routing = RoutingConfig::new(16, 4, 0);
     let swap = Arc::new(SwapService::new(
         Arc::clone(&snapshot),
@@ -435,7 +433,7 @@ async fn e2e_oneinch_intent_fills_through_the_production_stack() {
         Arc::new(StrategyGuard::default()),
         Arc::clone(&trades),
         Arc::clone(&execution),
-        fill_builders,
+        fill_builder,
         Arc::clone(&leg_cost),
         Arc::clone(&clock) as Arc<dyn Clock>,
         SwapConfig {

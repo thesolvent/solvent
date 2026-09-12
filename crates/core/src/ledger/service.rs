@@ -107,6 +107,15 @@ impl LedgerService {
         Ok(())
     }
 
+    /// Protect a cross-chain hold from TTL expiry once both services have committed it.
+    pub async fn commit(&self, id: ReservationId) -> Result<(), SolventError> {
+        let mut ledger = self.ledger.lock().await;
+        self.store.commit(id).await?;
+        ledger.commit(id)?;
+        self.publish(&ledger);
+        Ok(())
+    }
+
     /// Release a lost auction / reverted fill.
     pub async fn void(&self, id: ReservationId) -> Result<(), SolventError> {
         let mut ledger = self.ledger.lock().await;
@@ -142,6 +151,24 @@ impl LedgerService {
             .reservation(&id)
             .filter(|reservation| reservation.state == ReservationState::Pending)
             .map(|r| r.sources.clone())
+    }
+
+    /// The sources of a committed or already-posted reservation used to settle an idempotent fill.
+    pub async fn settlement_reservation_sources(
+        &self,
+        id: ReservationId,
+    ) -> Option<Vec<ReservationSource>> {
+        self.ledger
+            .lock()
+            .await
+            .reservation(&id)
+            .filter(|reservation| {
+                matches!(
+                    reservation.state,
+                    ReservationState::Committed | ReservationState::Posted
+                )
+            })
+            .map(|reservation| reservation.sources.clone())
     }
 
     /// Expire every pending reservation past its TTL as of now — except those in `exclude` (fills

@@ -51,6 +51,40 @@ describe("Explorer presentation", () => {
     expect(view.elapsedSeconds).toBe(7);
   });
 
+  it("projects SolventX evidence into cross-chain lifecycle labels", () => {
+    const trade = {
+      ...toTrade(detail),
+      flow: "cross-chain" as const,
+      lifecycle: [
+        { status: "quoted", at: 100 },
+        { status: "destination fill", at: 103 },
+        { status: "proof relay", at: 105 },
+        { status: "origin claim", at: 107 },
+        { status: "repayment", at: 109 },
+        { status: "complete", at: 111 },
+      ],
+      createdAt: 100,
+      settledAt: 111,
+    };
+
+    const view = tradeLifecycle(trade);
+
+    expect(view.steps.map((step) => step.label)).toEqual([
+      "Quoted",
+      "Destination fill",
+      "Proof relay",
+      "Origin claim",
+      "Repayment",
+      "Complete",
+    ]);
+    expect(view.recordedCount).toBe(6);
+    expect(view.elapsedSeconds).toBe(11);
+    expect(view.phases).toEqual([
+      { name: "Destination execution", complete: true },
+      { name: "Origin settlement", complete: true },
+    ]);
+  });
+
   it("distinguishes a signed output floor and a stopped lifecycle from settlement", () => {
     const trade = toTrade({
       ...detail,

@@ -1,15 +1,16 @@
-import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useAccount, useSwitchChain } from "wagmi";
 
-import { DASH } from "@/data";
+import { chain } from "@/adapters/wallet/config";
+import { DASH, type Asset } from "@/data";
 import { fit, money } from "@/lib/format";
 import {
   ANY_NETWORK,
   ANY_TAG,
+  assetKey,
   choices,
   networkOptions,
+  selectedAsset,
   settleLegs,
   swapAction,
   tagOptions,
@@ -17,27 +18,61 @@ import {
 import { useAssets } from "@/services/assets";
 import { useQuote } from "@/services/quote";
 import { useSubmitSwap } from "@/services/swap";
-import { chain } from "@/adapters/wallet/config";
-import { useApp } from "@/state";
+import { useConfig } from "@/services/system";
+import { type SwapProtocol, useApp } from "@/state";
+import { AssetIdentity } from "@/components/AssetIdentity";
+import { useWalletAction } from "@/services/wallet";
 
 import styles from "./SwapPage.module.css";
 
 const SWAP_TABS = ["Swap"];
 
+type ProtocolOption = {
+  value: SwapProtocol;
+  label: string;
+  description: string;
+};
+
+const PROTOCOL_OPTIONS = [
+  {
+    value: "uniswapx",
+    label: "UniswapX",
+    description: "Dutch-auction intent settlement",
+  },
+  {
+    value: "erc7683",
+    label: "ERC-7683",
+    description: "Standardized same-chain order settlement",
+  },
+] satisfies readonly ProtocolOption[];
+
 export function SwapPage() {
   const { state, set, config } = useApp();
+  const [protocolMenuOpen, setProtocolMenuOpen] = useState(false);
+  const crossChain = state.productMode === "SolventX";
+  const runtimeConfig = useConfig();
+  const erc7683Available = Boolean(runtimeConfig.data?.erc7683_settler);
+  const protocol =
+    crossChain || !erc7683Available ? "uniswapx" : state.swapProtocol;
+  const protocolLabel =
+    PROTOCOL_OPTIONS.find((option) => option.value === protocol)?.label ??
+    protocol;
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
-  const assets = useAssets();
-  const bySymbol = (symbol: string) => assets.find((a) => a.symbol === symbol);
-  const from = bySymbol(state.fromToken);
-  const to = bySymbol(state.toToken);
+  const assets = useAssets(crossChain);
+  const from = selectedAsset(assets, state.fromToken);
+  const to = selectedAsset(assets, state.toToken);
 
   useEffect(() => {
-    const settled = settleLegs(assets, state.fromToken, state.toToken);
+    const settled = settleLegs(
+      assets,
+      state.fromToken,
+      state.toToken,
+      crossChain,
+    );
     if (settled) set(settled);
-  }, [assets, state.fromToken, state.toToken, set]);
+  }, [assets, crossChain, state.fromToken, state.toToken, set]);
 
   const typed = state.amount;
   const hasAmount = typed.trim() !== "";
@@ -46,7 +81,7 @@ export function SwapPage() {
   const fromUsdNum = amt * (from?.price ?? 0);
 
   // The output is the server's price for this size, not the mid — it carries fee and impact.
-  const { quote, pricing, problem } = useQuote(from, to, typed);
+  const { quote, pricing, problem } = useQuote(from, to, typed, protocol);
   // Nothing in means nothing out; anything else without a price is unknown, not zero.
   const outStr = quote?.amountOut ?? (hasAmount && amt > 0 && to ? DASH : "");
   const dotAt = outStr.indexOf(".");
@@ -62,9 +97,12 @@ export function SwapPage() {
     { label: "Max slippage", value: `${config.slippage}%` },
   ];
 
-  const { isConnected, chainId } = useAccount();
-  const { openConnectModal } = useConnectModal();
-  const { switchChain } = useSwitchChain();
+  const wallet = useWalletAction();
+  const walletNetwork =
+    wallet.connected && wallet.chainId !== undefined
+      ? (assets.find((asset) => asset.chainId === wallet.chainId)?.net ??
+        (wallet.chainId === chain.id ? chain.name : `Chain ${wallet.chainId}`))
+      : undefined;
   const submission = useSubmitSwap(
     {
       from,
@@ -72,6 +110,7 @@ export function SwapPage() {
       amount: typed,
       quote,
       slippagePct: config.slippage,
+      protocol,
     },
     ({ tradeId }) => {
       // BrowserRouter updates history before React renders a requested departure.
@@ -80,19 +119,15 @@ export function SwapPage() {
     },
   );
 
-  const switchTo = isConnected && chainId !== chain.id ? chain.name : undefined;
-
   // One button, whichever of the three things is missing.
   const act = () => {
-    if (!isConnected) return openConnectModal?.();
-    if (switchTo) return switchChain({ chainId: chain.id });
-    submission.send();
+    if (wallet.prepare()) submission.send();
   };
 
   const action = to
     ? swapAction({
-        connected: isConnected,
-        switchTo,
+        connected: wallet.connected,
+        switchTo: wallet.switchTo,
         submitting: submission.submitting,
         submitted: submission.result !== undefined,
         amount: amt,
@@ -100,22 +135,27 @@ export function SwapPage() {
         quote,
         problem,
         submissionProblem: submission.problem,
+        submissionStatus: submission.status,
+        inputToken: from?.symbol,
       })
     : { label: "Select receive asset", ready: false };
 
   const matches = useMemo(() => {
     const q = state.pQuery.trim().toLowerCase();
-    return choices(assets, state.picker ?? "from", state.fromToken).filter(
-      (t) => {
-        const okQ =
-          !q ||
-          t.symbol.toLowerCase().includes(q) ||
-          t.name.toLowerCase().includes(q);
-        const okTag = state.pTag === ANY_TAG || t.tags.indexOf(state.pTag) > -1;
-        const okNet = state.pNet === ANY_NETWORK || t.net === state.pNet;
-        return okQ && okTag && okNet;
-      },
-    );
+    return choices(
+      assets,
+      state.picker ?? "from",
+      state.fromToken,
+      crossChain,
+    ).filter((t) => {
+      const okQ =
+        !q ||
+        t.symbol.toLowerCase().includes(q) ||
+        t.name.toLowerCase().includes(q);
+      const okTag = state.pTag === ANY_TAG || t.tags.indexOf(state.pTag) > -1;
+      const okNet = state.pNet === ANY_NETWORK || t.net === state.pNet;
+      return okQ && okTag && okNet;
+    });
   }, [
     assets,
     state.picker,
@@ -123,6 +163,7 @@ export function SwapPage() {
     state.pQuery,
     state.pTag,
     state.pNet,
+    crossChain,
   ]);
 
   useEffect(() => {
@@ -134,19 +175,38 @@ export function SwapPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [state.picker, set]);
 
+  useEffect(() => {
+    if (!protocolMenuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProtocolMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [protocolMenuOpen]);
+
+  useEffect(() => {
+    if (crossChain || !erc7683Available) setProtocolMenuOpen(false);
+  }, [crossChain, erc7683Available]);
+
   // Picking the asset already on the other leg swaps the two rather than
   // leaving both legs on the same token.
-  const choose = (sym: string) => {
+  const choose = (asset: Asset) => {
+    const selected = assetKey(asset);
+    const other = selectedAsset(
+      assets,
+      state.picker === "from" ? state.toToken : state.fromToken,
+    );
+    const sameAsset = other && assetKey(other) === selected;
     if (state.picker === "from") {
       set({
-        fromToken: sym,
-        toToken: state.toToken === sym ? state.fromToken : state.toToken,
+        fromToken: selected,
+        toToken: sameAsset ? state.fromToken : state.toToken,
         picker: null,
       });
     } else {
       set({
-        toToken: sym,
-        fromToken: state.fromToken === sym ? state.toToken : state.fromToken,
+        toToken: selected,
+        fromToken: sameAsset ? state.toToken : state.fromToken,
         picker: null,
       });
     }
@@ -164,12 +224,94 @@ export function SwapPage() {
             ))}
           </div>
           <div className={styles.headActions}>
-            <button type="button" className={styles.iconButton}>
-              <span className={styles.iconGlyph} />
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label={
+                walletNetwork
+                  ? `Connected network: ${walletNetwork}`
+                  : "Wallet network not connected"
+              }
+              title={walletNetwork}
+            >
+              <span
+                className={
+                  walletNetwork ? styles.networkGlyph : styles.iconGlyph
+                }
+                aria-hidden="true"
+              >
+                {walletNetwork?.slice(0, 1).toUpperCase()}
+              </span>
             </button>
-            <button type="button" className={styles.moreButton}>
-              ···
-            </button>
+            {!crossChain && erc7683Available && (
+              <div className={styles.protocolMenu}>
+                <button
+                  type="button"
+                  className={
+                    protocolMenuOpen
+                      ? styles.protocolTriggerOpen
+                      : styles.protocolTrigger
+                  }
+                  aria-label="Select swap protocol"
+                  aria-expanded={protocolMenuOpen}
+                  aria-haspopup="menu"
+                  onClick={() => setProtocolMenuOpen((open) => !open)}
+                >
+                  <span>{protocolLabel}</span>
+                  <span
+                    className={
+                      protocolMenuOpen
+                        ? styles.protocolTriggerMoreOpen
+                        : styles.protocolTriggerMore
+                    }
+                    aria-hidden="true"
+                  >
+                    {protocolMenuOpen ? "▴" : "···"}
+                  </span>
+                </button>
+                {protocolMenuOpen && (
+                  <div className={styles.protocolOptions} role="menu">
+                    {PROTOCOL_OPTIONS.map(({ value, label, description }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={protocol === value}
+                        className={
+                          protocol === value
+                            ? styles.protocolOptionActive
+                            : styles.protocolOption
+                        }
+                        onClick={() => {
+                          set({
+                            swapProtocol: value,
+                          });
+                          setProtocolMenuOpen(false);
+                        }}
+                      >
+                        <span className={styles.protocolCopy}>
+                          <span className={styles.protocolName}>{label}</span>
+                          <span className={styles.protocolDescription}>
+                            {description}
+                          </span>
+                        </span>
+                        <span
+                          className={styles.protocolMark}
+                          aria-hidden="true"
+                        >
+                          {protocol === value ? "✓" : ""}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {(crossChain || !erc7683Available) && (
+              <button type="button" className={styles.moreButton} disabled>
+                ···
+              </button>
+            )}
           </div>
         </div>
 
@@ -179,12 +321,10 @@ export function SwapPage() {
             className={styles.assetButton}
             onClick={() => set({ picker: "from", pQuery: "" })}
           >
-            <span className={styles.assetChip}>
-              {state.fromToken.slice(0, 2)}
-            </span>
             <span className={styles.assetSymbol}>
-              {state.fromToken || "Select"}
+              {from?.symbol || "Select"}
             </span>
+            <AssetIdentity asset={from} />
             <span className={styles.assetCaret}>▾</span>
           </button>
           <div className={styles.amountCol}>
@@ -201,9 +341,9 @@ export function SwapPage() {
                 maxLength={258}
               />
             </div>
-            {hasAmount && (
-              <div className={styles.amountUsd}>~$ {money(fromUsdNum)}</div>
-            )}
+            <div className={styles.amountUsd} aria-hidden={!hasAmount}>
+              {hasAmount ? `~$ ${money(fromUsdNum)}` : "\u00a0"}
+            </div>
           </div>
         </div>
 
@@ -229,12 +369,8 @@ export function SwapPage() {
             className={styles.assetButton}
             onClick={() => set({ picker: "to", pQuery: "" })}
           >
-            <span className={styles.assetChip}>
-              {state.toToken.slice(0, 2)}
-            </span>
-            <span className={styles.assetSymbol}>
-              {state.toToken || "Select"}
-            </span>
+            <span className={styles.assetSymbol}>{to?.symbol || "Select"}</span>
+            <AssetIdentity asset={to} />
             <span className={styles.assetCaret}>▾</span>
           </button>
           <div className={styles.amountCol}>
@@ -250,11 +386,9 @@ export function SwapPage() {
                 </span>
               </div>
             </div>
-            {quote && (
-              <div className={styles.amountUsd}>
-                ~$ {money(quote.amountOutUsd)}
-              </div>
-            )}
+            <div className={styles.amountUsd} aria-hidden={!quote}>
+              {quote ? `~$ ${money(quote.amountOutUsd)}` : "\u00a0"}
+            </div>
           </div>
         </div>
 
@@ -271,7 +405,7 @@ export function SwapPage() {
 
         <button
           type="button"
-          className={styles.cta}
+          className={`${styles.cta} ${action.retry ? styles.ctaRetry : ""}`}
           disabled={!action.ready}
           onClick={act}
         >
@@ -322,19 +456,22 @@ export function SwapPage() {
 
               <div data-scroll="1" className={styles.tokenList}>
                 {matches.map((t) => {
+                  const selected = selectedAsset(
+                    assets,
+                    state.picker === "from" ? state.fromToken : state.toToken,
+                  );
                   const active =
-                    (state.picker === "from"
-                      ? state.fromToken
-                      : state.toToken) === t.symbol;
+                    selected !== undefined &&
+                    assetKey(selected) === assetKey(t);
                   const down = t.change.charAt(0) === "-";
                   return (
                     <button
-                      key={t.symbol}
+                      key={assetKey(t)}
                       type="button"
                       className={
                         active ? styles.tokenRowActive : styles.tokenRow
                       }
-                      onClick={() => choose(t.symbol)}
+                      onClick={() => choose(t)}
                     >
                       <span className={styles.tokenChip}>
                         {t.symbol.slice(0, 2)}
@@ -375,25 +512,27 @@ export function SwapPage() {
               </div>
             </div>
 
-            <div className={styles.netCol}>
-              <div className={styles.netHead}>Network</div>
-              {networkOptions(assets).map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  className={
-                    n === state.pNet ? styles.netRowActive : styles.netRow
-                  }
-                  onClick={() => set({ pNet: n })}
-                >
-                  <span className={styles.netDot} />
-                  <span className={styles.netLabel}>{n}</span>
-                  <span className={styles.netMark}>
-                    {n === state.pNet ? "✓" : ""}
-                  </span>
-                </button>
-              ))}
-            </div>
+            {crossChain && (
+              <div className={styles.netCol}>
+                <div className={styles.netHead}>Network</div>
+                {networkOptions(assets).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    className={
+                      n === state.pNet ? styles.netRowActive : styles.netRow
+                    }
+                    onClick={() => set({ pNet: n })}
+                  >
+                    <span className={styles.netDot} />
+                    <span className={styles.netLabel}>{n}</span>
+                    <span className={styles.netMark}>
+                      {n === state.pNet ? "✓" : ""}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </section>

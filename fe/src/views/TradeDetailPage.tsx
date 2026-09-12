@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { tradeProblem, useTrade } from "@/services/explorer";
 import { useConfig } from "@/services/system";
 import { Crumbs } from "@/components/Crumbs";
+import { AssetIdentity } from "@/components/AssetIdentity";
 import { explorerUrl, tradeDetail } from "@/lib/explorer";
 import { useAppActions } from "@/state";
 import { TradeLifecycle } from "./TradeLifecycle";
@@ -106,9 +107,34 @@ export function TradeDetailPage() {
             }}
           >
             <div className={styles.statLabel}>{stat.label}</div>
-            <div className={styles.statValueSm} title={stat.value}>
-              {stat.value}
-            </div>
+            {trade.flow === "cross-chain" && stat.label === "In → out" ? (
+              <div className={styles.crossChainFlow} title={stat.value}>
+                <span>{trade.input.display}</span>
+                <AssetIdentity
+                  asset={
+                    trade.input.net
+                      ? { ...trade.input, net: trade.input.net }
+                      : undefined
+                  }
+                />
+                <span aria-hidden="true">→</span>
+                <span>
+                  {trade.status === "confirmed" ? "" : "min. "}
+                  {trade.output.display}
+                </span>
+                <AssetIdentity
+                  asset={
+                    trade.output.net
+                      ? { ...trade.output, net: trade.output.net }
+                      : undefined
+                  }
+                />
+              </div>
+            ) : (
+              <div className={styles.statValueSm} title={stat.value}>
+                {stat.value}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -118,9 +144,15 @@ export function TradeDetailPage() {
           <TradeLifecycle trade={trade} />
 
           <div className={styles.sourcedHead}>
-            <span className={styles.sourcedTitle}>Sourced from</span>
+            <span className={styles.sourcedTitle}>
+              {trade.flow === "cross-chain"
+                ? "Destination liquidity"
+                : "Sourced from"}
+            </span>
             <span className={styles.sourcedHint}>
-              click a leg to open the maker
+              {trade.flow === "cross-chain" && trade.output.net
+                ? `${trade.output.net} execution · click a row to open its strategy`
+                : "click a leg to open the maker"}
             </span>
           </div>
           <div data-scroll="1" className={styles.legList}>
@@ -128,7 +160,11 @@ export function TradeDetailPage() {
               <Link
                 key={`${leg.maker}:${leg.hash}`}
                 className={styles.legRow}
-                to={`/explorer/strategies/${leg.hash}`}
+                to={
+                  leg.chainId == null
+                    ? `/explorer/strategies/${leg.hash}`
+                    : `/explorer/strategies/${leg.hash}?chain=${leg.chainId}`
+                }
                 title={leg.maker}
               >
                 <span className={styles.legMaker}>
@@ -142,10 +178,37 @@ export function TradeDetailPage() {
                 </span>
                 <span className={styles.legAmountCol}>
                   <span className={styles.legAmountRow}>
-                    <span className={styles.legAmount} title={leg.amt}>
-                      {leg.amt}
-                    </span>
-                    <span className={styles.legCurve}>{leg.curve}</span>
+                    {trade.flow === "cross-chain" ? (
+                      <span
+                        className={styles.crossChainLegFlow}
+                        title={leg.amt}
+                      >
+                        <span>{leg.input.display}</span>
+                        <AssetIdentity
+                          asset={
+                            leg.input.net
+                              ? { ...leg.input, net: leg.input.net }
+                              : undefined
+                          }
+                        />
+                        <span aria-hidden="true">→</span>
+                        <span>{leg.output.display}</span>
+                        <AssetIdentity
+                          asset={
+                            leg.output.net
+                              ? { ...leg.output, net: leg.output.net }
+                              : undefined
+                          }
+                        />
+                      </span>
+                    ) : (
+                      <>
+                        <span className={styles.legAmount} title={leg.amt}>
+                          {leg.amt}
+                        </span>
+                        <span className={styles.legCurve}>{leg.curve}</span>
+                      </>
+                    )}
                   </span>
                   <span className={styles.legTrack}>
                     <span

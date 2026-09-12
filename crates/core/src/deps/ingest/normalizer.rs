@@ -19,4 +19,8 @@ pub enum NormalizeError {
     /// The payload did not decode as a well-formed order of this protocol.
     #[error("malformed {0:?} order")]
     Decode(ProtocolId),
+    #[error("invalid {0:?} order")]
+    Invalid(ProtocolId),
+    #[error("invalid {0:?} order signature")]
+    Signature(ProtocolId),
 }

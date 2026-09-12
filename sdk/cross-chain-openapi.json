@@ -1,0 +1,1088 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Solvent Cross-Chain Proxy API",
+    "description": "",
+    "license": {
+      "name": ""
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/v1/cross-chain/orders": {
+      "post": {
+        "tags": [
+          "cross-chain"
+        ],
+        "summary": "Validate both execution plans, prepare capital on each chain, and start the durable saga.",
+        "operationId": "create_order",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCrossChainOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Cross-chain order created or idempotently recovered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrossChainOrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Quote or execution plan is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A chain service or saga store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cross-chain/orders/direct": {
+      "post": {
+        "tags": [
+          "cross-chain"
+        ],
+        "summary": "Verify the wallet authorization, obtain chain-authored plans, and start a direct route.",
+        "operationId": "create_direct_order",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDirectOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Direct cross-chain order created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrossChainOrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Quote or wallet authorization is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A chain service or saga store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Direct settlement is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cross-chain/orders/draft": {
+      "post": {
+        "tags": [
+          "cross-chain"
+        ],
+        "summary": "Build the exact Compact commitment and settlement terms the wallet will authorize.",
+        "operationId": "draft_order",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectOrderDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Wallet-signable direct-order terms",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectOrderDraft"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Quote or authorization terms are invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Direct-order drafting is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cross-chain/orders/{id}": {
+      "get": {
+        "tags": [
+          "cross-chain"
+        ],
+        "summary": "Return the last durable state recorded for a cross-chain order.",
+        "operationId": "order",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "32-byte cross-chain order identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current durable order state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrossChainOrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or unknown order identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The saga store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cross-chain/orders/{id}/advance": {
+      "post": {
+        "tags": [
+          "cross-chain"
+        ],
+        "summary": "Advance one durable cross-chain saga transition.",
+        "operationId": "advance",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "32-byte cross-chain order identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saga after at most one advancement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrossChainOrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or unknown order identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A chain service or saga store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cross-chain/quote": {
+      "post": {
+        "tags": [
+          "cross-chain"
+        ],
+        "summary": "Join the independently authoritative origin and destination quotes.",
+        "operationId": "quote",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CrossChainQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Aggregate quote accepted by both chain services",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AggregateQuote"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid route, chain pair, or amount",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A chain service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AggregateQuote": {
+        "type": "object",
+        "description": "The immutable quote accepted by the client and prepared on both chains.",
+        "required": [
+          "id",
+          "origin",
+          "destination",
+          "amount_in",
+          "amount_out",
+          "bridge_fee",
+          "expires_at_unix"
+        ],
+        "properties": {
+          "amount_in": {
+            "type": "string"
+          },
+          "amount_out": {
+            "type": "string"
+          },
+          "bridge_fee": {
+            "type": "string"
+          },
+          "cctp_finality_threshold": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "destination": {
+            "$ref": "#/components/schemas/LegQuote"
+          },
+          "expires_at_unix": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/LegQuote"
+          }
+        }
+      },
+      "ChainExecutionPlan": {
+        "type": "object",
+        "description": "Calls staged on exactly one chain before capital is committed.",
+        "required": [
+          "aggregate_id",
+          "chain_id",
+          "steps"
+        ],
+        "properties": {
+          "aggregate_id": {
+            "type": "string"
+          },
+          "chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreparedStep"
+            }
+          }
+        }
+      },
+      "CompactCommitmentTerms": {
+        "type": "object",
+        "required": [
+          "arbiter",
+          "sponsor",
+          "nonce",
+          "expires",
+          "lock_tag",
+          "token",
+          "amount",
+          "mandate"
+        ],
+        "properties": {
+          "amount": {
+            "type": "string"
+          },
+          "arbiter": {
+            "type": "string"
+          },
+          "expires": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "lock_tag": {
+            "type": "string"
+          },
+          "mandate": {
+            "$ref": "#/components/schemas/SolventCompactMandate"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "sponsor": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateCrossChainOrderRequest": {
+        "type": "object",
+        "required": [
+          "order_id",
+          "quote",
+          "origin_plan",
+          "destination_plan"
+        ],
+        "properties": {
+          "destination_plan": {
+            "$ref": "#/components/schemas/ChainExecutionPlan"
+          },
+          "order_id": {
+            "type": "string"
+          },
+          "origin_plan": {
+            "$ref": "#/components/schemas/ChainExecutionPlan"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/AggregateQuote"
+          }
+        }
+      },
+      "CreateDirectOrderRequest": {
+        "type": "object",
+        "required": [
+          "draft",
+          "sponsor_signature"
+        ],
+        "properties": {
+          "draft": {
+            "$ref": "#/components/schemas/DirectOrderDraftRequest"
+          },
+          "sponsor_signature": {
+            "type": "string"
+          }
+        }
+      },
+      "CrossChainLifecycleEvent": {
+        "type": "object",
+        "required": [
+          "stage",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "stage": {
+            "$ref": "#/components/schemas/CrossChainLifecycleStage"
+          }
+        }
+      },
+      "CrossChainLifecycleStage": {
+        "type": "string",
+        "description": "User-visible milestones recorded as the cross-chain saga progresses.",
+        "enum": [
+          "quoted",
+          "destination_fill",
+          "proof_relay",
+          "origin_claim",
+          "repayment",
+          "complete"
+        ]
+      },
+      "CrossChainOrderResponse": {
+        "type": "object",
+        "required": [
+          "order"
+        ],
+        "properties": {
+          "order": {
+            "$ref": "#/components/schemas/CrossChainSaga"
+          }
+        }
+      },
+      "CrossChainQuoteRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "origin_chain_id",
+          "destination_chain_id",
+          "origin_token_in",
+          "origin_token_out",
+          "destination_token_in",
+          "destination_token_out",
+          "amount_in",
+          "destination_amount_in",
+          "deadline_unix",
+          "route"
+        ],
+        "properties": {
+          "amount_in": {
+            "type": "string"
+          },
+          "deadline_unix": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "destination_amount_in": {
+            "type": "string"
+          },
+          "destination_chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "destination_token_in": {
+            "type": "string"
+          },
+          "destination_token_out": {
+            "type": "string"
+          },
+          "origin_chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "origin_token_in": {
+            "type": "string"
+          },
+          "origin_token_out": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "route": {
+            "$ref": "#/components/schemas/CrossChainRoute"
+          }
+        }
+      },
+      "CrossChainRoute": {
+        "type": "string",
+        "description": "Repayment mechanism selected for an aggregate quote.",
+        "enum": [
+          "direct",
+          "cctp"
+        ]
+      },
+      "CrossChainSaga": {
+        "type": "object",
+        "description": "The proxy's recoverable record for one end-to-end order.",
+        "required": [
+          "order_id",
+          "quote",
+          "state"
+        ],
+        "properties": {
+          "destination": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StepEvidence"
+              }
+            ]
+          },
+          "destination_prepare": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fill_proof": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StepEvidence"
+              }
+            ]
+          },
+          "lifecycle": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CrossChainLifecycleEvent"
+            }
+          },
+          "order_id": {
+            "type": "string"
+          },
+          "origin": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StepEvidence"
+              }
+            ]
+          },
+          "origin_prepare": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quote": {
+            "$ref": "#/components/schemas/AggregateQuote"
+          },
+          "repayment": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StepEvidence"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/SagaState"
+          },
+          "taker": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DirectOrderDraft": {
+        "type": "object",
+        "required": [
+          "aggregate_id",
+          "order_id",
+          "compact",
+          "order",
+          "commitment"
+        ],
+        "properties": {
+          "aggregate_id": {
+            "type": "string"
+          },
+          "commitment": {
+            "$ref": "#/components/schemas/CompactCommitmentTerms"
+          },
+          "compact": {
+            "type": "string"
+          },
+          "order": {
+            "$ref": "#/components/schemas/SolventCompactOrder"
+          },
+          "order_id": {
+            "type": "string"
+          }
+        }
+      },
+      "DirectOrderDraftRequest": {
+        "type": "object",
+        "required": [
+          "quote",
+          "sponsor",
+          "recipient",
+          "order_nonce",
+          "compact_nonce",
+          "compact_expires_unix"
+        ],
+        "properties": {
+          "compact_expires_unix": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "compact_nonce": {
+            "type": "string"
+          },
+          "order_nonce": {
+            "type": "string"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/AggregateQuote"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "sponsor": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorBody": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "LegQuote": {
+        "type": "object",
+        "description": "A chain-local promise used by the proxy to assemble an end-to-end quote.",
+        "required": [
+          "quote_id",
+          "request_id",
+          "role",
+          "local_chain",
+          "remote_chain",
+          "input_token",
+          "output_token",
+          "amount_in",
+          "amount_out",
+          "route",
+          "block_number",
+          "expires_at_unix",
+          "sources"
+        ],
+        "properties": {
+          "amount_in": {
+            "type": "string"
+          },
+          "amount_out": {
+            "type": "string"
+          },
+          "block_number": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "expires_at_unix": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "input_token": {
+            "type": "string"
+          },
+          "local_chain": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "output_token": {
+            "type": "string"
+          },
+          "quote_id": {
+            "type": "string"
+          },
+          "remote_chain": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/LegRole"
+          },
+          "route": {
+            "$ref": "#/components/schemas/CrossChainRoute"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReservationSource"
+            },
+            "description": "Capital held locally at admission; the chain service remains authoritative for these terms."
+          }
+        }
+      },
+      "LegRole": {
+        "type": "string",
+        "description": "The responsibility of a chain-local quote.",
+        "enum": [
+          "origin",
+          "destination"
+        ]
+      },
+      "PreparedStep": {
+        "type": "object",
+        "description": "One pre-authorized call. Its debug representation deliberately omits calldata.",
+        "required": [
+          "command",
+          "target",
+          "value",
+          "calldata"
+        ],
+        "properties": {
+          "calldata": {
+            "type": "string"
+          },
+          "command": {
+            "$ref": "#/components/schemas/RemoteCommand"
+          },
+          "target": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "RemoteCommand": {
+        "type": "string",
+        "description": "Irreversible operations are named so a chain service can enforce a contract allow-list.",
+        "enum": [
+          "deliver",
+          "dispatch_fill_proof",
+          "claim_origin",
+          "dispatch_repayment",
+          "close_destination"
+        ]
+      },
+      "ReservationSource": {
+        "type": "object",
+        "description": "One maker-capital source a reservation draws on: `amount` of `token` pulled from a specific\nstrategy — settled by exactly one Aqua `pull`. Each source holds capacity at both ceilings, the\nshared wallet and the strategy virtual.",
+        "required": [
+          "maker",
+          "strategy_hash",
+          "token",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "string"
+          },
+          "maker": {
+            "type": "string"
+          },
+          "strategy_hash": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "SagaState": {
+        "type": "string",
+        "description": "Durable proxy state. The linear states make the next safe action explicit after a restart.",
+        "enum": [
+          "quoted",
+          "preparing",
+          "prepared",
+          "destination_pending",
+          "destination_finalized",
+          "fill_proof_pending",
+          "origin_pending",
+          "origin_finalized",
+          "repayment_pending",
+          "complete",
+          "failed_before_delivery",
+          "needs_reconcile"
+        ]
+      },
+      "SolventCompactMandate": {
+        "type": "object",
+        "required": [
+          "order_id",
+          "destination_chain_id",
+          "destination_settler",
+          "fill_proof_verifier",
+          "output_token",
+          "minimum_output_amount",
+          "recipient",
+          "fill_deadline",
+          "exclusive_filler",
+          "route_kind"
+        ],
+        "properties": {
+          "destination_chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "destination_settler": {
+            "type": "string"
+          },
+          "exclusive_filler": {
+            "type": "string"
+          },
+          "fill_deadline": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "fill_proof_verifier": {
+            "type": "string"
+          },
+          "minimum_output_amount": {
+            "type": "string"
+          },
+          "order_id": {
+            "type": "string"
+          },
+          "output_token": {
+            "type": "string"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "route_kind": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "SolventCompactOrder": {
+        "type": "object",
+        "required": [
+          "user",
+          "nonce",
+          "origin_chain_id",
+          "origin_settler",
+          "compact",
+          "compact_id",
+          "compact_expires",
+          "input_token",
+          "input_amount",
+          "destination_chain_id",
+          "output_token",
+          "minimum_output_amount",
+          "recipient",
+          "destination_settler",
+          "fill_proof_verifier",
+          "exclusive_filler",
+          "exclusivity_ends",
+          "fill_deadline",
+          "route_kind"
+        ],
+        "properties": {
+          "compact": {
+            "type": "string"
+          },
+          "compact_expires": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "compact_id": {
+            "type": "string"
+          },
+          "destination_chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "destination_settler": {
+            "type": "string"
+          },
+          "exclusive_filler": {
+            "type": "string"
+          },
+          "exclusivity_ends": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "fill_deadline": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "fill_proof_verifier": {
+            "type": "string"
+          },
+          "input_amount": {
+            "type": "string"
+          },
+          "input_token": {
+            "type": "string"
+          },
+          "minimum_output_amount": {
+            "type": "string"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "origin_chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "origin_settler": {
+            "type": "string"
+          },
+          "output_token": {
+            "type": "string"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "route_kind": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "user": {
+            "type": "string"
+          }
+        }
+      },
+      "StepEvidence": {
+        "type": "object",
+        "description": "Evidence for an idempotent remote command. Payload bytes and signatures remain chain-local.",
+        "required": [
+          "command_id"
+        ],
+        "properties": {
+          "block_number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "command_id": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "transaction_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,1159 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "compact",
+        "type": "address",
+        "internalType": "contract ITheCompactClaims"
+      },
+      {
+        "name": "aqua",
+        "type": "address",
+        "internalType": "contract IAqua"
+      },
+      {
+        "name": "originToken",
+        "type": "address",
+        "internalType": "contract IERC20"
+      },
+      {
+        "name": "destinationChainId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "destinationApp",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "fillProofVerifier",
+        "type": "address",
+        "internalType": "contract IFillProofVerifier"
+      },
+      {
+        "name": "proofOutbox",
+        "type": "address",
+        "internalType": "contract IProofOutbox"
+      },
+      {
+        "name": "routed",
+        "type": "tuple",
+        "internalType": "struct CompactOriginSettler.RoutedConfig",
+        "components": [
+          {
+            "name": "originUsdc",
+            "type": "address",
+            "internalType": "contract IERC20"
+          },
+          {
+            "name": "swapRouter",
+            "type": "address",
+            "internalType": "contract ISwapVM"
+          },
+          {
+            "name": "tokenMessenger",
+            "type": "address",
+            "internalType": "contract ITokenMessengerV2"
+          },
+          {
+            "name": "destinationUsdc",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "destinationDomain",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "minFinalityThreshold",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "feeRecipient",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "AQUA",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IAqua"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "COMPACT",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ITheCompactClaims"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "COMPACT_WITH_MANDATE_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DESTINATION_APP",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DESTINATION_CHAIN_ID",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "FILL_PROOF_VERIFIER",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IFillProofVerifier"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MANDATE_WITNESS_TYPESTRING",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ORIGIN_TOKEN",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IERC20"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "PROOF_OUTBOX",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IProofOutbox"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "mandateHash",
+    "inputs": [
+      {
+        "name": "mandate",
+        "type": "tuple",
+        "internalType": "struct SolventMandate",
+        "components": [
+          {
+            "name": "orderId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "destinationChainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "destinationSettler",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "fillProofVerifier",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "outputToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "minimumOutputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "fillDeadline",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "exclusiveFiller",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "routeKind",
+            "type": "uint8",
+            "internalType": "enum RouteKind"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "orderIdFor",
+    "inputs": [
+      {
+        "name": "order",
+        "type": "tuple",
+        "internalType": "struct SolventCrossChainOrder",
+        "components": [
+          {
+            "name": "user",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "originChainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "originSettler",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "compact",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "compactId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "compactExpires",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "inputToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "inputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "destinationChainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "outputToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "minimumOutputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "destinationSettler",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "fillProofVerifier",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "exclusiveFiller",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "exclusivityEnds",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "fillDeadline",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "routeKind",
+            "type": "uint8",
+            "internalType": "enum RouteKind"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "settleDirect",
+    "inputs": [
+      {
+        "name": "order",
+        "type": "tuple",
+        "internalType": "struct SolventCrossChainOrder",
+        "components": [
+          {
+            "name": "user",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "originChainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "originSettler",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "compact",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "compactId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "compactExpires",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "inputToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "inputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "destinationChainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "outputToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "minimumOutputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "destinationSettler",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "fillProofVerifier",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "exclusiveFiller",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "exclusivityEnds",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "fillDeadline",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "routeKind",
+            "type": "uint8",
+            "internalType": "enum RouteKind"
+          }
+        ]
+      },
+      {
+        "name": "mandate",
+        "type": "tuple",
+        "internalType": "struct SolventMandate",
+        "components": [
+          {
+            "name": "orderId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "destinationChainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "destinationSettler",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "fillProofVerifier",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "outputToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "minimumOutputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "fillDeadline",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "exclusiveFiller",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "routeKind",
+            "type": "uint8",
+            "internalType": "enum RouteKind"
+          }
+        ]
+      },
+      {
+        "name": "fillProof",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "compactClaim",
+        "type": "tuple",
+        "internalType": "struct Claim",
+        "components": [
+          {
+            "name": "allocatorData",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "sponsorSignature",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "sponsor",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "expires",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "witness",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "witnessTypestring",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "id",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "allocatedAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "claimants",
+            "type": "tuple[]",
+            "internalType": "struct Component[]",
+            "components": [
+              {
+                "name": "claimant",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "amount",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "settleRouted",
+    "inputs": [
+      {
+        "name": "order",
+        "type": "tuple",
+        "internalType": "struct SolventCrossChainOrder",
+        "components": [
+          {
+            "name": "user",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "originChainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "originSettler",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "compact",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "compactId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "compactExpires",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "inputToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "inputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "destinationChainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "outputToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "minimumOutputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "destinationSettler",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "fillProofVerifier",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "exclusiveFiller",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "exclusivityEnds",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "fillDeadline",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "routeKind",
+            "type": "uint8",
+            "internalType": "enum RouteKind"
+          }
+        ]
+      },
+      {
+        "name": "mandate",
+        "type": "tuple",
+        "internalType": "struct SolventMandate",
+        "components": [
+          {
+            "name": "orderId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "destinationChainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "destinationSettler",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "fillProofVerifier",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "outputToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "minimumOutputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "fillDeadline",
+            "type": "uint48",
+            "internalType": "uint48"
+          },
+          {
+            "name": "exclusiveFiller",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "routeKind",
+            "type": "uint8",
+            "internalType": "enum RouteKind"
+          }
+        ]
+      },
+      {
+        "name": "fillProof",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "compactClaim",
+        "type": "tuple",
+        "internalType": "struct Claim",
+        "components": [
+          {
+            "name": "allocatorData",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "sponsorSignature",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "sponsor",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "expires",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "witness",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "witnessTypestring",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "id",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "allocatedAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "claimants",
+            "type": "tuple[]",
+            "internalType": "struct Component[]",
+            "components": [
+              {
+                "name": "claimant",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "amount",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "makerOrder",
+        "type": "tuple",
+        "internalType": "struct ISwapVM.Order",
+        "components": [
+          {
+            "name": "maker",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "traits",
+            "type": "uint256",
+            "internalType": "MakerTraits"
+          },
+          {
+            "name": "data",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "settledOrders",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "usedFillProofs",
+    "inputs": [
+      {
+        "name": "fillId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "DirectMakerRepaid",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "maker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "repaymentToken",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "repaymentAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "usedAquaPush",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RoutedBurnInitiated",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "originMaker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "swapOrderHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "inputAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "usdcBurned",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxCctpFee",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "surplus",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "FillProofAlreadyUsed",
+    "inputs": [
+      {
+        "name": "fillId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidCompactClaim",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidFillProof",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidMandate",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidOrder",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidSwapResult",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderAlreadySettled",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ReentrancyGuardReentrantCall",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SafeCastOverflowedUintDowncast",
+    "inputs": [
+      {
+        "name": "bits",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "SafeERC20FailedOperation",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TakerTraitsMissingHasPreTransferInFlag",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TakerTraitsMissingHasPreTransferOutFlag",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TakerTraitsThresholdLengthInvalid",
+    "inputs": [
+      {
+        "name": "threshold",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnexpectedRepaymentDelta",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnexpectedTokenBalance",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ZeroAddress",
+    "inputs": []
+  }
+]

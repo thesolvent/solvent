@@ -10,7 +10,13 @@ import { useLayoutEffect, useState } from "react";
 import { useAccount, useClient, useConnectorClient } from "wagmi";
 import type { RecordPage } from "@/data/explorer";
 import type { ExecutedRebate, RebateRecord } from "@/data/rebates";
-import type { RebateFilter, RebateIntent, RebatesPort } from "@/ports/rebates";
+import { submissionProblem } from "@/lib/swap";
+import type {
+  RebateFilter,
+  RebateIntent,
+  RebatesPort,
+  RebateSubmissionStatus,
+} from "@/ports/rebates";
 import { LIVE_QUERY_OPTIONS } from "./live";
 import { useServices } from "./context";
 
@@ -18,6 +24,7 @@ interface Submission {
   key: string;
   rebateId: string;
   intent: RebateIntent | undefined;
+  onStatus: (status: RebateSubmissionStatus) => void;
 }
 
 type RebatePages = InfiniteData<RecordPage<RebateRecord>, unknown>;
@@ -143,7 +150,7 @@ function createIntent(
 async function submit(attempt: Submission): Promise<ExecutedRebate> {
   if (!attempt.intent)
     throw new Error("Connect a wallet to execute this rebate");
-  return attempt.intent.submit();
+  return attempt.intent.submit({ onStatus: attempt.onStatus });
 }
 
 function markExecuted(
@@ -176,7 +183,7 @@ function executionProblem(error: Error | null): string | undefined {
     return error.message;
   if (error.message === "Insufficient token balance")
     return "Not enough input tokens in this wallet";
-  return "Could not execute this rebate";
+  return submissionProblem(error, "Could not execute this rebate");
 }
 
 function submissionKey(
@@ -206,8 +213,10 @@ export function useExecuteRebate() {
   const { address, chainId } = useAccount();
   const publicClient = useClient({ chainId });
   const { data: walletClient } = useConnectorClient();
+  const [status, setStatus] = useState<RebateSubmissionStatus>();
   const mutation = useMutation({
     mutationFn: submit,
+    onMutate: () => setStatus({ kind: "preparing" }),
     onSuccess: (result) =>
       queryClient.setQueriesData<RebatePages>(
         { queryKey: ["rebates"] },
@@ -229,6 +238,7 @@ export function useExecuteRebate() {
               publicClient,
               walletClient,
             }),
+            onStatus: setStatus,
           },
     );
   }
@@ -236,6 +246,7 @@ export function useExecuteRebate() {
   return {
     execute,
     pendingId: mutation.isPending ? mutation.variables?.rebateId : undefined,
+    status: mutation.isPending ? status : undefined,
     completedId: mutation.isSuccess ? mutation.data.rebateId : undefined,
     failedId: mutation.isError ? mutation.variables?.rebateId : undefined,
     problem: executionProblem(mutation.error),

@@ -57,6 +57,10 @@
   gap: 8px;
 }
 
+.protocolMenu {
+  position: relative;
+}
+
 .iconBox {
   width: 44px;
   height: 44px;
@@ -70,6 +74,7 @@
 
 .iconButton {
   composes: iconBox;
+  padding: 0;
 }
 
 .iconButton:hover {
@@ -81,6 +86,22 @@
   height: 14px;
   border: 1.6px solid var(--ink);
   border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.networkGlyph {
+  composes: iconGlyph;
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
+  box-sizing: border-box;
+  border-color: var(--lime);
+  background: var(--lime);
+  font-size: 12px;
 }
 
 .moreButton {
@@ -88,6 +109,124 @@
   font-size: 17px;
   letter-spacing: 0.14em;
   line-height: 1;
+}
+
+.protocolTrigger {
+  display: grid;
+  grid-template-columns: 1fr 44px;
+  box-sizing: border-box;
+  width: 156px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 17px;
+  text-align: left;
+}
+
+.protocolTriggerOpen {
+  composes: protocolTrigger;
+  border-top: 2px solid var(--lime);
+}
+
+.protocolTrigger > span:first-child {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+}
+
+.protocolTriggerMore {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--line);
+  font-size: 17px;
+  letter-spacing: 0.14em;
+  line-height: 1;
+}
+
+.protocolTriggerMoreOpen {
+  composes: protocolTriggerMore;
+  font-size: 12px;
+  letter-spacing: 0;
+  composes: pop120 from "../styles/animations.module.css";
+}
+
+.moreButton:disabled {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.protocolOptions {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  width: min(286px, calc(100vw - 64px));
+  border: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: 0 16px 36px rgba(11, 11, 11, 0.12);
+  transform-origin: top right;
+  composes: pop160 from "../styles/animations.module.css";
+}
+
+.protocolOption {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 78px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-left: 3px solid transparent;
+  padding: 15px 18px 15px 20px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.protocolOption:first-child {
+  border-top: 0;
+}
+
+.protocolOption:hover {
+  background: var(--line-faint);
+}
+
+.protocolOptionActive {
+  composes: protocolOption;
+  border-left-color: var(--lime);
+  background: var(--lime-wash);
+}
+
+.protocolCopy,
+.protocolName,
+.protocolDescription {
+  display: block;
+}
+
+.protocolName {
+  margin-bottom: 3px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.protocolDescription {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.protocolMark {
+  flex: none;
+  color: var(--green-deep);
+  font-size: 18px;
 }
 
 .leg {
@@ -106,11 +245,11 @@
 .assetButton {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 140px;
+  gap: 8px;
+  width: 172px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 7px 14px 7px 7px;
+  padding: 8px 12px 8px 16px;
   background: var(--paper);
   flex: none;
   cursor: pointer;
@@ -125,20 +264,12 @@
   box-shadow: 0 2px 10px rgba(11, 11, 11, 0.07);
 }
 
-.assetChip {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--line-faint);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12.5px;
-  font-weight: 600;
+.assetButton:has([data-asset-identity]) {
+  width: auto;
 }
 
 .assetSymbol {
-  flex: 1;
+  flex: none;
   font-size: 18px;
   font-weight: 500;
   text-align: left;
@@ -206,6 +337,7 @@
 }
 
 .amountUsd {
+  min-height: 20px;
   font-size: 17px;
   color: var(--text-muted);
   font-weight: 300;
@@ -289,6 +421,17 @@
   background: var(--line);
   color: var(--text-muted);
   cursor: not-allowed;
+}
+
+/* A request may safely retry with the same intent after a transient server failure. */
+.ctaRetry {
+  background: var(--line);
+  color: var(--text-muted);
+}
+
+.ctaRetry:hover:not(:disabled) {
+  background: var(--dark-line);
+  color: var(--paper);
 }
 
 /* ---------- Token picker ---------- */

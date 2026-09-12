@@ -1,13 +1,12 @@
-import {
-    isAddressEqual,
-    isHex,
-    size,
-    type Address,
-    type Hex,
-} from "viem";
+import { isAddressEqual, isHex, size, type Address, type Hex } from "viem";
 
 import type { Rebate, SolventClient } from "../client";
-import { createWalletSession, type WalletClients } from "../swap/wallet";
+import {
+    createWalletSession,
+    type WalletActionOptions,
+    type WalletActionStatus,
+    type WalletClients,
+} from "../swap/wallet";
 import {
     InputValidationError,
     validatedAddress,
@@ -29,7 +28,13 @@ export interface ExecutedRebate {
 }
 
 export interface RebateIntent {
-    submit(): Promise<ExecutedRebate>;
+    submit(options?: RebateSubmissionOptions): Promise<ExecutedRebate>;
+}
+
+export type RebateSubmissionStatus = { kind: "preparing" } | WalletActionStatus;
+
+export interface RebateSubmissionOptions extends WalletActionOptions {
+    onStatus?(status: RebateSubmissionStatus): void;
 }
 
 export interface RebateClient {
@@ -93,31 +98,42 @@ export function createRebateClient({
             const block = await wallet.currentBlock(current.chainId);
             // A transaction submitted at the deadline can only mine in a later, invalid block.
             if (block >= current.deadlineBlock) {
-                throw new RebateUnavailableError("Rebate authorization expired");
+                throw new RebateUnavailableError(
+                    "Rebate authorization expired",
+                );
             }
         }
 
-        async function execute(): Promise<ExecutedRebate> {
+        async function execute(
+            options?: RebateSubmissionOptions,
+        ): Promise<ExecutedRebate> {
             if (result) return result;
+            options?.onStatus?.({ kind: "preparing" });
             const current = await executionPlan();
             if (!transactionHash) {
-                await wallet.ensureAllowance({
-                    owner: current.executor,
-                    chainId: current.chainId,
-                    token: current.tokenIn,
-                    spender: current.filler,
-                    amount: current.deposit,
-                });
+                await wallet.ensureAllowance(
+                    {
+                        owner: current.executor,
+                        chainId: current.chainId,
+                        token: current.tokenIn,
+                        spender: current.filler,
+                        amount: current.deposit,
+                    },
+                    options,
+                );
                 await assertLive(current);
-                transactionHash = await wallet.sendTransaction({
-                    owner: current.executor,
-                    chainId: current.chainId,
-                    to: current.filler,
-                    data: current.calldata,
-                    value: 0n,
-                });
+                transactionHash = await wallet.sendTransaction(
+                    {
+                        owner: current.executor,
+                        chainId: current.chainId,
+                        to: current.filler,
+                        data: current.calldata,
+                        value: 0n,
+                    },
+                    options,
+                );
             }
-            await wallet.confirmTransaction(transactionHash);
+            await wallet.confirmTransaction(transactionHash, options);
             result = {
                 rebateId: current.rebateId,
                 transactionHash,
@@ -126,8 +142,8 @@ export function createRebateClient({
         }
 
         return {
-            submit() {
-                pending ??= execute().finally(() => {
+            submit(options) {
+                pending ??= execute(options).finally(() => {
                     pending = undefined;
                     // Before broadcast, a retry must reload work that the server may have renewed.
                     if (!transactionHash) plan = undefined;
@@ -150,9 +166,15 @@ function executablePlan(
         throw invalid("rebate id", "Server returned a different rebate");
     }
     const filler = validatedAddress(config.filler, "configured filler");
-    const target = validatedAddress(required(rebate.to, "rebate target"), "rebate target");
+    const target = validatedAddress(
+        required(rebate.to, "rebate target"),
+        "rebate target",
+    );
     if (!isAddressEqual(filler, target)) {
-        throw invalid("rebate target", "Rebate target does not match the configured filler");
+        throw invalid(
+            "rebate target",
+            "Rebate target does not match the configured filler",
+        );
     }
     const tokenIn = validatedAddress(rebate.token_in, "rebate input token");
     const tokenOut = validatedAddress(rebate.token_out, "rebate output token");
@@ -170,7 +192,10 @@ function executablePlan(
     const deadlineBlock = wireBlock(rebate.deadline_block);
     const calldata = required(rebate.calldata, "rebate calldata");
     if (!isHex(calldata, { strict: true }) || size(calldata) < 4) {
-        throw invalid("rebate calldata", "Rebate calldata must include a function selector");
+        throw invalid(
+            "rebate calldata",
+            "Rebate calldata must include a function selector",
+        );
     }
     return {
         rebateId: request.rebateId,
@@ -195,7 +220,10 @@ function wireUint(value: string, field: string, positive = false): bigint {
 
 function wireBlock(value: number | null | undefined): bigint {
     if (!Number.isSafeInteger(value) || (value ?? 0) <= 0) {
-        throw invalid("rebate deadline", "Rebate deadline must be a positive safe integer");
+        throw invalid(
+            "rebate deadline",
+            "Rebate deadline must be a positive safe integer",
+        );
     }
     return BigInt(value as number);
 }
