@@ -5,7 +5,7 @@
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::primitives::execution::TrackedFill;
+use crate::primitives::execution::{ExecStatus, TrackedFill};
 use crate::primitives::{IntentId, ReservationId};
 
 #[async_trait]
@@ -28,6 +28,21 @@ pub trait FillStore: Send + Sync {
     /// Every fill still tracked as in-flight — the reconcile working set, and after a restart the
     /// fills to recover.
     async fn tracked(&self) -> Result<Vec<TrackedFill>, FillStoreError>;
+
+    /// Preserve a terminal status long enough for higher-level coordinators to observe it even
+    /// after the generic reconcile loop removes the in-flight handle.
+    async fn record_terminal(
+        &self,
+        _intent: IntentId,
+        _status: &ExecStatus,
+    ) -> Result<(), FillStoreError> {
+        Ok(())
+    }
+
+    /// Read a previously recorded terminal status for an intent.
+    async fn terminal(&self, _intent: IntentId) -> Result<Option<ExecStatus>, FillStoreError> {
+        Ok(None)
+    }
 }
 
 /// A fill-store failure.

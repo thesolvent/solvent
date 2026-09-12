@@ -926,7 +926,7 @@
         "tags": [
           "crate::http::app::swap"
         ],
-        "summary": "Submit a taker-signed order: decode → verify the swapper signature → cosign → route → reserve →\npersist → fill. A malformed or unverifiable order is `400`; an unroutable one returns a\n`declined` trade (`200`).",
+        "summary": "Submit a taker-signed order: authenticate → route → reserve → persist → fill. A malformed or\nunverifiable order is `400`; an unroutable one returns a `declined` trade (`200`).",
         "operationId": "submit",
         "requestBody": {
           "content": {
@@ -1333,6 +1333,18 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "erc7683_filler": {
+            "type": "string",
+            "description": "The ERC-7683 filler selected by the backend execution dispatcher."
+          },
+          "erc7683_resolver": {
+            "type": "string",
+            "description": "The ERC-7683 resolver exposing the order through the standard interface."
+          },
+          "erc7683_settler": {
+            "type": "string",
+            "description": "The ERC-7683 same-chain settler used in user-signed order payloads."
           },
           "features": {
             "$ref": "#/components/schemas/Features"
@@ -2700,6 +2712,9 @@
             "type": "string",
             "description": "The input amount, in base units (a decimal integer string)."
           },
+          "protocol": {
+            "$ref": "#/components/schemas/SwapProtocol"
+          },
           "token_in": {
             "type": "string"
           },
@@ -2722,6 +2737,16 @@
         "properties": {
           "amount_out": {
             "$ref": "#/components/schemas/Amount"
+          },
+          "executor_fee": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Amount"
+              }
+            ]
           },
           "expires_at": {
             "type": "string"
@@ -2953,6 +2978,18 @@
                 "type": "integer",
                 "format": "int32",
                 "minimum": 0
+              },
+              "erc7683_filler": {
+                "type": "string",
+                "description": "The ERC-7683 filler selected by the backend execution dispatcher."
+              },
+              "erc7683_resolver": {
+                "type": "string",
+                "description": "The ERC-7683 resolver exposing the order through the standard interface."
+              },
+              "erc7683_settler": {
+                "type": "string",
+                "description": "The ERC-7683 same-chain settler used in user-signed order payloads."
               },
               "features": {
                 "$ref": "#/components/schemas/Features"
@@ -4645,6 +4682,16 @@
               "amount_out": {
                 "$ref": "#/components/schemas/Amount"
               },
+              "executor_fee": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Amount"
+                  }
+                ]
+              },
               "expires_at": {
                 "type": "string"
               },
@@ -5204,9 +5251,16 @@
           }
         }
       },
+      "SwapProtocol": {
+        "type": "string",
+        "enum": [
+          "uniswapx",
+          "erc7683"
+        ]
+      },
       "SwapRequest": {
         "type": "object",
-        "description": "A taker-signed order submission, mirroring the UniswapX Orders API (`{ encodedOrder, signature,\nchainId, quoteId? }`). The taker's client builds + signs the base order; the server cosigns.",
+        "description": "A taker-signed order submission. UniswapX remains the default when `protocol` is omitted.",
         "required": [
           "encodedOrder",
           "signature",
@@ -5220,6 +5274,9 @@
           },
           "encodedOrder": {
             "type": "string"
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/SwapProtocol"
           },
           "quoteId": {
             "type": [

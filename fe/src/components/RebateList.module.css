@@ -18,7 +18,7 @@
   display: grid;
   grid-template-columns:
     minmax(100px, 0.9fr) minmax(170px, 1.35fr) minmax(100px, 0.9fr)
-    minmax(100px, 0.9fr) minmax(120px, 1fr) 102px;
+    minmax(100px, 0.9fr) minmax(120px, 1fr) 152px;
   align-items: center;
   padding: 11px 16px;
   border-bottom: 1px solid var(--surface);
@@ -93,6 +93,9 @@
 }
 
 .earnButton {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--line);
   background: var(--paper);
   color: var(--text-strong);
@@ -102,10 +105,12 @@
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 
-.earnButton:hover {
+.earnButton:hover:not(:disabled) {
   border-color: var(--ink);
   background: var(--ink);
   color: var(--paper);
@@ -141,9 +146,13 @@
 }
 
 .error {
+  min-width: 0;
+  max-width: 100%;
   color: var(--err-ink);
   font-size: 9.5px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .emptyNote {
@@ -167,7 +176,7 @@
   .row {
     grid-template-columns:
       minmax(90px, 0.8fr) minmax(150px, 1.2fr) minmax(100px, 0.9fr)
-      minmax(110px, 1fr) 82px;
+      minmax(110px, 1fr) 132px;
   }
 
   .row > :nth-child(4) {

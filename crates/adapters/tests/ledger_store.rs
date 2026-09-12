@@ -196,3 +196,13 @@ async fn transitions_only_fire_from_the_expected_state() {
     store.void_reorg(rid(1)).await.unwrap();
     assert!(store.open_reservations().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn committed_reservation_remains_in_the_recovery_set() {
+    let store = setup().await;
+    let mut expected = reservation(1, vec![source(1, 1, 3, 500_000)]);
+    store.reserve(&expected).await.unwrap();
+    store.commit(expected.id).await.unwrap();
+    expected.state = solvent_core::primitives::ledger::ReservationState::Committed;
+    assert_eq!(store.open_reservations().await.unwrap(), vec![expected]);
+}

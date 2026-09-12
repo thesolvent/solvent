@@ -9,4 +9,5 @@ export * from "./client";
 
 export * from "./orders";
 export * from "./swap";
+export * from "./cross-chain";
 export * from "./validation";

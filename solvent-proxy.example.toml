@@ -1,0 +1,17 @@
+# The proxy owns no RPC URL or private key. It joins quotes and advances a durable saga by calling
+# the two private, chain-local Solvent listeners. Set SOLVENT_INTERNAL_TOKEN to the same secret on
+# all three processes and terminate production mTLS at the service gateway.
+bind_addr = "0.0.0.0:8090"
+database_url = "sqlite:solvent-proxy.db?mode=rwc"
+origin_service_url = "http://127.0.0.1:9080/"
+destination_service_url = "http://127.0.0.1:9081/"
+poll_interval_ms = 2000
+
+# Omit this block to serve direct routes only. The destination close call is built only after Iris
+# returns a complete, order-bound message; raw message and attestation bytes are never logged.
+[cctp]
+iris_url = "https://iris-api-sandbox.circle.com/"
+source_domain = 0
+destination_domain = 3
+finality_threshold = 1000
+destination_app = "0x0000000000000000000000000000000000000000"

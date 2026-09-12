@@ -1,3 +1,7 @@
+import type {
+  RebateSubmissionOptions,
+  RebateSubmissionStatus,
+} from "@solvent/sdk/rebates";
 import type { WalletClients } from "@solvent/sdk/swap";
 import type {
   ExecutedRebate,
@@ -6,6 +10,8 @@ import type {
 } from "@/data/rebates";
 import type { RecordPage } from "@/data/explorer";
 
+export type { RebateSubmissionOptions, RebateSubmissionStatus };
+
 export interface RebateFilter {
   maker?: string;
   status?: RebateStatus;
@@ -13,7 +19,7 @@ export interface RebateFilter {
 
 /** One server-authorized execution, retained while a wallet submission is retried. */
 export interface RebateIntent {
-  submit(): Promise<ExecutedRebate>;
+  submit(options?: RebateSubmissionOptions): Promise<ExecutedRebate>;
 }
 
 export interface RebatesPort {

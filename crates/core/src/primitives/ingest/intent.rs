@@ -1,6 +1,6 @@
 //! The canonical intent — the protocol-agnostic order every downstream slice (routing, ledger,
 //! execution) consumes. Protocol-specific bytes ride along opaquely in `raw`, decoded only by the
-//! protocol's own adapter, so adding a protocol is a new adapter with no change here.
+//! protocol's own adapter, so downstream routing and execution stay independent of its wire format.
 
 use alloy_primitives::{Address, Bytes, U256};
 
@@ -19,6 +19,7 @@ pub enum ProtocolId {
     UniswapXV1,
     UniswapXV2,
     OneInchLimitOrder,
+    Erc7683,
 }
 
 /// What the taker pays: the token and its amount over time.
@@ -112,6 +113,8 @@ pub struct Intent {
     /// not otherwise carry it.
     pub swapper: Address,
     pub input: IntentInput,
+    /// Optional protocol overhead excluded from routing while the signed input stays gross.
+    pub routing_input_limit: Option<U256>,
     pub outputs: Vec<IntentOutput>,
     pub deadline: u64,
     pub exclusivity: Option<Exclusivity>,
@@ -135,6 +138,8 @@ pub struct IntentParts {
     pub protocol: ProtocolId,
     pub swapper: Address,
     pub input: IntentInput,
+    /// Optional protocol overhead excluded from routing while the signed input stays gross.
+    pub routing_input_limit: Option<U256>,
     pub outputs: Vec<IntentOutput>,
     pub deadline: u64,
     pub exclusivity: Option<Exclusivity>,
@@ -161,6 +166,7 @@ impl IntentParts {
             protocol,
             swapper,
             input,
+            routing_input_limit: None,
             outputs,
             deadline: 0,
             exclusivity: None,
@@ -230,6 +236,7 @@ impl Intent {
             protocol: parts.protocol,
             swapper: parts.swapper,
             input: parts.input,
+            routing_input_limit: parts.routing_input_limit,
             outputs: parts.outputs,
             deadline: parts.deadline,
             exclusivity: parts.exclusivity,

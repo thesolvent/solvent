@@ -4,6 +4,8 @@
 //! business logic lives in core services.
 
 pub mod app;
+pub mod crosschain_internal;
+pub mod crosschain_proxy;
 mod depth;
 pub mod dto;
 pub mod error;
@@ -11,6 +13,8 @@ pub mod openapi;
 pub mod primitives;
 pub mod state;
 
+pub use crosschain_internal::{crosschain_internal_router, crosschain_internal_router_with_author};
+pub use crosschain_proxy::{crosschain_proxy_router, crosschain_proxy_router_with_drafts};
 pub use depth::DepthReader;
 
 use std::time::Duration;
@@ -138,7 +142,7 @@ mod tests {
     use solvent_core::deps::execution::{
         Execution, ExecutionError, SettlementError, SettlementReader, SimError, SimGate,
     };
-    use solvent_core::deps::ingest::{BuiltFill, FillBuilder, FillBuilderError};
+    use solvent_core::deps::ingest::{FillBuilder, FillBuilderError, PreparedFill};
     use solvent_core::deps::ledger::{
         BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError,
     };
@@ -162,7 +166,7 @@ mod tests {
     use solvent_core::primitives::execution::{
         ExecHandle, ExecStatus, FillTx, SimVerdict, TrackedFill,
     };
-    use solvent_core::primitives::ingest::{Intent, ProtocolId};
+    use solvent_core::primitives::ingest::Intent;
     use solvent_core::primitives::ledger::{AccountKey, Reservation, ReservationSource};
     use solvent_core::primitives::rebate::{RebateBatch, RebateExecution, RebatePlan};
     use solvent_core::primitives::registry::MakerStrategy;
@@ -548,8 +552,8 @@ mod tests {
             _: &Intent,
             _: &RoutePlan,
             _: &Snapshot,
-        ) -> Result<BuiltFill, FillBuilderError> {
-            Ok(BuiltFill::new(Address::ZERO, Bytes::new()))
+        ) -> Result<PreparedFill, FillBuilderError> {
+            Ok(PreparedFill::new(Address::ZERO, Bytes::new()))
         }
     }
 
@@ -632,10 +636,7 @@ mod tests {
             Arc::clone(&strategy_guard),
             Arc::clone(&trades),
             execution,
-            BTreeMap::from([(
-                ProtocolId::UniswapXV2,
-                Arc::new(FakeFill) as Arc<dyn FillBuilder>,
-            )]),
+            Arc::new(FakeFill) as Arc<dyn FillBuilder>,
             Arc::clone(&leg_cost),
             Arc::new(SystemClock),
             SwapConfig {
@@ -692,6 +693,9 @@ mod tests {
                 reactor: Address::ZERO,
                 permit2: Address::ZERO,
                 filler: Address::ZERO,
+                erc7683_settler: None,
+                erc7683_filler: None,
+                erc7683_resolver: None,
                 taker_credential: Address::ZERO,
                 cosigner: Address::ZERO,
             }),
@@ -707,6 +711,8 @@ mod tests {
             rebates,
             cosigner,
             normalizer: Arc::new(ServerNormalizer::new(Address::ZERO, vec![Address::ZERO])),
+            erc7683: None,
+            erc7683_fee_policy: None,
             trades: trade_svc,
             registry: Arc::clone(&registry),
             registry_store: Arc::new(NoopEventStore),
@@ -931,6 +937,22 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(json["status"], "Error");
+    }
+
+    #[tokio::test]
+    async fn erc7683_quote_is_rejected_when_the_contract_stack_is_not_configured() {
+        let (status, json) = post(
+            "/v1/swap/quote",
+            serde_json::json!({
+                "protocol": "erc7683",
+                "token_in": Address::from([1; 20]).to_string(),
+                "token_out": Address::from([2; 20]).to_string(),
+                "amount_in": "1000",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(json["status"], "Error");
     }
 

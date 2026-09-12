@@ -1,23 +1,27 @@
 export interface TokenQuantity {
   symbol: string;
   display: string;
+  net?: string;
+  logoUri?: string | null;
 }
 
 export interface TradeStage {
   status: string;
-  at: number;
+  at: number | null;
 }
 
 export interface TradeSource {
   curve: string | null;
   maker: string;
   strategyHash: string;
+  chainId?: number;
   input: TokenQuantity;
   output: TokenQuantity;
   sharePct: number;
 }
 
 export interface TradeRecord {
+  flow: "same-chain" | "cross-chain";
   signaturePresent: boolean | null;
   id: string;
   status: string;

@@ -8,7 +8,7 @@ use alloy::primitives::{Address, Bytes, B256, U256};
 use alloy::sol;
 use alloy::sol_types::{SolCall, SolValue};
 
-use solvent_core::deps::ingest::{BuiltFill, FillBuilder, FillBuilderError};
+use solvent_core::deps::ingest::{FillBuilder, FillBuilderError, PreparedFill};
 use solvent_core::primitives::ingest::Intent;
 use solvent_core::primitives::registry::{Snapshot, StrategyKey};
 use solvent_core::primitives::routing::{RouteLeg, RoutePlan};
@@ -92,7 +92,7 @@ impl FillBuilder for OneInchFillBuilder {
         intent: &Intent,
         plan: &RoutePlan,
         snapshot: &Snapshot,
-    ) -> Result<BuiltFill, FillBuilderError> {
+    ) -> Result<PreparedFill, FillBuilderError> {
         if plan.legs.is_empty() {
             return Err(FillBuilderError::NoLegs);
         }
@@ -115,7 +115,10 @@ impl FillBuilder for OneInchFillBuilder {
             extension: wire.extension,
             sources,
         };
-        Ok(BuiltFill::new(self.filler, Bytes::from(call.abi_encode())))
+        Ok(PreparedFill::new(
+            self.filler,
+            Bytes::from(call.abi_encode()),
+        ))
     }
 }
 

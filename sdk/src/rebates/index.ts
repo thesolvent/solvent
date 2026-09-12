@@ -5,4 +5,6 @@ export type {
     RebateClient,
     RebateClientConfig,
     RebateIntent,
+    RebateSubmissionOptions,
+    RebateSubmissionStatus,
 } from "./client";

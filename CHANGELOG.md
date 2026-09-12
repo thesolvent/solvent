@@ -6,12 +6,41 @@ the project is pre-1.0 and evolving.
 
 ## [Unreleased]
 
+### Changed — frontend wallet experience
+
+- **Privy wallet integration** — supports embedded and external EVM wallets through Privy + Wagmi,
+  including the configured origin and destination devnet chains. Embedded-wallet owners can export
+  their wallet through Privy's secure modal; Solvent never handles the exported private key.
+- **Transaction progress** — swaps, position creation and management, rebates, and cross-chain
+  Compact deposits now report preparation, approval, signing, submission, and receipt-confirmation
+  phases in their existing action controls.
+
+### Added — cross-chain execution
+
+- **Two chain-local Solvent services plus a keyless proxy** — authenticated private quote,
+  prepare/commit/inspect/release, staged-step, and status APIs; durable SQLite quote, reservation,
+  step, and saga records; deterministic chain-bound command IDs; restart-safe compensation and
+  post-delivery retries.
+- **Authenticated proof rails** — paired Chainlink CCIP outbox/inbox contracts with deferred exact-
+  payload dispatch, current-fee materialization, strict remote authentication, replay protection,
+  deployment scripts, and exported ABIs.
+- **Direct and CCTP repayment coordination** — concurrent leg aggregation, Circle fee/allowance
+  admission, Iris polling, order-bound message validation, late staging of attestation calldata,
+  and destination close through the owning chain service.
+- **Cross-chain SDK and operations surface** — Compact balance/deposit/signing helpers, typed proxy
+  client with durable polling, public proxy OpenAPI, service/proxy configuration examples, and an
+  architecture/runbook at `docs/CROSS_CHAIN_OPERATIONS.md`.
+
 ### Added — contracts (`contracts/`, Foundry)
 - **`UniswapXAquaFiller`** — the P1 on-chain filler: a zero-inventory UniswapX taker that sources order
   outputs from makers' Aqua positions via the SwapVM router, executing an off-chain routing plan
   (`SourceSwap[]`). Supports multi-maker sourcing, multi-token outputs, and batched orders. Three safety
   layers (per-leg `amountInMaximum`, reactor approvals derived from the resolved orders, and a
   balance-snapshot profitability guard), plus `Ownable2Step` + a transient reentrancy guard.
+- **Cross-chain Aqua settlement** — `CompactOriginSettler` and `CrossChainAquaApp` implement direct
+  and CCTP-routed, zero-inventory fills between a user’s The Compact claim on the origin and a maker’s
+  Aqua strategy on the destination. The hermetic suite covers authorization, replay protection,
+  rollbacks, capacity limits, CCTP message binding, fee bounds, and destination repayment.
 - **Test suite** — 20 hermetic tests (happy paths, boundaries, every guard, admin, and a source-split
   fuzz) against source-deployed UniswapX + Aqua/SwapVM, plus an opt-in mainnet-fork test against the
   real V2 reactor + Permit2.

@@ -1,7 +1,7 @@
 //! A routed, reserved plan becomes a [`FillTx`] — the raw transaction the execution port submits —
 //! and comes back as an [`ExecStatus`] the service couples to the ledger.
 
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 
 use crate::primitives::{IntentId, ReservationId};
 
@@ -18,6 +18,8 @@ pub struct FillTx {
     pub filler_owner: Address,
     /// The filler contract the transaction targets.
     pub filler: Address,
+    /// Native value sent with the call. Ordinary same-chain fills use zero.
+    pub value: U256,
     /// ABI-encoded `fill(...)` calldata from the protocol's `FillBuilder`.
     pub calldata: Bytes,
 }
@@ -35,8 +37,14 @@ impl FillTx {
             chain_id,
             filler_owner,
             filler,
+            value: U256::ZERO,
             calldata,
         }
+    }
+
+    pub fn with_value(mut self, value: U256) -> Self {
+        self.value = value;
+        self
     }
 }
 

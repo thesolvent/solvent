@@ -6,6 +6,11 @@ use thiserror::Error;
 
 use crate::deps::asset::PairPriceHistorySourceError;
 use crate::deps::balances::BalancesOracleError;
+use crate::deps::crosschain::{
+    CctpAttestationError, CctpCompletionError, DirectPlanAuthorError, LegQuoteStoreError,
+    LegQuoterError, PreparationStoreError, RemoteSolventError, SagaStoreError,
+    StepMaterializerError, StepStoreError, StepValidatorError,
+};
 use crate::deps::execution::{ExecutionAuthorizerError, ExecutionError, SettlementError, SimError};
 use crate::deps::ingest::{FillBuilderError, NormalizeError};
 use crate::deps::ledger::{BudgetSourceError, LedgerStoreError};
@@ -24,6 +29,30 @@ use crate::rebate::RebateError;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum SolventError {
+    #[error("cross-chain quote: {0}")]
+    LegQuote(#[from] LegQuoterError),
+    #[error("cross-chain quote store: {0}")]
+    LegQuoteStore(#[from] LegQuoteStoreError),
+    #[error("cross-chain preparation store: {0}")]
+    PreparationStore(#[from] PreparationStoreError),
+    #[error("cross-chain saga store: {0}")]
+    SagaStore(#[from] SagaStoreError),
+    #[error("cross-chain step store: {0}")]
+    StepStore(#[from] StepStoreError),
+    #[error("cross-chain step materializer: {0}")]
+    StepMaterializer(#[from] StepMaterializerError),
+    #[error("cross-chain step validation: {0}")]
+    StepValidator(#[from] StepValidatorError),
+    #[error("direct plan author: {0}")]
+    DirectPlanAuthor(#[from] DirectPlanAuthorError),
+    #[error("CCTP attestation: {0}")]
+    CctpAttestation(#[from] CctpAttestationError),
+    #[error("CCTP completion: {0}")]
+    CctpCompletion(#[from] CctpCompletionError),
+    #[error("remote Solvent: {0}")]
+    RemoteSolvent(#[from] RemoteSolventError),
+    #[error("invalid cross-chain request: {0}")]
+    InvalidCrossChain(String),
     /// Reading historical market prices failed.
     #[error("pair price history: {0}")]
     PairPriceHistory(#[from] PairPriceHistorySourceError),

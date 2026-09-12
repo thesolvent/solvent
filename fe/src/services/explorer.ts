@@ -10,6 +10,7 @@ import type {
   TradeFilter,
 } from "@/ports/explorer";
 import { SolventApiError } from "@solvent/sdk/client";
+import { CrossChainApiError } from "@solvent/sdk/cross-chain";
 import { isTerminalTrade } from "@/lib/trade-lifecycle";
 import { useServices } from "./context";
 import { LIVE_QUERY_OPTIONS } from "./live";
@@ -61,7 +62,10 @@ export function useTrade(id: string | undefined) {
 }
 
 function isMissingTrade(error: unknown): boolean {
-  return error instanceof SolventApiError && [400, 404].includes(error.status);
+  return (
+    (error instanceof SolventApiError || error instanceof CrossChainApiError) &&
+    [400, 404].includes(error.status)
+  );
 }
 
 export function tradeProblem(error: unknown): string {
