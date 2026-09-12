@@ -3,7 +3,11 @@ import { Route, useLocation, useParams } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TransitionRoutes } from "@/components/TransitionRoutes";
-import type { CreatePair, CreatedPosition } from "@/ports/positions";
+import type {
+  CreatePair,
+  CreatedPosition,
+  PositionSubmissionOptions,
+} from "@/ports/positions";
 import { INITIAL_STATE } from "@/state";
 import { useAppStore } from "@/store";
 import { renderWithServices } from "@/test/harness";
@@ -45,21 +49,25 @@ const pair: CreatePair = {
 const FLIPPED_WETH = "0.7879867893524485";
 
 const wallet = vi.hoisted(() => ({ connected: true }));
-const openConnectModal = vi.hoisted(() => vi.fn());
+const connectOrCreateWallet = vi.hoisted(() => vi.fn());
+
+vi.mock("@privy-io/react-auth", () => ({
+  usePrivy: () => ({ connectOrCreateWallet }),
+}));
 
 vi.mock("wagmi", async (original) => ({
   ...(await original<typeof import("wagmi")>()),
+  // A disconnected wallet reports no address either: `useWalletAction` reads a known address as
+  // connected, so leaving one here would make every wallet look attached.
   useAccount: () => ({
     isConnected: wallet.connected,
-    address: "0x1111111111111111111111111111111111111111",
+    address: wallet.connected
+      ? "0x1111111111111111111111111111111111111111"
+      : undefined,
     chainId: 31337,
   }),
   useClient: () => ({}),
   useConnectorClient: () => ({ data: {} }),
-}));
-
-vi.mock("@rainbow-me/rainbowkit", () => ({
-  useConnectModal: () => ({ openConnectModal }),
 }));
 
 function StrategyDestination() {
@@ -74,7 +82,7 @@ function StrategyDestination() {
 
 beforeEach(() => {
   wallet.connected = true;
-  openConnectModal.mockClear();
+  connectOrCreateWallet.mockClear();
   useAppStore.setState({
     ...INITIAL_STATE,
     step: 4,
@@ -317,11 +325,19 @@ describe("CreatePoolPage", () => {
     useAppStore.setState({ step: 3 });
     let loadPairs!: (pairs: CreatePair[]) => void;
     let confirm!: (position: CreatedPosition) => void;
-    const submit = vi.fn().mockReturnValue(
-      new Promise<CreatedPosition>((resolve) => {
-        confirm = resolve;
-      }),
-    );
+    const submit = vi
+      .fn()
+      .mockImplementation((options?: PositionSubmissionOptions) => {
+        options?.onStatus?.({
+          kind: "approving",
+          token: pair.base.address,
+          index: 0,
+          total: 1,
+        });
+        return new Promise<CreatedPosition>((resolve) => {
+          confirm = resolve;
+        });
+      });
     renderWithServices(
       <TransitionRoutes>
         <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
@@ -362,6 +378,11 @@ describe("CreatePoolPage", () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     });
     await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(
+      await screen.findByRole("button", {
+        name: "Approve WETH — step 1 of 2",
+      }),
+    ).toBeDisabled();
     expect(screen.queryByText(/Created strategy/)).not.toBeInTheDocument();
 
     vi.useFakeTimers();
@@ -551,7 +572,7 @@ describe("CreatePoolPage", () => {
     const cta = await screen.findByRole("button", { name: "Connect wallet" });
     expect(cta).toBeEnabled();
     fireEvent.click(cta);
-    expect(openConnectModal).toHaveBeenCalledOnce();
+    expect(connectOrCreateWallet).toHaveBeenCalledOnce();
   });
 
   it("promises only the signatures it will ask for", async () => {

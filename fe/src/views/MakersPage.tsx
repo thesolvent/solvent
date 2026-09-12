@@ -1,4 +1,3 @@
-import { useAccount } from "wagmi";
 import { Pagination } from "@/components/Pagination";
 import { RebateList } from "@/components/RebateList";
 import { useLoadedPagination } from "@/components/useLoadedPagination";
@@ -21,6 +20,7 @@ import {
 } from "@/services/makers";
 import { useManagePosition } from "@/services/positions";
 import { useRebates } from "@/services/rebates";
+import { useWalletAction } from "@/services/wallet";
 import { useApp } from "@/state";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -60,7 +60,8 @@ export function MakersPage() {
   const navigate = useNavigate();
   const { state, set } = useApp();
   const { maker } = useParams();
-  const { address: walletAddress } = useAccount();
+  const wallet = useWalletAction();
+  const walletAddress = wallet.address;
   const roster = useMakers();
   const makers = [...(roster.data ?? [])].sort(
     (left, right) =>

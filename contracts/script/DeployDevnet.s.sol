@@ -54,13 +54,15 @@ contract DeployDevnet is Script {
         Aqua aqua = new Aqua();
         AquaSwapVMRouter router = new AquaSwapVMRouter(address(aqua), WETH, owner, ROUTER_NAME, ROUTER_VERSION);
         V2DutchOrderReactor reactor = new V2DutchOrderReactor(IPermit2(PERMIT2), address(0));
-        // Devnet: the deployer is also the policy signer, matching SOLVENT_POLICY_SIGNER_KEY.
+        // Devnet defaults the policy signer to the deployer, matching SOLVENT_POLICY_SIGNER_KEY.
+        address policySigner = vm.envOr("POLICY_SIGNER", owner);
         UniswapXAquaFiller filler =
-            new UniswapXAquaFiller(owner, ISwapVM(address(router)), IReactor(address(reactor)), owner);
+            new UniswapXAquaFiller(owner, ISwapVM(address(router)), IReactor(address(reactor)), policySigner);
 
         address[6] memory tokenAddrs;
         for (uint256 i = 0; i < toks.length; i++) {
             tokenAddrs[i] = address(new DevToken(toks[i].name, toks[i].symbol, toks[i].decimals));
+            filler.setTokenAllowed(tokenAddrs[i], true);
         }
 
         vm.stopBroadcast();

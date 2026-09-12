@@ -1,11 +1,8 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { useAccount, useSwitchChain } from "wagmi";
 import { Pagination } from "@/components/Pagination";
 import { RebateList } from "@/components/RebateList";
 import { useLoadedPagination } from "@/components/useLoadedPagination";
-import { chain } from "@/adapters/wallet/config";
 import {
   activityRow,
   explorerStats,
@@ -14,6 +11,7 @@ import {
 } from "@/lib/explorer";
 import { loadedPageLabel } from "@/lib/pagination";
 import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
+import type { RebateSubmissionStatus } from "@/ports/rebates";
 import { useAssets } from "@/services/assets";
 import {
   useActivity,
@@ -22,6 +20,7 @@ import {
   useTrades,
 } from "@/services/explorer";
 import { usePools } from "@/services/pools";
+import { useWalletAction } from "@/services/wallet";
 import {
   useActiveRebatePages,
   useExecuteRebate,
@@ -34,6 +33,22 @@ import { EVENT_TERMS, STATUS_TERMS } from "@/lib/glossary";
 import styles from "./explorer.module.css";
 
 const TABS = ["Trades", "Activity", "Rebates", "Your Trades"] as const;
+
+function rebateSubmissionLabel(status: RebateSubmissionStatus | undefined) {
+  switch (status?.kind) {
+    case "approving":
+      return "Approve input token…";
+    case "signing":
+      return "Sign rebate…";
+    case "submitting":
+      return "Submitting rebate…";
+    case "confirming":
+      return "Confirming rebate…";
+    case "preparing":
+    default:
+      return "Preparing rebate…";
+  }
+}
 
 /** Trades are served ten to a page; the placeholder shows the page that is coming. */
 const PAGE_SIZE = 10;
@@ -314,8 +329,8 @@ function TradeList({ filter }: { filter: TradeFilter }) {
 function MyTrades() {
   // The wallet hooks live here rather than on the page: every other tab renders without a wallet,
   // and a hook cannot be called conditionally.
-  const { address } = useAccount();
-  const { openConnectModal } = useConnectModal();
+  const wallet = useWalletAction();
+  const address = wallet.address;
   const sameChain = useTrades(address ? { taker: address } : undefined);
   const crossChain = useCrossChainOrders(address);
   const pending = sameChain.isPending || crossChain.isPending;
@@ -326,7 +341,7 @@ function MyTrades() {
     return (
       <p className={styles.emptyNote}>
         Connect a wallet to see the trades you have made.{" "}
-        <button type="button" onClick={() => openConnectModal?.()}>
+        <button type="button" onClick={() => wallet.prepare()}>
           Connect
         </button>
       </p>
@@ -479,15 +494,10 @@ function ExplorerRebates({
     query.dataUpdatedAt,
   );
   const execution = useExecuteRebate();
-  const { isConnected, chainId } = useAccount();
-  const { openConnectModal } = useConnectModal();
-  const { switchChain } = useSwitchChain();
-  const wrongChain = isConnected && chainId !== chain.id;
+  const wallet = useWalletAction();
 
   function execute(id: string) {
-    if (!isConnected) return openConnectModal?.();
-    if (wrongChain) return switchChain({ chainId: chain.id });
-    execution.execute(id);
+    if (wallet.prepare()) execution.execute(id);
   }
 
   return (
@@ -508,13 +518,14 @@ function ExplorerRebates({
         active
           ? {
               availableIds: continuity.availableIds,
-              label: !isConnected
+              label: !wallet.connected
                 ? "Connect"
-                : wrongChain
-                  ? "Switch network"
+                : wallet.switchTo
+                  ? `Switch to ${wallet.switchTo}`
                   : "Earn",
               onExecute: execute,
               pendingId: execution.pendingId,
+              pendingLabel: rebateSubmissionLabel(execution.status),
               completedId: execution.completedId,
               failedId: execution.failedId,
               problem: execution.problem,

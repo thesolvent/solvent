@@ -9,6 +9,10 @@ import {
     PositionExistsError,
     PositionPreviewError,
 } from "../../src/positions";
+import type {
+    PositionCreationStatus,
+    PositionTransactionStatus,
+} from "../../src/positions";
 
 const wallet = vi.hoisted(() => ({
     ensureAllowance: vi.fn(),
@@ -84,17 +88,24 @@ describe("position creation intent", () => {
         ],
     ].map((amounts) => ({ amounts }));
 
-    it.each(malformedAmounts)("rejects malformed Aqua reserves before preview", async ({ amounts: badAmounts }) => {
-        const { api, positions } = setup();
-        await expect(
-            positions
-                .createIntent({ maker: MAKER, strategy, amounts: badAmounts })
-                .submit(),
-        ).rejects.toThrow();
-        expect(api.positionsPreview).not.toHaveBeenCalled();
-        expect(wallet.ensureAllowance).not.toHaveBeenCalled();
-        expect(wallet.sendTransaction).not.toHaveBeenCalled();
-    });
+    it.each(malformedAmounts)(
+        "rejects malformed Aqua reserves before preview",
+        async ({ amounts: badAmounts }) => {
+            const { api, positions } = setup();
+            await expect(
+                positions
+                    .createIntent({
+                        maker: MAKER,
+                        strategy,
+                        amounts: badAmounts,
+                    })
+                    .submit(),
+            ).rejects.toThrow();
+            expect(api.positionsPreview).not.toHaveBeenCalled();
+            expect(wallet.ensureAllowance).not.toHaveBeenCalled();
+            expect(wallet.sendTransaction).not.toHaveBeenCalled();
+        },
+    );
 
     it("rejects a maker different from the one encoded in the strategy", async () => {
         const { api, positions } = setup();
@@ -113,8 +124,13 @@ describe("position creation intent", () => {
         const { api, positions } = setup();
 
         await expect(
-            positions.createIntent({ maker: MAKER, strategy, amounts }).submit(),
-        ).resolves.toEqual({ strategyHash: strategy.strategyHash, transactionHash: HASH });
+            positions
+                .createIntent({ maker: MAKER, strategy, amounts })
+                .submit(),
+        ).resolves.toEqual({
+            strategyHash: strategy.strategyHash,
+            transactionHash: HASH,
+        });
 
         expect(api.positionsPreview).toHaveBeenCalledWith({
             maker: MAKER,
@@ -142,6 +158,22 @@ describe("position creation intent", () => {
         expect(wallet.confirmTransaction).toHaveBeenCalledWith(HASH);
     });
 
+    it("reports each wallet-visible creation phase", async () => {
+        const { positions } = setup();
+        const statuses: PositionCreationStatus[] = [];
+
+        await positions
+            .createIntent({ maker: MAKER, strategy, amounts })
+            .submit({ onStatus: (status) => statuses.push(status) });
+
+        expect(statuses).toEqual([
+            { kind: "preparing" },
+            { kind: "approving", token: TOKEN_B, index: 0, total: 1 },
+            { kind: "shipping", approvalCount: 1 },
+            { kind: "confirming", approvalCount: 1 },
+        ]);
+    });
+
     it.each([
         [{ exists: true }, PositionExistsError],
         [{ warnings: ["insufficient DAI balance"] }, PositionPreviewError],
@@ -153,20 +185,31 @@ describe("position creation intent", () => {
             },
             PositionPreviewError,
         ],
-    ])("stops before wallet prompts when preview rejects the ship", async (preview, ErrorType) => {
-        const { positions } = setup(preview);
+    ])(
+        "stops before wallet prompts when preview rejects the ship",
+        async (preview, ErrorType) => {
+            const { positions } = setup(preview);
 
-        await expect(
-            positions.createIntent({ maker: MAKER, strategy, amounts }).submit(),
-        ).rejects.toBeInstanceOf(ErrorType);
-        expect(wallet.ensureAllowance).not.toHaveBeenCalled();
-        expect(wallet.sendTransaction).not.toHaveBeenCalled();
-    });
+            await expect(
+                positions
+                    .createIntent({ maker: MAKER, strategy, amounts })
+                    .submit(),
+            ).rejects.toBeInstanceOf(ErrorType);
+            expect(wallet.ensureAllowance).not.toHaveBeenCalled();
+            expect(wallet.sendTransaction).not.toHaveBeenCalled();
+        },
+    );
 
     it("reuses its transaction hash when receipt confirmation is retried", async () => {
-        wallet.confirmTransaction.mockRejectedValueOnce(new Error("receipt timeout"));
+        wallet.confirmTransaction.mockRejectedValueOnce(
+            new Error("receipt timeout"),
+        );
         const { api, positions } = setup();
-        const intent = positions.createIntent({ maker: MAKER, strategy, amounts });
+        const intent = positions.createIntent({
+            maker: MAKER,
+            strategy,
+            amounts,
+        });
 
         await expect(intent.submit()).rejects.toThrow("receipt timeout");
         await expect(intent.submit()).resolves.toEqual({
@@ -183,9 +226,15 @@ describe("position creation intent", () => {
     });
 
     it("rechecks authorization when a ship was never broadcast", async () => {
-        wallet.sendTransaction.mockRejectedValueOnce(new Error("wallet rejected"));
+        wallet.sendTransaction.mockRejectedValueOnce(
+            new Error("wallet rejected"),
+        );
         const { api, positions } = setup();
-        const intent = positions.createIntent({ maker: MAKER, strategy, amounts });
+        const intent = positions.createIntent({
+            maker: MAKER,
+            strategy,
+            amounts,
+        });
 
         await expect(intent.submit()).rejects.toThrow("wallet rejected");
         await expect(intent.submit()).resolves.toEqual({
@@ -201,8 +250,14 @@ describe("position creation intent", () => {
 
     it("retries a transient preflight failure without changing the intent", async () => {
         const { api, positions } = setup();
-        api.positionsPreview.mockRejectedValueOnce(new Error("API unavailable"));
-        const intent = positions.createIntent({ maker: MAKER, strategy, amounts });
+        api.positionsPreview.mockRejectedValueOnce(
+            new Error("API unavailable"),
+        );
+        const intent = positions.createIntent({
+            maker: MAKER,
+            strategy,
+            amounts,
+        });
 
         await expect(intent.submit()).rejects.toThrow("API unavailable");
         await expect(intent.submit()).resolves.toEqual({
@@ -222,12 +277,18 @@ describe("position creation intent", () => {
             }),
         );
         const { positions } = setup();
-        const intent = positions.createIntent({ maker: MAKER, strategy, amounts });
+        const intent = positions.createIntent({
+            maker: MAKER,
+            strategy,
+            amounts,
+        });
 
         const first = intent.submit();
         const second = intent.submit();
         expect(first).toBe(second);
-        await vi.waitFor(() => expect(wallet.confirmTransaction).toHaveBeenCalledOnce());
+        await vi.waitFor(() =>
+            expect(wallet.confirmTransaction).toHaveBeenCalledOnce(),
+        );
         confirm();
         await expect(Promise.all([first, second])).resolves.toHaveLength(2);
 
@@ -253,22 +314,26 @@ describe("position management intents", () => {
 
         expect(api.config).toHaveBeenCalledOnce();
         expect(api.positionsPreview).not.toHaveBeenCalled();
-        expect(wallet.ensureAllowance).toHaveBeenCalledWith({
-            owner: MAKER,
-            chainId: 31337,
-            token: TOKEN_A,
-            spender: AQUA,
-            amount: 25n,
-            approvalAmount: maxUint256,
-        });
+        expect(wallet.ensureAllowance).toHaveBeenCalledWith(
+            {
+                owner: MAKER,
+                chainId: 31337,
+                token: TOKEN_A,
+                spender: AQUA,
+                amount: 25n,
+                approvalAmount: maxUint256,
+            },
+            undefined,
+        );
         expect(wallet.sendTransaction).toHaveBeenCalledWith(
             expect.objectContaining({
                 owner: MAKER,
                 chainId: 31337,
                 to: AQUA,
             }),
+            undefined,
         );
-        expect(wallet.confirmTransaction).toHaveBeenCalledWith(HASH);
+        expect(wallet.confirmTransaction).toHaveBeenCalledWith(HASH, undefined);
     });
 
     it("simulates, broadcasts, and confirms a dock without token approvals", async () => {
@@ -293,8 +358,57 @@ describe("position management intents", () => {
                 chainId: 31337,
                 to: AQUA,
             }),
+            undefined,
         );
-        expect(wallet.confirmTransaction).toHaveBeenCalledWith(HASH);
+        expect(wallet.confirmTransaction).toHaveBeenCalledWith(HASH, undefined);
+    });
+
+    it("reports each wallet-visible push phase", async () => {
+        const { positions } = setup();
+        const statuses: PositionTransactionStatus[] = [];
+        wallet.ensureAllowance.mockImplementationOnce(
+            async (
+                _request: unknown,
+                options?: {
+                    onStatus?(status: PositionTransactionStatus): void;
+                },
+            ) => options?.onStatus?.({ kind: "approving", token: TOKEN_A }),
+        );
+        wallet.sendTransaction.mockImplementationOnce(
+            async (
+                _request: unknown,
+                options?: {
+                    onStatus?(status: PositionTransactionStatus): void;
+                },
+            ) => {
+                options?.onStatus?.({ kind: "submitting" });
+                return HASH;
+            },
+        );
+        wallet.confirmTransaction.mockImplementationOnce(
+            async (
+                _hash: unknown,
+                options?: {
+                    onStatus?(status: PositionTransactionStatus): void;
+                },
+            ) => options?.onStatus?.({ kind: "confirming" }),
+        );
+
+        await positions
+            .pushIntent({
+                maker: MAKER,
+                strategyHash: HASH,
+                token: TOKEN_A,
+                amount: 25n,
+            })
+            .submit({ onStatus: (status) => statuses.push(status) });
+
+        expect(statuses).toEqual([
+            { kind: "preparing" },
+            { kind: "approving", token: TOKEN_A },
+            { kind: "submitting" },
+            { kind: "confirming" },
+        ]);
     });
 
     it("reuses a management transaction when receipt confirmation is retried", async () => {

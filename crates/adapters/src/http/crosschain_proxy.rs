@@ -279,7 +279,10 @@ async fn orders_of(
     let taker = Address::parse_checksummed(&query.taker, None)
         .or_else(|_| query.taker.parse::<Address>())
         .map_err(|_| client_error("taker must be a 20-byte hex address"))?;
-    let limit = query.limit.unwrap_or(DEFAULT_ORDER_PAGE).min(MAX_ORDER_PAGE);
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_ORDER_PAGE)
+        .min(MAX_ORDER_PAGE);
     state
         .proxy
         .orders_of(taker, limit)

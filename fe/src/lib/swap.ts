@@ -3,6 +3,10 @@ import { parseTokenAmount } from "@solvent/sdk/validation";
 
 import type { Asset, Quote } from "@/data";
 import { chain } from "@/adapters/wallet/config";
+import type { SwapSubmissionStatus } from "@/ports/swap";
+import { SolventApiError, SolventNetworkError } from "@solvent/sdk/client";
+import { CrossChainApiError } from "@solvent/sdk/cross-chain";
+import { InputValidationError } from "@solvent/sdk/validation";
 import { tokenAmount } from "./format";
 
 /** The unfiltered choice in each list; not a value any asset carries. */
@@ -274,6 +278,26 @@ export function impactLevel(priceImpact: string | undefined): ImpactLevel {
 export interface SwapAction {
   label: string;
   ready: boolean;
+  retry?: true;
+}
+
+export function swapSubmissionLabel(
+  status: SwapSubmissionStatus | undefined,
+  inputToken: string | undefined,
+): string {
+  switch (status?.kind) {
+    case "approving":
+      return `Approve ${inputToken ?? "token"}…`;
+    case "signing":
+      return "Sign swap…";
+    case "submitting":
+      return "Submitting swap…";
+    case "confirming":
+      return "Confirming swap…";
+    case "preparing":
+    default:
+      return "Preparing swap…";
+  }
 }
 
 /**
@@ -296,6 +320,8 @@ export function swapAction(input: {
   short?: string;
   impact?: ImpactLevel;
   impactAcknowledged?: boolean;
+  submissionStatus?: SwapSubmissionStatus;
+  inputToken?: string;
 }): SwapAction {
   const {
     connected,
@@ -310,11 +336,25 @@ export function swapAction(input: {
     short,
     impact = "normal",
     impactAcknowledged = false,
+    submissionStatus,
+    inputToken,
   } = input;
-  if (submitting) return { label: "Confirm in your wallet", ready: false };
+  if (submitting) {
+    return {
+      label: swapSubmissionLabel(submissionStatus, inputToken),
+      ready: false,
+    };
+  }
   if (submitted) return { label: "Intent submitted to Aqua", ready: false };
   // A trade that cannot happen says so whether or not a wallet is attached.
   if (problem) return { label: problem, ready: false };
+  if (submissionProblem) {
+    return {
+      label: `${submissionProblem} — try again`,
+      ready: true,
+      retry: true,
+    };
+  }
   if (amount <= 0) return { label: "Enter an amount", ready: false };
   if (!connected) return { label: "Connect a wallet", ready: true };
   // Signing a trade the wallet cannot pay for fails deep in the wallet, with no reason given here.
@@ -327,10 +367,7 @@ export function swapAction(input: {
   // A trade this far out of line is worth a second press rather than one stray click.
   if (impact === "severe" && !impactAcknowledged)
     return { label: "Confirm price impact", ready: true };
-  return {
-    label: submissionProblem ? `${submissionProblem} — try again` : "Swap",
-    ready: true,
-  };
+  return { label: "Swap", ready: true };
 }
 
 /** EIP-1193's code for a request the person declined. */
@@ -338,6 +375,18 @@ const USER_REJECTED = 4001;
 
 /** Guard against a cause chain that loops back on itself. */
 const MAX_CAUSES = 10;
+const SAFE_WALLET_MESSAGES = new Set([
+  "Wallet account changed",
+  "Wrong wallet network",
+  "Wrong RPC network",
+  "Token amount must be positive",
+  "Insufficient token balance",
+  "Approval cannot be below the required amount",
+  "Token refused approval",
+  "Token allowance was not updated",
+  "Approval reverted",
+  "Transaction reverted",
+]);
 
 /**
  * Whether the person simply said no.
@@ -363,17 +412,25 @@ function isWalletRejection(error: unknown): boolean {
  * The server writes its refusals for a reader, but a wallet writes them for a developer — dumping
  * one on the button gives a stack trace where a sentence belongs.
  */
-export function submissionProblem(error: Error | null): string | undefined {
+export function submissionProblem(
+  error: Error | null,
+  fallback = "Could not submit the swap",
+): string | undefined {
   if (!error) return undefined;
   if (isSwapDeclined(error)) return "The resolver declined this swap";
   if (
+    error instanceof InputValidationError ||
+    error instanceof CrossChainApiError ||
+    error instanceof SolventApiError ||
+    error instanceof SolventNetworkError ||
     error.name === "InputValidationError" ||
-    error.name === "CrossChainApiError"
+    error.name === "CrossChainApiError" ||
+    error.name === "SolventApiError" ||
+    error.name === "SolventNetworkError" ||
+    SAFE_WALLET_MESSAGES.has(error.message)
   )
     return error.message;
-  return isWalletRejection(error)
-    ? "Wallet request rejected"
-    : "Could not submit the swap";
+  return isWalletRejection(error) ? "Wallet request rejected" : fallback;
 }
 
 export function isSwapDeclined(error: Error | null): boolean {

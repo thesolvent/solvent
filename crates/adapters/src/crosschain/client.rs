@@ -211,7 +211,10 @@ impl RemoteSolvent for SolventClient {
 /// Its own sentence is what a caller can act on; the status code only names the layer that said
 /// no. The code is kept for the case where a service refuses without saying why.
 fn status_message(status: StatusCode, body: Option<String>) -> String {
-    match body.map(|body| body.trim().to_string()).filter(|b| !b.is_empty()) {
+    match body
+        .map(|body| body.trim().to_string())
+        .filter(|b| !b.is_empty())
+    {
         Some(body) => body,
         None => format!("chain-local Solvent returned HTTP {status}"),
     }

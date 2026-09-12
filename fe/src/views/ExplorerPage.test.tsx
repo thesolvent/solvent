@@ -19,6 +19,10 @@ import { ServicesProvider } from "@/services/ServicesProvider";
 import { AppProvider } from "@/AppProvider";
 import { ExplorerPage } from "./ExplorerPage";
 
+vi.mock("@privy-io/react-auth", () => ({
+  usePrivy: () => ({ connectOrCreateWallet: vi.fn() }),
+}));
+
 const trade = toTrade(detail);
 const common = {
   pools: { list: vi.fn().mockResolvedValue([]) },

@@ -12,6 +12,10 @@ import { SwapPage } from "@/views/SwapPage";
 
 const wallet = vi.hoisted(() => ({ balance: undefined as bigint | undefined }));
 
+vi.mock("@privy-io/react-auth", () => ({
+  usePrivy: () => ({ connectOrCreateWallet: vi.fn() }),
+}));
+
 vi.mock("wagmi", async (original) => ({
   ...(await original<typeof import("wagmi")>()),
   useAccount: () => ({
@@ -168,7 +172,7 @@ describe("SwapPage", () => {
     },
   );
 
-  it("keeps a rejected submission on Swap without a route transition", async () => {
+  it("keeps a rejected submission visible and retryable", async () => {
     const submit = vi.fn().mockRejectedValue(new Error("Submission failed"));
     renderWithServices(
       swapRoutes(),
@@ -184,11 +188,12 @@ describe("SwapPage", () => {
     );
     await screen.findByText("2,477");
     fireEvent.click(screen.getAllByRole("button", { name: "Swap" }).at(-1)!);
-    expect(
-      await screen.findByRole("button", {
-        name: "Could not submit the swap — try again",
-      }),
-    ).toBeInTheDocument();
+    const retry = await screen.findByRole("button", {
+      name: "Could not submit the swap — try again",
+    });
+    expect(retry).not.toBeDisabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
     expect(screen.queryByTestId("route-transition")).not.toBeInTheDocument();
     expect(screen.queryByText(/Trade destination/)).not.toBeInTheDocument();
   });
@@ -247,6 +252,7 @@ describe("SwapPage", () => {
         return {
           send: vi.fn(),
           submitting: true,
+          status: { kind: "preparing" },
           result: undefined,
           problem: undefined,
         };

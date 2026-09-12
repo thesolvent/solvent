@@ -148,3 +148,94 @@ it("opens an individual position while keeping its disclosure and actions indepe
   fireEvent.click(screen.getByRole("button", { name: "Push" }));
   expect(onOpenPosition).toHaveBeenCalledTimes(1);
 });
+
+it("switches networks before an owned maker action can submit", () => {
+  const prepareWallet = vi.fn().mockReturnValue(false);
+  const onPush = vi.fn();
+  render(
+    <MakerPositions
+      positions={[
+        {
+          ...position,
+          maker: "0x1111111111111111111111111111111111111111",
+          tokens: [
+            {
+              address: "0x2222222222222222222222222222222222222222",
+              symbol: "LINK",
+              decimals: 18,
+            },
+            {
+              address: "0x3333333333333333333333333333333333333333",
+              symbol: "USDC",
+              decimals: 6,
+            },
+          ],
+        },
+      ]}
+      onOpenPosition={ignoreOpen}
+      walletAction="Solvent Devnet"
+      onPrepareWallet={prepareWallet}
+      onPush={onPush}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Push" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Switch to Solvent Devnet" }),
+  );
+
+  expect(prepareWallet).toHaveBeenCalledOnce();
+  expect(onPush).not.toHaveBeenCalled();
+});
+
+it("names the current push approval in the existing confirmation button", () => {
+  const ownedPosition = {
+    ...position,
+    maker: "0x1111111111111111111111111111111111111111",
+    tokens: [
+      {
+        address: "0x2222222222222222222222222222222222222222",
+        symbol: "LINK",
+        decimals: 18,
+      },
+      {
+        address: "0x3333333333333333333333333333333333333333",
+        symbol: "USDC",
+        decimals: 6,
+      },
+    ],
+  };
+  const { rerender } = render(
+    <MakerPositions
+      positions={[ownedPosition]}
+      onOpenPosition={ignoreOpen}
+      actionStatus={{
+        kind: "push",
+        strategyHash: "position-a",
+        submitting: false,
+        phase: undefined,
+        problem: undefined,
+      }}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Push" }));
+  rerender(
+    <MakerPositions
+      positions={[ownedPosition]}
+      onOpenPosition={ignoreOpen}
+      actionStatus={{
+        kind: "push",
+        strategyHash: "position-a",
+        submitting: true,
+        phase: {
+          kind: "approving",
+          token: "0x2222222222222222222222222222222222222222",
+        },
+        problem: undefined,
+      }}
+    />,
+  );
+
+  expect(screen.getByRole("button", { name: "Approve LINK…" })).toBeDisabled();
+});

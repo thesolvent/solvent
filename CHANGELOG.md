@@ -6,6 +6,39 @@ the project is pre-1.0 and evolving.
 
 ## [Unreleased]
 
+### Added — explorer
+
+- **Your Trades** — a person's full history in one list: same-chain trades from each deployment and
+  cross-chain orders from the proxy's saga store, merged and ordered newest first. Served by a new
+  `GET /v1/cross-chain/orders?taker=`, with the saga's `taker` promoted out of the stored body into
+  an indexed column.
+
+### Fixed — cross-chain diagnostics
+
+- **A refusal is no longer reported as an outage.** "No route for this pair and size" reached the
+  browser as "cross-chain service unavailable": the internal handlers answered with a bare status
+  code, the internal client kept the status and dropped the body, and `NoRoute` fell through to a
+  500. Handlers now answer with the words they already had, `NoRoute` is a 422, and the proxy passes
+  a chain-local rejection through with its own message.
+
+### Fixed — swap widget
+
+- The global focus ring no longer cages the amount row on a mouse click, an empty field draws its
+  caret at the placeholder's size, and the amount accepts only a decimal still being typed —
+  `inputMode` refuses nothing on its own.
+- The chain mark in the asset picker had no CSS class defined, so it rendered at the image's native
+  size; the asset pill sized differently depending on whether a token was chosen; and the wallet
+  balance was the one query in the app that never refetched.
+
+### Changed — frontend wallet experience
+
+- **Privy wallet integration** — supports embedded and external EVM wallets through Privy + Wagmi,
+  including the configured origin and destination devnet chains. Embedded-wallet owners can export
+  their wallet through Privy's secure modal; Solvent never handles the exported private key.
+- **Transaction progress** — swaps, position creation and management, rebates, and cross-chain
+  Compact deposits now report preparation, approval, signing, submission, and receipt-confirmation
+  phases in their existing action controls.
+
 ### Added — cross-chain execution
 
 - **Two chain-local Solvent services plus a keyless proxy** — authenticated private quote,

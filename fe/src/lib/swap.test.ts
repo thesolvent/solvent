@@ -200,6 +200,33 @@ describe("the action button", () => {
       ready: true,
     });
   });
+
+  it("keeps a submission failure visible and retryable", () => {
+    expect(
+      swapAction({
+        ...base,
+        submissionProblem: "Insufficient token balance",
+      }),
+    ).toEqual({
+      label: "Insufficient token balance — try again",
+      ready: true,
+      retry: true,
+    });
+  });
+
+  it("names the wallet phase while the swap is pending", () => {
+    expect(
+      swapAction({
+        ...base,
+        submitting: true,
+        inputToken: "DAI",
+        submissionStatus: {
+          kind: "approving",
+          token: "0x1111111111111111111111111111111111111111",
+        },
+      }),
+    ).toEqual({ label: "Approve DAI…", ready: false });
+  });
 });
 
 describe("submission errors", () => {
@@ -209,6 +236,17 @@ describe("submission errors", () => {
 
     expect(submissionProblem(error)).toBe(
       "Quote expires too soon; request a fresh price",
+    );
+  });
+
+  it("keeps the backend and balance reasons safe for the swap action", async () => {
+    const { SolventApiError } = await import("@solvent/sdk/client");
+
+    expect(submissionProblem(new SolventApiError(409, "Quote expired"))).toBe(
+      "Quote expired",
+    );
+    expect(submissionProblem(new Error("Insufficient token balance"))).toBe(
+      "Insufficient token balance",
     );
   });
 });

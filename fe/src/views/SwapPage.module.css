@@ -261,6 +261,17 @@
   cursor: not-allowed;
 }
 
+/* A request may safely retry with the same intent after a transient server failure. */
+.ctaRetry {
+  background: var(--line);
+  color: var(--text-muted);
+}
+
+.ctaRetry:hover:not(:disabled) {
+  background: var(--dark-line);
+  color: var(--paper);
+}
+
 /* ---------- Token picker ---------- */
 
 .veil {

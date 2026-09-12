@@ -1,7 +1,5 @@
-import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useAccount, useSwitchChain } from "wagmi";
 
 import { DASH, type Asset } from "@/data";
 import { fit, usd } from "@/lib/format";
@@ -27,8 +25,8 @@ import { AsyncNote } from "@/components/AsyncNote";
 import { useQuote } from "@/services/quote";
 import { useTokenBalance } from "@/services/balance";
 import { useSubmitSwap } from "@/services/swap";
-import { chain } from "@/adapters/wallet/config";
 import { useApp } from "@/state";
+import { useWalletAction } from "@/services/wallet";
 import { AssetIdentity, TokenMark } from "@/components/AssetIdentity";
 import { Term } from "@/components/Tooltip";
 import type { GlossaryKey } from "@/lib/glossary";
@@ -109,9 +107,7 @@ export function SwapPage() {
     },
   ];
 
-  const { isConnected, chainId } = useAccount();
-  const { openConnectModal } = useConnectModal();
-  const { switchChain } = useSwitchChain();
+  const wallet = useWalletAction();
   const submission = useSubmitSwap(
     {
       from,
@@ -138,12 +134,10 @@ export function SwapPage() {
     setImpactAcknowledged(false);
   }, [state.fromToken, state.toToken, typed]);
 
-  const switchTo = isConnected && chainId !== chain.id ? chain.name : undefined;
-
-  // One button, whichever step the trade is missing.
+  // One button, whichever step the trade is missing. `prepare` connects or switches chain and
+  // reports whether the trade can go ahead now.
   const act = () => {
-    if (!isConnected) return openConnectModal?.();
-    if (switchTo) return switchChain({ chainId: chain.id });
+    if (!wallet.prepare()) return;
     if (impact === "severe" && !impactAcknowledged)
       return setImpactAcknowledged(true);
     submission.send();
@@ -151,8 +145,8 @@ export function SwapPage() {
 
   const action = to
     ? swapAction({
-        connected: isConnected,
-        switchTo,
+        connected: wallet.connected,
+        switchTo: wallet.switchTo,
         submitting: submission.submitting,
         submitted: submission.result !== undefined,
         amount: amt,
@@ -163,6 +157,8 @@ export function SwapPage() {
         short,
         impact,
         impactAcknowledged,
+        submissionStatus: submission.status,
+        inputToken: from?.symbol,
       })
     : { label: "Select receive asset", ready: false };
 
@@ -335,7 +331,7 @@ export function SwapPage() {
 
         <button
           type="button"
-          className={styles.cta}
+          className={`${styles.cta} ${action.retry ? styles.ctaRetry : ""}`}
           disabled={!action.ready}
           onClick={act}
         >

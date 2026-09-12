@@ -80,6 +80,18 @@ beforeEach(() => {
   compact.approve.mockResolvedValue("0xapproval");
   compact.deposit.mockResolvedValue("0xdeposit");
   compact.sign.mockResolvedValue("0xsponsor");
+  compact.approve.mockImplementation(
+    async (_public, _wallet, _request, options) => {
+      options?.onBroadcast();
+      return "0xapproval";
+    },
+  );
+  compact.deposit.mockImplementation(
+    async (_public, _wallet, _request, options) => {
+      options?.onBroadcast();
+      return "0xdeposit";
+    },
+  );
 });
 
 describe("swap HTTP adapter invariants", () => {
@@ -276,6 +288,7 @@ describe("swap HTTP adapter invariants", () => {
     });
     const publicClient = {};
     const walletClient = {};
+    const statuses: string[] = [];
 
     const { swapAdapter } = await import("./swap");
     await expect(
@@ -291,11 +304,20 @@ describe("swap HTTP adapter invariants", () => {
           },
           { publicClient, walletClient } as never,
         )
-        .submit(),
+        .submit({ onStatus: (status) => statuses.push(status.kind) }),
     ).resolves.toEqual({
       tradeId: "0x07",
       status: "destination_pending",
     });
+    expect(statuses).toEqual([
+      "preparing",
+      "approving",
+      "confirming",
+      "submitting",
+      "confirming",
+      "signing",
+      "submitting",
+    ]);
 
     const draftRequest = api.crossChain.draft.mock.calls[0]?.[0];
     expect(draftRequest).toMatchObject({
@@ -312,6 +334,7 @@ describe("swap HTTP adapter invariants", () => {
         amount: 1_000_000_000_000_000_000n,
         sponsor,
       }),
+      expect.objectContaining({ onBroadcast: expect.any(Function) }),
     );
     expect(compact.deposit).toHaveBeenCalledWith(
       publicClient,
@@ -321,6 +344,7 @@ describe("swap HTTP adapter invariants", () => {
         amount: 1_000_000_000_000_000_000n,
         sponsor,
       }),
+      expect.objectContaining({ onBroadcast: expect.any(Function) }),
     );
     expect(compact.sign).toHaveBeenCalledWith(
       walletClient,

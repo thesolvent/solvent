@@ -7,9 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useAccount } from "wagmi";
 
 import { AsyncNote } from "@/components/AsyncNote";
 import { Crumbs } from "@/components/Crumbs";
@@ -19,13 +17,18 @@ import {
   clampBand,
   createPosition,
 } from "@/lib/create-position";
-import type { CreatePair, PositionCurve } from "@/ports/positions";
+import type {
+  CreatePair,
+  PositionCreationStatus,
+  PositionCurve,
+} from "@/ports/positions";
 import type { Position } from "@/data/makers";
 import {
   useCreatePairs,
   useCreatePosition,
   usePairPriceHistory,
 } from "@/services/positions";
+import { useWalletAction } from "@/services/wallet";
 import { usePosition } from "@/services/makers";
 import { slug } from "@/services/pools";
 import { useApp, type AppState } from "@/state";
@@ -68,6 +71,28 @@ const PANE_SUBS = [
 const EMPTY_PAIRS: readonly CreatePair[] = [];
 
 type BandEdge = "max" | "min" | "body";
+
+function positionCreationLabel(
+  status: PositionCreationStatus | undefined,
+  pair: CreatePair | undefined,
+): string {
+  if (!status || status.kind === "preparing") return "Checking position…";
+  if (status.kind === "approving") {
+    const token = !pair
+      ? "token"
+      : pair.base.address.toLowerCase() === status.token.toLowerCase()
+        ? pair.base.symbol
+        : pair.quote.address.toLowerCase() === status.token.toLowerCase()
+          ? pair.quote.symbol
+          : "token";
+    return `Approve ${token} — step ${status.index + 1} of ${status.total + 1}`;
+  }
+  if (status.kind === "shipping") {
+    const step = status.approvalCount + 1;
+    return `Create position — step ${step} of ${step}`;
+  }
+  return "Confirming position…";
+}
 
 function pairDefaults(pair: CreatePair, corePair: number) {
   const minimum = pair.type === "Stable" ? MIN_PEGGED_BOUND_PERCENT : 0.004;
@@ -184,14 +209,14 @@ function cloneDefaults(
 
 export function CreatePoolPage() {
   const { state, set } = useApp();
-  const { isConnected: walletConnected } = useAccount();
+  const wallet = useWalletAction();
+  const walletConnected = wallet.connected;
   const navigate = useNavigate();
   const { pair: routePair } = useParams();
   const [searchParams] = useSearchParams();
   const cloneHash = searchParams.get("clone") ?? undefined;
   const cloneQuery = usePosition(cloneHash);
   const pairQuery = useCreatePairs();
-  const { openConnectModal } = useConnectModal();
   const pairs = pairQuery.data ?? EMPTY_PAIRS;
   const routeIndex = routePair
     ? pairs.findIndex(
@@ -1489,19 +1514,19 @@ export function CreatePoolPage() {
                             ? c.ctaCursor
                             : "pointer",
                       }}
-                      onClick={
-                        walletConnected
-                          ? creation.send
-                          : () => openConnectModal?.()
-                      }
+                      onClick={() => {
+                        if (wallet.prepare()) creation.send();
+                      }}
                     >
                       {!walletConnected
                         ? "Connect wallet"
                         : creation.submitting
-                          ? "Creating position…"
+                          ? positionCreationLabel(creation.status, c.pair)
                           : creation.problem
                             ? "Could not create — try again"
-                            : c.cta}
+                            : wallet.switchTo
+                              ? `Switch to ${wallet.switchTo}`
+                              : c.cta}
                     </button>
                   </div>
                 </div>
