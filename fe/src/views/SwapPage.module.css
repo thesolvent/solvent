@@ -246,7 +246,6 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 172px;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 8px 12px 8px 16px;
@@ -262,10 +261,6 @@
 .assetButton:hover {
   border-color: var(--ink);
   box-shadow: 0 2px 10px rgba(11, 11, 11, 0.07);
-}
-
-.assetButton:has([data-asset-identity]) {
-  width: auto;
 }
 
 .assetSymbol {

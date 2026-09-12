@@ -26,6 +26,11 @@ import { useAssetBalances, useWalletAction } from "@/services/wallet";
 import styles from "./SwapPage.module.css";
 
 const SWAP_TABS = ["Swap"];
+const PLACEHOLDER_SIZE = "clamp(30px, 8cqi, 42px)";
+
+function isAmountDraft(value: string): boolean {
+  return /^\d*\.?\d*$/.test(value);
+}
 
 type ProtocolOption = {
   value: SwapProtocol;
@@ -333,9 +338,15 @@ export function SwapPage() {
             <div className={styles.amountBox}>
               <input
                 className={styles.amountInput}
-                style={{ fontSize: fit(state.amount) }}
+                style={{
+                  fontSize: state.amount ? fit(state.amount) : PLACEHOLDER_SIZE,
+                }}
                 value={state.amount}
-                onChange={(e) => set({ amount: e.target.value })}
+                onChange={(e) => {
+                  if (isAmountDraft(e.target.value)) {
+                    set({ amount: e.target.value });
+                  }
+                }}
                 placeholder="Enter amount"
                 aria-label="Swap amount"
                 inputMode="decimal"

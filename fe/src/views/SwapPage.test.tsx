@@ -128,6 +128,25 @@ const ERC7683_CONFIG: AppConfig = {
 };
 
 describe("SwapPage", () => {
+  it("rejects non-numeric amount input while keeping partial decimals", async () => {
+    renderWithServices(<SwapPage />, {
+      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    const amount = await screen.findByLabelText("Swap amount");
+
+    for (const value of [".", "0.", "100.", "100.5"]) {
+      fireEvent.change(amount, { target: { value } });
+      expect(amount).toHaveValue(value);
+    }
+
+    fireEvent.change(amount, { target: { value: "100.5x" } });
+    expect(amount).toHaveValue("100.5");
+    fireEvent.change(amount, { target: { value: "abc" } });
+    expect(amount).toHaveValue("100.5");
+  });
+
   it("shows the connected wallet's balance in each picker row", async () => {
     walletReads.data = [
       { result: 1_500_000_000_000_000_000n, status: "success" },
