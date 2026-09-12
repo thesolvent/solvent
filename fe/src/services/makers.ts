@@ -3,6 +3,7 @@ import type { MakerPeriod, Position } from "@/data/makers";
 import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { isMissingRecord, LIVE_QUERY_OPTIONS } from "./live";
 import { useServices } from "./context";
+import type { StrategyReadSource } from "@/ports/makers";
 
 const POST_CREATE_RETRY_INTERVAL_MS = 1_000;
 const POST_CREATE_RETRY_LIMIT = 20;
@@ -10,11 +11,13 @@ const POST_CREATE_RETRY_LIMIT = 20;
 interface MakerReadOptions {
   waitForIndex?: boolean;
   chainId?: number;
+  source?: StrategyReadSource;
 }
 
 interface PositionDepthOptions {
   waitForLiquidity?: boolean;
   chainId?: number;
+  source?: StrategyReadSource;
 }
 
 function depthRefreshInterval(
@@ -47,11 +50,11 @@ function useMakerRead<T>(
   id: string | undefined,
   read: (id: string) => Promise<T>,
   period?: MakerPeriod,
-  { waitForIndex = false, chainId }: MakerReadOptions = {},
+  { waitForIndex = false, chainId, source }: MakerReadOptions = {},
 ) {
   return useQuery({
     ...LIVE_QUERY_OPTIONS,
-    queryKey: ["makers", name, id?.toLowerCase(), period, chainId],
+    queryKey: ["makers", name, id?.toLowerCase(), period, chainId, source],
     queryFn: id ? () => read(id) : skipToken,
     retry: (count, error) =>
       isMissingRecord(error)
@@ -114,7 +117,7 @@ export function usePosition(
   return useMakerRead(
     "position",
     hash,
-    (id) => makers.position(id, options?.chainId),
+    (id) => makers.position(id, options?.chainId, options?.source),
     undefined,
     options,
   );
@@ -136,27 +139,30 @@ export function useMakerSettlements(
   });
 }
 
-export function usePositionHistory(hash: string | undefined, chainId?: number) {
+export function usePositionHistory(
+  hash: string | undefined,
+  options?: MakerReadOptions,
+) {
   const { makers } = useServices();
   return useMakerRead(
     "history",
     hash,
-    (id) => makers.history(id, chainId),
+    (id) => makers.history(id, options?.chainId, options?.source),
     undefined,
-    { chainId },
+    options,
   );
 }
 
 export function usePositionDepth(
   position: Position | undefined,
-  { waitForLiquidity = false, chainId }: PositionDepthOptions = {},
+  { waitForLiquidity = false, chainId, source }: PositionDepthOptions = {},
 ) {
   const { makers } = useServices();
   return useQuery({
     ...LIVE_QUERY_OPTIONS,
-    queryKey: ["makers", "depth", position?.hash, chainId],
+    queryKey: ["makers", "depth", position?.hash, chainId, source],
     queryFn: position
-      ? () => makers.depth(position.hash, position.ref, chainId)
+      ? () => makers.depth(position.hash, position.ref, chainId, source)
       : skipToken,
     refetchInterval: (query) =>
       depthRefreshInterval(

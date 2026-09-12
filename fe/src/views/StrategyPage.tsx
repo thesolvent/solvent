@@ -20,6 +20,10 @@ export function StrategyPage() {
   const location = useLocation();
   const { strategyHash } = useParams();
   const chainParam = new URLSearchParams(location.search).get("chain");
+  const source =
+    new URLSearchParams(location.search).get("source") === "direct"
+      ? "direct"
+      : undefined;
   const parsedChainId = chainParam == null ? undefined : Number(chainParam);
   const chainId =
     parsedChainId != null &&
@@ -30,14 +34,19 @@ export function StrategyPage() {
   const waitForIndex = Boolean(
     (location.state as RouteState | null)?.waitForStrategyIndex,
   );
-  const position = usePosition(strategyHash, { waitForIndex, chainId });
-  const history = usePositionHistory(
-    position.data ? strategyHash : undefined,
+  const position = usePosition(strategyHash, {
+    waitForIndex,
     chainId,
-  );
+    source,
+  });
+  const history = usePositionHistory(position.data ? strategyHash : undefined, {
+    chainId,
+    source,
+  });
   const depth = usePositionDepth(position.data, {
     waitForLiquidity: waitForIndex,
     chainId,
+    source,
   });
   const [hoverFrac, setHoverFrac] = useState<number | null>(null);
   const rangeHint = useId();

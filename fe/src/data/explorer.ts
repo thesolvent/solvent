@@ -15,6 +15,7 @@ export interface TradeSource {
   maker: string;
   strategyHash: string;
   chainId?: number;
+  strategySource?: "direct";
   input: TokenQuantity;
   output: TokenQuantity;
   sharePct: number;

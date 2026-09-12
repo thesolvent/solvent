@@ -94,6 +94,22 @@ function servedAsset(assets: Asset[], address: string): Asset | undefined {
   );
 }
 
+function crossChainProfit(
+  amountIn: bigint,
+  input: Asset | undefined,
+  amountOut: bigint,
+  output: Asset | undefined,
+) {
+  if (!input || !output || input.price <= 0 || output.price <= 0) return null;
+  const inputUsd = Number(formatUnits(amountIn, input.decimals)) * input.price;
+  const outputUsd =
+    Number(formatUnits(amountOut, output.decimals)) * output.price;
+  const estimate = inputUsd - outputUsd;
+  return Number.isFinite(estimate)
+    ? { symbol: "USD", display: String(estimate) }
+    : null;
+}
+
 /** Adapt a durable SolventX saga to the already-reviewed trade details layout. */
 export function toCrossChainTrade(
   order: CrossChainOrder,
@@ -118,6 +134,7 @@ export function toCrossChainTrade(
     0n,
   );
   const amountOut = BigInt(order.quote.amount_out);
+  const amountIn = BigInt(order.quote.amount_in);
   // Historical sagas predate recorded lifecycle timestamps, so their quote expiry is the only clock.
   const createdAt = Math.max(0, order.quote.expires_at_unix - 600);
   const status = crossChainStatus(order.state);
@@ -146,7 +163,7 @@ export function toCrossChainTrade(
       net: output?.net ?? `Chain ${order.quote.destination.local_chain}`,
       logoUri: output?.logoUri,
     },
-    surplus: null,
+    surplus: crossChainProfit(amountIn, input, amountOut, output),
     priceImpactPct: null,
     makers: new Set(sources.map((source) => source.maker.toLowerCase())).size,
     txHash: evidence?.transaction_hash ?? null,
@@ -165,6 +182,8 @@ export function toCrossChainTrade(
         maker: source.maker,
         strategyHash: source.strategy_hash,
         chainId: order.quote.destination.local_chain,
+        strategySource:
+          order.quote.destination.route === "direct" ? "direct" : undefined,
         curve: null,
         input: {
           symbol: destinationInput?.symbol ?? "TOKEN",

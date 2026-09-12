@@ -47,11 +47,11 @@ describe("Strategy back navigation", () => {
         makers: { position, history: () => pending },
         explorer: { trades },
       },
-      `${strategyPath}?chain=31338`,
+      `${strategyPath}?chain=31338&source=direct`,
     );
 
     await waitFor(() => {
-      expect(position).toHaveBeenCalledWith("test-strategy", 31338);
+      expect(position).toHaveBeenCalledWith("test-strategy", 31338, "direct");
       expect(trades).toHaveBeenCalledWith(
         {
           status: "confirmed",
