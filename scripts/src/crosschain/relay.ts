@@ -5,8 +5,8 @@ import {
     createWalletClient,
     http,
 } from "../lib/node-runtime.ts";
+import { infraManifestPath, tryRead, type CrossChainInfraManifest } from "../deploy/manifests.ts";
 
-const router = "0x610178dA211FEF7D417bC0e6FeD39F05609AD788";
 const account = privateKeyToAccount(
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
 );
@@ -24,9 +24,28 @@ function chain(id: number, rpc: string) {
     });
 }
 
-function relay(sourceId: number, sourceRpc: string, destinationId: number, destinationRpc: string, sourceSelector: bigint) {
+function router(side: "origin" | "destination"): `0x${string}` {
+    const infra = tryRead<CrossChainInfraManifest>(infraManifestPath(side));
+    if (!infra)
+        throw new Error(
+            `no crosschain-infra manifest for ${side} — deploy it first (the relay has nothing to watch)`,
+        );
+    return infra.router as `0x${string}`;
+}
+
+function relay(
+    sourceSide: "origin" | "destination",
+    sourceId: number,
+    sourceRpc: string,
+    destinationSide: "origin" | "destination",
+    destinationId: number,
+    destinationRpc: string,
+    sourceSelector: bigint,
+) {
     const sourceChain = chain(sourceId, sourceRpc);
     const destinationChain = chain(destinationId, destinationRpc);
+    const sourceRouter = router(sourceSide);
+    const destinationRouter = router(destinationSide);
     const source = createPublicClient({ chain: sourceChain, transport: http(sourceRpc) });
     const destination = createPublicClient({
         chain: destinationChain,
@@ -39,7 +58,7 @@ function relay(sourceId: number, sourceRpc: string, destinationId: number, desti
     });
     const delivered = new Set<Hex>();
     source.watchContractEvent({
-        address: router,
+        address: sourceRouter,
         abi,
         eventName: "MessageQueued",
         poll: true,
@@ -51,7 +70,7 @@ function relay(sourceId: number, sourceRpc: string, destinationId: number, desti
                 delivered.add(messageId);
                 void wallet
                     .writeContract({
-                        address: router,
+                        address: destinationRouter,
                         abi,
                         functionName: "deliverPayload",
                         args: [messageId, sourceSelector, sourceOutbox, receiver, payload],
@@ -67,7 +86,7 @@ function relay(sourceId: number, sourceRpc: string, destinationId: number, desti
     });
 }
 
-relay(31337, "http://127.0.0.1:8545", 31338, "http://127.0.0.1:8546", 11n);
-relay(31338, "http://127.0.0.1:8546", 31337, "http://127.0.0.1:8545", 22n);
+relay("origin", 31337, "http://127.0.0.1:9645", "destination", 31338, "http://127.0.0.1:9646", 11n);
+relay("destination", 31338, "http://127.0.0.1:9646", "origin", 31337, "http://127.0.0.1:9645", 22n);
 console.log("SolventX local proof relay listening");
 await new Promise(() => {});
