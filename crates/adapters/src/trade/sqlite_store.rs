@@ -151,6 +151,7 @@ fn row_to_trade(row: &SqliteRow) -> Result<Trade, TradeStoreError> {
         min_amount_out: amount(row, "min_amount_out")?,
         amount_out: opt_amount(row, "amount_out")?,
         status: status(row, "status")?,
+        reason: row.try_get("reason").map_err(db)?,
         deadline_block: count(row, "deadline_block")?,
         signature: row
             .try_get::<Option<Vec<u8>>, _>("signature")
@@ -194,9 +195,9 @@ async fn insert_trade(
     let affected = sqlx::query(
         "INSERT INTO trade (
              id, order_hash, taker, token_in, token_out, amount_in, min_amount_out, amount_out,
-             status, status_rank, deadline_block, signature, price_impact_pct, surplus, tx_hash,
-             block_number, created_at, settled_at, token_in_price_usd, token_out_price_usd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             status, status_rank, reason, deadline_block, signature, price_impact_pct, surplus,
+             tx_hash, block_number, created_at, settled_at, token_in_price_usd, token_out_price_usd)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (order_hash) DO NOTHING",
     )
     .bind(trade.id.to_string())
@@ -209,6 +210,7 @@ async fn insert_trade(
     .bind(trade.amount_out.as_ref().map(amount_text))
     .bind(trade.status.as_str())
     .bind(i64::from(trade.status.rank()))
+    .bind(trade.reason.as_deref())
     .bind(i64_of(trade.deadline_block)?)
     .bind(trade.signature.as_ref().map(bytes_of))
     .bind(trade.price_impact_pct)
@@ -336,12 +338,13 @@ impl TradeStore for SqliteTradeStore {
         let mut tx = self.pool.begin().await.map_err(db)?;
         sqlx::query(
             "UPDATE trade
-             SET status = ?, status_rank = ?, amount_out = ?, tx_hash = ?, block_number = ?,
-                 settled_at = ?
+             SET status = ?, status_rank = ?, reason = COALESCE(?, reason), amount_out = ?,
+                 tx_hash = ?, block_number = ?, settled_at = ?
              WHERE id = ? AND settled_at IS NULL",
         )
         .bind(outcome.status.as_str())
         .bind(i64::from(outcome.status.rank()))
+        .bind(outcome.reason.as_deref())
         .bind(outcome.amount_out.as_ref().map(amount_text))
         .bind(outcome.tx_hash.map(bytes_of))
         .bind(outcome.block_number.map(i64_of).transpose()?)

@@ -91,6 +91,11 @@ impl LegQuoter for ServiceLegQuoter {
                 })
             })
             .collect::<Result<Vec<_>, LegQuoterError>>()?;
+        // The solver produces basis points and the quote DTO divides them by 100, so scaling back
+        // recovers the original integer exactly rather than approximating it.
+        let price_impact_bps = routed
+            .as_ref()
+            .map(|quote| (quote.price_impact_pct * 100.0).round().max(0.0) as u32);
         let mut quote = LegQuote {
             quote_id: B256::ZERO,
             request_id: request.request_id,
@@ -102,6 +107,7 @@ impl LegQuoter for ServiceLegQuoter {
             amount_in: request.amount,
             amount_out,
             route: request.route,
+            price_impact_bps,
             block_number,
             expires_at_unix,
             sources,

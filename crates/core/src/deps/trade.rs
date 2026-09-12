@@ -19,6 +19,8 @@ pub struct CreateResult {
 /// A trade's terminal settlement — the filled amount and on-chain coordinates, applied once.
 pub struct Settlement {
     pub status: TradeStatus,
+    /// Why a terminal trade never filled — a rendered `DeclineReason`; `None` on the happy path.
+    pub reason: Option<String>,
     pub amount_out: Option<U256>,
     pub tx_hash: Option<B256>,
     pub block_number: Option<u64>,

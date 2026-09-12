@@ -10,7 +10,7 @@ use crate::execution::ExecutionService;
 use crate::ledger::LedgerService;
 use crate::obs::warn;
 use crate::primitives::execution::{Settled, SettledOutcome};
-use crate::primitives::trade::{Trade, TradeStatus};
+use crate::primitives::trade::{DeclineReason, Trade, TradeStatus};
 use crate::primitives::{IntentId, SolventError};
 
 pub struct ReconcileService {
@@ -29,6 +29,10 @@ pub struct ReconcileReport {
     /// Orphaned reservations swept past their TTL.
     pub swept: usize,
 }
+
+/// A reservation the sweeper reclaimed: its fill never reached a terminal status before the hold
+/// expired, so nothing on-chain explains the failure beyond the timeout itself.
+const SWEPT: &str = "the reservation expired before the fill landed";
 
 impl ReconcileService {
     pub fn new(
@@ -58,7 +62,8 @@ impl ReconcileService {
         let in_flight = self.execution.tracked_reservations().await?;
         let swept = self.ledger.sweep_expired(&in_flight).await?;
         for intent in &swept {
-            self.apply(*intent, |_| failed(now)).await?;
+            self.apply(*intent, |_| failed(now, SWEPT.to_owned()))
+                .await?;
         }
 
         Ok(ReconcileReport {
@@ -73,12 +78,13 @@ impl ReconcileService {
         self.apply(fill.intent, |trade| match fill.outcome {
             SettledOutcome::Confirmed { tx, block } => Settlement {
                 status: TradeStatus::Confirmed,
+                reason: None,
                 amount_out: Some(trade.min_amount_out),
                 tx_hash: Some(tx),
                 block_number: Some(block),
                 at: now,
             },
-            SettledOutcome::Failed => failed(now),
+            SettledOutcome::Failed { ref reason } => failed(now, reason.clone()),
         })
         .await
     }
@@ -101,9 +107,10 @@ impl ReconcileService {
 }
 
 /// A terminal `Failed` settlement — a fill that reverted, dropped, or timed out unfilled.
-fn failed(now: u64) -> Settlement {
+fn failed(now: u64, detail: String) -> Settlement {
     Settlement {
         status: TradeStatus::Failed,
+        reason: Some(DeclineReason::FillFailed(detail).to_string()),
         amount_out: None,
         tx_hash: None,
         block_number: None,
@@ -323,6 +330,7 @@ mod tests {
             if let Some(trade) = rows.values_mut().find(|t| t.id == *id) {
                 if trade.settled_at.is_none() {
                     trade.status = outcome.status;
+                    trade.reason = outcome.reason.clone().or(trade.reason.take());
                     trade.amount_out = outcome.amount_out;
                     trade.tx_hash = outcome.tx_hash;
                     trade.block_number = outcome.block_number;
@@ -372,6 +380,7 @@ mod tests {
             min_amount_out: U256::from(MIN_OUT),
             amount_out: None,
             status: TradeStatus::Reserved,
+            reason: None,
             deadline_block: 0,
             signature: None,
             price_impact_pct: None,
@@ -472,6 +481,12 @@ mod tests {
         let settled = trades.get(intent);
         assert_eq!(settled.status, TradeStatus::Failed);
         assert_eq!(settled.amount_out, None);
+        // The revert string is the only account of why the fill did not land; reconcile is the
+        // last place it exists before the execution tracking is forgotten.
+        assert_eq!(
+            settled.reason,
+            Some(DeclineReason::FillFailed("revert".to_owned()).to_string())
+        );
     }
 
     #[tokio::test]
@@ -491,6 +506,12 @@ mod tests {
         clock.set(1100);
         let report = reconcile.tick().await.unwrap();
         assert_eq!(report.swept, 1);
+        // A swept orphan has no on-chain outcome to quote, so it says what did happen: the hold
+        // expired. It must not borrow the revert wording of a fill that actually ran.
+        assert_eq!(
+            trades.get(intent).reason,
+            Some(DeclineReason::FillFailed(SWEPT.to_owned()).to_string())
+        );
         assert_eq!(trades.get(intent).status, TradeStatus::Failed);
         assert_eq!(ledger.available(&wallet_account()), U256::from(1000u64));
     }

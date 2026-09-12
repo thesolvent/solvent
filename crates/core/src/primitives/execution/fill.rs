@@ -143,5 +143,5 @@ pub struct Settled {
 #[non_exhaustive]
 pub enum SettledOutcome {
     Confirmed { tx: B256, block: u64 },
-    Failed,
+    Failed { reason: String },
 }

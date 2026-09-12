@@ -71,6 +71,7 @@ describe("Explorer records", () => {
         amount_in: "0xde0b6b3a7640000",
         amount_out: "0xaef9e7",
         bridge_fee: "0x00",
+        price_impact_bps: 37,
         expires_at_unix: 1_900_000_600,
         origin: {
           quote_id: "0x02",
@@ -151,6 +152,8 @@ describe("Explorer records", () => {
       blockNumber: 148,
       createdAt: 1_900_000_000,
       settledAt: 1_900_000_150,
+      // Basis points on the wire, percent in the view — 37bp is 0.37%, not 37%.
+      priceImpactPct: 0.37,
     });
     expect(trade.lifecycle).toHaveLength(6);
     expect(trade.lifecycle.map((stage) => stage.status)).toEqual([

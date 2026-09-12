@@ -44,12 +44,15 @@ export function toCrossChainQuote(
       : Number(formatUnits(amountInRaw, from.decimals)) * from.price;
   const amountOutUsd =
     to.price == null ? null : Number(amountOutUnits) * to.price;
-  // Impact is the gap between what went in and what came out; unpriced either side, there is none
-  // to state, and stating zero would claim a free swap.
+  // The router knows what the route actually cost, so prefer its figure. The USD endpoints are a
+  // fallback for a pair the valuation feed cannot price on both sides; unpriced either way there
+  // is none to state, and stating zero would claim a free swap.
   const priceImpact =
-    amountInUsd != null && amountOutUsd != null && amountInUsd > 0
-      ? percent(Math.max(0, ((amountInUsd - amountOutUsd) / amountInUsd) * 100))
-      : DASH;
+    api.price_impact_bps != null
+      ? percent(api.price_impact_bps / 100)
+      : amountInUsd != null && amountOutUsd != null && amountInUsd > 0
+        ? percent(Math.max(0, ((amountInUsd - amountOutUsd) / amountInUsd) * 100))
+        : DASH;
   const makers = new Set(
     [...api.origin.sources, ...api.destination.sources].map((source) =>
       source.maker.toLowerCase(),

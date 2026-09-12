@@ -3966,6 +3966,13 @@
                       "format": "double",
                       "description": "Price impact of the routed quote, in percent; absent when no route was found."
                     },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Why a declined or failed trade never filled; absent on the happy path."
+                    },
                     "settled_at": {
                       "type": [
                         "integer",
@@ -4843,6 +4850,13 @@
                 "format": "double",
                 "description": "Price impact of the routed quote, in percent; absent when no route was found."
               },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Why a declined or failed trade never filled; absent on the happy path."
+              },
               "settled_at": {
                 "type": [
                   "integer",
@@ -5233,6 +5247,13 @@
             ],
             "format": "double",
             "description": "Price impact of the routed quote, in percent; absent when no route was found."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why a declined or failed trade never filled; absent on the happy path."
           },
           "settled_at": {
             "type": [

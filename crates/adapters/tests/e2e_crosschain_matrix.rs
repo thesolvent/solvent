@@ -149,6 +149,7 @@ impl LegQuoter for Quoter {
             amount_in: r.amount,
             amount_out,
             route: r.route,
+            price_impact_bps: None,
             block_number: self.0 .0,
             expires_at_unix: NOW + 300,
             sources,

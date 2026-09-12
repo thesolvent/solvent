@@ -141,7 +141,12 @@ export function toCrossChainTrade(
       logoUri: output?.logoUri,
     },
     surplus: null,
-    priceImpactPct: null,
+    // The aggregate quote carries the routed shortfall across both legs; older sagas were recorded
+    // before it existed, and a route that never touched a curve has none to state.
+    priceImpactPct:
+      order.quote.price_impact_bps == null
+        ? null
+        : order.quote.price_impact_bps / 100,
     makers: new Set(sources.map((source) => source.maker.toLowerCase())).size,
     txHash: evidence?.transaction_hash ?? null,
     blockNumber: evidence?.block_number ?? null,

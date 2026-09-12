@@ -103,6 +103,44 @@ impl FromStr for TradeStatus {
     }
 }
 
+/// Why a trade ended without a fill. A refusal is only actionable if the swapper can read it, so
+/// every path that lands a trade on `Declined` or `Failed` renders one of these onto the trade
+/// instead of leaving the cause in the server log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DeclineReason {
+    /// No maker curve could cover the requested size at the signed limit.
+    Unroutable,
+    /// A routed strategy was withdrawn from admission between the quote and the reserve.
+    StrategyGuarded,
+    /// A routed maker's capacity was taken by another trade after the quote was served.
+    InsufficientCapacity,
+    /// The pre-submit simulation rejected the fill; the reservation was voided unspent.
+    SimRejected(String),
+    /// The submitted fill reverted, was dropped, or timed out before landing.
+    FillFailed(String),
+}
+
+impl fmt::Display for DeclineReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DeclineReason::Unroutable => {
+                f.write_str("no route covers this size at the signed limit")
+            }
+            DeclineReason::StrategyGuarded => {
+                f.write_str("a routed strategy was withdrawn before the reserve")
+            }
+            DeclineReason::InsufficientCapacity => {
+                f.write_str("a routed maker's capacity was taken after the quote")
+            }
+            DeclineReason::SimRejected(detail) => {
+                write!(f, "simulation rejected the fill: {detail}")
+            }
+            DeclineReason::FillFailed(detail) => write!(f, "the fill did not land: {detail}"),
+        }
+    }
+}
+
 /// A submitted swap and its settlement so far. The signed UniswapX order is carried by the
 /// `order_hash`/`signature`/`deadline_block` fields — a trade *contains* an order, it is not a
 /// second name for one. The nullable fields fill in as the lifecycle advances.
@@ -119,6 +157,8 @@ pub struct Trade {
     /// The amount actually delivered, set once the fill confirms.
     pub amount_out: Option<U256>,
     pub status: TradeStatus,
+    /// Why a terminal trade never filled — a rendered [`DeclineReason`]; `None` on the happy path.
+    pub reason: Option<String>,
     pub deadline_block: u64,
     /// The taker's signature over the order; absent when a trade is declined before signing.
     pub signature: Option<Bytes>,
@@ -174,6 +214,9 @@ pub struct TradeView {
     pub signature_present: Option<bool>,
     pub id: String,
     pub status: String,
+    /// Why a declined or failed trade never filled; absent on the happy path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     #[schema(value_type = String)]
     pub taker: Address,
     /// The swapper's input token and the maximum it authorized.

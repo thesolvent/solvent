@@ -473,6 +473,7 @@ mod tests {
             amount_in,
             amount_out,
             route: CrossChainRoute::Direct,
+            price_impact_bps: None,
             block_number: 50,
             expires_at_unix: NOW + 300,
             sources,

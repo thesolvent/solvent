@@ -20,6 +20,8 @@ export interface LegQuote {
     amount_in: Hex;
     amount_out: Hex;
     route: CrossChainRoute;
+    /** Routed shortfall for this leg, in basis points; absent for a leg that never routes. */
+    price_impact_bps?: number | null;
     block_number: number;
     expires_at_unix: number;
     sources: ReservationSource[];
@@ -39,6 +41,8 @@ export interface AggregateQuote {
     amount_in: Hex;
     amount_out: Hex;
     bridge_fee: Hex;
+    /** End-to-end routed shortfall across both legs, in basis points. */
+    price_impact_bps?: number | null;
     cctp_finality_threshold?: number;
     expires_at_unix: number;
 }

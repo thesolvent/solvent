@@ -100,6 +100,7 @@ impl LegQuoter for ScenarioQuoter {
             amount_in: request.amount,
             amount_out,
             route: request.route,
+            price_impact_bps: None,
             block_number: self.chain_id.0,
             expires_at_unix: request.deadline_unix.min(NOW + 300),
             sources,

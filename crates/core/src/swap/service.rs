@@ -18,7 +18,9 @@ use crate::primitives::ingest::Intent;
 use crate::primitives::ledger::{LedgerError, ReservationSource};
 use crate::primitives::registry::Snapshot;
 use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
-use crate::primitives::trade::{Trade, TradeAttempt, TradeId, TradeLeg, TradeStatus};
+use crate::primitives::trade::{
+    DeclineReason, Trade, TradeAttempt, TradeId, TradeLeg, TradeStatus,
+};
 use crate::primitives::{IntentId, ReservationId};
 use crate::registry::SharedSnapshot;
 use crate::routing::{route, GuardAdmission, LegCostResolver, RoutingBook, StrategyGuard};
@@ -130,6 +132,7 @@ impl SwapService {
             Some(&plan),
             now,
             TradeStatus::Quoted,
+            None,
             &prices,
         );
         let created = self
@@ -186,7 +189,13 @@ impl SwapService {
         if plan_is_guarded(plan, snapshot, &admission) {
             drop(admission);
             warn!(intent = %intent_id, "reserve declined: strategy guarded");
-            self.settle(id, TradeStatus::Declined, now).await?;
+            self.settle(
+                id,
+                TradeStatus::Declined,
+                Some(DeclineReason::StrategyGuarded),
+                now,
+            )
+            .await?;
             return Ok(Some(SwapOutcome {
                 trade_id: *id,
                 status: TradeStatus::Declined,
@@ -206,7 +215,13 @@ impl SwapService {
             Ok(()) => Ok(None),
             Err(SolventError::Ledger(LedgerError::Insufficient(_))) => {
                 warn!(intent = %intent_id, "reserve declined: insufficient capacity");
-                self.settle(id, TradeStatus::Declined, now).await?;
+                self.settle(
+                    id,
+                    TradeStatus::Declined,
+                    Some(DeclineReason::InsufficientCapacity),
+                    now,
+                )
+                .await?;
                 Ok(Some(SwapOutcome {
                     trade_id: *id,
                     status: TradeStatus::Declined,
@@ -247,8 +262,14 @@ impl SwapService {
                     status: TradeStatus::Submitted,
                 })
             }
-            FillOutcome::Rejected { .. } => {
-                self.settle(id, TradeStatus::Declined, now).await?;
+            FillOutcome::Rejected { reason } => {
+                self.settle(
+                    id,
+                    TradeStatus::Declined,
+                    Some(DeclineReason::SimRejected(reason)),
+                    now,
+                )
+                .await?;
                 Ok(SwapOutcome {
                     trade_id: *id,
                     status: TradeStatus::Declined,
@@ -281,6 +302,7 @@ impl SwapService {
             None,
             now,
             TradeStatus::Declined,
+            Some(DeclineReason::Unroutable),
             &prices,
         );
         let created = self
@@ -292,19 +314,32 @@ impl SwapService {
             )
             .await?;
         // Stamp `settled_at` like every other decline path, so /stats counts them consistently.
-        self.settle(&created.id, TradeStatus::Declined, now).await?;
+        self.settle(
+            &created.id,
+            TradeStatus::Declined,
+            Some(DeclineReason::Unroutable),
+            now,
+        )
+        .await?;
         Ok(SwapOutcome {
             trade_id: created.id,
             status: TradeStatus::Declined,
         })
     }
 
-    async fn settle(&self, id: &TradeId, status: TradeStatus, at: u64) -> Result<(), SolventError> {
+    async fn settle(
+        &self,
+        id: &TradeId,
+        status: TradeStatus,
+        reason: Option<DeclineReason>,
+        at: u64,
+    ) -> Result<(), SolventError> {
         self.trades
             .settle(
                 id,
                 &Settlement {
                     status,
+                    reason: reason.map(|r| r.to_string()),
                     amount_out: None,
                     tx_hash: None,
                     block_number: None,
@@ -325,6 +360,7 @@ impl SwapService {
         plan: Option<&RoutePlan>,
         now: u64,
         status: TradeStatus,
+        reason: Option<DeclineReason>,
         prices: &TradePrices,
     ) -> Trade {
         Trade {
@@ -337,6 +373,7 @@ impl SwapService {
             min_amount_out: amounts.min_out,
             amount_out: None,
             status,
+            reason: reason.map(|r| r.to_string()),
             deadline_block: intent.deadline,
             signature: Some(intent.signature.clone()),
             price_impact_pct: plan.map(|p| p.price_impact_pct),
@@ -710,6 +747,7 @@ mod tests {
             if let Some(info) = rows.values_mut().find(|i| i.trade.id == *id) {
                 if info.trade.settled_at.is_none() {
                     info.trade.status = outcome.status;
+                    info.trade.reason = outcome.reason.clone().or(info.trade.reason.take());
                     info.trade.amount_out = outcome.amount_out;
                     info.trade.settled_at = Some(outcome.at);
                 }
@@ -935,6 +973,7 @@ mod tests {
             min_amount_out: e(3000, 6),
             amount_out: None,
             status: TradeStatus::Quoted,
+            reason: None,
             deadline_block: order.deadline,
             signature: Some(order.signature.clone()),
             price_impact_pct: None,
@@ -973,6 +1012,54 @@ mod tests {
             TradeStatus::Submitted,
             "the wedged trade advanced to submitted"
         );
+    }
+
+    /// A decline is only actionable if the swapper can read why, and the four decline paths are
+    /// not interchangeable — an unroutable order and a rejected simulation call for different
+    /// action. Each must persist its own cause, not a shared placeholder.
+    #[tokio::test]
+    async fn each_decline_path_records_its_own_reason() {
+        let unroutable = harness(vec![], SimVerdict::Ok).await;
+        let rejected = harness(
+            vec![xyc(3, e(100, 18), e(300_000, 6))],
+            SimVerdict::Reject {
+                reason: "stale".into(),
+            },
+        )
+        .await;
+
+        let mut reasons = Vec::new();
+        for h in [&unroutable, &rejected] {
+            let out = h
+                .swap
+                .submit(
+                    intent(1, addr(9), e(2, 18), e(3000, 6)),
+                    addr(9),
+                    tid(),
+                    TradePrices::default(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(out.status, TradeStatus::Declined);
+            reasons.push(
+                h.trades
+                    .info(&out.trade_id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .trade
+                    .reason
+                    .expect("a declined trade explains itself"),
+            );
+        }
+
+        assert_eq!(reasons[0], DeclineReason::Unroutable.to_string());
+        assert_eq!(
+            reasons[1],
+            DeclineReason::SimRejected("stale".to_owned()).to_string(),
+            "the sim gate's own words reach the trade"
+        );
+        assert_ne!(reasons[0], reasons[1]);
     }
 
     #[tokio::test]

@@ -336,6 +336,14 @@ the project is pre-1.0 and evolving.
     or 24.2+; frontend and SDK runtime requirements are unchanged.
 
 ### Changed — backend (`crates/`)
+- **A trade carries why it never filled.** `TradeView.reason` is served for every terminal trade
+  that did not settle: the four decline paths (unroutable, strategy withdrawn, capacity taken, sim
+  rejected) each record their own cause, and a failed fill carries the chain's revert string through
+  reconcile instead of dropping it. Previously the reason existed only as a server log line.
+- **A cross-chain quote states the router's price impact.** `LegQuote` and `AggregateQuote` carry
+  `price_impact_bps` — the routed shortfall in basis points, composed across the two legs. The
+  previous figure was derived from the USD endpoints, so a pair the valuation feed could not price
+  on both sides showed no impact at all.
 - **Trade responses expose stored price impact** for Explorer list and detail. OpenAPI and SDK types
   carry the optional value; the existing `deadline_block` field is documented as Unix seconds.
 - **Pools carry `tvl_change_24h_pct`** — the value-weighted 24h move of what the pool holds,

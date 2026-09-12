@@ -1389,6 +1389,8 @@ export interface components {
                      * @description Price impact of the routed quote, in percent; absent when no route was found.
                      */
                     price_impact_pct?: number | null;
+                    /** @description Why a declined or failed trade never filled; absent on the happy path. */
+                    reason?: string | null;
                     /** Format: int64 */
                     settled_at?: number | null;
                     signature_present?: boolean | null;
@@ -1648,6 +1650,8 @@ export interface components {
                  * @description Price impact of the routed quote, in percent; absent when no route was found.
                  */
                 price_impact_pct?: number | null;
+                /** @description Why a declined or failed trade never filled; absent on the happy path. */
+                reason?: string | null;
                 /** Format: int64 */
                 settled_at?: number | null;
                 signature_present?: boolean | null;
@@ -1783,6 +1787,8 @@ export interface components {
              * @description Price impact of the routed quote, in percent; absent when no route was found.
              */
             price_impact_pct?: number | null;
+            /** @description Why a declined or failed trade never filled; absent on the happy path. */
+            reason?: string | null;
             /** Format: int64 */
             settled_at?: number | null;
             signature_present?: boolean | null;

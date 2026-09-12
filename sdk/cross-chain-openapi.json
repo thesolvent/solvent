@@ -373,6 +373,15 @@
           },
           "origin": {
             "$ref": "#/components/schemas/LegQuote"
+          },
+          "price_impact_bps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "End-to-end routed shortfall across both legs, in basis points; `None` when neither leg\nrouted. Composed from the legs rather than read off the USD endpoints, so it states what\nthe route cost even for a pair the valuation feed cannot price.",
+            "minimum": 0
           }
         }
       },
@@ -791,6 +800,15 @@
           },
           "output_token": {
             "type": "string"
+          },
+          "price_impact_bps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The routed shortfall from this leg's best available rate, in basis points; `None` for a\nleg that never routes (a direct-route origin escrow moves the amount unchanged). Carried in\nbps, not percent, because these terms are compared for equality and content-hashed — the\nrouting solver produces bps anyway, so this is the exact figure rather than a lossy one.",
+            "minimum": 0
           },
           "quote_id": {
             "type": "string"

@@ -110,6 +110,7 @@ impl TradeService {
             signature_present: None,
             id: trade.id.to_string(),
             status: trade.status.as_str().to_string(),
+            reason: trade.reason.clone(),
             taker: trade.taker,
             input: TokenAmount {
                 amount: input,
@@ -339,6 +340,7 @@ mod tests {
             min_amount_out: U256::from(500u64),
             amount_out: None,
             status: TradeStatus::Reserved,
+            reason: None,
             deadline_block: 123,
             signature: None,
             price_impact_pct: None,

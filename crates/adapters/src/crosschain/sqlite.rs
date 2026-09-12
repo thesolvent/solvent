@@ -485,6 +485,7 @@ mod tests {
             amount_in: U256::from(100),
             amount_out: U256::from(99),
             route: CrossChainRoute::Cctp,
+            price_impact_bps: None,
             block_number: 7,
             expires_at_unix: 100,
             sources: Vec::new(),

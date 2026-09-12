@@ -8,8 +8,8 @@ use moka::sync::Cache;
 
 use super::SharedSnapshot;
 use crate::deps::registry::{ChainSource, EventStore};
-use crate::primitives::registry::{EventCursor, Snapshot};
 use crate::obs::warn;
+use crate::primitives::registry::{EventCursor, Snapshot};
 use crate::primitives::{ChainConfig, ChainId};
 use crate::SolventError;
 

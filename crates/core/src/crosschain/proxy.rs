@@ -653,6 +653,8 @@ pub fn aggregate_quote(
     let id = aggregate_id(&origin, &destination, alloy_primitives::U256::ZERO, None);
     let amount_in = origin.amount_in;
     let amount_out = destination.amount_out;
+    let price_impact_bps =
+        combined_impact_bps(origin.price_impact_bps, destination.price_impact_bps);
     Ok(AggregateQuote {
         id,
         origin,
@@ -660,9 +662,25 @@ pub fn aggregate_quote(
         amount_in,
         amount_out,
         bridge_fee: alloy_primitives::U256::ZERO,
+        price_impact_bps,
         cctp_finality_threshold: None,
         expires_at_unix,
     })
+}
+
+/// Compose two sequential legs' shortfalls. The hops multiply — each leg keeps a fraction of what
+/// it was handed — so the end-to-end shortfall is `1 - (1-a)(1-b)`, not `a + b`; adding them
+/// overstates the cost of a route that is expensive on both sides. A leg that never routed has no
+/// shortfall to contribute rather than a zero one, so two unrouted legs state nothing at all.
+fn combined_impact_bps(origin: Option<u32>, destination: Option<u32>) -> Option<u32> {
+    // Whole and kept both fit in 14 bits, so their product cannot overflow and every step stays
+    // exact in integer bps — no fallible conversion to confuse "cannot happen" with "no impact".
+    const WHOLE: u32 = 10_000;
+    if origin.is_none() && destination.is_none() {
+        return None;
+    }
+    let kept = |leg: Option<u32>| WHOLE - leg.unwrap_or(0).min(WHOLE);
+    Some(WHOLE - kept(origin) * kept(destination) / WHOLE)
 }
 
 pub(crate) fn aggregate_id(
@@ -826,6 +844,26 @@ fn validate_committed(
 
 #[cfg(test)]
 mod tests {
+    /// Two hops compound rather than add: routing 1% on each side costs 1.99%, not 2%. Stating the
+    /// sum would overcharge every route that is expensive on both legs, and the error grows with
+    /// the impact — exactly where the number matters most.
+    #[test]
+    fn leg_impacts_compound_and_an_unrouted_leg_contributes_nothing() {
+        use super::combined_impact_bps;
+
+        assert_eq!(
+            combined_impact_bps(None, None),
+            None,
+            "nothing routed, nothing to state"
+        );
+        assert_eq!(combined_impact_bps(None, Some(50)), Some(50));
+        assert_eq!(combined_impact_bps(Some(50), None), Some(50));
+        assert_eq!(combined_impact_bps(Some(100), Some(100)), Some(199));
+        // A leg that consumed everything leaves nothing for the next one to erode.
+        assert_eq!(combined_impact_bps(Some(10_000), Some(500)), Some(10_000));
+        assert_eq!(combined_impact_bps(Some(99_999), Some(0)), Some(10_000));
+    }
+
     use super::*;
     use crate::deps::crosschain::{RemoteSolventError, SagaStoreError};
     use crate::primitives::crosschain::{
@@ -854,6 +892,7 @@ mod tests {
             amount_in: U256::from(100),
             amount_out: U256::from(90),
             route: CrossChainRoute::Direct,
+            price_impact_bps: None,
             block_number: 10,
             expires_at_unix: expires,
             sources: Vec::new(),

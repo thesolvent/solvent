@@ -760,6 +760,7 @@ mod tests {
             amount_in: U256::from(1_000),
             amount_out: U256::from(1_000),
             route: CrossChainRoute::Direct,
+            price_impact_bps: None,
             block_number: 10,
             expires_at_unix: 2_000,
             sources: Vec::new(),
@@ -775,6 +776,7 @@ mod tests {
             amount_in: U256::from(900),
             amount_out: U256::from(850),
             route: CrossChainRoute::Direct,
+            price_impact_bps: None,
             block_number: 11,
             expires_at_unix: 2_000,
             sources: vec![ReservationSource {
@@ -793,6 +795,7 @@ mod tests {
                 amount_in: U256::from(1_000),
                 amount_out: U256::from(850),
                 bridge_fee: U256::ZERO,
+                price_impact_bps: None,
                 cctp_finality_threshold: None,
                 expires_at_unix: 2_000,
             },

@@ -144,6 +144,12 @@ pub struct LegQuote {
     #[schema(value_type = String)]
     pub amount_out: U256,
     pub route: CrossChainRoute,
+    /// The routed shortfall from this leg's best available rate, in basis points; `None` for a
+    /// leg that never routes (a direct-route origin escrow moves the amount unchanged). Carried in
+    /// bps, not percent, because these terms are compared for equality and content-hashed — the
+    /// routing solver produces bps anyway, so this is the exact figure rather than a lossy one.
+    #[serde(default)]
+    pub price_impact_bps: Option<u32>,
     pub block_number: u64,
     pub expires_at_unix: u64,
     /// Capital held locally at admission; the chain service remains authoritative for these terms.
@@ -163,6 +169,11 @@ pub struct AggregateQuote {
     pub amount_out: U256,
     #[schema(value_type = String)]
     pub bridge_fee: U256,
+    /// End-to-end routed shortfall across both legs, in basis points; `None` when neither leg
+    /// routed. Composed from the legs rather than read off the USD endpoints, so it states what
+    /// the route cost even for a pair the valuation feed cannot price.
+    #[serde(default)]
+    pub price_impact_bps: Option<u32>,
     pub cctp_finality_threshold: Option<u32>,
     pub expires_at_unix: u64,
 }

@@ -42,6 +42,7 @@ fn trade(id: TradeId, order: u8, taker: u8, status: TradeStatus) -> Trade {
         min_amount_out: U256::from(900u64),
         amount_out: None,
         status,
+        reason: None,
         deadline_block: 100,
         signature: Some(Bytes::from(vec![0xaa, 0xbb])),
         price_impact_pct: Some(0.42),
@@ -188,6 +189,7 @@ async fn settle_is_terminal_and_idempotent() {
             &id,
             &Settlement {
                 status: TradeStatus::Confirmed,
+                reason: None,
                 amount_out: Some(U256::from(950u64)),
                 tx_hash: Some(B256::from([9; 32])),
                 block_number: Some(123),
@@ -210,6 +212,7 @@ async fn settle_is_terminal_and_idempotent() {
             &id,
             &Settlement {
                 status: TradeStatus::Failed,
+                reason: Some("the fill did not land: reverted".to_owned()),
                 amount_out: None,
                 tx_hash: None,
                 block_number: None,
@@ -221,6 +224,51 @@ async fn settle_is_terminal_and_idempotent() {
     let t = store.info(&id).await.unwrap().unwrap().trade;
     assert_eq!(t.status, TradeStatus::Confirmed);
     assert_eq!(t.amount_out, Some(U256::from(950u64)));
+    assert_eq!(
+        t.reason, None,
+        "a replay cannot invent a reason for a fill that landed"
+    );
+}
+
+/// The decline reason is the only account of why a trade never filled, and it is written twice:
+/// once when the row is created and once by the settlement. Neither write may lose it — a reason
+/// recorded at create must survive a settlement that carries none.
+#[tokio::test]
+async fn a_recorded_decline_reason_survives_settlement() {
+    let store = setup().await;
+    let id = tid(1);
+    let declined = Trade {
+        reason: Some("no route covers this size at the signed limit".to_owned()),
+        ..trade(id, 1, 7, TradeStatus::Declined)
+    };
+    store
+        .create(&declined, &[], &created(1_700_000_000))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.info(&id).await.unwrap().unwrap().trade.reason,
+        declined.reason,
+        "the reason is durable from the moment the row exists"
+    );
+
+    store
+        .settle(
+            &id,
+            &Settlement {
+                status: TradeStatus::Declined,
+                reason: None,
+                amount_out: None,
+                tx_hash: None,
+                block_number: None,
+                at: 1_700_000_010,
+            },
+        )
+        .await
+        .unwrap();
+
+    let t = store.info(&id).await.unwrap().unwrap().trade;
+    assert_eq!(t.reason, declined.reason);
+    assert_eq!(t.settled_at, Some(1_700_000_010));
 }
 
 #[tokio::test]
@@ -334,6 +382,7 @@ async fn stats_counts_settled_confirmed_and_median_impact() {
     }
     let settlement = |status| Settlement {
         status,
+        reason: None,
         amount_out: Some(U256::from(900u64)),
         tx_hash: None,
         block_number: None,

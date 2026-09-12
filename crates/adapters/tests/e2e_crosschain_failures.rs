@@ -151,6 +151,7 @@ impl LegQuoter for FixedQuoter {
             amount_in: request.amount,
             amount_out,
             route: request.route,
+            price_impact_bps: None,
             block_number: self.chain.0,
             expires_at_unix: NOW + 300,
             sources,

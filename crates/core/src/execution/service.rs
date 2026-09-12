@@ -90,12 +90,14 @@ impl ExecutionService {
                 ExecStatus::Failed { reason } => {
                     settle(self.ledger.void(f.reservation).await)?;
                     warn!(intent = %f.intent, "fill did not land; reservation voided: {}", reason);
-                    SettledOutcome::Failed
+                    SettledOutcome::Failed { reason }
                 }
                 ExecStatus::Dropped => {
                     settle(self.ledger.void(f.reservation).await)?;
                     warn!(intent = %f.intent, "fill dropped from the mempool; reservation voided");
-                    SettledOutcome::Failed
+                    SettledOutcome::Failed {
+                        reason: "dropped from the mempool".to_owned(),
+                    }
                 }
                 ExecStatus::Pending => continue,
             };
@@ -436,7 +438,7 @@ mod tests {
         assert!(matches!(
             settled.as_slice(),
             [Settled {
-                outcome: SettledOutcome::Failed,
+                outcome: SettledOutcome::Failed { .. },
                 ..
             }]
         ));
