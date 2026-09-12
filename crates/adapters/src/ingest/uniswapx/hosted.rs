@@ -176,13 +176,15 @@ async fn poll_once(
             health.record_success(now_unix());
             records
                 .iter()
-                .filter_map(|record| match record.to_raw_order(chain) {
-                    Ok(raw) => Some(raw),
-                    Err(e) => {
-                        warn!("orders feed: unusable record {}: {}", record.order_hash, e);
-                        None
-                    }
-                })
+                .filter_map(
+                    |record| match record.to_raw_order(chain, client.protocol()) {
+                        Ok(raw) => Some(raw),
+                        Err(e) => {
+                            warn!("orders feed: unusable record {}: {}", record.order_hash, e);
+                            None
+                        }
+                    },
+                )
                 .collect()
         }
         Err(OrdersApiError::Refused) => {

@@ -350,6 +350,29 @@ the project is pre-1.0 and evolving.
     execution time if the epoch has moved on. Verified against real live orderbook data: every
     liquid-pair order this codebase currently has liquidity for (UNI/USDT, USDC/USDT, USDT/USDC)
     carries this bit, so refusing it outright meant refusing real, sourceable flow for no reason.
+  - **A second UniswapX feed: `Limit`-type orders, the original `ExclusiveDutchOrderReactor`** —
+    a separate deployment and order struct (`ExclusiveDutchOrder`, `ProtocolId::UniswapXV1`) from
+    the V2 reactor's `Dutch_V2` feed, wired up as its own independent feed/normalizer pair,
+    `uniswapx_v1_orders_api_url`/`uniswapx_v1_reactor`. Reuses the existing `UniswapXFillBuilder`
+    and deployed `UniswapXAquaFiller` — both only ever forward `intent.settler`/`raw`/`signature`
+    opaquely, with no reactor-generation-specific logic to duplicate. The wire format was pinned
+    against a real order pulled from the live API rather than assumed from the plain
+    (non-exclusive) `DutchOrderLib` docs, which are two fields short of what the reactor this
+    order type actually serves carries (`exclusiveFiller`/`exclusivityOverrideBps`) — decoding the
+    assumed shape against real data failed outright until corrected. A second real-data mismatch:
+    a fully flat order (no price movement, `decayStartTime == decayEndTime`) is common in live
+    `Limit` flow, and the real `DutchDecayLib.decay` special-cases `startAmount == endAmount`
+    before it ever looks at the window — a flat leg never reverts on `EndTimeBeforeStartTime`, even
+    with a zero-width window. The normalizer initially rejected these outright; fixed to only
+    require a valid window for a leg that actually decays, mirroring the contract's own check
+    order, verified against real fetched orders that were being wrongly refused.
+    Proven end to end on a mainnet fork: `UniswapXV1AquaFillerFork.t.sol` fills a real order
+    against the real deployed `ExclusiveDutchOrderReactor` through the same policy-authorized
+    `UniswapXAquaFiller` contract — no contract change needed for this reactor generation.
+  - **The order-feed pipeline and decision loop now start whenever at least one feed is
+    configured** (UniswapX V2, UniswapX V1, or 1inch), not only under UniswapX V2's own key —
+    previously a deployment running only the 1inch or V1 feed would have left the entire ingest
+    pipeline inert despite looking fully configured.
 
 ### Added — frontend (`fe/`, React + Vite)
 - **Live Makers and strategy details** — connect the original dashboard and strategy panels to

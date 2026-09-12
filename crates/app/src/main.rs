@@ -25,7 +25,7 @@ use solvent_adapters::ingest::oneinch::{
 };
 use solvent_adapters::ingest::uniswapx::{
     FeedHealth, HostedFeed, OrdersApiClient, Scope, ServerCosigner, UniswapXFillBuilder,
-    UniswapXV2Normalizer,
+    UniswapXV1Normalizer, UniswapXV2Normalizer,
 };
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteOrderLog, SqliteQuoteLog};
@@ -416,15 +416,18 @@ async fn main() -> Result<(), StartupError> {
     // which would otherwise read as a real fillable order and broadcast a pointless, gas-spending
     // transaction. Leaving the builder out entirely when unset makes that protocol decline the same
     // clean way an unregistered one already does, instead of silently misreporting as submitted.
-    let mut fill_builders: BTreeMap<ProtocolId, Arc<dyn FillBuilder>> = BTreeMap::from([(
-        ProtocolId::UniswapXV2,
-        Arc::new(UniswapXFillBuilder::new(
-            config.app_address,
-            config.filler,
-            taker_credential,
-            Arc::clone(&authorizer),
-        )) as Arc<dyn FillBuilder>,
-    )]);
+    // `Limit`-type (V1) orders reuse this same builder: it only forwards `intent.settler`/`raw`/
+    // `signature` opaquely and reads no reactor-generation-specific fields.
+    let uniswapx_fill_builder: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(
+        config.app_address,
+        config.filler,
+        taker_credential,
+        Arc::clone(&authorizer),
+    ));
+    let mut fill_builders: BTreeMap<ProtocolId, Arc<dyn FillBuilder>> = BTreeMap::from([
+        (ProtocolId::UniswapXV2, Arc::clone(&uniswapx_fill_builder)),
+        (ProtocolId::UniswapXV1, uniswapx_fill_builder),
+    ]);
     if config.oneinch_filler != Address::ZERO {
         fill_builders.insert(
             ProtocolId::OneInchLimitOrder,
@@ -492,7 +495,10 @@ async fn main() -> Result<(), StartupError> {
     // the only way to see one. Left off entirely when neither endpoint is configured, in which case
     // the resolver takes orders solely from its own submit path.
     let mut feed_health_handle: Option<Arc<FeedHealth>> = None;
-    if config.orders_api_url.is_some() || config.oneinch_orderbook_url.is_some() {
+    if config.orders_api_url.is_some()
+        || config.uniswapx_v1_orders_api_url.is_some()
+        || config.oneinch_orderbook_url.is_some()
+    {
         // Fall back to the token list: those are the assets the registry can price, so nothing
         // outside them is fillable anyway.
         let admitted: BTreeSet<Address> = match config.admitted_tokens.is_empty() {
@@ -522,6 +528,7 @@ async fn main() -> Result<(), StartupError> {
                     orders_api_url,
                     ChainId(config.chain_id),
                     config.order_type.clone(),
+                    ProtocolId::UniswapXV2,
                 )
                 .map_err(|e| StartupError::OrdersFeed(e.to_string()))?,
             );
@@ -539,6 +546,37 @@ async fn main() -> Result<(), StartupError> {
                 Arc::clone(&feed_health),
             ));
             feeds.push(feed);
+        }
+
+        // The Orders API's `Limit` order type: UniswapX's original `ExclusiveDutchOrderReactor`,
+        // a separate deployment (and struct shape) from the V2 reactor above. Independent gate;
+        // reuses the same `UniswapXFillBuilder` since it only forwards `intent.settler`/`raw`/
+        // `signature` opaquely and never assumes a particular reactor generation.
+        if let Some(v1_url) = config.uniswapx_v1_orders_api_url.clone() {
+            normalizers.insert(
+                ProtocolId::UniswapXV1,
+                Arc::new(UniswapXV1Normalizer::new(config.uniswapx_v1_reactor)),
+            );
+            let v1_client = Arc::new(
+                OrdersApiClient::new(
+                    v1_url,
+                    ChainId(config.chain_id),
+                    "Limit".to_string(),
+                    ProtocolId::UniswapXV1,
+                )
+                .map_err(|e| StartupError::OrdersFeed(e.to_string()))?,
+            );
+            let v1_health = Arc::new(FeedHealth::new(Duration::from_secs(
+                config.feed_silence_secs,
+            )));
+            let v1_feed: Arc<dyn OrderFeed> = Arc::new(HostedFeed::new(
+                v1_client,
+                ChainId(config.chain_id),
+                vec![Scope::ExclusiveTo(config.filler), Scope::Book],
+                Duration::from_millis(config.order_poll_ms),
+                v1_health,
+            ));
+            feeds.push(v1_feed);
         }
 
         if let Some(oneinch_url) = config.oneinch_orderbook_url.clone() {

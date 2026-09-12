@@ -125,6 +125,15 @@ pub struct Config {
     #[serde(default = "default_dedup_ttl_secs")]
     pub dedup_ttl_secs: u64,
 
+    /// Root of the Orders API's `Limit` order type — UniswapX's original `ExclusiveDutchOrderReactor`
+    /// deployment, distinct from `order_type`'s `Dutch_V2` reactor above. Unset leaves this second
+    /// feed off; independent of `orders_api_url` in both directions.
+    #[serde(default)]
+    pub uniswapx_v1_orders_api_url: Option<String>,
+    /// The real `ExclusiveDutchOrderReactor` a `Limit`-type order settles through.
+    #[serde(default)]
+    pub uniswapx_v1_reactor: Address,
+
     /// Root of 1inch's Orderbook API, or unset to leave this feed off. Requires `ONEINCH_API_KEY`
     /// in the environment when set.
     #[serde(default)]
