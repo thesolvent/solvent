@@ -107,15 +107,7 @@ impl SwapService {
         if !self.fill_builder.supports(intent.protocol) {
             // Observed and quoted upstream, but this protocol has no builder to fill it with.
             return self
-                .declined(
-                    trade_id,
-                    &intent,
-                    taker,
-                    now,
-                    prices,
-                    None,
-                    "no fill builder registered for this protocol",
-                )
+                .declined(trade_id, &intent, taker, now, prices, None)
                 .await;
         }
         let Some(amounts) = swap_amounts(&intent, self.config.filler, now) else {
