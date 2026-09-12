@@ -691,6 +691,10 @@
   font-size: 10px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  /* Shares a row with a figure that has first claim on the space; it gives way rather than
+     spilling over the cell beside it. */
+  min-width: 0;
+  overflow: hidden;
 }
 
 .refreshDot {
@@ -941,10 +945,39 @@
   }
 }
 
+.placeholderRow {
+  composes: tradeRow;
+  cursor: default;
+}
+
+.placeholderActivityRow {
+  composes: activityRow;
+  cursor: default;
+}
+
+/**
+ * A bar where the text will be. It carries the same class as the value it stands in for, so the
+ * line box — and the row height — is the one the arriving data will occupy.
+ */
+.skeleton {
+  display: block;
+  color: transparent;
+  border-radius: 2px;
+  background: var(--surface);
+  animation: skeleton-fade 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-fade {
+  50% {
+    opacity: 0.45;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .liveStatus,
   .step .stepFill,
   [aria-current="step"] .stepBar::after,
+  .skeleton,
   .freshness .refreshDot {
     animation: none;
   }

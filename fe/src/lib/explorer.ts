@@ -4,9 +4,12 @@ import type {
   TokenQuantity,
   TradeRecord,
 } from "@/data/explorer";
+import { GLOSSARY, STATUS_TERMS } from "@/lib/glossary";
+import { isHaltedTrade, isTerminalTrade } from "@/lib/trade-lifecycle";
 import {
   DASH,
   LOCALE,
+  blockNumber,
   count,
   percent,
   tokenWithSymbol,
@@ -37,13 +40,29 @@ function timestamp(at: number | null): string {
       });
 }
 
+/** A gap in seconds, at the coarsest unit that still carries the decision. */
+function span(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86400)}d`;
+}
+
 export function relativeTime(at: number | null, now = Date.now()): string {
   if (at == null) return DASH;
-  const seconds = Math.max(0, Math.floor(now / 1000) - at);
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
+  return `${span(Math.max(0, Math.floor(now / 1000) - at))} ago`;
+}
+
+/**
+ * A deadline as a distance from now.
+ *
+ * While an order can still be filled the only fact that changes a decision is how long is left;
+ * the wall-clock time it was signed for is kept on the row's title for anyone reconciling logs.
+ */
+export function countdown(at: number | null, now = Date.now()): string {
+  if (at == null) return DASH;
+  const seconds = at - Math.floor(now / 1000);
+  return seconds > 0 ? `in ${span(seconds)}` : `expired ${span(-seconds)} ago`;
 }
 
 export function explorerUrl(
@@ -67,9 +86,9 @@ export function explorerStats(stats: ExplorerStats | undefined) {
     {
       label: "Block height",
       term: "blockHeight" as const,
-      value: count(stats?.blockHeight),
-      sub: "live",
-      accent: "var(--green)",
+      value: blockNumber(stats?.blockHeight),
+      sub: "",
+      accent: "var(--text-muted)",
     },
     {
       label: "Events, 24h",
@@ -118,7 +137,7 @@ export function tradeRow(trade: TradeRecord) {
     blockLabel:
       trade.blockNumber == null
         ? "not settled"
-        : `blk ${count(trade.blockNumber)}`,
+        : `blk ${blockNumber(trade.blockNumber)}`,
     input: tokenText(trade.input),
     output: `${trade.status === "confirmed" ? "" : "min. "}${tokenText(trade.output)}`,
     makers: count(trade.makers),
@@ -160,7 +179,7 @@ export function activityRow(record: ActivityRecord) {
     kindFg: kind.color,
     who: truncateAddress(record.maker),
     tx: truncateHash(record.txHash),
-    when: `${record.blockNumber == null ? "block unknown" : `blk ${count(record.blockNumber)}`} · ${relativeTime(record.at)}`,
+    when: `${record.blockNumber == null ? "block unknown" : `blk ${blockNumber(record.blockNumber)}`} · ${relativeTime(record.at)}`,
     flow: record.amount
       ? tokenText(record.amount)
       : record.kind === "docked"
@@ -170,8 +189,10 @@ export function activityRow(record: ActivityRecord) {
   };
 }
 
-export function tradeDetail(trade: TradeRecord) {
+export function tradeDetail(trade: TradeRecord, now = Date.now()) {
   const row = tradeRow(trade);
+  const halted = isHaltedTrade(trade.status);
+  const statusTerm = STATUS_TERMS[trade.status];
   return {
     title: `Trade #${trade.id}`,
     status: trade.status,
@@ -215,16 +236,25 @@ export function tradeDetail(trade: TradeRecord) {
         value: truncateHash(trade.orderHash),
         fullValue: trade.orderHash ?? DASH,
       },
-      { label: "Deadline", value: timestamp(trade.deadlineAt) },
+      {
+        label: "Deadline",
+        // Once the trade is terminal the countdown is history; the signed time is the useful fact.
+        value: isTerminalTrade(trade.status)
+          ? timestamp(trade.deadlineAt)
+          : countdown(trade.deadlineAt, now),
+        fullValue: timestamp(trade.deadlineAt),
+      },
       {
         label: "Signature",
         value: trade.signaturePresent ? "Provided" : DASH,
       },
     ],
-    profit: trade.surplus ? tokenText(trade.surplus) : DASH,
-    profitTag: ["declined", "failed"].includes(trade.status)
-      ? `not earned — ${trade.status}`
-      : "route estimate · net of estimated gas",
+    profitLabel: halted ? "Not earned" : "Expected profit",
+    profit: halted || !trade.surplus ? DASH : tokenText(trade.surplus),
+    profitTag:
+      halted && statusTerm
+        ? GLOSSARY[statusTerm]
+        : "route estimate · net of estimated gas",
     empty: trade.legs.length === 0,
     emptyText: "No maker legs recorded for this order.",
   };

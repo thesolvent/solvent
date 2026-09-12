@@ -1,10 +1,16 @@
 import type { CSSProperties } from "react";
 import type { TradeRecord } from "@/data/explorer";
 import { isTerminalTrade, tradeLifecycle } from "@/lib/trade-lifecycle";
+import { STATUS_TERMS } from "@/lib/glossary";
+import { Term } from "@/components/Tooltip";
 import styles from "./explorer.module.css";
 
 export function TradeLifecycle({ trade }: { trade: TradeRecord }) {
   const lifecycle = tradeLifecycle(trade);
+  const stopped = lifecycle.stoppedAt
+    ? `Stopped at ${lifecycle.stoppedAt}`
+    : "Stopped before the first stage";
+  const term = STATUS_TERMS[trade.status];
   return (
     <div className={styles.lifecycle}>
       <span
@@ -13,17 +19,29 @@ export function TradeLifecycle({ trade }: { trade: TradeRecord }) {
         aria-atomic="true"
         className={styles.srOnly}
       >
-        Trade {trade.status}. {lifecycle.recordedCount} of{" "}
-        {lifecycle.steps.length} stages recorded.
+        Trade {trade.status}.{" "}
+        {lifecycle.halted
+          ? `${stopped}.`
+          : `${lifecycle.recordedCount} of ${lifecycle.steps.length} stages recorded.`}
       </span>
       <div className={styles.lifecycleHead}>
         <div className={styles.lifecycleTitleRow}>
           <span className={styles.sectionTitle}>Lifecycle</span>
           <span className={styles.lifecycleCount}>
-            <span className={styles.lifecycleCountStrong}>
-              {lifecycle.recordedCount}
-            </span>{" "}
-            of {lifecycle.steps.length} stages complete
+            {lifecycle.halted ? (
+              <>
+                <span className={styles.lifecycleCountStrong}>{stopped}</span>
+                {" · "}
+                {term ? <Term term={term}>{trade.status}</Term> : trade.status}
+              </>
+            ) : (
+              <>
+                <span className={styles.lifecycleCountStrong}>
+                  {lifecycle.recordedCount}
+                </span>{" "}
+                of {lifecycle.steps.length} stages complete
+              </>
+            )}
           </span>
         </div>
         <span className={styles.lifecycleTotal}>

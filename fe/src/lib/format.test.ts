@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  blockNumber,
   DASH,
   count,
   percent,
@@ -141,5 +142,13 @@ describe("count", () => {
     expect(count(1234567)).toBe("1,234,567");
     expect(count(0)).toBe("0");
     expect(count(null)).toBe(DASH);
+  });
+});
+
+describe("blockNumber", () => {
+  it("leaves a block height ungrouped so it reads as an identifier", () => {
+    expect(blockNumber(1234567)).toBe("1234567");
+    expect(blockNumber(0)).toBe("0");
+    expect(blockNumber(null)).toBe(DASH);
   });
 });

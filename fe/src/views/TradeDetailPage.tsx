@@ -235,7 +235,7 @@ export function TradeDetailPage() {
           <div className={styles.profit}>
             <div className={styles.profitHead}>
               <span className={styles.profitSwatch} />
-              <span className={styles.profitLabel}>Expected profit</span>
+              <span className={styles.profitLabel}>{detail.profitLabel}</span>
             </div>
             <div className={styles.profitValue}>{detail.profit}</div>
             <div className={styles.profitTag}>{detail.profitTag}</div>

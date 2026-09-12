@@ -74,7 +74,7 @@ describe("Explorer live lists", () => {
       expect(
         screen.getByRole("link", { name: "Open trade trade-1" }),
       ).toBeInTheDocument();
-      expect(screen.getByText("91,001")).toBeInTheDocument();
+      expect(screen.getByText("91001")).toBeInTheDocument();
       expect(pools).toHaveBeenCalledTimes(2);
 
       unavailable = true;
@@ -114,12 +114,58 @@ describe("Explorer live lists", () => {
       expect(
         screen.getByRole("link", { name: "Open trade trade-3" }),
       ).toBeInTheDocument();
-      expect(screen.getByText("91,003")).toBeInTheDocument();
+      expect(screen.getByText("91003")).toBeInTheDocument();
     } finally {
       view.unmount();
       focusManager.setFocused(undefined);
       onlineManager.setOnline(true);
       vi.useRealTimers();
+    }
+  });
+
+  it('reports the block height\'s real refresh state instead of a permanent "live"', async () => {
+    const healthy = renderWithServices(<ExplorerPage />, {
+      ...common,
+      explorer: {
+        trades: vi.fn().mockResolvedValue({ items: [] }),
+        stats: vi.fn().mockResolvedValue(toStats(stats)),
+      },
+    });
+    expect(await screen.findByText(/^Updated ·/)).toBeInTheDocument();
+    healthy.unmount();
+
+    const stalled = renderWithServices(<ExplorerPage />, {
+      ...common,
+      explorer: {
+        trades: vi.fn().mockResolvedValue({ items: [] }),
+        stats: vi.fn().mockRejectedValue(new Error("temporarily unavailable")),
+      },
+    });
+    try {
+      expect(await screen.findByText("Refresh delayed")).toBeInTheDocument();
+      expect(screen.queryByText(/^Updated/)).not.toBeInTheDocument();
+    } finally {
+      stalled.unmount();
+    }
+  });
+
+  it("holds the list's shape while the first page loads", async () => {
+    const view = renderWithServices(<ExplorerPage />, {
+      ...common,
+      explorer: {
+        trades: vi.fn().mockReturnValue(new Promise(() => {})),
+        stats: vi.fn().mockResolvedValue(toStats(stats)),
+      },
+    });
+    try {
+      expect(
+        view.container.querySelectorAll('[data-placeholder="row"]'),
+      ).toHaveLength(10);
+      expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
+        "Loading trades…",
+      );
+    } finally {
+      view.unmount();
     }
   });
 

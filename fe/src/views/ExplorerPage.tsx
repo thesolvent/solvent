@@ -18,11 +18,17 @@ import {
   useRebates,
 } from "@/services/rebates";
 import { Term } from "@/components/Tooltip";
+import { QueryFreshness } from "./QueryFreshness";
 import { EVENT_TERMS, STATUS_TERMS } from "@/lib/glossary";
 
 import styles from "./explorer.module.css";
 
 const TABS = ["Trades", "Activity", "Rebates"] as const;
+
+/** Trades are served ten to a page; the placeholder shows the page that is coming. */
+const PAGE_SIZE = 10;
+/** Activity rows are twice the height, so fewer fill the same list. */
+const ACTIVITY_PLACEHOLDER_ROWS = 6;
 
 /** Each filter's options, the first being its default. Tab and filters live in the query string so
  *  a view can be shared, restored by Back and survive a reload; a default is left out of the URL,
@@ -108,14 +114,95 @@ function FilterDrop({
   );
 }
 
+/** One line of text, standing in for a value that has not arrived. */
+function Bar({ className, width }: { className: string; width: string }) {
+  return (
+    <span className={`${className} ${styles.skeleton}`} style={{ width }}>
+      &nbsp;
+    </span>
+  );
+}
+
+/**
+ * Rows in the shape of the ones being fetched.
+ *
+ * A line of prose where a dense list will land moves every row the moment data arrives, so the
+ * placeholder is the real row markup with its values blanked: same grid, same line boxes, same
+ * height. Hidden from assistive tech — the list's own `role="status"` does the announcing.
+ */
+function PlaceholderRows({
+  rows,
+  variant,
+}: {
+  rows: number;
+  variant: "trade" | "activity";
+}) {
+  return (
+    <>
+      {Array.from({ length: rows }, (_, index) =>
+        variant === "trade" ? (
+          <div
+            key={index}
+            className={styles.placeholderRow}
+            data-placeholder="row"
+            aria-hidden="true"
+          >
+            <span className={styles.tradePair}>
+              <Bar className={styles.tradePairName} width="58%" />
+              <Bar className={styles.tradeBlk} width="40%" />
+            </span>
+            <span className={styles.tradeFlow}>
+              <Bar className={styles.tradeIn} width="42%" />
+              <Bar className={styles.tradeOut} width="42%" />
+            </span>
+            <span className={styles.tradeCell}>
+              <Bar className={styles.tradeCellValue} width="40%" />
+              <Bar className={styles.tradeCellLabel} width="72%" />
+            </span>
+            <span className={styles.tradeCell}>
+              <Bar className={styles.tradeCellValue} width="62%" />
+              <Bar className={styles.tradeCellLabel} width="58%" />
+            </span>
+            <span className={styles.tradeStatusCell}>
+              <Bar className={styles.statusPill} width="58px" />
+              <Bar className={styles.tradeTx} width="84%" />
+            </span>
+            <span className={styles.chevron} />
+          </div>
+        ) : (
+          <div
+            key={index}
+            className={styles.placeholderActivityRow}
+            data-placeholder="row"
+            aria-hidden="true"
+          >
+            <div className={styles.activityTop}>
+              <Bar className={styles.mono} width="112px" />
+              <Bar className={styles.kindTag} width="46px" />
+              <Bar className={styles.who} width="88px" />
+              <span className={styles.spacer} />
+              <Bar className={styles.when} width="132px" />
+            </div>
+            <div className={styles.activityBottom}>
+              <Bar className={styles.flow} width="28%" />
+              <span className={styles.spacer} />
+              <Bar className={styles.activityText} width="26%" />
+            </div>
+          </div>
+        ),
+      )}
+    </>
+  );
+}
+
 function TradeList({ filter }: { filter: TradeFilter }) {
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
   const query = useTrades(filter, cursors.at(-1));
   const rows = query.data?.items.map(tradeRow) ?? [];
   const page = cursors.length - 1;
   const hasNextPage = Boolean(query.data?.nextCursor);
-  const first = page * 10 + 1;
-  const last = page * 10 + rows.length;
+  const first = page * PAGE_SIZE + 1;
+  const last = page * PAGE_SIZE + rows.length;
   const pageLabel = rows.length
     ? `Showing ${first}–${last}${hasNextPage ? "" : ` of ${last}`} trades`
     : "No trades on this page";
@@ -134,9 +221,12 @@ function TradeList({ filter }: { filter: TradeFilter }) {
     <>
       <div data-scroll="1" className={styles.list} aria-busy={query.isFetching}>
         {query.isPending && (
-          <p className={styles.emptyNote} role="status">
-            Loading trades…
-          </p>
+          <>
+            <p className={styles.srOnly} role="status">
+              Loading trades…
+            </p>
+            <PlaceholderRows rows={PAGE_SIZE} variant="trade" />
+          </>
         )}
         {query.isError && (
           <p className={styles.emptyNote} role="alert">
@@ -211,9 +301,15 @@ function ActivityList({ filter }: { filter: ActivityFilter }) {
     <>
       <div data-scroll="1" className={styles.list} aria-busy={query.isFetching}>
         {query.isPending && (
-          <p className={styles.emptyNote} role="status">
-            Loading activity…
-          </p>
+          <>
+            <p className={styles.srOnly} role="status">
+              Loading activity…
+            </p>
+            <PlaceholderRows
+              rows={ACTIVITY_PLACEHOLDER_ROWS}
+              variant="activity"
+            />
+          </>
         )}
         {query.isError && (
           <p className={styles.emptyNote} role="alert">
@@ -437,11 +533,15 @@ export function ExplorerPage() {
             </div>
             <div className={styles.statRow}>
               <span className={styles.statValue}>{stat.value}</span>
-              <span className={styles.statSub} style={{ color: stat.accent }}>
-                {stats.isError && stat.label === "Block height"
-                  ? "updates delayed"
-                  : stat.sub}
-              </span>
+              {/* The head of the chain is the one figure whose age matters, so it carries the
+                  poll's real state rather than a permanent "live". */}
+              {stat.term === "blockHeight" ? (
+                <QueryFreshness query={stats} />
+              ) : (
+                <span className={styles.statSub} style={{ color: stat.accent }}>
+                  {stat.sub}
+                </span>
+              )}
             </div>
           </div>
         ))}

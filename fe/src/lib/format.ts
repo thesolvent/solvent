@@ -75,9 +75,24 @@ export function usd(value: Maybe, options?: { compact?: boolean }): string {
   return USD_FULL.format(value);
 }
 
-/** A plain count of things — blocks, fills, events. */
+/** A plain count of things — fills, events, makers. */
 export function count(value: Maybe): string {
   return absent(value) ? DASH : value.toLocaleString(LOCALE);
+}
+
+/**
+ * A block number.
+ *
+ * An identifier, not a quantity: grouped as `39,064` it reads as an amount of something, and two
+ * heights a thousand apart stop being comparable at a glance.
+ */
+export function blockNumber(value: Maybe): string {
+  return absent(value)
+    ? DASH
+    : value.toLocaleString(LOCALE, {
+        useGrouping: false,
+        maximumFractionDigits: 0,
+      });
 }
 
 /**

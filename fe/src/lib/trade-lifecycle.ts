@@ -20,8 +20,13 @@ const CROSS_CHAIN_STAGES = [
 type StageState =
   "recorded" | "not recorded" | "not reached" | "awaiting" | "pending";
 
+/** A trade that stopped short of settling: nothing further will be recorded, and nothing filled. */
+export function isHaltedTrade(status: string): boolean {
+  return ["declined", "failed"].includes(status);
+}
+
 export function isTerminalTrade(status: string): boolean {
-  return ["confirmed", "declined", "failed"].includes(status);
+  return status === "confirmed" || isHaltedTrade(status);
 }
 
 /** Status identifies progress; only lifecycle events establish that a stage was recorded. */
@@ -55,8 +60,12 @@ export function tradeLifecycle(trade: TradeRecord) {
         typeof at !== "number" ? null : Math.max(0, at - trade.createdAt),
     };
   });
+  const halted = isHaltedTrade(trade.status);
   return {
     steps,
+    halted,
+    // Where it got to, so a halted trade reads as stopped at a stage rather than part-way to one.
+    stoppedAt: halted && latestStage >= 0 ? stages[latestStage] : null,
     recordedCount: steps.filter((step) => step.state === "recorded").length,
     elapsedSeconds:
       trade.settledAt === null

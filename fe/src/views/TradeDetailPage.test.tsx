@@ -22,6 +22,39 @@ function routes() {
 }
 
 describe("Trade detail navigation", () => {
+  it("reads a declined trade as stopped, not as partial progress", async () => {
+    const read = vi.fn().mockResolvedValue(
+      toTrade({
+        ...detail,
+        status: "declined",
+        tx_hash: undefined,
+        block_number: undefined,
+        surplus: undefined,
+        legs: [],
+        settled_at: undefined,
+        lifecycle: [
+          { status: "created", at: detail.created_at },
+          { status: "quoted", at: detail.created_at },
+        ],
+      }),
+    );
+    renderWithServices(
+      routes(),
+      {
+        explorer: { trade: read },
+        system: { config: vi.fn().mockResolvedValue({}) },
+      },
+      `/explorer/trades/${detail.id}`,
+    );
+    expect(await screen.findByText("Stopped at Quoted")).toBeInTheDocument();
+    expect(screen.queryByText(/stages complete/)).not.toBeInTheDocument();
+    expect(screen.getByText("Not earned")).toBeInTheDocument();
+    expect(screen.queryByText("Expected profit")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Trade declined. Stopped at Quoted.",
+    );
+  });
+
   it("refreshes a submitted intent until it is confirmed, then stops polling", async () => {
     vi.useFakeTimers();
     const read = vi
