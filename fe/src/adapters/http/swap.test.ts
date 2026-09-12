@@ -177,11 +177,11 @@ describe("swap HTTP adapter invariants", () => {
     };
     api.origin.config.mockResolvedValue({
       chain_id: 31337,
-      networks: ["Ethereum"],
+      chains: [{ chain_id: 31337, name: "Ethereum", logo_uri: null }],
     });
     api.destination.config.mockResolvedValue({
       chain_id: 31338,
-      networks: ["Base"],
+      chains: [{ chain_id: 31338, name: "Base", logo_uri: null }],
     });
     api.origin.assets.mockResolvedValue({
       items: [{ ...baseLink, address: originLink.address }],

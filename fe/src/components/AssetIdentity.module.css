@@ -22,17 +22,26 @@
 .token {
   background: var(--line-faint);
   color: var(--text-strong);
+  position: relative;
 }
 
-.token img {
+/* Layered over the initials rather than replacing them, so a request that hangs still reads. */
+.token img,
+.chain img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  border-radius: inherit;
 }
 
 .chain {
-  margin-left: -6px;
   background: var(--lime);
   color: var(--ink);
   position: relative;
+}
+
+.trailing {
+  margin-left: -6px;
 }

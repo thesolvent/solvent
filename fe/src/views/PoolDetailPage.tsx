@@ -5,6 +5,7 @@ import { Crumbs } from "@/components/Crumbs";
 import { poolDetail } from "@/lib/pool-detail";
 import { tokenText } from "@/lib/explorer";
 import { useTrades } from "@/services/explorer";
+import { Term } from "@/components/Tooltip";
 import { usePool, usePoolDepth, usePoolRoster } from "@/services/pools";
 import { useApp } from "@/state";
 import { QueryFreshness } from "./QueryFreshness";
@@ -65,7 +66,9 @@ export function PoolDetailPage() {
           <section className={styles.kpiWide}>
             <div className={styles.kpiTag}>
               <span className={styles.kpiSwatch} />
-              <span className={styles.kpiLabel}>Depth</span>
+              <span className={styles.kpiLabel}>
+                <Term term="tvl">Depth</Term>
+              </span>
             </div>
             <div>
               <div className={styles.kpiRow}>
@@ -74,7 +77,9 @@ export function PoolDetailPage() {
                   <span className={styles.kpiDelta}>{d.tvlChange}</span>
                 )}
               </div>
-              <div className={styles.kpiSub}>Total value locked</div>
+              <div className={styles.kpiSub}>
+                <Term term="tvl">Total value locked</Term>
+              </div>
             </div>
             <div className={styles.kpiFoot}>
               Zero-inventory fills routed through{" "}
@@ -85,7 +90,9 @@ export function PoolDetailPage() {
           <section className={styles.kpiDark}>
             <div className={styles.kpiTag}>
               <span className={styles.kpiSwatch} />
-              <span className={styles.kpiLabelDark}>Net APR</span>
+              <span className={styles.kpiLabelDark}>
+                <Term term="netApr">Net APR</Term>
+              </span>
             </div>
             <div>
               <div className={styles.kpiValueLime}>{d.apr}</div>
@@ -133,7 +140,7 @@ export function PoolDetailPage() {
                   }
                   onClick={() => set({ makerSort: t })}
                 >
-                  {t}
+                  <Term term={t === "Virtual" ? "virtual" : "actual"}>{t}</Term>
                 </button>
               ))}
             </div>

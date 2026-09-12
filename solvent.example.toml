@@ -16,7 +16,7 @@ app_address = "0x0000000000000000000000000000000000000000"
 
 default_fee_bps = 5
 block_explorer_url = "http://localhost:5100"
-networks = ["Ethereum"]
+chains = [{ chain_id = 31337, name = "Ethereum", logo_uri = "/chains/ethereum.png" }]
 faucet = true
 
 # Token metadata (Uniswap Token List JSON). Addresses must match the devnet deploy.

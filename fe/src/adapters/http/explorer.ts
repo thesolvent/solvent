@@ -6,7 +6,7 @@ import {
   toStats,
   toTrade,
 } from "../mappers/explorer";
-import { toAsset } from "../mappers/asset";
+import { chainsOf, toAsset } from "../mappers/asset";
 import {
   baseApi,
   crossChainApi,
@@ -54,14 +54,12 @@ export const explorerAdapter: ExplorerPort = {
         baseApi.assets(),
         baseApi.config(),
       ]);
+      // Both deployments' chains, so each asset is named by its own id, not by who answered.
+      const known = [...chainsOf(originConfig), ...chainsOf(destinationConfig)];
       return toCrossChainTrade(
         order,
-        originAssets.items.map((asset) =>
-          toAsset(asset, originConfig.networks[0] ?? "Unknown"),
-        ),
-        destinationAssets.items.map((asset) =>
-          toAsset(asset, destinationConfig.networks[0] ?? "Unknown"),
-        ),
+        originAssets.items.map((asset) => toAsset(asset, known)),
+        destinationAssets.items.map((asset) => toAsset(asset, known)),
       );
     }
   },

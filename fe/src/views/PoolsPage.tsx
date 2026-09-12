@@ -1,3 +1,4 @@
+import { Term } from "@/components/Tooltip";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -306,12 +307,16 @@ export function PoolsPage() {
                   <div className={styles.poolFee}>
                     <span className={styles.poolFeeChip} />
                     <div style={{ minWidth: 0 }}>
-                      <div className={styles.poolMicro}>Fee tier</div>
+                      <div className={styles.poolMicro}>
+                        <Term term="feeTier">Fee tier</Term>
+                      </div>
                       <div className={styles.poolFeeValue}>{p.fee}</div>
                     </div>
                   </div>
                   <div className={styles.poolApr}>
-                    <div className={styles.poolMicro}>Net APR</div>
+                    <div className={styles.poolMicro}>
+                      <Term term="netApr">Net APR</Term>
+                    </div>
                     <div className={styles.poolAprValue}>{p.apr}</div>
                   </div>
                 </div>

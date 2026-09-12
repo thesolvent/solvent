@@ -25,7 +25,9 @@
 .cardHead {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* The head carries one control now that the single-tab strip is gone. It stays on the trailing
+     edge because the protocol menu hangs from its right edge, and the card clips overflow. */
+  justify-content: flex-end;
   padding: 14px 16px;
   border-bottom: 1px solid var(--line);
 }
@@ -545,6 +547,17 @@
   font-size: 12px;
   font-weight: 700;
   flex: none;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Layered over the initials rather than replacing them, so a request that hangs still reads. */
+.tokenChip img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .tokenMain {

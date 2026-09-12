@@ -6,6 +6,23 @@ the project is pre-1.0 and evolving.
 
 ## [Unreleased]
 
+### Added — asset marks and a term glossary
+
+- **Token and chain artwork** — `Token` carries the token list's `logo_uri`, and the devnet token
+  list points each entry at a bundled mark, so pools, trades, the roster and balances can draw one.
+  The swap asset pills and picker rows layer the mark over the initials they already drew, so a
+  request that hangs still reads.
+- **Glossary tooltips** — a `Term` component defines the terms that decide money, portalled past the
+  panels whose `overflow: hidden` would clip them, and reachable by keyboard as well as pointer.
+  Wired into the pools list, pool detail, swap route stats, and the maker KPIs.
+
+### Changed — chains replace network names
+
+- **`Chain { chain_id, name, logo_uri }` replaces `networks: Vec<String>`** in `/config` and the
+  config file. This fixes a live mislabelling bug: the FE named every asset after whichever
+  deployment answered for it, so on a cross-chain trade the destination's assets carried the
+  origin's chain name. An asset is now named from its own chain id.
+
 ### Changed — frontend wallet experience
 
 - **Privy wallet integration** — supports embedded and external EVM wallets through Privy + Wagmi,

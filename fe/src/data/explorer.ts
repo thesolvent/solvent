@@ -3,6 +3,8 @@ export interface TokenQuantity {
   display: string;
   net?: string;
   logoUri?: string | null;
+  /** The mark of the chain this side settles on, when the deployment names one. */
+  chainLogoUri?: string | null;
 }
 
 export interface TradeStage {

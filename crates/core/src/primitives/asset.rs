@@ -36,6 +36,8 @@ pub struct Token {
     pub chain_id: u64,
     pub symbol: String,
     pub decimals: u8,
+    /// The token list's icon, when it carried one.
+    pub logo_uri: Option<String>,
 }
 
 /// The complete picture of one asset: identity + static metadata + market + protocol status. Every

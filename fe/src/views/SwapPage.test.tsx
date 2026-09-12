@@ -121,7 +121,7 @@ const ERC7683_CONFIG: AppConfig = {
   erc7683_settler: "0x5555555555555555555555555555555555555555",
   features: { earn: false, faucet: true, send_buy: false },
   filler: "0x6666666666666666666666666666666666666666",
-  networks: ["Ethereum"],
+  chains: [{ chain_id: 31337, name: "Ethereum", logo_uri: null }],
   permit2: "0x7777777777777777777777777777777777777777",
   reactor: "0x8888888888888888888888888888888888888888",
   taker_credential: "0x9999999999999999999999999999999999999999",
