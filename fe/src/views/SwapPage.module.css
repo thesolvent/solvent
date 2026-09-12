@@ -25,7 +25,9 @@
 .cardHead {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* The head carries one control now that the single-tab strip is gone. It stays on the trailing
+     edge because the protocol menu hangs from its right edge, and the card clips overflow. */
+  justify-content: flex-end;
   padding: 14px 16px;
   border-bottom: 1px solid var(--line);
 }
