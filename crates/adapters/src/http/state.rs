@@ -1,6 +1,7 @@
 //! Handler context. `AppState` is the shared, cheaply-cloneable bundle every handler receives; the
 //! app (composition root) builds it. `AppConfig` doubles as the `/config` response payload.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::depth::DepthReader;
@@ -22,7 +23,7 @@ use solvent_core::valuation::Valuation;
 
 use crate::chain::ChainHead;
 use crate::ingest::erc7683::Erc7683Normalizer;
-use crate::ingest::uniswapx::ServerCosigner;
+use crate::ingest::uniswapx::{ServerCosigner, SqliteUniswapXFeedStore, UniswapFeedAsset};
 
 /// Feature flags the FE reads at bootstrap. `earn` / `send_buy` are always off in the MVP.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -116,4 +117,8 @@ pub struct AppState {
     pub valuation: Arc<Valuation>,
     /// Records each served quote, for maker uptime / latency / fill-share analytics.
     pub quote_log: Arc<dyn QuoteLog>,
+    /// The isolated, read-only UniswapX order simulation feed.
+    pub uniswap_feed: Option<Arc<SqliteUniswapXFeedStore>>,
+    /// Mainnet token display metadata used only by the UniswapX feed response.
+    pub uniswap_feed_assets: Arc<HashMap<Address, UniswapFeedAsset>>,
 }

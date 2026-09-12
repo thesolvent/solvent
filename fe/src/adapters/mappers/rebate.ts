@@ -30,5 +30,6 @@ export function toRebate(api: Rebate): RebateRecord {
     publishedAt: api.published_at ?? null,
     executedAt: api.executed_at ?? null,
     transactionHash: api.transaction_hash ?? null,
+    originTradeId: api.allocations[0]?.trade_id ?? null,
   };
 }

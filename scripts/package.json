@@ -15,6 +15,9 @@
     "trades": "node src/seed/trades.ts",
     "relay:crosschain": "node src/crosschain/relay.ts",
     "starter": "pnpm seed && pnpm trades && pnpm smoke",
+    "deploy": "node src/deploy/all.ts",
+    "deploy:reset": "node src/deploy/all.ts --reset",
+    "deploy:down": "node src/deploy/all.ts --down",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

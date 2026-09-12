@@ -5,6 +5,7 @@ import {
   toCrossChainTrade,
   toStats,
   toTrade,
+  toUniswapXFeed,
 } from "../mappers/explorer";
 import { chainsOf, toAsset } from "../mappers/asset";
 import {
@@ -62,6 +63,16 @@ export const explorerAdapter: ExplorerPort = {
         destinationAssets.items.map((asset) => toAsset(asset, known)),
       );
     }
+  },
+  async uniswapxFeed(cursor) {
+    const page = await solventApi.uniswapxFeed({
+      cursor,
+      limit: PAGE_SIZE,
+    });
+    return {
+      items: page.items.map(toUniswapXFeed),
+      nextCursor: page.next_cursor,
+    };
   },
   async activity(filter, cursor) {
     // The Aqua feed records maker events; it does not publish resolver events.

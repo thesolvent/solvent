@@ -1,0 +1,131 @@
+# Two-chain devnet for the cross-chain one-click deploy (`scripts/src/deploy/all.ts`). Unlike
+# `docker-compose.yml` (single chain, one-shot `seed` container), contract deployment here runs
+# from the host via the deploy orchestrator — it needs tight control over ordering and address
+# precomputation across two chains that `forge script` alone cannot express. This file brings up
+# only the infra: two chains, two explorers, two faucets.
+#
+# Host ports are deliberately disjoint from `docker-compose.yml`'s single-chain devnet
+# (8545/5100/8081) AND from the `pr14-merge-master` worktree's own crosschain deploy
+# (9545/9546/5200/5201/9081/9082) so any of the three stacks can run side by side without a port
+# fight — another worktree's stack may be someone else's active work, never assume it is safe to
+# stop.
+name: solvent-crosschain-erc7683
+
+services:
+  anvil-origin:
+    image: ghcr.io/foundry-rs/foundry:stable
+    user: "root"
+    entrypoint: ["anvil"]
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8545"
+      - "--chain-id"
+      - "31337"
+      - "--block-time"
+      - "1"
+      - "--disable-code-size-limit"
+      - "--slots-in-an-epoch"
+      - "1"
+      - "--state"
+      - "/state/anvil.json"
+      - "--state-interval"
+      - "5"
+    volumes:
+      - "anvil-origin-state:/state"
+    ports:
+      - "9645:8545"
+    restart: unless-stopped
+
+  anvil-destination:
+    image: ghcr.io/foundry-rs/foundry:stable
+    user: "root"
+    entrypoint: ["anvil"]
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8546"
+      - "--chain-id"
+      - "31338"
+      - "--block-time"
+      - "1"
+      - "--disable-code-size-limit"
+      - "--slots-in-an-epoch"
+      - "1"
+      - "--state"
+      - "/state/anvil.json"
+      - "--state-interval"
+      - "5"
+    volumes:
+      - "anvil-destination-state:/state"
+    ports:
+      - "9646:8546"
+    restart: unless-stopped
+
+  explorer-origin:
+    image: otterscan/otterscan:v2.11.0
+    depends_on:
+      - anvil-origin
+    ports:
+      - "5300:80"
+    volumes:
+      - "./otterscan.origin.json:/usr/share/nginx/html/config.json:ro"
+    restart: unless-stopped
+
+  explorer-destination:
+    image: otterscan/otterscan:v2.11.0
+    depends_on:
+      - anvil-destination
+    ports:
+      - "5301:80"
+    volumes:
+      - "./otterscan.destination.json:/usr/share/nginx/html/config.json:ro"
+    restart: unless-stopped
+
+  faucet-origin:
+    build:
+      context: ..
+      dockerfile: crates/devnet/Dockerfile
+    environment:
+      RPC_URL: "http://anvil-origin:8545"
+      FAUCET_PRIVATE_KEY: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      FAUCET_WALLET_STATE_DB: "/state/faucet-walletkit.redb"
+      MANIFEST_PATH: "/manifest/devnet.json"
+      BIND_ADDR: "0.0.0.0:8080"
+      CHAIN_ID: "31337"
+      COOLDOWN_SECS: "1"
+      DRIP_UNITS: "100000"
+    ports:
+      - "9181:8080"
+    volumes:
+      - "./generated/crosschain/origin:/manifest:ro"
+      - "faucet-origin-state:/state"
+    restart: unless-stopped
+
+  faucet-destination:
+    build:
+      context: ..
+      dockerfile: crates/devnet/Dockerfile
+    environment:
+      RPC_URL: "http://anvil-destination:8546"
+      FAUCET_PRIVATE_KEY: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      FAUCET_WALLET_STATE_DB: "/state/faucet-walletkit.redb"
+      MANIFEST_PATH: "/manifest/devnet.json"
+      BIND_ADDR: "0.0.0.0:8080"
+      CHAIN_ID: "31338"
+      COOLDOWN_SECS: "1"
+      DRIP_UNITS: "100000"
+    ports:
+      - "9182:8080"
+    volumes:
+      - "./generated/crosschain/destination:/manifest:ro"
+      - "faucet-destination-state:/state"
+    restart: unless-stopped
+
+volumes:
+  anvil-origin-state:
+  anvil-destination-state:
+  faucet-origin-state:
+  faucet-destination-state:

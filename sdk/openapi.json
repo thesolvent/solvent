@@ -1038,6 +1038,48 @@
         }
       }
     },
+    "/v1/uniswapx-feed": {
+      "get": {
+        "tags": [
+          "crate::http::app::uniswapx_feed"
+        ],
+        "operationId": "uniswapx_feed",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (default 50, max 200)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque next-page cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_UniswapXFeedOrderView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/wallets/{addr}/balances": {
       "get": {
         "tags": [
@@ -4064,6 +4106,109 @@
           }
         }
       },
+      "Response_List_UniswapXFeedOrderView": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "order_hash",
+                    "source_chain_id",
+                    "token_in",
+                    "token_out",
+                    "amount_in",
+                    "required_out",
+                    "market_out_per_in_q18",
+                    "simulated_amount_out",
+                    "simulated_batch_id",
+                    "observed_at",
+                    "last_seen_at"
+                  ],
+                  "properties": {
+                    "amount_in": {
+                      "type": "string"
+                    },
+                    "last_seen_at": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "market_out_per_in_q18": {
+                      "type": "string"
+                    },
+                    "observed_at": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "order_hash": {
+                      "type": "string"
+                    },
+                    "required_out": {
+                      "type": "string"
+                    },
+                    "simulated_amount_out": {
+                      "type": "string"
+                    },
+                    "simulated_batch_id": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "source_chain_id": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "token_in": {
+                      "$ref": "#/components/schemas/UniswapXFeedAssetView"
+                    },
+                    "token_out": {
+                      "$ref": "#/components/schemas/UniswapXFeedAssetView"
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
       "Response_MakerDashboard": {
         "type": "object",
         "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
@@ -5327,6 +5472,86 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "UniswapXFeedAssetView": {
+        "type": "object",
+        "required": [
+          "address",
+          "symbol",
+          "decimals"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "decimals": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "symbol": {
+            "type": "string"
+          }
+        }
+      },
+      "UniswapXFeedOrderView": {
+        "type": "object",
+        "required": [
+          "order_hash",
+          "source_chain_id",
+          "token_in",
+          "token_out",
+          "amount_in",
+          "required_out",
+          "market_out_per_in_q18",
+          "simulated_amount_out",
+          "simulated_batch_id",
+          "observed_at",
+          "last_seen_at"
+        ],
+        "properties": {
+          "amount_in": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "market_out_per_in_q18": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "order_hash": {
+            "type": "string"
+          },
+          "required_out": {
+            "type": "string"
+          },
+          "simulated_amount_out": {
+            "type": "string"
+          },
+          "simulated_batch_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "source_chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "token_in": {
+            "$ref": "#/components/schemas/UniswapXFeedAssetView"
+          },
+          "token_out": {
+            "$ref": "#/components/schemas/UniswapXFeedAssetView"
           }
         }
       }

@@ -54,6 +54,18 @@ export interface ActivityRecord {
   txHash: string | null;
 }
 
+/** A public UniswapX Dutch order evaluated by Solvent's non-executable simulation. */
+export interface UniswapXFeedRecord {
+  orderHash: string;
+  sourceChainId: number;
+  input: TokenQuantity;
+  requiredOutput: TokenQuantity;
+  marketOutPerIn: string;
+  simulatedOutput: TokenQuantity;
+  simulatedBatchId: number;
+  lastSeenAt: number;
+}
+
 export interface ExplorerStats {
   blockHeight: number;
   events24h: number | null;
