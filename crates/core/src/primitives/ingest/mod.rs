@@ -6,7 +6,9 @@ pub mod fee;
 pub mod intent;
 pub mod raw;
 
-pub use curve::{AmountCurve, Rounding};
+pub use curve::AmountCurve;
 pub use fee::ExecutionFeePolicy;
-pub use intent::{Exclusivity, Intent, IntentInput, IntentOutput, ProtocolId};
-pub use raw::RawOrder;
+pub use intent::{
+    Delivery, Exclusivity, Intent, IntentInput, IntentOutput, IntentParts, ProtocolId,
+};
+pub use raw::{OrderSource, RawOrder};

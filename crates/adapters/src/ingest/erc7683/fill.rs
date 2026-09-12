@@ -82,7 +82,7 @@ mod tests {
 
     use solvent_core::deps::execution::{ExecutionAuthorizer, ExecutionAuthorizerError};
     use solvent_core::primitives::execution::{ExecutionAuthorization, PolicySignature};
-    use solvent_core::primitives::ingest::{AmountCurve, IntentInput, IntentOutput};
+    use solvent_core::primitives::ingest::{AmountCurve, IntentInput, IntentOutput, IntentParts};
     use solvent_core::primitives::registry::AquaEvent;
     use solvent_core::primitives::routing::RouteLeg;
     use solvent_core::primitives::{ChainId, IntentId, MakerId, StrategyHash};
@@ -138,24 +138,26 @@ mod tests {
             nonce: U256::from(9u8),
             deadline: U256::from(2_000u64),
         };
-        let intent = Intent::new(
-            IntentId(order_id(&order)),
-            ProtocolId::Erc7683,
-            IntentInput::new(token_in, AmountCurve::scalar(order.inputAmount)),
-            Some(U256::from(1_000u64)),
-            vec![IntentOutput::new(
-                token_out,
-                AmountCurve::scalar(order.outputAmount),
-                recipient,
-            )],
-            2_000,
-            None,
+        let intent = Intent::new(IntentParts {
+            routing_input_limit: Some(U256::from(1_000u64)),
+            deadline: 2_000,
             settler,
-            ChainId(31337),
-            order.abi_encode().into(),
-            Bytes::from(vec![0xCC; 65]),
-            1_000,
-        );
+            raw: order.abi_encode().into(),
+            signature: Bytes::from(vec![0xCC; 65]),
+            observed_at: 1_000,
+            ..IntentParts::new(
+                IntentId(order_id(&order)),
+                ProtocolId::Erc7683,
+                recipient,
+                IntentInput::new(token_in, AmountCurve::scalar(order.inputAmount)),
+                vec![IntentOutput::new(
+                    token_out,
+                    AmountCurve::scalar(order.outputAmount),
+                    recipient,
+                )],
+                ChainId(31337),
+            )
+        });
         let plan = RoutePlan::new(
             intent.id,
             vec![RouteLeg {

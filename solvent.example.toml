@@ -51,6 +51,35 @@ decay_window_secs = 60     # the cosigner's decay window applied to each order
 # and reconciles them rather than losing track. Point it at a persistent volume in production.
 wallet_state_db = "walletkit.redb"
 
+# Block the registry watcher starts from. Set it to the Aqua deployment block: no strategy can
+# exist before it, and scanning from genesis is thousands of getLogs calls over empty history.
+registry_start_block = 0
+registry_scan_span   = 2000   # blocks per getLogs; lower it if the node caps the log count
+
+# The live order feed. UniswapX orders are off-chain signed messages until someone fills them —
+# there is no mempool or event to watch — so polling the Orders API is the only way to see one.
+# Omit `orders_api_url` to leave the feed off; the resolver then takes orders only from its own
+# submit endpoint. Point it at a local mirror to replay recorded pages without touching the network.
+# orders_api_url = "https://api.uniswap.org/v2"
+order_type = "Dutch_V2"    # mainnet serves V2 Dutch; other chains run V3 or Priority reactors
+order_poll_ms = 250        # the endpoint allows 4 requests/sec; one leaves per interval
+feed_silence_secs = 300    # unreachable for longer than this and readiness turns false
+
+# Cosigner keys whose signature a fed order must carry. The reactor only checks that a cosignature
+# matches the order's own `cosigner` field — it has no notion of a legitimate cosigner — so pinning
+# the identity is ours to do. This is Uniswap's operational key, identical on mainnet and Sepolia.
+expected_cosigners = ["0x4449Cd34d1eb1FEDCF02A1Be3834FfDe8E6A6180"]
+
+# Tokens the resolver will touch on either side. Empty falls back to the token list. Restricting to
+# tokens a maker has actually shipped costs no reach — nothing else is fillable — and it excludes
+# fee-on-transfer, rebasing, and blocklisting tokens, each of which delivers less than the reactor
+# demands and reverts inside the filler's own balance guard.
+admitted_tokens = []
+max_outputs = 4            # each output is a token to source; an order with hundreds is a gas bomb
+dedup_ttl_secs = 900       # longer than any order lives, so one order is admitted once
+dedup_capacity = 16384     # bounded as well as expiring: the order stream is not ours to control
+max_tracked_intents = 64   # orders held for re-pricing at once; the feed's volume is not ours to control
+
 # Enable this block on each chain-local process that participates in a configured cross-chain pair.
 # Expose this listener only to the proxy (normally behind mTLS); SOLVENT_INTERNAL_TOKEN supplies
 # the application-level Bearer credential. Set only the contracts deployed on this process's chain.

@@ -87,6 +87,55 @@ pub struct Config {
     pub crosschain: Option<CrossChainConfig>,
     #[serde(default)]
     pub rebate: RebateConfig,
+    /// Block the registry watcher starts scanning from — the Aqua deployment, since no strategy can
+    /// exist before it. Left at zero it re-scans the whole chain on a cold store, which on mainnet
+    /// is thousands of `getLogs` calls over blocks that cannot contain an event.
+    #[serde(default)]
+    pub registry_start_block: u64,
+    /// Blocks per `getLogs` request when the watcher scans. Nodes cap a response at a fixed number
+    /// of logs, and Aqua is dense enough on mainnet that the indexer's default span exceeds it.
+    /// Unset leaves the indexer's own default.
+    #[serde(default)]
+    pub registry_scan_span: Option<u64>,
+
+    /// Root of the Orders API the live feed polls, or a local mirror serving the same shape. Unset
+    /// leaves the feed off and the resolver takes orders only from its own submit endpoint.
+    #[serde(default)]
+    pub orders_api_url: Option<String>,
+    /// The order type to ask for. UniswapX runs a different reactor and decay model per chain, and
+    /// this resolver decodes V2 Dutch orders, which mainnet serves.
+    #[serde(default = "default_order_type")]
+    pub order_type: String,
+    /// Gap between individual order-feed requests. The endpoint allows four per second; one request
+    /// leaves per interval however many scopes are polled.
+    #[serde(default = "default_order_poll_ms")]
+    pub order_poll_ms: u64,
+    /// How long the feed may fail to reach the endpoint before readiness turns false.
+    #[serde(default = "default_feed_silence_secs")]
+    pub feed_silence_secs: u64,
+    /// Cosigner keys whose signature the feed's orders must carry. The reactor only checks that a
+    /// cosignature matches the order's own `cosigner` field, so pinning the identity is ours to do;
+    /// on mainnet this is Uniswap's operational key.
+    #[serde(default)]
+    pub expected_cosigners: Vec<Address>,
+    /// Tokens the resolver will touch on either side of an order. Empty falls back to the token
+    /// list, which is the set the registry can price anyway.
+    #[serde(default)]
+    pub admitted_tokens: Vec<Address>,
+    /// Ceiling on an order's output legs.
+    #[serde(default = "default_max_outputs")]
+    pub max_outputs: usize,
+    /// Order hashes held against re-delivery. Each poll returns the same newest page, so this needs
+    /// to outrun the page size by a wide margin, not the order rate.
+    #[serde(default = "default_dedup_capacity")]
+    pub dedup_capacity: u64,
+    /// Ceiling on orders held for re-pricing at once.
+    #[serde(default = "default_max_tracked")]
+    pub max_tracked_intents: usize,
+    /// How long a hash stays deduped. Longer than any order lives, so a single order is admitted
+    /// once however many polls return it.
+    #[serde(default = "default_dedup_ttl_secs")]
+    pub dedup_ttl_secs: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -113,7 +162,12 @@ pub struct DirectAuthorConfig {
 }
 
 /// One Binance price symbol and the tokens whose USD price it feeds.
+///
+/// Unknown fields are refused because TOML scopes bare keys to the table header above them: a
+/// top-level key written below `[[price_symbols]]` becomes a field of that entry, and without this
+/// it would be accepted and discarded, disabling whatever it configured with nothing logged.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PriceSymbol {
     pub symbol: String,
     pub tokens: Vec<Address>,
@@ -263,6 +317,35 @@ fn default_ttl_secs() -> u64 {
 fn default_decay_secs() -> u64 {
     60
 }
+fn default_order_type() -> String {
+    "Dutch_V2".to_string()
+}
+
+/// Four requests per second is the endpoint's published ceiling.
+fn default_order_poll_ms() -> u64 {
+    250
+}
+
+fn default_feed_silence_secs() -> u64 {
+    300
+}
+
+fn default_max_outputs() -> usize {
+    4
+}
+
+fn default_max_tracked() -> usize {
+    64
+}
+
+fn default_dedup_capacity() -> u64 {
+    16_384
+}
+
+fn default_dedup_ttl_secs() -> u64 {
+    900
+}
+
 fn default_wallet_state_db() -> String {
     "walletkit.redb".to_string()
 }
@@ -309,6 +392,8 @@ pub enum StartupError {
     WalletStore(String),
     #[error("filler configuration: {0}")]
     FillerConfiguration(String),
+    #[error("orders feed: {0}")]
+    OrdersFeed(String),
     #[error("token list: {0}")]
     TokenList(String),
     #[error(transparent)]
@@ -317,4 +402,38 @@ pub enum StartupError {
     Db(#[from] sqlx::Error),
     #[error(transparent)]
     Solvent(#[from] SolventError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shipped example is the template every deployment copies, so a key in the wrong TOML
+    /// scope ships the feature off everywhere. Every value here also equals its `serde` default,
+    /// which is why this asserts placement in the parsed tree rather than the loaded values.
+    #[test]
+    fn the_example_config_puts_every_feed_key_at_the_root() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../solvent.example.toml");
+        let raw = config::Config::builder()
+            .add_source(config::File::with_name(path))
+            .build()
+            .expect("the shipped example is valid TOML");
+        for key in [
+            "order_type",
+            "order_poll_ms",
+            "feed_silence_secs",
+            "expected_cosigners",
+            "admitted_tokens",
+            "max_outputs",
+            "dedup_ttl_secs",
+            "dedup_capacity",
+            "max_tracked_intents",
+        ] {
+            assert!(
+                raw.get::<config::Value>(key).is_ok(),
+                "{key} is not at the root of the example config"
+            );
+        }
+        Config::load(path).expect("the shipped example deserializes");
+    }
 }

@@ -3,6 +3,7 @@ import { SolventApiError } from "@solvent/sdk/client";
 import {
   toActivity,
   toCrossChainTrade,
+  toObservedOrder,
   toStats,
   toTrade,
 } from "../mappers/explorer";
@@ -31,6 +32,10 @@ export const explorerAdapter: ExplorerPort = {
       limit: PAGE_SIZE,
     });
     return { items: page.items.map(toTrade), nextCursor: page.next_cursor };
+  },
+  async orders(limit = 50) {
+    const page = await solventApi.orders({ limit });
+    return page.items.map(toObservedOrder);
   },
   async trade(id) {
     try {

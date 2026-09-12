@@ -49,7 +49,7 @@ use solvent_core::deps::trade::TradeStore;
 use solvent_core::execution::ExecutionService;
 use solvent_core::maker::MakerService;
 use solvent_core::pool::{DepthService, PoolService};
-use solvent_core::primitives::ingest::{ExecutionFeePolicy, ProtocolId, RawOrder};
+use solvent_core::primitives::ingest::{ExecutionFeePolicy, OrderSource, ProtocolId, RawOrder};
 use solvent_core::primitives::ledger::{AccountKey, ReservationSource};
 use solvent_core::primitives::rebate::{RebateAllocation, RebatePlan};
 use solvent_core::primitives::routing::{RouteRequest, RoutingConfig};
@@ -111,6 +111,7 @@ async fn e2e_erc7683_order_routes_and_settles_through_aqua() {
         U256::ZERO,
         None,
     )
+    .plan
     .expect("provisional route");
     let routed_input = provisional_plan
         .legs
@@ -157,6 +158,7 @@ async fn e2e_erc7683_order_routes_and_settles_through_aqua() {
         Bytes::from(order.abi_encode()),
         Bytes::from(signature.as_bytes()),
         now,
+        OrderSource::Solvent,
     );
     let normalized = Erc7683Normalizer::new(
         ChainId(stack.chain_id),
@@ -184,6 +186,7 @@ async fn e2e_erc7683_order_routes_and_settles_through_aqua() {
         U256::ZERO,
         None,
     )
+    .plan
     .expect("final route");
     let sources = plan
         .legs
@@ -285,6 +288,7 @@ async fn e2e_erc7683_post_swap_submits_through_execution_service() {
         U256::ZERO,
         None,
     )
+    .plan
     .expect("provisional route");
     let routed_input = provisional_plan
         .legs
@@ -509,6 +513,7 @@ async fn erc7683_http_state(
         SwapConfig {
             routing: RoutingConfig::new(64, 8, 150_000),
             chain_id: stack.chain_id,
+            filler: stack.filler,
             filler_owner: stack.h.maker,
             reservation_ttl_secs: 60,
         },
@@ -541,6 +546,7 @@ async fn erc7683_http_state(
         .expect("history source");
     let (head, _head_poller) =
         ChainHead::new(stack.h.maker_provider.clone(), Duration::from_secs(60));
+    let cosigner_signer = PrivateKeySigner::random();
 
     (
         AppState {
@@ -584,9 +590,13 @@ async fn erc7683_http_state(
                 PERMIT2,
                 stack.reactor,
                 stack.chain_id,
-                PrivateKeySigner::random(),
+                cosigner_signer.clone(),
                 stack.filler,
                 60,
+            )),
+            normalizer: Arc::new(UniswapXV2Normalizer::new(
+                stack.reactor,
+                vec![cosigner_signer.address()],
             )),
             erc7683: Some(Arc::new(Erc7683Normalizer::new(
                 ChainId(stack.chain_id),
@@ -600,6 +610,8 @@ async fn erc7683_http_state(
             registry_store: events,
             valuation,
             quote_log: Arc::new(SqliteQuoteLog::new(state_pool, clock)),
+            feed_health: None,
+            order_log: None,
         },
         state_dir,
     )
@@ -661,6 +673,7 @@ async fn exercise_protected_curve(label: &str) {
         .header
         .timestamp;
     let cosigner = PrivateKeySigner::random();
+    let cosigner_address = cosigner.address();
     let builder =
         SignedOrderBuilder::new(PERMIT2, stack.chain_id, h.taker_signer.clone(), cosigner);
     let order = OrderSpec {
@@ -677,12 +690,15 @@ async fn exercise_protected_curve(label: &str) {
         decay_start: now + 10,
         decay_end: now + 100,
         exclusive_filler: stack.filler,
+        exclusivity_override_bps: 100,
     };
     let feed = SelfHostedFeed::new(&builder, std::slice::from_ref(&order), now);
 
     // Ingest: stream → normalize.
     let raws: Vec<RawOrder> = feed.stream().collect().await;
-    let intent = UniswapXV2Normalizer.normalize(&raws[0]).expect("normalize");
+    let intent = UniswapXV2Normalizer::new(stack.reactor, vec![cosigner_address])
+        .normalize(&raws[0])
+        .expect("normalize");
 
     // Route the required output against the caps, then reserve the plan.
     let snap = snapshot.load();
@@ -703,6 +719,7 @@ async fn exercise_protected_curve(label: &str) {
         U256::ZERO,
         None,
     )
+    .plan
     .expect("a routable plan");
     let sources: Vec<ReservationSource> = plan
         .legs

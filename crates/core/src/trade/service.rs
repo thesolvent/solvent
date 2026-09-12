@@ -106,6 +106,14 @@ impl TradeService {
             ),
             None => None,
         };
+        let indicative_input = match trade.indicative_amount_in {
+            Some(cost) => Some(
+                self.valuation
+                    .amount(cost, token_in.address, token_in.decimals)
+                    .await,
+            ),
+            None => None,
+        };
         TradeView {
             signature_present: None,
             id: trade.id.to_string(),
@@ -120,6 +128,8 @@ impl TradeService {
                 token: token_out,
             },
             surplus,
+            indicative_input,
+            source: trade.source.as_str().to_string(),
             price_impact_pct: trade.price_impact_pct,
             tx_hash: trade.tx_hash.map(|h| h.to_string()),
             block_number: trade.block_number,
@@ -206,6 +216,7 @@ fn human(amount: U256, decimals: u8) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::primitives::ingest::OrderSource;
     use alloy_primitives::B256;
     use async_trait::async_trait;
     use rust_decimal::Decimal;
@@ -330,6 +341,8 @@ mod tests {
 
     fn a_trade() -> Trade {
         Trade {
+            indicative_amount_in: None,
+            source: OrderSource::UniswapX,
             id: TradeId(Ulid::from_parts(1, 2)),
             order_hash: IntentId(B256::from([7; 32])),
             taker: Address::from([9; 20]),

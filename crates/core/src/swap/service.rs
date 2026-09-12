@@ -21,7 +21,9 @@ use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 use crate::primitives::trade::{Trade, TradeAttempt, TradeId, TradeLeg, TradeStatus};
 use crate::primitives::{IntentId, ReservationId};
 use crate::registry::SharedSnapshot;
-use crate::routing::{route, GuardAdmission, LegCostResolver, RoutingBook, StrategyGuard};
+use crate::routing::{
+    route, GuardAdmission, GuardSnapshot, LegCostResolver, RoutingBook, StrategyGuard,
+};
 use crate::SolventError;
 
 /// The chain/fill constants and routing knobs the swap path needs, bundled to keep the constructor
@@ -29,6 +31,9 @@ use crate::SolventError;
 pub struct SwapConfig {
     pub routing: RoutingConfig,
     pub chain_id: u64,
+    /// The UniswapX filler contract: the identity checked against an order's own exclusive-window
+    /// grant. Other protocols configure their own filler inside their own `FillBuilder`.
+    pub filler: Address,
     /// The account authorized to call each protocol filler.
     pub filler_owner: Address,
     /// How long a reservation holds before the TTL sweep may release it.
@@ -79,6 +84,12 @@ impl SwapService {
         }
     }
 
+    /// The current guard state, for a caller that routes a preview against it (e.g. the decision
+    /// loop's read-only re-pricing) without reserving or committing anything.
+    pub fn guards(&self) -> GuardSnapshot {
+        self.guards.snapshot()
+    }
+
     /// Submit one taker-signed intent. Idempotent on the order hash: a resubmit returns the existing
     /// trade without re-reserving or re-filling. `taker` is the order's swapper (the adapter reads it
     /// from the decoded order); `trade_id` is a freshly-minted candidate the store keeps only if this
@@ -91,8 +102,11 @@ impl SwapService {
         prices: TradePrices,
     ) -> Result<SwapOutcome, SolventError> {
         let now = self.clock.now_unix();
-        let Some(amounts) = swap_amounts(&intent, now) else {
-            return self.declined(trade_id, &intent, taker, now, prices).await;
+        let Some(amounts) = swap_amounts(&intent, self.config.filler, now) else {
+            // No single delivery to source, so there is no cost to quote either.
+            return self
+                .declined(trade_id, &intent, taker, now, prices, None)
+                .await;
         };
 
         let snapshot = self.registry.load();
@@ -109,15 +123,20 @@ impl SwapService {
         let per_leg_cost = self.leg_cost.for_request(&request).await;
         // The taker's input is the max-in bound: a plan that can't source the output within it (net
         // of gas) is unprofitable, so the router declines.
-        let Some(plan) = route(
+        let routed = route(
             RoutingBook::new(&snapshot, &caps, &guards),
             &request,
             intent.routing_input_limit.unwrap_or(amounts.amount_in),
             &self.config.routing,
             per_leg_cost,
             None,
-        ) else {
-            return self.declined(trade_id, &intent, taker, now, prices).await;
+        );
+        let Some(plan) = routed.plan else {
+            // `indicative` is what sourcing would have cost: the account of the decline, and the
+            // only number that distinguishes "priced out by a hair" from "no liquidity at all".
+            return self
+                .declined(trade_id, &intent, taker, now, prices, routed.indicative)
+                .await;
         };
 
         // Persist first (dedup on the order hash); only a newly-recorded order reserves and fills.
@@ -130,6 +149,7 @@ impl SwapService {
             now,
             TradeStatus::Quoted,
             &prices,
+            routed.indicative,
         );
         let created = self
             .trades
@@ -264,13 +284,14 @@ impl SwapService {
         taker: Address,
         now: u64,
         prices: TradePrices,
+        indicative_in: Option<U256>,
     ) -> Result<SwapOutcome, SolventError> {
-        let output = primary_output(intent, now);
+        let delivery = intent.required_output(self.config.filler, now);
         let amounts = SwapAmounts {
             token_in: intent.input.token,
-            token_out: output.map_or(Address::ZERO, |o| o.token),
+            token_out: delivery.map_or(Address::ZERO, |d| d.token),
             amount_in: intent.input.curve.amount_at(now),
-            min_out: output.map_or(U256::ZERO, |o| o.amount),
+            min_out: delivery.map_or(U256::ZERO, |d| d.amount),
         };
         let trade = self.trade(
             trade_id,
@@ -281,6 +302,7 @@ impl SwapService {
             now,
             TradeStatus::Declined,
             &prices,
+            indicative_in,
         );
         let created = self
             .trades
@@ -325,9 +347,12 @@ impl SwapService {
         now: u64,
         status: TradeStatus,
         prices: &TradePrices,
+        indicative_amount_in: Option<U256>,
     ) -> Trade {
         Trade {
             id,
+            indicative_amount_in,
+            source: intent.source,
             order_hash: intent.id,
             taker,
             token_in: amounts.token_in,
@@ -378,29 +403,16 @@ struct SwapAmounts {
     min_out: U256,
 }
 
-/// An order output's delivered token and its amount at a given time.
-#[derive(Clone, Copy)]
-struct SwapOutput {
-    token: Address,
-    amount: U256,
-}
-
-/// The order's first output (delivered token + amount at `now`), or `None` for an output-less order.
-fn primary_output(intent: &Intent, now: u64) -> Option<SwapOutput> {
-    intent.outputs.first().map(|o| SwapOutput {
-        token: o.token,
-        amount: o.curve.amount_at(now),
-    })
-}
-
-/// The swap's tokens and exact-out bounds, or `None` when the order has no output to deliver.
-fn swap_amounts(intent: &Intent, now: u64) -> Option<SwapAmounts> {
-    let output = primary_output(intent, now)?;
+/// The swap's tokens and exact-out bounds, or `None` when the order has nothing this filler can
+/// deliver. `min_out` is what the settler will actually collect: every output leg summed, and raised
+/// by the exclusivity toll when the window belongs to another filler.
+fn swap_amounts(intent: &Intent, filler: Address, now: u64) -> Option<SwapAmounts> {
+    let delivery = intent.required_output(filler, now)?;
     Some(SwapAmounts {
         token_in: intent.input.token,
-        token_out: output.token,
+        token_out: delivery.token,
         amount_in: intent.input.curve.amount_at(now),
-        min_out: output.amount,
+        min_out: delivery.amount,
     })
 }
 
@@ -459,6 +471,7 @@ fn reached(now: u64, stages: &[TradeStatus]) -> Vec<TradeAttempt> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::primitives::ingest::OrderSource;
     use std::collections::BTreeMap;
     use std::sync::Mutex;
 
@@ -477,7 +490,9 @@ mod tests {
     };
     use crate::primitives::asset::{TokenList, TokenMeta};
     use crate::primitives::execution::{ExecHandle, ExecStatus, SimVerdict, TrackedFill};
-    use crate::primitives::ingest::{AmountCurve, IntentInput, IntentOutput, ProtocolId};
+    use crate::primitives::ingest::{
+        AmountCurve, Exclusivity, IntentInput, IntentOutput, ProtocolId,
+    };
     use crate::primitives::ledger::{AccountKey, Reservation};
     use crate::primitives::registry::{Curve, CurveSpec, MakerStrategy, Snapshot, StrategyKey};
     use crate::primitives::trade::TradeInfo;
@@ -494,26 +509,61 @@ mod tests {
         U256::from(n) * U256::from(10u64).pow(U256::from(dec))
     }
 
+    /// What we source has to be what the settler will collect, and inside another filler's window
+    /// that is the tolled figure. Sourcing face value there buys from every maker and then reverts,
+    /// so the toll belongs on the write path, not only in the decision that got us here.
+    #[test]
+    fn sourcing_inside_another_fillers_window_includes_the_toll() {
+        let us = addr(0x7A);
+        let them = addr(0x3B);
+        let face = e(3_000, 6);
+        let mut order = intent(1, addr(0x99), e(1, 18), face);
+        order.exclusivity = Some(Exclusivity::new(them, 1_000, 100));
+
+        let tolled = face * U256::from(10_100u64) / U256::from(10_000u64);
+        assert_eq!(
+            swap_amounts(&order, us, 500)
+                .expect("fillable at a price")
+                .min_out,
+            tolled,
+            "inside their window"
+        );
+        assert_eq!(
+            swap_amounts(&order, us, 1_001)
+                .expect("the window lapsed")
+                .min_out,
+            face,
+            "once the window lapses"
+        );
+        assert_eq!(
+            swap_amounts(&order, them, 500)
+                .expect("the holder fills at face value")
+                .min_out,
+            face,
+            "when the window is the filler's own"
+        );
+    }
+
     /// An exact-out intent: pay up to `amount_in` WETH, deliver `min_out` USDC to `taker`.
     fn intent(order: u8, taker: Address, amount_in: U256, min_out: U256) -> Intent {
-        Intent::new(
-            IntentId(B256::from([order; 32])),
-            ProtocolId::UniswapXV2,
-            IntentInput::new(addr(WETH), AmountCurve::scalar(amount_in)),
-            None,
-            vec![IntentOutput::new(
-                addr(USDC),
-                AmountCurve::scalar(min_out),
+        Intent::new(crate::primitives::ingest::IntentParts {
+            deadline: 2_000_000_000,
+            settler: addr(0xEE),
+            raw: Bytes::from(vec![0xab]),
+            signature: Bytes::from(vec![0xcd]),
+            ..crate::primitives::ingest::IntentParts::new(
+                IntentId(B256::from([order; 32])),
+                ProtocolId::UniswapXV2,
                 taker,
-            )],
-            2_000_000_000,
-            None,
-            addr(0xEE),
-            crate::primitives::ChainId(31337),
-            Bytes::from(vec![0xab]),
-            Bytes::from(vec![0xcd]),
-            0,
-        )
+                IntentInput::new(addr(WETH), AmountCurve::scalar(amount_in)),
+                vec![IntentOutput::new(
+                    addr(USDC),
+                    AmountCurve::scalar(min_out),
+                    taker,
+                )],
+                crate::primitives::ChainId(31337),
+            )
+        })
     }
 
     fn xyc(maker: u8, weth: U256, usdc: U256) -> MakerStrategy {
@@ -826,6 +876,7 @@ mod tests {
             SwapConfig {
                 routing: RoutingConfig::new(16, 4, 150_000),
                 chain_id: 31337,
+                filler: addr(0xEE),
                 filler_owner: addr(0xF0),
                 reservation_ttl_secs: 60,
             },
@@ -870,6 +921,102 @@ mod tests {
         assert_eq!(info.trade.taker, addr(9));
         // The payout was held.
         assert!(h.ledger.available(&virt(3, USDC)) < before);
+    }
+
+    /// The shape that made this a live defect: a swapper leg plus an interface fee, same token.
+    /// Sourcing only the first leaves the fill short by the fee, which the contract discovers after
+    /// it has already bought from every maker and spent the gas.
+    #[tokio::test]
+    async fn a_fee_leg_is_sourced_too() {
+        let h = harness(vec![xyc(3, e(100, 18), e(300_000, 6))], SimVerdict::Ok).await;
+        let mut order = intent(1, addr(9), e(2, 18), e(3000, 6));
+        order.outputs.push(IntentOutput::new(
+            addr(USDC),
+            AmountCurve::scalar(e(25, 6)),
+            addr(0xFE),
+        ));
+
+        let before = h.ledger.available(&virt(3, USDC));
+        let out = h
+            .swap
+            .submit(order, addr(9), tid(), TradePrices::default())
+            .await
+            .unwrap();
+        assert_eq!(out.status, TradeStatus::Submitted);
+
+        // The hold covers both legs, not just the swapper's.
+        let held = before - h.ledger.available(&virt(3, USDC));
+        assert!(
+            held >= e(3025, 6),
+            "held {held} should cover the swapper leg plus the fee leg"
+        );
+    }
+
+    /// Legs in different tokens each need their own route and reservation, all-or-nothing. No live
+    /// order is shaped that way, so the swap path declines rather than under-sourcing.
+    #[tokio::test]
+    async fn outputs_in_two_tokens_are_declined() {
+        let h = harness(vec![xyc(3, e(100, 18), e(300_000, 6))], SimVerdict::Ok).await;
+        let mut order = intent(1, addr(9), e(2, 18), e(3000, 6));
+        order.outputs.push(IntentOutput::new(
+            addr(0xDA),
+            AmountCurve::scalar(e(25, 18)),
+            addr(0xFE),
+        ));
+
+        let out = h
+            .swap
+            .submit(order, addr(9), tid(), TradePrices::default())
+            .await
+            .unwrap();
+        assert_eq!(out.status, TradeStatus::Declined);
+    }
+
+    /// The taker's input is the max-in bound, and it is the only thing standing between the
+    /// decision loop and filling at a loss. `unroutable_order_is_declined` covers "no makers at
+    /// all"; this covers the case that actually costs money — makers exist, the route is perfectly
+    /// sourceable, and it simply costs more than the swapper is paying.
+    ///
+    /// The pool is 100 WETH / 300,000 USDC, so delivering 3,000 USDC costs ~1.0101 WETH on the
+    /// constant-product curve. One input either side of that flips the verdict.
+    #[tokio::test]
+    async fn an_order_costing_more_than_the_taker_pays_is_declined() {
+        let pool = || vec![xyc(3, e(100, 18), e(300_000, 6))];
+        let deliver = e(3_000, 6);
+
+        let h = harness(pool(), SimVerdict::Ok).await;
+        let too_little = h
+            .swap
+            .submit(
+                intent(1, addr(9), e(1, 18), deliver),
+                addr(9),
+                tid(),
+                TradePrices::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            too_little.status,
+            TradeStatus::Declined,
+            "1 WETH cannot buy 3,000 USDC from this pool"
+        );
+
+        let h = harness(pool(), SimVerdict::Ok).await;
+        let enough = h
+            .swap
+            .submit(
+                intent(2, addr(9), e(2, 18), deliver),
+                addr(9),
+                tid(),
+                TradePrices::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            enough.status,
+            TradeStatus::Submitted,
+            "2 WETH comfortably covers the same delivery"
+        );
     }
 
     #[tokio::test]
@@ -952,6 +1099,8 @@ mod tests {
         let order = intent(7, addr(9), e(2, 18), e(3000, 6));
         // A crash between create and reserve strands the trade at Quoted, never reserved or filled.
         let stuck = Trade {
+            indicative_amount_in: None,
+            source: OrderSource::UniswapX,
             id: tid(),
             order_hash: order.id,
             taker: addr(9),

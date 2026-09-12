@@ -5,7 +5,8 @@ use alloy::sol_types::SolValue;
 
 use solvent_core::deps::ingest::{NormalizeError, Normalizer};
 use solvent_core::primitives::ingest::{
-    AmountCurve, ExecutionFeePolicy, Intent, IntentInput, IntentOutput, ProtocolId, RawOrder,
+    AmountCurve, ExecutionFeePolicy, Intent, IntentInput, IntentOutput, IntentParts, ProtocolId,
+    RawOrder,
 };
 use solvent_core::primitives::{ChainId, IntentId};
 
@@ -64,24 +65,27 @@ impl Erc7683Normalizer {
             .checked_sub(order.executorFee)
             .filter(|amount| !amount.is_zero())
             .ok_or_else(bad)?;
-        let intent = Intent::new(
-            IntentId(order_id(&order)),
-            ProtocolId::Erc7683,
-            IntentInput::new(order.inputToken, AmountCurve::scalar(order.inputAmount)),
-            Some(routing_input),
-            vec![IntentOutput::new(
-                order.outputToken,
-                AmountCurve::scalar(order.outputAmount),
-                order.recipient,
-            )],
-            u64::try_from(order.deadline).map_err(|_| bad())?,
-            None,
-            order.settler,
-            raw.chain,
-            raw.payload.clone(),
-            raw.signature.clone(),
-            raw.observed_at,
-        );
+        let intent = Intent::new(IntentParts {
+            routing_input_limit: Some(routing_input),
+            deadline: u64::try_from(order.deadline).map_err(|_| bad())?,
+            settler: order.settler,
+            raw: raw.payload.clone(),
+            signature: raw.signature.clone(),
+            observed_at: raw.observed_at,
+            source: raw.source,
+            ..IntentParts::new(
+                IntentId(order_id(&order)),
+                ProtocolId::Erc7683,
+                order.user,
+                IntentInput::new(order.inputToken, AmountCurve::scalar(order.inputAmount)),
+                vec![IntentOutput::new(
+                    order.outputToken,
+                    AmountCurve::scalar(order.outputAmount),
+                    order.recipient,
+                )],
+                raw.chain,
+            )
+        });
         Ok(NormalizedErc7683 { intent, user })
     }
 
@@ -123,6 +127,8 @@ mod tests {
     use alloy::primitives::{address, Bytes, B256};
     use alloy::signers::{local::PrivateKeySigner, SignerSync};
 
+    use solvent_core::primitives::ingest::OrderSource;
+
     use super::*;
     use crate::ingest::erc7683::codec::permit_digest;
 
@@ -163,6 +169,7 @@ mod tests {
             Bytes::from(order.abi_encode()),
             Bytes::from(signature.as_bytes()),
             1_000,
+            OrderSource::Solvent,
         )
     }
 
@@ -207,6 +214,7 @@ mod tests {
             Bytes::from(changed.abi_encode()),
             signed.signature.clone(),
             1_000,
+            OrderSource::Solvent,
         );
         assert!(matches!(
             normalizer().normalize_order(&changed_raw),

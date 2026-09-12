@@ -45,7 +45,7 @@ impl ExecutionService {
     pub async fn fill(&self, pending: PendingFill) -> Result<FillOutcome, SolventError> {
         match self.sim.simulate(&pending.fill_tx).await? {
             SimVerdict::Reject { reason } => {
-                warn!("fill dropped by sim gate; voiding reservation");
+                warn!("fill dropped by sim gate; voiding reservation: {}", reason);
                 self.ledger.void(pending.reservation).await?;
                 Ok(FillOutcome::Rejected { reason })
             }
@@ -87,9 +87,14 @@ impl ExecutionService {
                     }
                     SettledOutcome::Confirmed { tx, block }
                 }
-                ExecStatus::Failed { .. } | ExecStatus::Dropped => {
+                ExecStatus::Failed { reason } => {
                     settle(self.ledger.void(f.reservation).await)?;
-                    warn!(intent = %f.intent, "fill did not land; reservation voided");
+                    warn!(intent = %f.intent, "fill did not land; reservation voided: {}", reason);
+                    SettledOutcome::Failed
+                }
+                ExecStatus::Dropped => {
+                    settle(self.ledger.void(f.reservation).await)?;
+                    warn!(intent = %f.intent, "fill dropped from the mempool; reservation voided");
                     SettledOutcome::Failed
                 }
                 ExecStatus::Pending => continue,

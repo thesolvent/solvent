@@ -6,6 +6,7 @@ import type {
   ActivityRecord,
   ExplorerStats,
   TradeRecord,
+  ObservedOrder,
 } from "@/data/explorer";
 
 export function toTrade(api: Trade): TradeRecord {
@@ -28,6 +29,13 @@ export function toTrade(api: Trade): TradeRecord {
     surplus: api.surplus
       ? { symbol: api.input.token.symbol, display: api.surplus.display }
       : null,
+    indicativeInput: api.indicative_input
+      ? {
+          symbol: api.input.token.symbol,
+          display: api.indicative_input.display,
+        }
+      : null,
+    source: api.source,
     priceImpactPct: api.price_impact_pct ?? null,
     makers:
       api.legs == null
@@ -213,5 +221,32 @@ export function toStats(api: Stats): ExplorerStats {
     medianImpactPct: api.median_impact_pct ?? null,
     activeMakers: api.active_makers ?? null,
     quotingNow: api.quoting_now ?? null,
+  };
+}
+
+/** The wire shape of an observed order, as the explorer reads it. */
+export function toObservedOrder(api: {
+  order_hash: string;
+  source: string;
+  token_in: string;
+  token_out?: string | null;
+  amount_in: string;
+  required_out?: string | null;
+  indicative_in?: string | null;
+  verdict: string;
+  reason?: string | null;
+  seen_at: number;
+}): ObservedOrder {
+  return {
+    orderHash: api.order_hash,
+    source: api.source,
+    tokenIn: api.token_in,
+    tokenOut: api.token_out ?? null,
+    amountIn: api.amount_in,
+    requiredOut: api.required_out ?? null,
+    indicativeIn: api.indicative_in ?? null,
+    verdict: api.verdict,
+    reason: api.reason ?? null,
+    seenAt: api.seen_at,
   };
 }

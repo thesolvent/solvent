@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use solvent_core::deps::ingest::Normalizer;
 use solvent_core::deps::quote_log::{QuoteParticipant, QuoteServed};
-use solvent_core::primitives::ingest::{ProtocolId, RawOrder};
+use solvent_core::primitives::ingest::{OrderSource, ProtocolId, RawOrder};
 use solvent_core::primitives::quote::QuoteLeg;
 use solvent_core::primitives::registry::TokenPair;
 use solvent_core::primitives::trade::TradeId;
@@ -21,7 +21,6 @@ use ulid::Ulid;
 
 use crate::http::primitives::{parse_addr, ApiResult, Response};
 use crate::http::state::AppState;
-use crate::ingest::uniswapx::UniswapXV2Normalizer;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
@@ -195,7 +194,8 @@ pub async fn submit(
                 .cosigner
                 .cosign(&encoded, signature.into(), now)
                 .map_err(|e| Response::error(e.to_string(), StatusCode::BAD_REQUEST))?;
-            let intent = UniswapXV2Normalizer
+            let intent = state
+                .normalizer
                 .normalize(&cosigned.raw)
                 .map_err(SolventError::from)?;
             (intent, cosigned.swapper)
@@ -207,6 +207,7 @@ pub async fn submit(
                 Bytes::from(encoded),
                 Bytes::from(signature),
                 now,
+                OrderSource::Solvent,
             );
             let normalizer = state.erc7683.as_ref().ok_or_else(erc7683_unavailable)?;
             let normalized = normalizer

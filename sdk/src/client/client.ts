@@ -16,6 +16,8 @@ export type QuoteResponse = Schemas["QuoteResponse"];
 export type SwapRequest = Schemas["SwapRequest"];
 export type SwapResponse = Schemas["SwapResponse"];
 export type Trade = Schemas["TradeView"];
+export type ObservedOrders = Schemas["ObservedOrders"];
+export type ObservedOrder = Schemas["ObservedOrder"];
 export type ActivityEvent = Schemas["ActivityEvent"];
 export type MakerSummary = Schemas["MakerSummary"];
 export type MakerDashboard = Schemas["MakerDashboard"];
@@ -87,6 +89,8 @@ export interface SolventClient {
     poolDepth(query: PoolDepthQuery): Promise<PoolDepth>;
     quote(body: QuoteRequest): Promise<QuoteResponse>;
     swap(body: SwapRequest): Promise<SwapResponse>;
+    /** Every order the feed showed the resolver, newest first. */
+    orders(query?: { limit?: number }): Promise<ObservedOrders>;
     trades(query?: TradesQuery): Promise<List<Trade>>;
     tradeDetail(id: string): Promise<Trade>;
     activity(query?: ActivityQuery): Promise<List<ActivityEvent>>;
@@ -177,6 +181,7 @@ export function createSolventClient(
         poolDepth: (query) => get<PoolDepth>("/v1/pools/depth", query),
         quote: (body) => post<QuoteResponse>("/v1/swap/quote", body),
         swap: (body) => post<SwapResponse>("/v1/swap", body),
+        orders: (query) => get<ObservedOrders>("/v1/orders", query),
         trades: (query) => get<List<Trade>>("/v1/trades", query),
         tradeDetail: (id) => get<Trade>(`/v1/trades/${id}`),
         activity: (query) => get<List<ActivityEvent>>("/v1/activity", query),

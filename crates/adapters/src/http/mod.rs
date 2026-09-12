@@ -19,6 +19,7 @@ pub use depth::DepthReader;
 
 use std::time::Duration;
 
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::Router;
@@ -45,6 +46,7 @@ pub fn router(state: AppState) -> Router {
         .route("/pools/depth", get(app::pools::pool_depth))
         .route("/swap/quote", post(app::swap::quote))
         .route("/swap", post(app::swap::submit))
+        .route("/orders", get(app::orders::orders))
         .route("/trades", get(app::trades::trades))
         .route("/trades/{id}", get(app::trades::trade_detail))
         .route("/activity", get(app::activity::activity))
@@ -72,10 +74,12 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/wallets/{addr}/balances", get(app::balances::balances))
         .route("/openapi.json", get(openapi::openapi_json))
-        .with_state(state);
+        .with_state(state.clone());
 
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
+        .with_state(state)
         .nest("/v1", v1)
         .layer(
             ServiceBuilder::new()
@@ -92,6 +96,28 @@ pub fn router(state: AppState) -> Router {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+/// Readiness, distinct from liveness: the process is fine, but a resolver that cannot see orders
+/// cannot do its job. `503` here should drain traffic and page someone; it should not restart the
+/// process, since the usual cause is upstream and a restart will not fix it.
+async fn readyz(State(state): State<AppState>) -> (StatusCode, &'static str) {
+    let stale = state
+        .feed_health
+        .as_ref()
+        .is_some_and(|health| !health.is_live(now_unix()));
+    match stale {
+        true => (StatusCode::SERVICE_UNAVAILABLE, "order feed unreachable"),
+        false => (StatusCode::OK, "ready"),
+    }
+}
+
+/// Wall-clock seconds. The feed stamps its successes from the same source.
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -165,7 +191,9 @@ mod tests {
 
     use crate::chain::ChainHead;
     use crate::http::state::{AppConfig, Features};
-    use crate::ingest::uniswapx::ServerCosigner;
+    use crate::ingest::uniswapx::{
+        FeedHealth, ServerCosigner, UniswapXV2Normalizer as ServerNormalizer,
+    };
     use crate::ledger::SystemClock;
     use crate::routing::MarketCache;
 
@@ -617,6 +645,7 @@ mod tests {
             SwapConfig {
                 routing: RoutingConfig::new(16, 4, 0),
                 chain_id: 31337,
+                filler: Address::ZERO,
                 filler_owner: Address::ZERO,
                 reservation_ttl_secs: 60,
             },
@@ -684,6 +713,7 @@ mod tests {
             swap,
             rebates,
             cosigner,
+            normalizer: Arc::new(ServerNormalizer::new(Address::ZERO, vec![Address::ZERO])),
             erc7683: None,
             erc7683_fee_policy: None,
             trades: trade_svc,
@@ -691,6 +721,8 @@ mod tests {
             registry_store: Arc::new(NoopEventStore),
             valuation,
             quote_log: Arc::new(NoopQuoteLog),
+            feed_health: None,
+            order_log: None,
         }
     }
 
@@ -721,6 +753,42 @@ mod tests {
         let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
         (status, json)
+    }
+
+    /// Readiness reflects the feed: a resolver that cannot reach the Orders API is not ready, even
+    /// though the process is perfectly alive. Without this the only signal is a constant "ok".
+    #[tokio::test]
+    async fn readyz_fails_when_the_order_feed_is_stale() {
+        let health = Arc::new(FeedHealth::new(Duration::from_secs(60)));
+        let mut state = test_state();
+        state.feed_health = Some(Arc::clone(&health));
+        let app = router(state);
+
+        let code = |app: Router| async move {
+            app.oneshot(
+                Request::builder()
+                    .uri("/readyz")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response")
+            .status()
+        };
+        assert_eq!(
+            code(app.clone()).await,
+            StatusCode::OK,
+            "nothing attempted yet"
+        );
+
+        // One failed attempt, long enough ago to exhaust the silence budget.
+        let long_ago = now_unix().saturating_sub(3_600);
+        health.record_failure(long_ago, false);
+        assert_eq!(
+            code(app).await,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the feed has been unreachable past its budget"
+        );
     }
 
     #[tokio::test]

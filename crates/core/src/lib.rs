@@ -3,6 +3,7 @@
 pub mod asset;
 pub mod balances;
 pub mod crosschain;
+pub mod decision;
 pub mod deps;
 pub mod execution;
 pub mod ingest;

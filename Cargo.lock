@@ -5281,6 +5281,7 @@ dependencies = [
  "alloy",
  "axum",
  "config",
+ "futures",
  "serde",
  "serde_json",
  "solvent-adapters",

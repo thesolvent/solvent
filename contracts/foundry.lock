@@ -8,6 +8,9 @@
   "lib/chainlink-ccip": {
     "rev": "0e3e0fc5c0f70f0d50dca66b139142ddf3009294"
   },
+  "lib/erc7683": {
+    "rev": "c3f1921ea6f6b6a64f053f3d6cc7929e223a7284"
+  },
   "lib/evm-cctp-contracts": {
     "rev": "a92a2b4e7e6ef99bf0b05dca71780f5ec190e729"
   },

@@ -1,5 +1,6 @@
 import type {
   ActivityRecord,
+  ObservedOrder,
   ExplorerStats,
   RecordPage,
   TradeRecord,
@@ -19,6 +20,8 @@ export interface ActivityFilter {
 }
 
 export interface ExplorerPort {
+  /** Every order the feed showed us, newest first. */
+  orders(limit?: number): Promise<ObservedOrder[]>;
   trades(
     filter: TradeFilter,
     cursor?: string,

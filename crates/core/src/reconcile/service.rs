@@ -114,6 +114,7 @@ fn failed(now: u64) -> Settlement {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::primitives::ingest::OrderSource;
     use std::collections::{BTreeMap, HashMap};
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::Mutex as StdMutex;
@@ -363,6 +364,8 @@ mod tests {
 
     fn trade(order_hash: IntentId) -> Trade {
         Trade {
+            indicative_amount_in: None,
+            source: OrderSource::UniswapX,
             id: TradeId(Ulid::from_parts(1, u128::from(order_hash.0 .0[0]))),
             order_hash,
             taker: Address::ZERO,

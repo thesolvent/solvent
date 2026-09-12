@@ -71,15 +71,15 @@ mod tests {
             decay_start: 1000,
             decay_end: 1100,
             exclusive_filler: address!("5555555555555555555555555555555555555555"),
+            exclusivity_override_bps: 100,
         };
 
         let feed = SelfHostedFeed::new(&builder, std::slice::from_ref(&spec), 1234);
         let orders: Vec<RawOrder> = feed.stream().collect().await;
         assert_eq!(orders.len(), 1);
 
-        let intent = UniswapXV2Normalizer
-            .normalize(&orders[0])
-            .expect("normalizes");
+        let normalizer = UniswapXV2Normalizer::new(spec.reactor, vec![signer(0x22).address()]);
+        let intent = normalizer.normalize(&orders[0]).expect("normalizes");
         assert_eq!(intent.protocol, ProtocolId::UniswapXV2);
         assert_eq!(intent.origin_chain, ChainId(1));
         assert_eq!(intent.settler, spec.reactor);
@@ -99,7 +99,11 @@ mod tests {
         );
         assert_eq!(
             intent.exclusivity,
-            Some(Exclusivity::new(spec.exclusive_filler, spec.decay_start))
+            Some(Exclusivity::new(
+                spec.exclusive_filler,
+                spec.decay_start,
+                spec.exclusivity_override_bps
+            ))
         );
         assert_eq!(intent.signature, orders[0].signature);
         assert_eq!(intent.observed_at, 1234);

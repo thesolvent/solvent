@@ -34,6 +34,7 @@ describe("Explorer records", () => {
       ...trades.items[0],
       status: "submitted",
       surplus: undefined,
+      source: "uniswapx",
       price_impact_pct: undefined,
     });
     expect(trade.makers).toBeNull();
