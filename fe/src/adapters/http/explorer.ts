@@ -83,6 +83,28 @@ export const explorerAdapter: ExplorerPort = {
       );
     }
   },
+  async crossChainOrders(taker) {
+    const [
+      orders,
+      originAssets,
+      originConfig,
+      destinationAssets,
+      destinationConfig,
+    ] = await Promise.all([
+      crossChainApi.ordersOf(taker),
+      crossChainOriginApi.assets(),
+      crossChainOriginApi.config(),
+      baseApi.assets(),
+      baseApi.config(),
+    ]);
+    // Either deployment can name either chain, so both leg mappings see the whole set.
+    const known = [...chainsOf(originConfig), ...chainsOf(destinationConfig)];
+    const origin = originAssets.items.map((asset) => toAsset(asset, known));
+    const destination = destinationAssets.items.map((asset) =>
+      toAsset(asset, known),
+    );
+    return orders.map((order) => toCrossChainTrade(order, origin, destination));
+  },
   async activity(filter, cursor) {
     // The Aqua feed records maker events; it does not publish resolver events.
     if (filter.entity === "Resolver")

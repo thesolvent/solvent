@@ -11,6 +11,8 @@ export interface TradeFilter {
   base?: string;
   quote?: string;
   chainId?: number;
+  /** The swapper whose trades to list. */
+  taker?: string;
 }
 
 export interface ActivityFilter {
@@ -24,6 +26,8 @@ export interface ExplorerPort {
     cursor?: string,
   ): Promise<RecordPage<TradeRecord>>;
   trade(id: string): Promise<TradeRecord>;
+  /** One person's cross-chain orders, which live in the proxy's store rather than either chain's. */
+  crossChainOrders(taker: string): Promise<TradeRecord[]>;
   activity(
     filter: ActivityFilter,
     cursor?: string,

@@ -6,11 +6,21 @@ import { Pagination } from "@/components/Pagination";
 import { RebateList } from "@/components/RebateList";
 import { useLoadedPagination } from "@/components/useLoadedPagination";
 import { chain } from "@/adapters/wallet/config";
-import { activityRow, explorerStats, tradeRow } from "@/lib/explorer";
+import {
+  activityRow,
+  explorerStats,
+  ownTrades,
+  tradeRow,
+} from "@/lib/explorer";
 import { loadedPageLabel } from "@/lib/pagination";
 import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
 import { useAssets } from "@/services/assets";
-import { useActivity, useExplorerStats, useTrades } from "@/services/explorer";
+import {
+  useActivity,
+  useCrossChainOrders,
+  useExplorerStats,
+  useTrades,
+} from "@/services/explorer";
 import { usePools } from "@/services/pools";
 import {
   useActiveRebatePages,
@@ -23,7 +33,7 @@ import { EVENT_TERMS, STATUS_TERMS } from "@/lib/glossary";
 
 import styles from "./explorer.module.css";
 
-const TABS = ["Trades", "Activity", "Rebates"] as const;
+const TABS = ["Trades", "Activity", "Rebates", "Your Trades"] as const;
 
 /** Trades are served ten to a page; the placeholder shows the page that is coming. */
 const PAGE_SIZE = 10;
@@ -195,6 +205,46 @@ function PlaceholderRows({
   );
 }
 
+/** One trade row. Two lists render it: every trade, and the reader's own. */
+function TradeRow({ trade }: { trade: ReturnType<typeof tradeRow> }) {
+  return (
+    <Link
+      className={styles.tradeRow}
+      to={`/explorer/trades/${encodeURIComponent(trade.id)}`}
+      aria-label={`Open trade ${trade.id}`}
+    >
+      <span className={styles.tradePair}>
+        <span className={styles.tradePairName}>{trade.pair}</span>
+        <span className={styles.tradeBlk}>{trade.blockLabel}</span>
+      </span>
+      <span className={styles.tradeFlow}>
+        <span className={styles.tradeIn}>{trade.input}</span>
+        <span className={styles.tradeArrow}>→</span>
+        <span className={styles.tradeOut}>{trade.output}</span>
+      </span>
+      <span className={styles.tradeCell}>
+        <span className={styles.tradeCellValue}>{trade.makers}</span>
+        <span className={styles.tradeCellLabel}>makers</span>
+      </span>
+      <span className={styles.tradeCell}>
+        <span className={styles.tradeCellValue}>{trade.impact}</span>
+        <span className={styles.tradeCellLabel}>impact</span>
+      </span>
+      <span className={styles.tradeStatusCell}>
+        <span className={styles.statusPill} style={trade.statusStyle}>
+          {STATUS_TERMS[trade.status] ? (
+            <Term term={STATUS_TERMS[trade.status]}>{trade.status}</Term>
+          ) : (
+            trade.status
+          )}
+        </span>
+        <span className={styles.tradeTx}>{trade.transactionLabel}</span>
+      </span>
+      <span className={styles.chevron}>›</span>
+    </Link>
+  );
+}
+
 function TradeList({ filter }: { filter: TradeFilter }) {
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
   const query = useTrades(filter, cursors.at(-1));
@@ -240,41 +290,7 @@ function TradeList({ filter }: { filter: TradeFilter }) {
           <p className={styles.emptyNote}>No trades match these filters.</p>
         )}
         {rows.map((trade) => (
-          <Link
-            key={trade.id}
-            className={styles.tradeRow}
-            to={`/explorer/trades/${encodeURIComponent(trade.id)}`}
-            aria-label={`Open trade ${trade.id}`}
-          >
-            <span className={styles.tradePair}>
-              <span className={styles.tradePairName}>{trade.pair}</span>
-              <span className={styles.tradeBlk}>{trade.blockLabel}</span>
-            </span>
-            <span className={styles.tradeFlow}>
-              <span className={styles.tradeIn}>{trade.input}</span>
-              <span className={styles.tradeArrow}>→</span>
-              <span className={styles.tradeOut}>{trade.output}</span>
-            </span>
-            <span className={styles.tradeCell}>
-              <span className={styles.tradeCellValue}>{trade.makers}</span>
-              <span className={styles.tradeCellLabel}>makers</span>
-            </span>
-            <span className={styles.tradeCell}>
-              <span className={styles.tradeCellValue}>{trade.impact}</span>
-              <span className={styles.tradeCellLabel}>impact</span>
-            </span>
-            <span className={styles.tradeStatusCell}>
-              <span className={styles.statusPill} style={trade.statusStyle}>
-                {STATUS_TERMS[trade.status] ? (
-                  <Term term={STATUS_TERMS[trade.status]}>{trade.status}</Term>
-                ) : (
-                  trade.status
-                )}
-              </span>
-              <span className={styles.tradeTx}>{trade.transactionLabel}</span>
-            </span>
-            <span className={styles.chevron}>›</span>
-          </Link>
+          <TradeRow key={trade.id} trade={trade} />
         ))}
       </div>
       <Pagination
@@ -285,6 +301,75 @@ function TradeList({ filter }: { filter: TradeFilter }) {
         onPage={selectPage}
       />
     </>
+  );
+}
+
+/**
+ * Everything one person has traded, both modes at once.
+ *
+ * Same-chain trades are served by each deployment; cross-chain orders live only in the proxy's
+ * saga store. They are separate reads because they are separate stores, and merged here so the
+ * reader sees one history rather than being asked which machinery settled their swap.
+ */
+function MyTrades() {
+  // The wallet hooks live here rather than on the page: every other tab renders without a wallet,
+  // and a hook cannot be called conditionally.
+  const { address } = useAccount();
+  const { openConnectModal } = useConnectModal();
+  const sameChain = useTrades(address ? { taker: address } : undefined);
+  const crossChain = useCrossChainOrders(address);
+  const pending = sameChain.isPending || crossChain.isPending;
+  const failed = sameChain.isError && crossChain.isError;
+  const rows = ownTrades(sameChain.data?.items, crossChain.data).map(tradeRow);
+
+  if (!address) {
+    return (
+      <p className={styles.emptyNote}>
+        Connect a wallet to see the trades you have made.{" "}
+        <button type="button" onClick={() => openConnectModal?.()}>
+          Connect
+        </button>
+      </p>
+    );
+  }
+
+  return (
+    <div
+      data-scroll="1"
+      className={styles.list}
+      aria-busy={sameChain.isFetching || crossChain.isFetching}
+    >
+      {pending && (
+        <>
+          <p className={styles.srOnly} role="status">
+            Loading your trades…
+          </p>
+          <PlaceholderRows rows={PAGE_SIZE} variant="trade" />
+        </>
+      )}
+      {failed && (
+        <p className={styles.emptyNote} role="alert">
+          Couldn’t load your trades.{" "}
+          <button
+            type="button"
+            onClick={() => {
+              void sameChain.refetch();
+              void crossChain.refetch();
+            }}
+          >
+            Try again
+          </button>
+        </p>
+      )}
+      {!pending && !failed && rows.length === 0 && (
+        <p className={styles.emptyNote}>
+          You haven’t traded on this deployment yet.
+        </p>
+      )}
+      {rows.map((trade) => (
+        <TradeRow key={trade.id} trade={trade} />
+      ))}
+    </div>
   );
 }
 
@@ -451,6 +536,7 @@ export function ExplorerPage() {
   const tab = chosen(TABS, params.get("tab"));
   const isTrades = tab === "Trades";
   const isActivity = tab === "Activity";
+  const isMine = tab === "Your Trades";
   const status = chosen(FILTERS.status, params.get("status"));
   const type = chosen(FILTERS.type, params.get("type"));
   const entity = chosen(FILTERS.entity, params.get("entity"));
@@ -507,16 +593,24 @@ export function ExplorerPage() {
         <div className={styles.headTitle}>
           <div className={styles.eyebrow}>Explorer</div>
           <h1 className={styles.titleLg}>
-            {isTrades ? "Trades" : isActivity ? "Protocol activity" : "Rebates"}
+            {isMine
+              ? "Your trades"
+              : isTrades
+                ? "Trades"
+                : isActivity
+                  ? "Protocol activity"
+                  : "Rebates"}
           </h1>
         </div>
         <span className={styles.limeSquare} />
         <p className={styles.pageDesc}>
-          {isTrades
-            ? "Every intent through Solvent: pair, in → out, makers sourced, status, price impact and tx."
-            : isActivity
-              ? "Aqua-level events: makers registering strategies, pushing and pulling balance, and docking positions."
-              : "Protected strategies share profitable price restoration between their maker and executor."}
+          {isMine
+            ? "Everything the connected wallet has traded — same-chain and cross-chain, newest first."
+            : isTrades
+              ? "Every intent through Solvent: pair, in → out, makers sourced, status, price impact and tx."
+              : isActivity
+                ? "Aqua-level events: makers registering strategies, pushing and pulling balance, and docking positions."
+                : "Protected strategies share profitable price restoration between their maker and executor."}
         </p>
       </div>
       <div className={styles.stats5}>
@@ -565,7 +659,7 @@ export function ExplorerPage() {
           ))}
         </div>
         <div className={styles.drops}>
-          {isTrades ? (
+          {isMine ? null : isTrades ? (
             <>
               {drop("status", status, FILTERS.status)}
               {drop("pair", selectedPair, pairOptions)}
@@ -580,7 +674,9 @@ export function ExplorerPage() {
           )}
         </div>
       </div>
-      {isTrades ? (
+      {isMine ? (
+        <MyTrades />
+      ) : isTrades ? (
         selectedPair === "All pairs" || pair ? (
           <TradeList key={JSON.stringify(filter)} filter={filter} />
         ) : poolQuery.isPending ? (

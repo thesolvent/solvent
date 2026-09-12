@@ -1,4 +1,4 @@
-use alloy::primitives::B256;
+use alloy::primitives::{Address, B256};
 use async_trait::async_trait;
 use solvent_core::deps::crosschain::{
     LegQuoteStore, LegQuoteStoreError, PreparationStore, PreparationStoreError, SagaStore,
@@ -190,16 +190,23 @@ impl LegQuoteStore for SqliteLegQuoteStore {
     }
 }
 
+/// How a taker is written to the indexed column: lower-case hex, matching the JSON body the
+/// migration backfilled from, so a row written before and after the column agree.
+fn taker_key(taker: Option<Address>) -> Option<String> {
+    taker.map(|taker| taker.to_string().to_lowercase())
+}
+
 #[async_trait]
 impl SagaStore for SqliteSagaStore {
     async fn insert(&self, saga: &CrossChainSaga) -> Result<CrossChainSaga, SagaStoreError> {
         let body = serde_json::to_string(saga).map_err(saga_db)?;
         sqlx::query(
-            "INSERT INTO crosschain_saga (order_id, state, body) VALUES (?, ?, ?)
+            "INSERT INTO crosschain_saga (order_id, state, taker, body) VALUES (?, ?, ?, ?)
              ON CONFLICT(order_id) DO NOTHING",
         )
         .bind(saga.order_id.0.to_vec())
         .bind(saga_state_label(saga.state))
+        .bind(taker_key(saga.taker))
         .bind(body)
         .execute(&self.pool)
         .await
@@ -246,6 +253,28 @@ impl SagaStore for SqliteSagaStore {
             ));
         }
         Ok(())
+    }
+
+    async fn by_taker(
+        &self,
+        taker: Address,
+        limit: u32,
+    ) -> Result<Vec<CrossChainSaga>, SagaStoreError> {
+        let bodies: Vec<String> = sqlx::query_scalar(
+            "SELECT body FROM crosschain_saga
+             WHERE taker = ?
+             ORDER BY updated_at DESC, order_id
+             LIMIT ?",
+        )
+        .bind(taker_key(Some(taker)))
+        .bind(i64::from(limit))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(saga_db)?;
+        bodies
+            .into_iter()
+            .map(|body| serde_json::from_str(&body).map_err(saga_db))
+            .collect()
     }
 
     async fn recoverable(&self) -> Result<Vec<CrossChainSaga>, SagaStoreError> {

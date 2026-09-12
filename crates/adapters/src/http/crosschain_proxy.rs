@@ -7,12 +7,13 @@ use crate::crosschain::{
     SolventCompactMandate, SolventCompactOrder,
 };
 use alloy::primitives::{Address, Bytes, B256, U256};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use solvent_core::crosschain::CrossChainProxy;
+use solvent_core::deps::crosschain::RemoteSolventError;
 use solvent_core::deps::ledger::Clock;
 use solvent_core::primitives::crosschain::{
     AggregateQuote, ChainExecutionPlan, CrossChainRoute, CrossChainSaga, LegQuoteRequest, LegRole,
@@ -47,7 +48,7 @@ pub fn crosschain_proxy_router_with_drafts(
         .route("/v1/cross-chain/quote", post(quote))
         .route("/v1/cross-chain/orders/draft", post(draft_order))
         .route("/v1/cross-chain/orders/direct", post(create_direct_order))
-        .route("/v1/cross-chain/orders", post(create_order))
+        .route("/v1/cross-chain/orders", post(create_order).get(orders_of))
         .route("/v1/cross-chain/orders/{id}", get(order))
         .route("/v1/cross-chain/orders/{id}/advance", post(advance))
         .with_state(state)
@@ -256,6 +257,37 @@ async fn create_direct_order(
         .map_err(proxy_error)
 }
 
+/// A person's own cross-chain orders, newest first.
+#[utoipa::path(
+    get,
+    path = "/v1/cross-chain/orders",
+    tag = "cross-chain",
+    params(
+        ("taker" = String, Query, description = "Swapper address"),
+        ("limit" = Option<u32>, Query, description = "Page size (default 25, max 200)"),
+    ),
+    responses(
+        (status = 200, description = "The taker's orders", body = CrossChainOrdersResponse),
+        (status = 400, description = "Malformed taker address", body = ErrorBody),
+        (status = 502, description = "The saga store is unavailable", body = ErrorBody),
+    )
+)]
+async fn orders_of(
+    State(state): State<ProxyState>,
+    Query(query): Query<OrdersQuery>,
+) -> Result<Json<CrossChainOrdersResponse>, (StatusCode, Json<ErrorBody>)> {
+    let taker = Address::parse_checksummed(&query.taker, None)
+        .or_else(|_| query.taker.parse::<Address>())
+        .map_err(|_| client_error("taker must be a 20-byte hex address"))?;
+    let limit = query.limit.unwrap_or(DEFAULT_ORDER_PAGE).min(MAX_ORDER_PAGE);
+    state
+        .proxy
+        .orders_of(taker, limit)
+        .await
+        .map(|orders| Json(CrossChainOrdersResponse { orders }))
+        .map_err(proxy_error)
+}
+
 /// Return the last durable state recorded for a cross-chain order.
 #[utoipa::path(
     get,
@@ -308,6 +340,20 @@ async fn advance(
         .map_err(proxy_error)
 }
 
+const DEFAULT_ORDER_PAGE: u32 = 25;
+const MAX_ORDER_PAGE: u32 = 200;
+
+#[derive(Debug, Deserialize)]
+struct OrdersQuery {
+    taker: String,
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct CrossChainOrdersResponse {
+    pub orders: Vec<CrossChainSaga>,
+}
+
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 struct ErrorBody {
     error: String,
@@ -316,12 +362,21 @@ struct ErrorBody {
 fn proxy_error(error: SolventError) -> (StatusCode, Json<ErrorBody>) {
     match error {
         SolventError::InvalidCrossChain(message) => client_error(&message),
-        _ => (
-            StatusCode::BAD_GATEWAY,
-            Json(ErrorBody {
-                error: "cross-chain service unavailable".to_string(),
-            }),
-        ),
+        // A chain-local service that refused the request is answering it, not failing: the reason
+        // belongs to the person who asked, so it is passed on rather than reported as an outage.
+        SolventError::RemoteSolvent(RemoteSolventError::Rejected(message)) => {
+            client_error(&message)
+        }
+        _ => {
+            // The reply is deliberately vague; without this the cause reaches nobody at all.
+            solvent_core::obs::error!(error = %error, "cross-chain request failed");
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(ErrorBody {
+                    error: "cross-chain service unavailable".to_string(),
+                }),
+            )
+        }
     }
 }
 

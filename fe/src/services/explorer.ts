@@ -26,6 +26,16 @@ export function useActivity(filter: ActivityFilter) {
   });
 }
 
+/** A person's cross-chain orders. Unconnected asks nothing. */
+export function useCrossChainOrders(taker: string | undefined) {
+  const { explorer } = useServices();
+  return useQuery({
+    ...LIVE_QUERY_OPTIONS,
+    queryKey: ["cross-chain-orders", taker],
+    queryFn: taker ? () => explorer.crossChainOrders(taker) : skipToken,
+  });
+}
+
 export function useExplorerStats() {
   const { explorer } = useServices();
   return useQuery({

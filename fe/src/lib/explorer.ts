@@ -130,6 +130,22 @@ export function explorerStats(stats: ExplorerStats | undefined) {
   }));
 }
 
+/**
+ * One person's history from the two stores that hold it, newest first.
+ *
+ * Same-chain trades come from each deployment; cross-chain orders live only in the proxy's saga
+ * store. Ordering is taken from the record's own instant, because the row carries formatted text
+ * rather than a time, and a saga and a trade are otherwise unrelated rows.
+ */
+export function ownTrades(
+  sameChain: TradeRecord[] | undefined,
+  crossChain: TradeRecord[] | undefined,
+): TradeRecord[] {
+  return [...(sameChain ?? []), ...(crossChain ?? [])].sort(
+    (a, b) => b.createdAt - a.createdAt,
+  );
+}
+
 export function tradeRow(trade: TradeRecord) {
   return {
     id: trade.id,

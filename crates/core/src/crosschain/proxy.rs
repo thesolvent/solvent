@@ -97,6 +97,15 @@ impl CrossChainProxy {
         Ok(self.sagas.recoverable().await?)
     }
 
+    /// One person's cross-chain orders, newest first.
+    pub async fn orders_of(
+        &self,
+        taker: Address,
+        limit: u32,
+    ) -> Result<Vec<CrossChainSaga>, SolventError> {
+        Ok(self.sagas.by_taker(taker, limit).await?)
+    }
+
     pub async fn start(
         &self,
         order_id: CrossChainOrderId,

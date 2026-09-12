@@ -20,6 +20,8 @@ export interface CrossChainClient {
     submitDirect(request: CreateDirectOrderRequest): Promise<CrossChainOrder>;
     submit(request: CreateCrossChainOrderRequest): Promise<CrossChainOrder>;
     order(orderId: string): Promise<CrossChainOrder>;
+    /** One person's cross-chain orders, newest first. */
+    ordersOf(taker: string, limit?: number): Promise<CrossChainOrder[]>;
     wait(
         orderId: string,
         options?: { intervalMs?: number; signal?: AbortSignal },
@@ -96,6 +98,14 @@ export function createCrossChainClient({
             return response.order;
         },
         order,
+        async ordersOf(taker, limit) {
+            const query = new URLSearchParams({ taker });
+            if (limit !== undefined) query.set("limit", String(limit));
+            const response = await request<{ orders: CrossChainOrder[] }>(
+                `/v1/cross-chain/orders?${query}`,
+            );
+            return response.orders;
+        },
         async wait(orderId, options) {
             const interval = options?.intervalMs ?? 2_000;
             for (;;) {

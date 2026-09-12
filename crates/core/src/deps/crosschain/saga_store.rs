@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use thiserror::Error;
 
+use alloy_primitives::Address;
+
 use crate::primitives::crosschain::CrossChainSaga;
 use crate::primitives::CrossChainOrderId;
 
@@ -21,4 +23,10 @@ pub trait SagaStore: Send + Sync {
     ) -> Result<Option<CrossChainSaga>, SagaStoreError>;
     async fn update(&self, saga: &CrossChainSaga) -> Result<(), SagaStoreError>;
     async fn recoverable(&self) -> Result<Vec<CrossChainSaga>, SagaStoreError>;
+    /// One person's orders, newest first.
+    async fn by_taker(
+        &self,
+        taker: Address,
+        limit: u32,
+    ) -> Result<Vec<CrossChainSaga>, SagaStoreError>;
 }
