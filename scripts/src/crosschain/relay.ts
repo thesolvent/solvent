@@ -24,11 +24,17 @@ function chain(id: number, rpc: string) {
     });
 }
 
+/** `RELAY_ORIGIN_ROUTER`/`RELAY_DESTINATION_ROUTER` let the relay run as a standalone deployment
+ *  (its own container, no shared filesystem with whatever deployed the contracts) — falls back to
+ *  the local manifest file when unset, for the same-host devnet flow. */
 function router(side: "origin" | "destination"): `0x${string}` {
+    const envKey = side === "origin" ? "RELAY_ORIGIN_ROUTER" : "RELAY_DESTINATION_ROUTER";
+    const fromEnv = process.env[envKey];
+    if (fromEnv) return fromEnv as `0x${string}`;
     const infra = tryRead<CrossChainInfraManifest>(infraManifestPath(side));
     if (!infra)
         throw new Error(
-            `no crosschain-infra manifest for ${side} — deploy it first (the relay has nothing to watch)`,
+            `no crosschain-infra manifest for ${side} and ${envKey} is unset — deploy it first (the relay has nothing to watch)`,
         );
     return infra.router as `0x${string}`;
 }
@@ -86,7 +92,12 @@ function relay(
     });
 }
 
-relay("origin", 31337, "http://127.0.0.1:9645", "destination", 31338, "http://127.0.0.1:9646", 11n);
-relay("destination", 31338, "http://127.0.0.1:9646", "origin", 31337, "http://127.0.0.1:9645", 22n);
+const ORIGIN_RPC = process.env.RELAY_ORIGIN_RPC ?? "http://127.0.0.1:9645";
+const DESTINATION_RPC = process.env.RELAY_DESTINATION_RPC ?? "http://127.0.0.1:9646";
+const ORIGIN_CHAIN_ID = Number(process.env.RELAY_ORIGIN_CHAIN_ID ?? 31337);
+const DESTINATION_CHAIN_ID = Number(process.env.RELAY_DESTINATION_CHAIN_ID ?? 31338);
+
+relay("origin", ORIGIN_CHAIN_ID, ORIGIN_RPC, "destination", DESTINATION_CHAIN_ID, DESTINATION_RPC, 11n);
+relay("destination", DESTINATION_CHAIN_ID, DESTINATION_RPC, "origin", ORIGIN_CHAIN_ID, ORIGIN_RPC, 22n);
 console.log("SolventX local proof relay listening");
 await new Promise(() => {});
