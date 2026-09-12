@@ -25,6 +25,9 @@ use solvent_adapters::execution::{
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
 use solvent_adapters::ingest::erc7683::{Erc7683FillBuilder, Erc7683Normalizer};
+use solvent_adapters::ingest::oneinch::{
+    OneInchApiClient, OneInchFeed, OneInchFillBuilder, OneInchNormalizer,
+};
 use solvent_adapters::ingest::uniswapx::{
     FeedHealth, HostedFeed, OrdersApiClient, Scope, ServerCosigner, UniswapXFillBuilder,
     UniswapXV2Normalizer,
@@ -545,6 +548,13 @@ async fn main() -> Result<(), StartupError> {
             config.reservation_ttl_secs,
         ),
     ));
+    // Each protocol names its own target contract in the `PreparedFill` it returns (`SwapService`
+    // no longer assumes a single filler address). 1inch's `oneinch_filler` has no real mainnet
+    // deployment yet: an unconfigured (zero) address still has no code, so a simulated call against
+    // it returns success with empty data rather than reverting, which would otherwise read as a
+    // real fillable order and broadcast a pointless, gas-spending transaction. Leaving the builder
+    // out entirely when unset makes that protocol decline the same clean way an unregistered one
+    // already does, instead of silently misreporting as submitted.
     let uniswapx_fill: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(
         config.app_address,
         config.filler,
@@ -563,8 +573,17 @@ async fn main() -> Result<(), StartupError> {
                 authorizer,
             )) as Arc<dyn FillBuilder>
         });
-    let fill_builder: Arc<dyn FillBuilder> =
-        Arc::new(ProtocolFillBuilder::new(uniswapx_fill, erc7683_fill));
+    let oneinch_fill = (config.oneinch_filler != Address::ZERO).then(|| {
+        Arc::new(OneInchFillBuilder::new(
+            config.app_address,
+            config.oneinch_filler,
+        )) as Arc<dyn FillBuilder>
+    });
+    let fill_builder: Arc<dyn FillBuilder> = Arc::new(ProtocolFillBuilder::new(
+        uniswapx_fill,
+        erc7683_fill,
+        oneinch_fill,
+    ));
     let erc7683 = erc7683_contracts
         .zip(erc7683_fee_policy)
         .map(|(contracts, fee_policy)| {
@@ -629,18 +648,11 @@ async fn main() -> Result<(), StartupError> {
         )
     }));
 
-    // The live order feed. Orders are off-chain messages until someone fills them, so polling the
-    // Orders API is the only way to see one. Left off when no endpoint is configured, in which case
+    // The live order feed(s). Orders are off-chain messages until someone fills them, so polling is
+    // the only way to see one. Left off entirely when neither endpoint is configured, in which case
     // the resolver takes orders solely from its own submit path.
     let mut feed_health_handle: Option<Arc<FeedHealth>> = None;
-    if let Some(orders_api_url) = config.orders_api_url.clone() {
-        let feed_normalizer: Arc<dyn Normalizer> = Arc::new(UniswapXV2Normalizer::new(
-            config.reactor,
-            config.expected_cosigners.clone(),
-        ));
-        if config.expected_cosigners.is_empty() {
-            tracing::warn!("no expected_cosigners configured; the order feed will admit nothing");
-        }
+    if config.orders_api_url.is_some() || config.oneinch_orderbook_url.is_some() {
         // Fall back to the token list: those are the assets the registry can price, so nothing
         // outside them is fillable anyway.
         let admitted: BTreeSet<Address> = match config.admitted_tokens.is_empty() {
@@ -651,8 +663,66 @@ async fn main() -> Result<(), StartupError> {
                 .collect(),
             false => config.admitted_tokens.iter().copied().collect(),
         };
+        let mut normalizers: BTreeMap<ProtocolId, Arc<dyn Normalizer>> = BTreeMap::new();
+        let mut feeds: Vec<Arc<dyn OrderFeed>> = Vec::new();
+
+        if let Some(orders_api_url) = config.orders_api_url.clone() {
+            let feed_normalizer: Arc<dyn Normalizer> = Arc::new(UniswapXV2Normalizer::new(
+                config.reactor,
+                config.expected_cosigners.clone(),
+            ));
+            if config.expected_cosigners.is_empty() {
+                tracing::warn!(
+                    "no expected_cosigners configured; the order feed will admit nothing"
+                );
+            }
+            normalizers.insert(ProtocolId::UniswapXV2, feed_normalizer);
+            let orders_client = Arc::new(
+                OrdersApiClient::new(
+                    orders_api_url,
+                    ChainId(config.chain_id),
+                    config.order_type.clone(),
+                )
+                .map_err(|e| StartupError::OrdersFeed(e.to_string()))?,
+            );
+            let feed_health = Arc::new(FeedHealth::new(Duration::from_secs(
+                config.feed_silence_secs,
+            )));
+            feed_health_handle = Some(Arc::clone(&feed_health));
+            // Orders already assigned to us are polled apart from the wider book: the exclusivity
+            // window is seconds long and discovery must not queue behind a page of everything else.
+            let feed: Arc<dyn OrderFeed> = Arc::new(HostedFeed::new(
+                orders_client,
+                ChainId(config.chain_id),
+                vec![Scope::ExclusiveTo(config.filler), Scope::Book],
+                Duration::from_millis(config.order_poll_ms),
+                Arc::clone(&feed_health),
+            ));
+            feeds.push(feed);
+        }
+
+        if let Some(oneinch_url) = config.oneinch_orderbook_url.clone() {
+            let oneinch_key = std::env::var("ONEINCH_API_KEY")
+                .map_err(|_| StartupError::MissingSecret("ONEINCH_API_KEY"))?;
+            normalizers.insert(ProtocolId::OneInchLimitOrder, Arc::new(OneInchNormalizer));
+            let oneinch_client = Arc::new(
+                OneInchApiClient::new(oneinch_url, ChainId(config.chain_id), oneinch_key)
+                    .map_err(|e| StartupError::OrdersFeed(e.to_string()))?,
+            );
+            let oneinch_health = Arc::new(FeedHealth::new(Duration::from_secs(
+                config.feed_silence_secs,
+            )));
+            let oneinch_feed: Arc<dyn OrderFeed> = Arc::new(OneInchFeed::new(
+                oneinch_client,
+                ChainId(config.chain_id),
+                Duration::from_millis(config.order_poll_ms),
+                oneinch_health,
+            ));
+            feeds.push(oneinch_feed);
+        }
+
         let pipeline = Arc::new(IngestPipeline::new(
-            BTreeMap::from([(ProtocolId::UniswapXV2, feed_normalizer)]),
+            normalizers,
             Duration::from_secs(config.dedup_ttl_secs),
             config.dedup_capacity,
             Arc::new(SystemClock),
@@ -663,34 +733,13 @@ async fn main() -> Result<(), StartupError> {
             },
             Some(Arc::clone(&order_log) as Arc<dyn OrderLog>),
         ));
-        let orders_client = Arc::new(
-            OrdersApiClient::new(
-                orders_api_url,
-                ChainId(config.chain_id),
-                config.order_type.clone(),
-            )
-            .map_err(|e| StartupError::OrdersFeed(e.to_string()))?,
-        );
-        let feed_health = Arc::new(FeedHealth::new(Duration::from_secs(
-            config.feed_silence_secs,
-        )));
-        feed_health_handle = Some(Arc::clone(&feed_health));
-        // Orders already assigned to us are polled apart from the wider book: the exclusivity
-        // window is seconds long and discovery must not queue behind a page of everything else.
-        let feed: Arc<dyn OrderFeed> = Arc::new(HostedFeed::new(
-            orders_client,
-            ChainId(config.chain_id),
-            vec![Scope::ExclusiveTo(config.filler), Scope::Book],
-            Duration::from_millis(config.order_poll_ms),
-            Arc::clone(&feed_health),
-        ));
 
         let (tx, rx) = tokio::sync::mpsc::channel::<Intent>(INTENT_CHANNEL_CAPACITY);
         tokio::spawn(supervise("ingest", move || {
             let pipeline = Arc::clone(&pipeline);
-            let feed = Arc::clone(&feed);
+            let feeds = feeds.clone();
             let tx = tx.clone();
-            async move { pipeline.run(vec![feed], tx).await }
+            async move { pipeline.run(feeds, tx).await }
         }));
 
         // Re-price every held order once per block: that is how often the state a decision rests on

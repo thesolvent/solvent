@@ -500,6 +500,7 @@ async fn erc7683_http_state(
     let fill_builder: Arc<dyn FillBuilder> = Arc::new(ProtocolFillBuilder::new(
         Arc::new(stack.fill_builder()),
         Some(Arc::new(stack.erc7683_fill_builder())),
+        None,
     ));
     let swap = Arc::new(SwapService::new(
         Arc::clone(&registry),

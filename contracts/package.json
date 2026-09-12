@@ -5,13 +5,17 @@
   "packageManager": "yarn@1.22.22",
   "description": "On-chain filler (UniswapXAquaFiller) + tests for Solvent, a zero-inventory intent resolver on 1inch Aqua",
   "license": "MIT",
-  "comment": "1inch Aqua/SwapVM ship as npm packages (their foundry.toml uses libs=[node_modules]); pins mirror swap-vm@v1.0.1 exactly. Uniswap (UniswapX/permit2) ship as git submodules and are fetched by `forge install` (see justfile `setup`).",
+  "comment": "1inch Aqua/SwapVM ship as npm packages (their foundry.toml uses libs=[node_modules]); pins mirror swap-vm@v1.0.1 exactly. Uniswap (UniswapX/permit2) ship as git submodules and are fetched by `forge install` (see justfile `setup`). limit-order-protocol's own contracts pin an exact solc (0.8.23), incompatible with this workspace's single-solc-version build (foundry.toml solc=0.8.30); postinstall relaxes that pin to a caret range so both compile together.",
   "dependencies": {
     "@1inch/swap-vm": "github:1inch/swap-vm#v1.0.1",
     "@1inch/aqua": "github:1inch/aqua#0.1.0",
+    "@1inch/limit-order-protocol-contract": "github:1inch/limit-order-protocol#4.3.2",
     "@1inch/solidity-utils": "6.9.7",
     "@openzeppelin/contracts": "5.4.0",
     "@openzeppelin/contracts-erc7683": "npm:@openzeppelin/contracts@5.6.1",
     "forge-std": "github:foundry-rs/forge-std#v1.11.0"
+  },
+  "scripts": {
+    "postinstall": "node -e \"const fs=require('fs'),path=require('path');const dir='node_modules/@1inch/limit-order-protocol-contract';if(!fs.existsSync(dir))process.exit(0);const walk=d=>fs.readdirSync(d,{withFileTypes:true}).forEach(e=>{const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(e.name.endsWith('.sol')){const s=fs.readFileSync(p,'utf8');const r=s.replace(/^pragma solidity 0\\.8\\.23;/m,'pragma solidity ^0.8.23;');if(r!==s)fs.writeFileSync(p,r);}});walk(dir);\""
   }
 }

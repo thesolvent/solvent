@@ -142,7 +142,7 @@ mod tests {
     use solvent_core::deps::execution::{
         Execution, ExecutionError, SettlementError, SettlementReader, SimError, SimGate,
     };
-    use solvent_core::deps::ingest::{FillBuilder, FillBuilderError};
+    use solvent_core::deps::ingest::{FillBuilder, FillBuilderError, PreparedFill};
     use solvent_core::deps::ledger::{
         BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError,
     };
@@ -552,11 +552,8 @@ mod tests {
             _: &Intent,
             _: &RoutePlan,
             _: &Snapshot,
-        ) -> Result<solvent_core::deps::ingest::PreparedFill, FillBuilderError> {
-            Ok(solvent_core::deps::ingest::PreparedFill::new(
-                Address::ZERO,
-                Bytes::new(),
-            ))
+        ) -> Result<PreparedFill, FillBuilderError> {
+            Ok(PreparedFill::new(Address::ZERO, Bytes::new()))
         }
     }
 
@@ -639,7 +636,7 @@ mod tests {
             Arc::clone(&strategy_guard),
             Arc::clone(&trades),
             execution,
-            Arc::new(FakeFill),
+            Arc::new(FakeFill) as Arc<dyn FillBuilder>,
             Arc::clone(&leg_cost),
             Arc::new(SystemClock),
             SwapConfig {

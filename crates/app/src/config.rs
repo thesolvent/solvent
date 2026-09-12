@@ -136,6 +136,18 @@ pub struct Config {
     /// once however many polls return it.
     #[serde(default = "default_dedup_ttl_secs")]
     pub dedup_ttl_secs: u64,
+
+    /// Root of 1inch's Orderbook API, or unset to leave this feed off. Requires `ONEINCH_API_KEY`
+    /// in the environment when set.
+    #[serde(default)]
+    pub oneinch_orderbook_url: Option<String>,
+    /// The deployed `OneInchLimitOrderAquaFiller` a 1inch fill is sent to. There is no real mainnet
+    /// deployment yet, so this is unset (zero) by default — and left unset, 1inch simply has no
+    /// registered `FillBuilder` at all (a call to the zero address has no code, so it would
+    /// simulate as a trivial on-chain success rather than a decline, misreporting a real submitted
+    /// trade for nothing). Set this only once a real contract is deployed.
+    #[serde(default)]
+    pub oneinch_filler: Address,
 }
 
 #[derive(Debug, Deserialize)]

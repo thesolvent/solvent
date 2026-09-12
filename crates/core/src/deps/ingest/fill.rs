@@ -1,5 +1,7 @@
-//! The fill-builder port: turn a routed plan into the calldata that settles it on-chain. One impl
-//! per protocol; the caller sends the returned calldata to that protocol's filler contract.
+//! The fill-builder port: turn a routed plan into the calldata that settles it on-chain, and the
+//! contract it must be sent to. One impl per protocol, each targeting its own deployed filler
+//! contract — the target travels with the calldata rather than being assumed by the caller, since
+//! two protocols never share one filler contract.
 
 use alloy_primitives::{Address, Bytes};
 use async_trait::async_trait;
@@ -7,11 +9,12 @@ use thiserror::Error;
 
 use crate::deps::execution::ExecutionAuthorizerError;
 
-use crate::primitives::ingest::Intent;
+use crate::primitives::ingest::{Intent, ProtocolId};
 use crate::primitives::registry::Snapshot;
 use crate::primitives::routing::RoutePlan;
 
 /// A protocol-selected contract call ready for simulation and submission.
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct PreparedFill {
     pub target: Address,
@@ -34,6 +37,14 @@ pub trait FillBuilder: Send + Sync {
         plan: &RoutePlan,
         snapshot: &Snapshot,
     ) -> Result<PreparedFill, FillBuilderError>;
+
+    /// Whether this builder can fill `protocol`, so the caller can decline before routing and
+    /// reserving rather than discovering it only at `build`. A builder scoped to one protocol is
+    /// never asked about another (the composition root wires it only where it applies), so `true`
+    /// is the correct default; only a multi-protocol dispatcher needs to override it.
+    fn supports(&self, _protocol: ProtocolId) -> bool {
+        true
+    }
 }
 
 /// A fill-build failure. All are unreachable on the normal route→fill path (a routed leg always has
@@ -47,6 +58,8 @@ pub enum FillBuilderError {
     MissingStrategy,
     #[error("a routed leg's shipped program did not decode")]
     UndecodableProgram,
+    #[error("intent raw/signature did not decode: {0}")]
+    MalformedIntent(&'static str),
     #[error("a routed leg's maker does not match its shipped order")]
     StrategyMakerMismatch,
     #[error("a routed leg is not protected by the configured taker credential")]

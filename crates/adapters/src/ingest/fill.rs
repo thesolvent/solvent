@@ -11,11 +11,20 @@ use solvent_core::primitives::routing::RoutePlan;
 pub struct ProtocolFillBuilder {
     uniswapx: Arc<dyn FillBuilder>,
     erc7683: Option<Arc<dyn FillBuilder>>,
+    oneinch: Option<Arc<dyn FillBuilder>>,
 }
 
 impl ProtocolFillBuilder {
-    pub fn new(uniswapx: Arc<dyn FillBuilder>, erc7683: Option<Arc<dyn FillBuilder>>) -> Self {
-        Self { uniswapx, erc7683 }
+    pub fn new(
+        uniswapx: Arc<dyn FillBuilder>,
+        erc7683: Option<Arc<dyn FillBuilder>>,
+        oneinch: Option<Arc<dyn FillBuilder>>,
+    ) -> Self {
+        Self {
+            uniswapx,
+            erc7683,
+            oneinch,
+        }
     }
 }
 
@@ -33,7 +42,20 @@ impl FillBuilder for ProtocolFillBuilder {
                 Some(builder) => builder.build(intent, plan, snapshot).await,
                 None => Err(FillBuilderError::UnsupportedProtocol),
             },
+            ProtocolId::OneInchLimitOrder => match &self.oneinch {
+                Some(builder) => builder.build(intent, plan, snapshot).await,
+                None => Err(FillBuilderError::UnsupportedProtocol),
+            },
             _ => Err(FillBuilderError::UnsupportedProtocol),
+        }
+    }
+
+    fn supports(&self, protocol: ProtocolId) -> bool {
+        match protocol {
+            ProtocolId::UniswapXV2 => true,
+            ProtocolId::Erc7683 => self.erc7683.is_some(),
+            ProtocolId::OneInchLimitOrder => self.oneinch.is_some(),
+            _ => false,
         }
     }
 }

@@ -1965,7 +1965,7 @@
           },
           "source": {
             "type": "string",
-            "description": "Where it came from: `uniswapx` (the public book) or `solvent` (our own endpoint)."
+            "description": "Where it came from: `uniswapx` (the public book), `oneinch` (the public book), or `solvent`\n(our own endpoint)."
           },
           "token_in": {
             "type": "string"

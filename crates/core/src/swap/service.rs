@@ -52,6 +52,8 @@ pub struct SwapService {
     guards: Arc<StrategyGuard>,
     trades: Arc<dyn TradeStore>,
     execution: Arc<ExecutionService>,
+    /// Dispatches a routed intent to its protocol's own filler contract (`ProtocolFillBuilder` in
+    /// the adapters crate composes one builder per protocol behind this single port).
     fill_builder: Arc<dyn FillBuilder>,
     leg_cost: Arc<LegCostResolver>,
     clock: Arc<dyn Clock>,
@@ -102,6 +104,12 @@ impl SwapService {
         prices: TradePrices,
     ) -> Result<SwapOutcome, SolventError> {
         let now = self.clock.now_unix();
+        if !self.fill_builder.supports(intent.protocol) {
+            // Observed and quoted upstream, but this protocol has no builder to fill it with.
+            return self
+                .declined(trade_id, &intent, taker, now, prices, None)
+                .await;
+        }
         let Some(amounts) = swap_amounts(&intent, self.config.filler, now) else {
             // No single delivery to source, so there is no cost to quote either.
             return self
@@ -237,6 +245,7 @@ impl SwapService {
 
     /// Build and submit the fill: `Submitted` on success, or settle `Declined` when the sim gate
     /// rejects (it has already voided the reservation).
+    #[allow(clippy::too_many_arguments)]
     async fn submit_fill(
         &self,
         id: &TradeId,
@@ -482,7 +491,7 @@ mod tests {
     use crate::deps::execution::{
         Execution, ExecutionError, SettlementError, SettlementReader, SimError, SimGate,
     };
-    use crate::deps::ingest::FillBuilderError;
+    use crate::deps::ingest::{FillBuilderError, PreparedFill};
     use crate::deps::ledger::{BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError};
     use crate::deps::routing::{GasPrice, GasPriceError, PriceOracle, PriceOracleError};
     use crate::deps::trade::{
@@ -652,6 +661,9 @@ mod tests {
         }
     }
 
+    /// Stands in for a single-protocol builder (like the real ones), so it fills only the
+    /// protocol these fixtures normally submit — 1inch is deliberately absent, to exercise the
+    /// pre-route decline for a protocol this deployment has no builder for.
     struct FakeFill;
     #[async_trait]
     impl FillBuilder for FakeFill {
@@ -660,11 +672,12 @@ mod tests {
             _: &Intent,
             _: &RoutePlan,
             _: &Snapshot,
-        ) -> Result<crate::deps::ingest::PreparedFill, FillBuilderError> {
-            Ok(crate::deps::ingest::PreparedFill::new(
-                addr(0xF1),
-                Bytes::from(vec![0x01, 0x02]),
-            ))
+        ) -> Result<PreparedFill, FillBuilderError> {
+            Ok(PreparedFill::new(addr(0xF1), Bytes::from(vec![0x01, 0x02])))
+        }
+
+        fn supports(&self, protocol: ProtocolId) -> bool {
+            protocol != ProtocolId::OneInchLimitOrder
         }
     }
 
@@ -870,7 +883,7 @@ mod tests {
             Arc::new(StrategyGuard::default()),
             trades.clone(),
             execution,
-            Arc::new(FakeFill),
+            Arc::new(FakeFill) as Arc<dyn FillBuilder>,
             leg_cost,
             Arc::new(FixedClock),
             SwapConfig {
@@ -970,6 +983,30 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.status, TradeStatus::Declined);
+    }
+
+    /// A protocol with no registered builder (an observation-only feed) must decline before
+    /// routing or reserving anything — never fall through to another protocol's builder, which
+    /// would encode calldata for the wrong settler.
+    #[tokio::test]
+    async fn a_protocol_with_no_fill_builder_is_declined_before_reserving() {
+        let h = harness(vec![xyc(3, e(100, 18), e(300_000, 6))], SimVerdict::Ok).await;
+        let before = h.ledger.available(&virt(3, USDC));
+        let mut order = intent(1, addr(9), e(2, 18), e(3000, 6));
+        order.protocol = ProtocolId::OneInchLimitOrder;
+
+        let out = h
+            .swap
+            .submit(order, addr(9), tid(), TradePrices::default())
+            .await
+            .unwrap();
+
+        assert_eq!(out.status, TradeStatus::Declined);
+        assert_eq!(
+            h.ledger.available(&virt(3, USDC)),
+            before,
+            "nothing should have been reserved for a protocol we cannot fill"
+        );
     }
 
     /// The taker's input is the max-in bound, and it is the only thing standing between the

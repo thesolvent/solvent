@@ -333,6 +333,52 @@ the project is pre-1.0 and evolving.
     should drain traffic and page someone, not restart a process whose problem is upstream. The
     health type existed but was read by nothing, so the failure it was written for — a filler that
     sees no orders while looking healthy — was live.
+  - **1inch Limit Order Protocol feed** — `OneInchFeed`/`OneInchNormalizer` poll 1inch's Orderbook
+    API and normalize plain, `ALLOW_MULTIPLE_FILLS`, and `FeeTaker`-gated orders into the same
+    `Intent` pipeline UniswapX orders use, so they are admitted or dropped and quote-priced the
+    same way, and — now that `OneInchFillBuilder` is wired in — actually filled when profitable.
+    An order whose amount depends on unrecovered extension bytecode (a predicate, a runtime amount
+    calculator, Permit2) is treated as malformed and never logged, the same as an unparseable
+    UniswapX order. Off by default; set `oneinch_orderbook_url`, `oneinch_filler`, and
+    `ONEINCH_API_KEY` to enable. Independent of UniswapX's own `orders_api_url` in both directions —
+    either feed, both, or neither can be configured, and the ingest pipeline and decision loop now
+    start whenever at least one is (previously they only ever started under UniswapX's own key,
+    which would have silently left 1inch inert in a 1inch-only deployment).
+  - **`OneInchFillBuilder` and `OneInchLimitOrderAquaFiller`** — the P2 on-chain filler: a
+    zero-inventory 1inch Limit Order Protocol taker that sources a fill's taker-asset leg from
+    makers' Aqua positions via the SwapVM router, the same sourcing mechanism `UniswapXAquaFiller`
+    uses behind a different callback shape (1inch's own `ITakerInteraction` taker-interaction hook,
+    fired between the protocol's maker→taker and taker→maker transfers, rather than a reactor
+    calling back into the filler). `takerInteraction` is otherwise reachable by anyone naming this
+    contract as the interaction target on an unrelated order of their own, so the callback checks
+    both a per-fill transient flag and the hash of the specific order `fill()` is mid-call on — a
+    same-tx flag alone is not enough, since `order.makerAsset`/`takerAsset` are maker-chosen and
+    unvalidated, and a malicious token's transfer hook can call the real protocol on a second,
+    attacker-crafted order that also names this contract before our own fill returns. Hermetic
+    Foundry suite (7 tests: single- and multi-maker sourcing, the profitability guard's callers,
+    both auth guards, admin) plus an opt-in mainnet-fork test against the real deployed 1inch
+    Aggregation Router V6, both against a source-deployed/real 1inch Limit Order Protocol +
+    Aqua/SwapVM. A hermetic Rust E2E (`e2e_oneinch_fill`) drives a signed order through the real
+    `IngestPipeline`/`Admission`/`OneInchNormalizer`/`DecisionService`/`SwapService`/
+    `OneInchFillBuilder` against source-deployed contracts, catching a real bug the Solidity suite
+    couldn't: 1inch's `Address`/`MakerTraits` custom value types canonicalize to `uint256` in a
+    function selector (not `address`), so the fill-builder's calldata was targeting the wrong
+    selector entirely — fixed in `fill.rs`.
+  - **`FillBuilder::build` now returns `BuiltFill { target, calldata }`** instead of bare calldata —
+    `SwapService` no longer assumes one shared filler-contract address (`SwapConfig.filler` dropped
+    that meaning; it's kept only for the UniswapX-specific exclusivity-toll check, which no other
+    protocol's intents carry). `main.rs` registers both `UniswapXFillBuilder` and, only once
+    `oneinch_filler` is actually set to a real deployment, `OneInchFillBuilder` — left out
+    entirely while unset (there is no real mainnet deployment yet), since a call to an address with
+    no code would otherwise simulate as a trivial on-chain success and broadcast a real,
+    gas-spending transaction that settles nothing, rather than declining cleanly.
+  - **1inch orders needing an epoch-manager check are no longer refused** — `NEED_CHECK_EPOCH_MANAGER`
+    only gates *whether* an order can still be filled (a soft-cancellation the real protocol
+    enforces on-chain), it never changes the maker/taker amounts, so it is treated the same as a
+    `FeeTaker` whitelist rejection: accepted at its real stated amounts, left to decline at
+    execution time if the epoch has moved on. Verified against real live orderbook data: every
+    liquid-pair order this codebase currently has liquidity for (UNI/USDT, USDC/USDT, USDT/USDC)
+    carries this bit, so refusing it outright meant refusing real, sourceable flow for no reason.
 
 ### Added — frontend (`fe/`, React + Vite)
 - **Live Makers and strategy details** — connect the original dashboard and strategy panels to
