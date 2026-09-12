@@ -2,6 +2,7 @@
 # source baked in, kept alive so `scheduled_tasks.run_once` can exec deploy-remote.sh and any
 # follow-up cast/forge calls against anvil-origin / anvil-destination over the `coolify` network.
 FROM ghcr.io/foundry-rs/foundry:stable
+USER root
 RUN apt-get update && apt-get install -y --no-install-recommends jq && rm -rf /var/lib/apt/lists/*
 COPY . /repo/contracts
 WORKDIR /repo/contracts
