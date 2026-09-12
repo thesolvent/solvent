@@ -21,7 +21,6 @@ use ulid::Ulid;
 
 use crate::http::primitives::{parse_addr, ApiResult, Response};
 use crate::http::state::AppState;
-use crate::ingest::uniswapx::UniswapXV2Normalizer;
 
 /// A quote request: the pair, and the input size in base units.
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -163,7 +162,8 @@ pub async fn submit(
         .cosigner
         .cosign(&encoded, signature.into(), now)
         .map_err(|e| Response::error(e.to_string(), StatusCode::BAD_REQUEST))?;
-    let intent = UniswapXV2Normalizer
+    let intent = state
+        .normalizer
         .normalize(&cosigned.raw)
         .map_err(SolventError::from)?;
     // Capture trade-time token prices here (the adapter holds the oracle) so the trade's fee/value

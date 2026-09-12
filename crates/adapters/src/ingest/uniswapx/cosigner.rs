@@ -8,7 +8,7 @@ use alloy::signers::local::PrivateKeySigner;
 use alloy::sol_types::SolValue;
 use thiserror::Error;
 
-use solvent_core::primitives::ingest::{ProtocolId, RawOrder};
+use solvent_core::primitives::ingest::{OrderSource, ProtocolId, RawOrder};
 use solvent_core::primitives::ChainId;
 
 use super::builder::{cosign_digest, sign65, witness_digest};
@@ -103,6 +103,7 @@ impl ServerCosigner {
                 Bytes::from(order.abi_encode()),
                 Bytes::from(signature.as_bytes()),
                 observed_at,
+                OrderSource::Solvent,
             ),
         })
     }
@@ -211,6 +212,7 @@ mod tests {
             decay_start: 0,
             decay_end: 0,
             exclusive_filler: Address::ZERO,
+            exclusivity_override_bps: 100,
         };
         let raw = builder.build(&spec, 0);
         let mut order = V2DutchOrder::abi_decode(&raw.payload).expect("decode");

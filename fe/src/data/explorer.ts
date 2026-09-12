@@ -25,6 +25,10 @@ export interface TradeRecord {
   input: TokenQuantity;
   output: TokenQuantity;
   surplus: TokenQuantity | null;
+  /** What sourcing the delivery would have cost, gas included — present on declines too. */
+  indicativeInput: TokenQuantity | null;
+  /** Which venue the order arrived from: the public book, or our own endpoint. */
+  source: string;
   priceImpactPct: number | null;
   makers: number | null;
   txHash: string | null;
@@ -61,4 +65,18 @@ export interface ExplorerStats {
 export interface RecordPage<T> {
   items: T[];
   nextCursor: string | undefined;
+}
+
+/** One order the feed showed the resolver, whatever became of it. */
+export interface ObservedOrder {
+  orderHash: string;
+  source: string;
+  tokenIn: string;
+  tokenOut: string | null;
+  amountIn: string;
+  requiredOut: string | null;
+  indicativeIn: string | null;
+  verdict: string;
+  reason: string | null;
+  seenAt: number;
 }

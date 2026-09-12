@@ -192,6 +192,7 @@ async fn e2e_routed_plan_is_always_reservable() {
         U256::ZERO,
         None,
     )
+    .plan
     .expect("router produces a plan for an interior trade");
     assert!(!plan.legs.is_empty());
 
@@ -247,6 +248,7 @@ async fn e2e_router_declines_beyond_caps() {
             U256::ZERO,
             None
         )
+        .plan
         .is_none(),
         "the router declines a trade beyond the book's capped capacity"
     );

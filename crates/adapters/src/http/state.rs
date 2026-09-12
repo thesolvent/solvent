@@ -20,7 +20,8 @@ use solvent_core::trade::TradeService;
 use solvent_core::valuation::Valuation;
 
 use crate::chain::ChainHead;
-use crate::ingest::uniswapx::ServerCosigner;
+use crate::ingest::uniswapx::{FeedHealth, ServerCosigner, UniswapXV2Normalizer};
+use crate::metrics::SqliteOrderLog;
 
 /// Feature flags the FE reads at bootstrap. `earn` / `send_buy` are always off in the MVP.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -80,6 +81,9 @@ pub struct AppState {
     pub rebates: Arc<RebateService>,
     /// Cosigns taker-signed orders on the swap path (holds only the resolver's cosigner key).
     pub cosigner: Arc<ServerCosigner>,
+    /// Decodes and validates the orders this server itself cosigns, so the self-venue path applies
+    /// the same admission rules as the feed. Its cosigner allow-list is our own key, not Uniswap's.
+    pub normalizer: Arc<UniswapXV2Normalizer>,
     /// The trade read-surface, backing the `/trades` and maker-settlements endpoints.
     pub trades: Arc<TradeService>,
     /// The live registry snapshot — the stat tiles read active-maker counts lock-free.
@@ -90,4 +94,9 @@ pub struct AppState {
     pub valuation: Arc<Valuation>,
     /// Records each served quote, for maker uptime / latency / fill-share analytics.
     pub quote_log: Arc<dyn QuoteLog>,
+    /// Liveness of the order feed, when one is configured. `None` means the resolver takes orders
+    /// only from its own submit path, so there is no feed to be stale.
+    pub feed_health: Option<Arc<FeedHealth>>,
+    /// Every order the feed showed us, for the explorer's order list. `None` leaves it empty.
+    pub order_log: Option<Arc<SqliteOrderLog>>,
 }

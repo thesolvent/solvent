@@ -4,10 +4,12 @@
 
 mod config;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+use alloy::primitives::Address;
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
@@ -18,9 +20,12 @@ use solvent_adapters::execution::{
 };
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
-use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
+use solvent_adapters::ingest::uniswapx::{
+    FeedHealth, HostedFeed, OrdersApiClient, Scope, ServerCosigner, UniswapXFillBuilder,
+    UniswapXV2Normalizer,
+};
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
-use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
+use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteOrderLog, SqliteQuoteLog};
 use solvent_adapters::rebate::{
     AlloyRebateChainSource, FillerRebateCallBuilder, SqliteRebateAccrualSource, SqliteRebateStore,
 };
@@ -29,12 +34,15 @@ use solvent_adapters::routing::{BinanceFeed, BinanceHistory, GasPoller, MarketCa
 use solvent_adapters::trade::SqliteTradeStore;
 use solvent_core::asset::{AssetManager, PairHistoryService};
 use solvent_core::balances::BalancesService;
+use solvent_core::decision::{DecisionConfig, DecisionDeps, DecisionService};
 use solvent_core::deps::asset::PairPriceHistorySource;
 use solvent_core::deps::balances::BalancesOracle;
 use solvent_core::deps::execution::ExecutionAuthorizer;
 use solvent_core::deps::ingest::FillBuilder;
+use solvent_core::deps::ingest::{Normalizer, OrderFeed};
 use solvent_core::deps::ledger::BudgetSource;
 use solvent_core::deps::maker_metrics::MakerMetricsStore;
+use solvent_core::deps::order_log::OrderLog;
 use solvent_core::deps::quote_log::QuoteLog;
 use solvent_core::deps::rebate::{
     RebateAccrualSource, RebateChainSource, RebateMarketBook, RebateStore,
@@ -43,10 +51,12 @@ use solvent_core::deps::registry::EventStore;
 use solvent_core::deps::routing::{GasPrice, PriceOracle};
 use solvent_core::deps::trade::TradeStore;
 use solvent_core::execution::ExecutionService;
+use solvent_core::ingest::{Admission, IngestPipeline};
 use solvent_core::ledger::LedgerService;
 use solvent_core::maker::MakerService;
 use solvent_core::obs::{info, warn};
 use solvent_core::pool::{DepthService, PoolService};
+use solvent_core::primitives::ingest::{Intent, ProtocolId};
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
@@ -93,6 +103,12 @@ const BLOCK_TIME_SECS: u64 = 2;
 /// Routing funnel + split caps for the quote path (gas units unused until gas pricing is wired).
 const MAX_CANDIDATES: usize = 16;
 const MAX_LEGS: usize = 4;
+/// Backpressure between ingest and the decision loop. A full channel slows the feed rather than
+/// dropping orders.
+const INTENT_CHANNEL_CAPACITY: usize = 256;
+/// How often held orders are re-priced — one block, since that is the rate at which the state a
+/// decision rests on can change.
+const DECISION_TICK: Duration = Duration::from_secs(12);
 
 #[tokio::main]
 async fn main() -> Result<(), StartupError> {
@@ -132,7 +148,7 @@ async fn main() -> Result<(), StartupError> {
     let registry = Arc::new(SharedSnapshot::default());
     let chain_config = ChainConfig::new(
         ChainId(config.chain_id),
-        0,
+        config.registry_start_block,
         SCAN_OVERLAP_BLOCKS,
         BLOCK_TIME_SECS,
     );
@@ -140,7 +156,7 @@ async fn main() -> Result<(), StartupError> {
         Arc::new(provider.clone()),
         config.aqua_address,
         config.app_address,
-        None,
+        config.registry_scan_span,
     ));
     let registry_sync = Arc::new(RegistrySync::new(
         &chain_config,
@@ -165,6 +181,7 @@ async fn main() -> Result<(), StartupError> {
         Arc::new(SystemClock),
     ));
     let trade_store: Arc<dyn TradeStore> = Arc::new(SqliteTradeStore::new(pool.clone()));
+    let order_log = Arc::new(SqliteOrderLog::new(pool.clone()));
     let quote_log: Arc<dyn QuoteLog> =
         Arc::new(SqliteQuoteLog::new(pool.clone(), Arc::new(SystemClock)));
     ledger.recover().await?;
@@ -283,6 +300,13 @@ async fn main() -> Result<(), StartupError> {
         config.filler,
         config.decay_window_secs,
     ));
+    // The self-venue path cosigns with our own key, so that is the identity its normalizer pins.
+    // The order feed's normalizer pins Uniswap's cosigner instead.
+    let normalizer = Arc::new(UniswapXV2Normalizer::new(
+        config.reactor,
+        vec![cosigner.address()],
+    ));
+
     // The account the fill tx is signed and authorized by (the filler's owner).
     let filler_owner = filler_key
         .parse::<PrivateKeySigner>()
@@ -421,6 +445,8 @@ async fn main() -> Result<(), StartupError> {
             REGISTRY_SYNC_INTERVAL,
         )
     }));
+    // Kept before the supervisor takes ownership, for the decision loop wired further down.
+    let decision_ledger = Arc::clone(&ledger);
     let ledger_registry = Arc::clone(&registry);
     tokio::spawn(supervise("ledger-sync", move || {
         run_ledger_sync(
@@ -438,6 +464,102 @@ async fn main() -> Result<(), StartupError> {
             RECONCILE_INTERVAL,
         )
     }));
+
+    // The live order feed. Orders are off-chain messages until someone fills them, so polling the
+    // Orders API is the only way to see one. Left off when no endpoint is configured, in which case
+    // the resolver takes orders solely from its own submit path.
+    let mut feed_health_handle: Option<Arc<FeedHealth>> = None;
+    if let Some(orders_api_url) = config.orders_api_url.clone() {
+        let feed_normalizer: Arc<dyn Normalizer> = Arc::new(UniswapXV2Normalizer::new(
+            config.reactor,
+            config.expected_cosigners.clone(),
+        ));
+        if config.expected_cosigners.is_empty() {
+            tracing::warn!("no expected_cosigners configured; the order feed will admit nothing");
+        }
+        // Fall back to the token list: those are the assets the registry can price, so nothing
+        // outside them is fillable anyway.
+        let admitted: BTreeSet<Address> = match config.admitted_tokens.is_empty() {
+            true => assets
+                .catalog_tokens()
+                .into_iter()
+                .map(|token| token.address)
+                .collect(),
+            false => config.admitted_tokens.iter().copied().collect(),
+        };
+        let pipeline = Arc::new(IngestPipeline::new(
+            BTreeMap::from([(ProtocolId::UniswapXV2, feed_normalizer)]),
+            Duration::from_secs(config.dedup_ttl_secs),
+            config.dedup_capacity,
+            Arc::new(SystemClock),
+            Admission {
+                supported_chains: BTreeSet::from([ChainId(config.chain_id)]),
+                tokens: admitted,
+                max_outputs: config.max_outputs,
+            },
+            Some(Arc::clone(&order_log) as Arc<dyn OrderLog>),
+        ));
+        let orders_client = Arc::new(
+            OrdersApiClient::new(
+                orders_api_url,
+                ChainId(config.chain_id),
+                config.order_type.clone(),
+            )
+            .map_err(|e| StartupError::OrdersFeed(e.to_string()))?,
+        );
+        let feed_health = Arc::new(FeedHealth::new(Duration::from_secs(
+            config.feed_silence_secs,
+        )));
+        feed_health_handle = Some(Arc::clone(&feed_health));
+        // Orders already assigned to us are polled apart from the wider book: the exclusivity
+        // window is seconds long and discovery must not queue behind a page of everything else.
+        let feed: Arc<dyn OrderFeed> = Arc::new(HostedFeed::new(
+            orders_client,
+            ChainId(config.chain_id),
+            vec![Scope::ExclusiveTo(config.filler), Scope::Book],
+            Duration::from_millis(config.order_poll_ms),
+            Arc::clone(&feed_health),
+        ));
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<Intent>(INTENT_CHANNEL_CAPACITY);
+        tokio::spawn(supervise("ingest", move || {
+            let pipeline = Arc::clone(&pipeline);
+            let feed = Arc::clone(&feed);
+            let tx = tx.clone();
+            async move { pipeline.run(vec![feed], tx).await }
+        }));
+
+        // Re-price every held order once per block: that is how often the state a decision rests on
+        // can change, and an order's price only moves with time.
+        let decision = Arc::new(DecisionService::new(
+            DecisionDeps {
+                registry: Arc::clone(&registry),
+                ledger: Arc::clone(&decision_ledger),
+                swap: Arc::clone(&swap),
+                leg_cost: Arc::clone(&leg_cost),
+                valuation: Arc::clone(&valuation),
+                clock: Arc::new(SystemClock),
+                order_log: Some(Arc::clone(&order_log) as Arc<dyn OrderLog>),
+            },
+            DecisionConfig {
+                routing: RoutingConfig::new(MAX_CANDIDATES, MAX_LEGS, config.gas_units_per_leg),
+                filler: config.filler,
+                max_tracked: config.max_tracked_intents,
+            },
+        ));
+        // Not `supervise`d: the loop owns the receiving half of the intent channel, which cannot be
+        // handed to a restart. What matters is that its ending is loud — otherwise the channel
+        // fills, ingest blocks on a full send, and the process keeps polling while filling nothing.
+        tokio::spawn(async move {
+            let ticks = futures::stream::unfold((), |()| async {
+                tokio::time::sleep(DECISION_TICK).await;
+                Some(((), ()))
+            });
+            decision.run(rx, Box::pin(ticks)).await;
+            tracing::error!("decision loop ended; no order will be filled until restart");
+        });
+        tracing::info!("order feed polling every {}ms", config.order_poll_ms);
+    }
 
     let trades = Arc::new(TradeService::new(
         Arc::clone(&trade_store),
@@ -458,11 +580,14 @@ async fn main() -> Result<(), StartupError> {
         swap,
         rebates,
         cosigner,
+        normalizer,
         trades,
         registry: Arc::clone(&registry),
         registry_store,
         valuation,
         quote_log,
+        feed_health: feed_health_handle,
+        order_log: Some(Arc::clone(&order_log)),
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
