@@ -24,7 +24,10 @@ use solvent_adapters::execution::{
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
 use solvent_adapters::ingest::erc7683::{Erc7683FillBuilder, Erc7683Normalizer};
-use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
+use solvent_adapters::ingest::uniswapx::{
+    OrdersApiClient, ServerCosigner, SimulatedBatchPool, SqliteUniswapXFeedStore, UniswapFeedAsset,
+    UniswapXFeedWorker, UniswapXFillBuilder,
+};
 use solvent_adapters::ingest::ProtocolFillBuilder;
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
@@ -224,6 +227,42 @@ async fn main() -> Result<(), StartupError> {
     let gas: Arc<dyn GasPrice> = market.clone();
     let oracle: Arc<dyn PriceOracle> = market.clone();
     let rebate_market: Arc<dyn RebateMarketBook> = market;
+    if !config.uniswap_assets.is_empty() {
+        let uniswap_market = MarketCache::new();
+        for token in config.uniswap_usd_stable_pegs() {
+            uniswap_market.seed_peg(token);
+        }
+        let uniswap_symbols = config.uniswap_price_feed_symbols();
+        if !uniswap_symbols.is_empty() {
+            tokio::spawn(
+                BinanceFeed::new(
+                    Arc::clone(&uniswap_market),
+                    config.binance_ws_url.clone(),
+                    uniswap_symbols,
+                )
+                .run(),
+            );
+        }
+        let feed_assets = config.uniswap_assets.iter().map(|asset| UniswapFeedAsset {
+            source_address: asset.source_address,
+            decimals: asset.decimals,
+        });
+        let feed_client = OrdersApiClient::mainnet()
+            .map_err(|error| StartupError::UniswapFeed(error.to_string()))?;
+        let feed_prices: Arc<dyn PriceOracle> = uniswap_market;
+        let feed_worker = UniswapXFeedWorker::new(
+            feed_client,
+            feed_assets,
+            feed_prices,
+            SimulatedBatchPool::random(2),
+            SqliteUniswapXFeedStore::new(pool.clone()),
+        );
+        tokio::spawn(feed_worker.run());
+        info!(
+            asset_count = config.uniswap_assets.len(),
+            "mainnet UniswapX feed simulation started"
+        );
+    }
     let valuation = Arc::new(Valuation::new(Arc::clone(&oracle)));
     let history_source: Arc<dyn PairPriceHistorySource> = Arc::new(
         BinanceHistory::new(

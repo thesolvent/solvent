@@ -53,6 +53,9 @@ pub struct Config {
     /// price cache at boot so every supported asset values.
     #[serde(default)]
     pub usd_stable_pegs: Vec<Address>,
+    /// Mainnet UniswapX tokens the isolated read-only simulation recognizes.
+    #[serde(default)]
+    pub uniswap_assets: Vec<UniswapAsset>,
     /// The resolver's Aqua filler contract the swap path fills through.
     #[serde(default)]
     pub filler: Address,
@@ -119,6 +122,17 @@ pub struct PriceSymbol {
     pub tokens: Vec<Address>,
 }
 
+/// One mainnet UniswapX token and the price source for its read-only simulation.
+#[derive(Clone, Debug, Deserialize)]
+pub struct UniswapAsset {
+    pub source_address: Address,
+    pub decimals: u8,
+    #[serde(default)]
+    pub market_symbol: Option<String>,
+    #[serde(default)]
+    pub usd_peg: bool,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RebateConfig {
     #[serde(default)]
@@ -164,12 +178,35 @@ impl Config {
         Ok(loaded.try_deserialize()?)
     }
 
-    /// The price feed's `symbol → tokens` map, as the `BinanceFeed` consumes it.
+    /// The price feed's `symbol → tokens` map, as the product `BinanceFeed` consumes it.
     pub fn price_feed_symbols(&self) -> HashMap<String, Vec<Address>> {
         self.price_symbols
             .iter()
             .map(|entry| (entry.symbol.clone(), entry.tokens.clone()))
             .collect()
+    }
+
+    /// The isolated UniswapX feed's `symbol → mainnet token identities` map.
+    pub fn uniswap_price_feed_symbols(&self) -> HashMap<String, Vec<Address>> {
+        let mut symbols = HashMap::new();
+        for asset in &self.uniswap_assets {
+            let Some(symbol) = &asset.market_symbol else {
+                continue;
+            };
+            symbols
+                .entry(symbol.clone())
+                .or_insert_with(Vec::new)
+                .push(asset.source_address);
+        }
+        symbols
+    }
+
+    /// Mainnet tokens held at par by the isolated UniswapX simulation.
+    pub fn uniswap_usd_stable_pegs(&self) -> impl Iterator<Item = Address> + '_ {
+        self.uniswap_assets
+            .iter()
+            .filter(|asset| asset.usd_peg)
+            .map(|asset| asset.source_address)
     }
 
     /// The subset the FE reads at bootstrap (the `/config` payload). `earn`/`send_buy` are MVP-off.
@@ -309,6 +346,8 @@ pub enum StartupError {
     WalletStore(String),
     #[error("filler configuration: {0}")]
     FillerConfiguration(String),
+    #[error("UniswapX feed: {0}")]
+    UniswapFeed(String),
     #[error("token list: {0}")]
     TokenList(String),
     #[error(transparent)]
