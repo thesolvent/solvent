@@ -1,8 +1,27 @@
 import type { Asset, Quote } from "@/data";
+import type { SwapSubmissionStatus } from "@/ports/swap";
+import { SolventApiError, SolventNetworkError } from "@solvent/sdk/client";
+import { CrossChainApiError } from "@solvent/sdk/cross-chain";
+import { InputValidationError } from "@solvent/sdk/validation";
 
 /** The unfiltered choice in each list; not a value any asset carries. */
 export const ANY_TAG = "All";
 export const ANY_NETWORK = "All networks";
+
+/** Chain-qualified identity keeps the same token symbol on two networks selectable. */
+export function assetKey(asset: Asset): string {
+  return `${asset.chainId}:${asset.address.toLowerCase()}`;
+}
+
+/** Accept legacy symbol state while moving explicit picker choices to chain-qualified keys. */
+export function selectedAsset(
+  assets: Asset[],
+  selection: string,
+): Asset | undefined {
+  return assets.find(
+    (asset) => assetKey(asset) === selection || asset.symbol === selection,
+  );
+}
 
 function options(anyLabel: string, values: string[]): string[] {
   return [anyLabel, ...[...new Set(values)].sort()];
@@ -29,12 +48,19 @@ export function networkOptions(assets: Asset[]): string[] {
 }
 
 /** Symbols quotable against `symbol`, read off the pairs it reports being part of. */
-function counterparts(assets: Asset[], symbol: string): string[] {
-  const asset = assets.find((candidate) => candidate.symbol === symbol);
+function counterparts(asset: Asset | undefined): string[] {
+  const symbol = asset?.symbol ?? "";
   return (asset?.pairs ?? []).flatMap((pair) => {
     const legs = pair.split("/");
     return legs.includes(symbol) ? legs.filter((leg) => leg !== symbol) : [];
   });
+}
+
+function remoteRepresentation(assets: Asset[], source: Asset | undefined) {
+  return assets.find(
+    (asset) =>
+      asset.chainId !== source?.chainId && asset.symbol === source?.symbol,
+  );
 }
 
 /**
@@ -47,15 +73,44 @@ export function choices(
   assets: Asset[],
   leg: "from" | "to",
   from: string,
+  crossChain = false,
 ): Asset[] {
-  if (leg === "from") return assets.filter((asset) => asset.pairs.length > 0);
-  const allowed = new Set(counterparts(assets, from));
-  return assets.filter((asset) => allowed.has(asset.symbol));
+  if (leg === "from") {
+    if (!crossChain) return assets.filter((asset) => asset.pairs.length > 0);
+    const originChain = assets[0]?.chainId;
+    return assets.filter(
+      (asset) =>
+        asset.chainId === originChain &&
+        remoteRepresentation(assets, asset)?.pairs.length,
+    );
+  }
+  const source = selectedAsset(assets, from);
+  const quoteSource = crossChain
+    ? remoteRepresentation(assets, source)
+    : source;
+  const allowed = new Set(counterparts(quoteSource));
+  const sourceNetwork = source?.net;
+  return assets.filter(
+    (asset) =>
+      allowed.has(asset.symbol) &&
+      (crossChain
+        ? asset.chainId === quoteSource?.chainId
+        : !sourceNetwork || asset.net === sourceNetwork),
+  );
 }
 
 /** The first asset this deployment can quote from. */
 function firstSource(assets: Asset[]): string | undefined {
   return assets.find((asset) => asset.pairs.length > 0)?.symbol;
+}
+
+function firstCrossChainSource(assets: Asset[]): string | undefined {
+  const originChain = assets[0]?.chainId;
+  return assets.find(
+    (asset) =>
+      asset.chainId === originChain &&
+      remoteRepresentation(assets, asset)?.pairs.length,
+  )?.symbol;
 }
 
 export interface Legs {
@@ -73,16 +128,45 @@ export function settleLegs(
   assets: Asset[],
   fromToken: string,
   toToken: string,
+  crossChain = false,
 ): Legs | null {
   if (!assets.length) return null;
-  const source = assets.find(
-    (asset) => asset.symbol === fromToken && asset.pairs.length > 0,
-  )?.symbol;
-  const settledSource = source ?? firstSource(assets);
+  const source = selectedAsset(assets, fromToken);
+  const quoteSource = crossChain
+    ? remoteRepresentation(assets, source)
+    : source;
+  const settledSource =
+    source && quoteSource?.pairs.length
+      ? fromToken
+      : crossChain
+        ? firstCrossChainSource(assets)
+        : firstSource(assets);
   if (!settledSource) return null;
   if (settledSource !== fromToken)
     return { fromToken: settledSource, toToken: "" };
-  if (!toToken || counterparts(assets, settledSource).includes(toToken))
+  if (!toToken) return null;
+  const settledAsset = selectedAsset(assets, settledSource);
+  const settledQuoteAsset = crossChain
+    ? remoteRepresentation(assets, settledAsset)
+    : settledAsset;
+  const destination = selectedAsset(assets, toToken);
+  const compatible = counterparts(settledQuoteAsset).includes(
+    destination?.symbol ?? "",
+  );
+  const sourceNetwork = settledAsset?.net;
+  const destinationNetwork = destination?.net;
+  const sameNetwork =
+    !sourceNetwork ||
+    !destinationNetwork ||
+    sourceNetwork === destinationNetwork;
+  const expectedDestinationChain = crossChain
+    ? settledQuoteAsset?.chainId
+    : destination?.chainId;
+  if (
+    compatible &&
+    destination?.chainId === expectedDestinationChain &&
+    (crossChain || sameNetwork)
+  )
     return null;
   return { fromToken: settledSource, toToken: "" };
 }
@@ -91,6 +175,26 @@ export function settleLegs(
 export interface SwapAction {
   label: string;
   ready: boolean;
+  retry?: true;
+}
+
+export function swapSubmissionLabel(
+  status: SwapSubmissionStatus | undefined,
+  inputToken: string | undefined,
+): string {
+  switch (status?.kind) {
+    case "approving":
+      return `Approve ${inputToken ?? "token"}…`;
+    case "signing":
+      return "Sign swap…";
+    case "submitting":
+      return "Submitting swap…";
+    case "confirming":
+      return "Confirming swap…";
+    case "preparing":
+    default:
+      return "Preparing swap…";
+  }
 }
 
 /**
@@ -109,6 +213,8 @@ export function swapAction(input: {
   quote: Quote | undefined;
   problem: string | undefined;
   submissionProblem?: string;
+  submissionStatus?: SwapSubmissionStatus;
+  inputToken?: string;
 }): SwapAction {
   const {
     connected,
@@ -120,11 +226,25 @@ export function swapAction(input: {
     quote,
     problem,
     submissionProblem,
+    submissionStatus,
+    inputToken,
   } = input;
-  if (submitting) return { label: "Confirm in your wallet", ready: false };
+  if (submitting) {
+    return {
+      label: swapSubmissionLabel(submissionStatus, inputToken),
+      ready: false,
+    };
+  }
   if (submitted) return { label: "Intent submitted to Aqua", ready: false };
   // A trade that cannot happen says so whether or not a wallet is attached.
   if (problem) return { label: problem, ready: false };
+  if (submissionProblem) {
+    return {
+      label: `${submissionProblem} — try again`,
+      ready: true,
+      retry: true,
+    };
+  }
   if (amount <= 0) return { label: "Enter an amount", ready: false };
   if (!connected) return { label: "Connect a wallet", ready: true };
   // An order names its chain, and a wallet will not sign for one it is not on.
@@ -132,10 +252,7 @@ export function swapAction(input: {
   if (pricing || !quote) {
     return { label: "Finding the best price", ready: false };
   }
-  return {
-    label: submissionProblem ? `${submissionProblem} — try again` : "Swap",
-    ready: true,
-  };
+  return { label: "Swap", ready: true };
 }
 
 /** EIP-1193's code for a request the person declined. */
@@ -143,6 +260,18 @@ const USER_REJECTED = 4001;
 
 /** Guard against a cause chain that loops back on itself. */
 const MAX_CAUSES = 10;
+const SAFE_WALLET_MESSAGES = new Set([
+  "Wallet account changed",
+  "Wrong wallet network",
+  "Wrong RPC network",
+  "Token amount must be positive",
+  "Insufficient token balance",
+  "Approval cannot be below the required amount",
+  "Token refused approval",
+  "Token allowance was not updated",
+  "Approval reverted",
+  "Transaction reverted",
+]);
 
 /**
  * Whether the person simply said no.
@@ -168,13 +297,25 @@ function isWalletRejection(error: unknown): boolean {
  * The server writes its refusals for a reader, but a wallet writes them for a developer — dumping
  * one on the button gives a stack trace where a sentence belongs.
  */
-export function submissionProblem(error: Error | null): string | undefined {
+export function submissionProblem(
+  error: Error | null,
+  fallback = "Could not submit the swap",
+): string | undefined {
   if (!error) return undefined;
   if (isSwapDeclined(error)) return "The resolver declined this swap";
-  if (error.name === "InputValidationError") return error.message;
-  return isWalletRejection(error)
-    ? "Wallet request rejected"
-    : "Could not submit the swap";
+  if (
+    error instanceof InputValidationError ||
+    error instanceof CrossChainApiError ||
+    error instanceof SolventApiError ||
+    error instanceof SolventNetworkError ||
+    error.name === "InputValidationError" ||
+    error.name === "CrossChainApiError" ||
+    error.name === "SolventApiError" ||
+    error.name === "SolventNetworkError" ||
+    SAFE_WALLET_MESSAGES.has(error.message)
+  )
+    return error.message;
+  return isWalletRejection(error) ? "Wallet request rejected" : fallback;
 }
 
 export function isSwapDeclined(error: Error | null): boolean {

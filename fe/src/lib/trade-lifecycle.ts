@@ -1,12 +1,20 @@
 import type { TradeRecord } from "@/data/explorer";
 
-const STAGES = [
+const SAME_CHAIN_STAGES = [
   "Created",
   "Quoted",
   "Reserved",
   "Simulated",
   "Submitted",
   "Confirmed",
+];
+const CROSS_CHAIN_STAGES = [
+  "Quoted",
+  "Destination fill",
+  "Proof relay",
+  "Origin claim",
+  "Repayment",
+  "Complete",
 ];
 
 type StageState =
@@ -18,18 +26,20 @@ export function isTerminalTrade(status: string): boolean {
 
 /** Status identifies progress; only lifecycle events establish that a stage was recorded. */
 export function tradeLifecycle(trade: TradeRecord) {
+  const stages =
+    trade.flow === "cross-chain" ? CROSS_CHAIN_STAGES : SAME_CHAIN_STAGES;
   const terminal = isTerminalTrade(trade.status);
   const recorded = new Map(
     trade.lifecycle.map((stage) => [stage.status, stage.at]),
   );
-  const latestStage = STAGES.reduce(
+  const latestStage = stages.reduce(
     (latest, label, index) =>
       recorded.has(label.toLowerCase()) || label.toLowerCase() === trade.status
         ? index
         : latest,
     -1,
   );
-  const steps = STAGES.map((label, index) => {
+  const steps = stages.map((label, index) => {
     const at = recorded.get(label.toLowerCase());
     let state: StageState;
     if (at !== undefined) state = "recorded";
@@ -42,7 +52,7 @@ export function tradeLifecycle(trade: TradeRecord) {
       label,
       state,
       elapsedSeconds:
-        at === undefined ? null : Math.max(0, at - trade.createdAt),
+        typeof at !== "number" ? null : Math.max(0, at - trade.createdAt),
     };
   });
   return {
@@ -53,8 +63,15 @@ export function tradeLifecycle(trade: TradeRecord) {
         ? null
         : Math.max(0, trade.settledAt - trade.createdAt),
     phases: [
-      { name: "Quote & reserve", complete: recorded.has("reserved") },
-      { name: "Simulate & settle", complete: recorded.has("confirmed") },
+      trade.flow === "cross-chain"
+        ? {
+            name: "Destination execution",
+            complete: recorded.has("destination fill"),
+          }
+        : { name: "Quote & reserve", complete: recorded.has("reserved") },
+      trade.flow === "cross-chain"
+        ? { name: "Origin settlement", complete: recorded.has("complete") }
+        : { name: "Simulate & settle", complete: recorded.has("confirmed") },
     ],
   };
 }

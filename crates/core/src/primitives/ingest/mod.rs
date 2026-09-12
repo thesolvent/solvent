@@ -2,10 +2,12 @@
 //! every downstream slice (routing, ledger, execution) consumes.
 
 pub mod curve;
+pub mod fee;
 pub mod intent;
 pub mod raw;
 
 pub use curve::AmountCurve;
+pub use fee::ExecutionFeePolicy;
 pub use intent::{
     Delivery, Exclusivity, Intent, IntentInput, IntentOutput, IntentParts, ProtocolId,
 };

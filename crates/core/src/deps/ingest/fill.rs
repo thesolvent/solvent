@@ -13,30 +13,30 @@ use crate::primitives::ingest::Intent;
 use crate::primitives::registry::Snapshot;
 use crate::primitives::routing::RoutePlan;
 
-/// One protocol's fill, ready to submit: the calldata, and the filler contract it targets.
+/// A protocol-selected contract call ready for simulation and submission.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct BuiltFill {
+pub struct PreparedFill {
     pub target: Address,
     pub calldata: Bytes,
 }
 
-impl BuiltFill {
-    pub fn new(target: Address, calldata: Bytes) -> BuiltFill {
-        BuiltFill { target, calldata }
+impl PreparedFill {
+    pub fn new(target: Address, calldata: Bytes) -> Self {
+        Self { target, calldata }
     }
 }
 
-/// Builds the ABI-encoded fill calldata for a routed plan, and names the contract it targets.
-/// `snapshot` resolves each leg's maker strategy (the on-chain order to source from).
 #[async_trait]
 pub trait FillBuilder: Send + Sync {
+    /// Builds the target and ABI-encoded calldata for a routed plan. `snapshot` resolves each leg's
+    /// maker strategy (the on-chain order to source from).
     async fn build(
         &self,
         intent: &Intent,
         plan: &RoutePlan,
         snapshot: &Snapshot,
-    ) -> Result<BuiltFill, FillBuilderError>;
+    ) -> Result<PreparedFill, FillBuilderError>;
 }
 
 /// A fill-build failure. All are unreachable on the normal route→fill path (a routed leg always has
@@ -56,6 +56,10 @@ pub enum FillBuilderError {
     StrategyMakerMismatch,
     #[error("a routed leg is not protected by the configured taker credential")]
     UnprotectedStrategy,
+    #[error("the normalized order does not match this protocol filler")]
+    InvalidOrder,
+    #[error("no fill builder is configured for this protocol")]
+    UnsupportedProtocol,
     #[error("a routed leg could not be policy-authorized: {0}")]
     Authorization(#[from] ExecutionAuthorizerError),
 }

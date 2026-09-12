@@ -1,4 +1,7 @@
-import { createRebateClient } from "@solvent/sdk/rebates";
+import {
+  createRebateClient,
+  type RebateSubmissionOptions,
+} from "@solvent/sdk/rebates";
 import type { Address } from "viem";
 import type { RebatesPort } from "@/ports/rebates";
 import { toRebate } from "../mappers/rebate";
@@ -25,8 +28,8 @@ export const rebatesAdapter: RebatesPort = {
       executor: executor as Address,
     });
     return {
-      async submit() {
-        const result = await intent.submit();
+      async submit(options?: RebateSubmissionOptions) {
+        const result = await intent.submit(options);
         return {
           rebateId: result.rebateId,
           transactionHash: result.transactionHash,

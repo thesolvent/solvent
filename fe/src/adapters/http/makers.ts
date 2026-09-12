@@ -7,7 +7,11 @@ import {
   toPosition,
 } from "../mappers/makers";
 import { toDepthCurve } from "../mappers/pool-detail";
-import { solventApi } from "./client";
+import { baseApi, solventApi } from "./client";
+
+function strategyApi(chainId?: number) {
+  return chainId == null ? solventApi : baseApi;
+}
 
 export const makersAdapter: MakersPort = {
   async list() {
@@ -26,14 +30,14 @@ export const makersAdapter: MakersPort = {
       toPosition,
     );
   },
-  async position(hash) {
-    return toPosition(await solventApi.position(hash));
+  async position(hash, chainId) {
+    return toPosition(await strategyApi(chainId).position(hash));
   },
-  async depth(hash, pair) {
-    return toDepthCurve(await solventApi.positionDepth(hash), pair);
+  async depth(hash, pair, chainId) {
+    return toDepthCurve(await strategyApi(chainId).positionDepth(hash), pair);
   },
-  async history(hash) {
-    const history = await solventApi.positionHistory(hash);
+  async history(hash, chainId) {
+    const history = await strategyApi(chainId).positionHistory(hash);
     return {
       from: history.from,
       to: history.to,

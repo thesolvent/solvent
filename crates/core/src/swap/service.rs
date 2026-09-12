@@ -3,7 +3,6 @@
 //! synchronously behind `POST /swap`; the reconcile worker later settles the trade. Protocol-agnostic
 //! — it takes an already-normalized [`Intent`] (the adapter decodes/verifies/cosigns the order).
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use alloy_primitives::{keccak256, Address, U256};
@@ -15,7 +14,7 @@ use crate::execution::ExecutionService;
 use crate::ledger::LedgerService;
 use crate::obs::warn;
 use crate::primitives::execution::{FillOutcome, FillTx, PendingFill};
-use crate::primitives::ingest::{Intent, ProtocolId};
+use crate::primitives::ingest::Intent;
 use crate::primitives::ledger::{LedgerError, ReservationSource};
 use crate::primitives::registry::Snapshot;
 use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
@@ -32,13 +31,10 @@ use crate::SolventError;
 pub struct SwapConfig {
     pub routing: RoutingConfig,
     pub chain_id: u64,
-    /// Matched against an order's exclusive filler (`Intent::required_output`) to decide whether
-    /// we owe the toll. Protocol-agnostic in practice: only a UniswapX-sourced intent ever carries
-    /// exclusivity, so this is unused for any other protocol's intent. Not the same thing as a
-    /// fill's target contract — that comes from the intent's own `FillBuilder::build`.
+    /// The UniswapX filler contract: the identity checked against an order's own exclusive-window
+    /// grant. Other protocols configure their own filler inside their own `FillBuilder`.
     pub filler: Address,
-    /// The account authorized to call a fill's target contract — whichever one the intent's
-    /// protocol builder names in its `BuiltFill`.
+    /// The account authorized to call each protocol filler.
     pub filler_owner: Address,
     /// How long a reservation holds before the TTL sweep may release it.
     pub reservation_ttl_secs: u64,
@@ -56,10 +52,9 @@ pub struct SwapService {
     guards: Arc<StrategyGuard>,
     trades: Arc<dyn TradeStore>,
     execution: Arc<ExecutionService>,
-    /// One builder per protocol a feed can source from. Keyed rather than singular so an intent
-    /// from a protocol we only observe (no builder registered) declines here rather than being
-    /// handed to another protocol's builder, which would encode calldata for the wrong settler.
-    fill_builders: BTreeMap<ProtocolId, Arc<dyn FillBuilder>>,
+    /// Dispatches a routed intent to its protocol's own filler contract (`ProtocolFillBuilder` in
+    /// the adapters crate composes one builder per protocol behind this single port).
+    fill_builder: Arc<dyn FillBuilder>,
     leg_cost: Arc<LegCostResolver>,
     clock: Arc<dyn Clock>,
     config: SwapConfig,
@@ -73,7 +68,7 @@ impl SwapService {
         guards: Arc<StrategyGuard>,
         trades: Arc<dyn TradeStore>,
         execution: Arc<ExecutionService>,
-        fill_builders: BTreeMap<ProtocolId, Arc<dyn FillBuilder>>,
+        fill_builder: Arc<dyn FillBuilder>,
         leg_cost: Arc<LegCostResolver>,
         clock: Arc<dyn Clock>,
         config: SwapConfig,
@@ -84,7 +79,7 @@ impl SwapService {
             guards,
             trades,
             execution,
-            fill_builders,
+            fill_builder,
             leg_cost,
             clock,
             config,
@@ -109,12 +104,6 @@ impl SwapService {
         prices: TradePrices,
     ) -> Result<SwapOutcome, SolventError> {
         let now = self.clock.now_unix();
-        let Some(fill_builder) = self.fill_builders.get(&intent.protocol).cloned() else {
-            // Observed and quoted upstream, but this protocol has no builder to fill it with.
-            return self
-                .declined(trade_id, &intent, taker, now, prices, None)
-                .await;
-        };
         let Some(amounts) = swap_amounts(&intent, self.config.filler, now) else {
             // No single delivery to source, so there is no cost to quote either.
             return self
@@ -139,7 +128,7 @@ impl SwapService {
         let routed = route(
             RoutingBook::new(&snapshot, &caps, &guards),
             &request,
-            amounts.amount_in,
+            intent.routing_input_limit.unwrap_or(amounts.amount_in),
             &self.config.routing,
             per_leg_cost,
             None,
@@ -199,16 +188,8 @@ impl SwapService {
             .advance(&created.id, TradeStatus::Reserved, now)
             .await?;
 
-        self.submit_fill(
-            &fill_builder,
-            &created.id,
-            &intent,
-            &plan,
-            &snapshot,
-            reservation,
-            now,
-        )
-        .await
+        self.submit_fill(&created.id, &intent, &plan, &snapshot, reservation, now)
+            .await
     }
 
     /// Reserve the plan's payouts. `Ok(None)` continues to the fill; `Ok(Some(..))` is a decline
@@ -261,7 +242,6 @@ impl SwapService {
     #[allow(clippy::too_many_arguments)]
     async fn submit_fill(
         &self,
-        fill_builder: &Arc<dyn FillBuilder>,
         id: &TradeId,
         intent: &Intent,
         plan: &RoutePlan,
@@ -269,14 +249,14 @@ impl SwapService {
         reservation: ReservationId,
         now: u64,
     ) -> Result<SwapOutcome, SolventError> {
-        let built = fill_builder.build(intent, plan, snapshot).await?;
+        let fill = self.fill_builder.build(intent, plan, snapshot).await?;
         let pending = PendingFill::new(
             FillTx::new(
                 intent.id,
                 self.config.chain_id,
                 self.config.filler_owner,
-                built.target,
-                built.calldata,
+                fill.target,
+                fill.calldata,
             ),
             reservation,
         );
@@ -505,7 +485,7 @@ mod tests {
     use crate::deps::execution::{
         Execution, ExecutionError, SettlementError, SettlementReader, SimError, SimGate,
     };
-    use crate::deps::ingest::{BuiltFill, FillBuilderError};
+    use crate::deps::ingest::{FillBuilderError, PreparedFill};
     use crate::deps::ledger::{BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError};
     use crate::deps::routing::{GasPrice, GasPriceError, PriceOracle, PriceOracleError};
     use crate::deps::trade::{
@@ -683,11 +663,8 @@ mod tests {
             _: &Intent,
             _: &RoutePlan,
             _: &Snapshot,
-        ) -> Result<BuiltFill, FillBuilderError> {
-            Ok(BuiltFill {
-                target: addr(0xF1),
-                calldata: Bytes::from(vec![0x01, 0x02]),
-            })
+        ) -> Result<PreparedFill, FillBuilderError> {
+            Ok(PreparedFill::new(addr(0xF1), Bytes::from(vec![0x01, 0x02])))
         }
     }
 
@@ -893,16 +870,13 @@ mod tests {
             Arc::new(StrategyGuard::default()),
             trades.clone(),
             execution,
-            BTreeMap::from([(
-                ProtocolId::UniswapXV2,
-                Arc::new(FakeFill) as Arc<dyn FillBuilder>,
-            )]),
+            Arc::new(FakeFill) as Arc<dyn FillBuilder>,
             leg_cost,
             Arc::new(FixedClock),
             SwapConfig {
                 routing: RoutingConfig::new(16, 4, 150_000),
                 chain_id: 31337,
-                filler: addr(0xF1),
+                filler: addr(0xEE),
                 filler_owner: addr(0xF0),
                 reservation_ttl_secs: 60,
             },
@@ -1092,6 +1066,30 @@ mod tests {
             .unwrap()
             .legs
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn routing_limit_excludes_protocol_fee_but_trade_keeps_gross_input() {
+        let h = harness(vec![xyc(3, e(100, 18), e(300_000, 6))], SimVerdict::Ok).await;
+        let gross = e(2, 18);
+        let mut order = intent(2, addr(9), gross, e(3000, 6));
+        order.protocol = ProtocolId::Erc7683;
+        order.routing_input_limit = Some(e(1, 18));
+
+        let outcome = h
+            .swap
+            .submit(order, addr(9), tid(), TradePrices::default())
+            .await
+            .expect("declined trade");
+        let stored = h
+            .trades
+            .info(&outcome.trade_id)
+            .await
+            .expect("store read")
+            .expect("trade");
+
+        assert_eq!(outcome.status, TradeStatus::Declined);
+        assert_eq!(stored.trade.amount_in, gross);
     }
 
     #[tokio::test]

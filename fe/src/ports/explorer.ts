@@ -11,6 +11,7 @@ export interface TradeFilter {
   status?: string;
   base?: string;
   quote?: string;
+  chainId?: number;
 }
 
 export interface ActivityFilter {

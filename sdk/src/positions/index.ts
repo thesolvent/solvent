@@ -13,7 +13,11 @@ export type {
     PositionClient,
     PositionClientConfig,
     PositionIntent,
+    PositionCreationStatus,
+    PositionSubmissionOptions,
     PositionTransaction,
     PositionTransactionIntent,
+    PositionTransactionStatus,
+    PositionTransactionSubmissionOptions,
     PushPositionRequest,
 } from "./client";

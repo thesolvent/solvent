@@ -349,10 +349,7 @@ async fn e2e_the_loop_waits_for_the_price_then_fills_from_the_feed() {
         Address::ZERO,
         0,
     ));
-    let fill_builders: BTreeMap<ProtocolId, Arc<dyn FillBuilder>> = BTreeMap::from([(
-        ProtocolId::UniswapXV2,
-        Arc::new(stack.fill_builder()) as Arc<dyn FillBuilder>,
-    )]);
+    let fill_builder: Arc<dyn FillBuilder> = Arc::new(stack.fill_builder());
     let routing = RoutingConfig::new(16, 4, 0);
     let swap = Arc::new(SwapService::new(
         Arc::clone(&snapshot),
@@ -360,7 +357,7 @@ async fn e2e_the_loop_waits_for_the_price_then_fills_from_the_feed() {
         Arc::new(StrategyGuard::default()),
         Arc::clone(&trades),
         Arc::clone(&execution),
-        fill_builders,
+        fill_builder,
         Arc::clone(&leg_cost),
         Arc::clone(&clock) as Arc<dyn Clock>,
         SwapConfig {

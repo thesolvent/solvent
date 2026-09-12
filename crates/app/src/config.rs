@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
-use alloy::primitives::{address, Address};
+use alloy::primitives::{address, Address, B256};
 use serde::Deserialize;
 use solvent_adapters::http::state::{AppConfig, Features};
 use solvent_core::asset::TokenList;
@@ -56,6 +56,15 @@ pub struct Config {
     /// The resolver's Aqua filler contract the swap path fills through.
     #[serde(default)]
     pub filler: Address,
+    /// Same-chain ERC-7683 contracts deployed with the filler stack.
+    #[serde(default)]
+    pub erc7683_settler: Address,
+    #[serde(default)]
+    pub erc7683_filler: Address,
+    #[serde(default)]
+    pub erc7683_resolver: Address,
+    #[serde(default = "default_erc7683_executor_fee_bps")]
+    pub erc7683_executor_fee_bps: u32,
     /// The UniswapX reactor a taker's order settles through; published so a client can name it.
     pub reactor: Address,
     /// The canonical Permit2 (same on every chain); overridable for a bespoke devnet deploy.
@@ -73,6 +82,9 @@ pub struct Config {
     /// Path to the tx engine's durable state (redb), so in-flight fills survive a restart.
     #[serde(default = "default_wallet_state_db")]
     pub wallet_state_db: String,
+    /// Optional private listener and allow-listed contracts for cross-chain coordination.
+    #[serde(default)]
+    pub crosschain: Option<CrossChainConfig>,
     #[serde(default)]
     pub rebate: RebateConfig,
     /// Block the registry watcher starts scanning from — the Aqua deployment, since no strategy can
@@ -138,6 +150,29 @@ pub struct Config {
     pub oneinch_filler: Address,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CrossChainConfig {
+    pub bind_addr: SocketAddr,
+    #[serde(default)]
+    pub destination_app: Address,
+    #[serde(default)]
+    pub origin_settler: Address,
+    #[serde(default)]
+    pub proof_outbox: Address,
+    #[serde(default = "default_crosschain_quote_ttl_secs")]
+    pub quote_ttl_secs: u64,
+    #[serde(default)]
+    pub direct_author: Option<DirectAuthorConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DirectAuthorConfig {
+    pub origin_chain_id: u64,
+    pub origin_proof_outbox: Address,
+    pub destination_proof_outbox: Address,
+    pub origin_strategy_hash: B256,
+}
+
 /// One Binance price symbol and the tokens whose USD price it feeds.
 ///
 /// Unknown fields are refused because TOML scopes bare keys to the table header above them: a
@@ -164,6 +199,13 @@ pub struct RebateConfig {
     pub market_max_age_secs: u64,
     #[serde(default = "default_rebate_authorization_ttl_blocks")]
     pub authorization_ttl_blocks: u64,
+}
+
+#[derive(Clone, Copy)]
+pub struct Erc7683Contracts {
+    pub settler: Address,
+    pub filler: Address,
+    pub resolver: Address,
 }
 
 impl Default for RebateConfig {
@@ -197,7 +239,12 @@ impl Config {
     }
 
     /// The subset the FE reads at bootstrap (the `/config` payload). `earn`/`send_buy` are MVP-off.
-    pub fn app_config(&self, cosigner: Address, taker_credential: Address) -> AppConfig {
+    pub fn app_config(
+        &self,
+        cosigner: Address,
+        taker_credential: Address,
+        erc7683: Option<Erc7683Contracts>,
+    ) -> AppConfig {
         AppConfig {
             chain_id: self.chain_id,
             features: Features {
@@ -213,13 +260,40 @@ impl Config {
             reactor: self.reactor,
             permit2: self.permit2,
             filler: self.filler,
+            erc7683_settler: erc7683.map(|contracts| contracts.settler),
+            erc7683_filler: erc7683.map(|contracts| contracts.filler),
+            erc7683_resolver: erc7683.map(|contracts| contracts.resolver),
             taker_credential,
             cosigner,
         }
     }
+
+    pub fn erc7683_contracts(&self) -> Result<Option<Erc7683Contracts>, StartupError> {
+        let configured = [
+            self.erc7683_settler,
+            self.erc7683_filler,
+            self.erc7683_resolver,
+        ];
+        if configured.iter().all(|address| address.is_zero()) {
+            return Ok(None);
+        }
+        if configured.iter().any(|address| address.is_zero()) {
+            return Err(StartupError::FillerConfiguration(
+                "ERC-7683 settler, filler, and resolver must be configured together".to_string(),
+            ));
+        }
+        Ok(Some(Erc7683Contracts {
+            settler: self.erc7683_settler,
+            filler: self.erc7683_filler,
+            resolver: self.erc7683_resolver,
+        }))
+    }
 }
 
 fn default_fee_bps() -> u32 {
+    5
+}
+fn default_erc7683_executor_fee_bps() -> u32 {
     5
 }
 fn default_explorer() -> String {
@@ -286,6 +360,9 @@ fn default_dedup_ttl_secs() -> u64 {
 
 fn default_wallet_state_db() -> String {
     "walletkit.redb".to_string()
+}
+fn default_crosschain_quote_ttl_secs() -> u64 {
+    300
 }
 fn default_rebate_deviation_bps() -> u64 {
     50

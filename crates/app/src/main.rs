@@ -15,11 +15,16 @@ use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
 use solvent_adapters::balances::AlloyBalancesOracle;
 use solvent_adapters::chain::ChainHead;
+use solvent_adapters::crosschain::{
+    AlloyDirectPlanAuthor, AlloyStepValidator, CcipStepMaterializer, DirectPlanAuthorConfig,
+    ServiceLegQuoter, SqlitePreparationStore, SqliteStepStore,
+};
 use solvent_adapters::execution::{
     AquaSettlementReader, LocalPolicySigner, SqliteFillStore, WalletkitExecutor,
 };
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
+use solvent_adapters::ingest::erc7683::{Erc7683FillBuilder, Erc7683Normalizer};
 use solvent_adapters::ingest::oneinch::{
     OneInchApiClient, OneInchFeed, OneInchFillBuilder, OneInchNormalizer,
 };
@@ -27,6 +32,7 @@ use solvent_adapters::ingest::uniswapx::{
     FeedHealth, HostedFeed, OrdersApiClient, Scope, ServerCosigner, UniswapXFillBuilder,
     UniswapXV2Normalizer,
 };
+use solvent_adapters::ingest::ProtocolFillBuilder;
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteOrderLog, SqliteQuoteLog};
 use solvent_adapters::rebate::{
@@ -37,10 +43,14 @@ use solvent_adapters::routing::{BinanceFeed, BinanceHistory, GasPoller, MarketCa
 use solvent_adapters::trade::SqliteTradeStore;
 use solvent_core::asset::{AssetManager, PairHistoryService};
 use solvent_core::balances::BalancesService;
+use solvent_core::crosschain::{LocalCrossChainService, LocalStepService};
 use solvent_core::decision::{DecisionConfig, DecisionDeps, DecisionService};
 use solvent_core::deps::asset::PairPriceHistorySource;
 use solvent_core::deps::balances::BalancesOracle;
-use solvent_core::deps::execution::ExecutionAuthorizer;
+use solvent_core::deps::crosschain::{
+    DirectPlanAuthor, LegQuoter, PreparationStore, StepMaterializer, StepStore, StepValidator,
+};
+use solvent_core::deps::execution::{Execution, ExecutionAuthorizer, SimGate};
 use solvent_core::deps::ingest::FillBuilder;
 use solvent_core::deps::ingest::{Normalizer, OrderFeed};
 use solvent_core::deps::ledger::BudgetSource;
@@ -57,9 +67,10 @@ use solvent_core::execution::ExecutionService;
 use solvent_core::ingest::{Admission, IngestPipeline};
 use solvent_core::ledger::LedgerService;
 use solvent_core::maker::MakerService;
-use solvent_core::obs::{info, warn};
+use solvent_core::obs::{error as obs_error, info, warn};
 use solvent_core::pool::{DepthService, PoolService};
-use solvent_core::primitives::ingest::{Intent, ProtocolId};
+use solvent_core::primitives::crosschain::RemoteCommand;
+use solvent_core::primitives::ingest::{ExecutionFeePolicy, Intent, ProtocolId};
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
@@ -121,6 +132,7 @@ async fn main() -> Result<(), StartupError> {
 
     let config_path = std::env::var("SOLVENT_CONFIG").unwrap_or_else(|_| "solvent".to_string());
     let config = Config::load(&config_path)?;
+    let erc7683_contracts = config.erc7683_contracts()?;
 
     let rpc = config
         .rpc_url
@@ -132,6 +144,22 @@ async fn main() -> Result<(), StartupError> {
         .call()
         .await
         .map_err(|error| StartupError::FillerConfiguration(error.to_string()))?;
+    if let Some(contracts) = erc7683_contracts {
+        let erc7683_credential = FillerConfiguration::new(contracts.filler, provider.clone())
+            .TAKER_CREDENTIAL()
+            .call()
+            .await
+            .map_err(|error| StartupError::FillerConfiguration(error.to_string()))?;
+        if erc7683_credential != taker_credential {
+            return Err(StartupError::FillerConfiguration(
+                "UniswapX and ERC-7683 fillers must share one taker credential".to_string(),
+            ));
+        }
+    }
+    let erc7683_fee_policy = erc7683_contracts
+        .map(|_| ExecutionFeePolicy::new(config.erc7683_executor_fee_bps))
+        .transpose()
+        .map_err(StartupError::from)?;
     let (head, poller) = ChainHead::new(provider.clone(), BLOCK_POLL_INTERVAL);
     tokio::spawn(poller);
 
@@ -320,11 +348,18 @@ async fn main() -> Result<(), StartupError> {
     let policy_signer = policy_signer_key.parse::<PrivateKeySigner>().map_err(|_| {
         StartupError::Key("SOLVENT_POLICY_SIGNER_KEY is not a valid private key".into())
     })?;
-    let authorizer: Arc<dyn ExecutionAuthorizer> = Arc::new(LocalPolicySigner::new(
+    let uniswapx_authorizer: Arc<dyn ExecutionAuthorizer> = Arc::new(LocalPolicySigner::new(
         config.chain_id,
         config.filler,
-        policy_signer,
+        policy_signer.clone(),
     ));
+    let erc7683_authorizer = erc7683_contracts.map(|contracts| {
+        Arc::new(LocalPolicySigner::new(
+            config.chain_id,
+            contracts.filler,
+            policy_signer,
+        )) as Arc<dyn ExecutionAuthorizer>
+    });
     let policy = DefaultPolicyEngine::new(
         vec![Box::new(AllowAll)],
         Arc::new(walletkit::adapters::SystemClock),
@@ -359,10 +394,114 @@ async fn main() -> Result<(), StartupError> {
     ));
     let execution = Arc::new(ExecutionService::new(
         executor.clone(),
-        executor,
+        executor.clone(),
         settlement,
         Arc::clone(&ledger),
     ));
+    if let Some(crosschain) = &config.crosschain {
+        let internal_token = std::env::var("SOLVENT_INTERNAL_TOKEN")
+            .map_err(|_| StartupError::MissingSecret("SOLVENT_INTERNAL_TOKEN"))?;
+        let mut authorization = format!("Bearer {internal_token}")
+            .parse::<axum::http::HeaderValue>()
+            .map_err(|_| {
+                StartupError::Key("SOLVENT_INTERNAL_TOKEN is not a valid HTTP header".into())
+            })?;
+        authorization.set_sensitive(true);
+        let preparations: Arc<dyn PreparationStore> =
+            Arc::new(SqlitePreparationStore::new(pool.clone()));
+        let crosschain_quotes: Arc<dyn solvent_core::deps::crosschain::LegQuoteStore> = Arc::new(
+            solvent_adapters::crosschain::SqliteLegQuoteStore::new(pool.clone()),
+        );
+        let local_quoter: Arc<dyn LegQuoter> = Arc::new(ServiceLegQuoter::new(
+            ChainId(config.chain_id),
+            Arc::clone(&quote),
+            head.clone(),
+            Arc::new(SystemClock),
+            crosschain.quote_ttl_secs,
+        ));
+        let local = Arc::new(LocalCrossChainService::new(
+            ChainId(config.chain_id),
+            local_quoter,
+            crosschain_quotes,
+            preparations,
+            Arc::clone(&ledger),
+            Arc::new(SystemClock),
+        ));
+        let mut targets = BTreeMap::new();
+        if !crosschain.destination_app.is_zero() {
+            targets.insert(RemoteCommand::Deliver, crosschain.destination_app);
+            targets.insert(RemoteCommand::CloseDestination, crosschain.destination_app);
+        }
+        if !crosschain.origin_settler.is_zero() {
+            targets.insert(RemoteCommand::ClaimOrigin, crosschain.origin_settler);
+        }
+        if !crosschain.proof_outbox.is_zero() {
+            targets.insert(RemoteCommand::DispatchFillProof, crosschain.proof_outbox);
+            targets.insert(RemoteCommand::DispatchRepayment, crosschain.proof_outbox);
+        }
+        let step_store: Arc<dyn StepStore> = Arc::new(SqliteStepStore::new(pool.clone()));
+        let execution_port: Arc<dyn Execution> = executor.clone();
+        let simulator: Arc<dyn SimGate> = executor.clone();
+        let materializer: Arc<dyn StepMaterializer> =
+            Arc::new(CcipStepMaterializer::new(provider.clone()));
+        let validator: Arc<dyn StepValidator> = Arc::new(
+            AlloyStepValidator::new(filler_owner, config.native_token)
+                .with_applications(crosschain.origin_settler, crosschain.destination_app),
+        );
+        let steps = Arc::new(
+            LocalStepService::new(
+                ChainId(config.chain_id),
+                filler_owner,
+                targets,
+                step_store,
+                execution_port,
+                simulator,
+            )
+            .with_validator(validator)
+            .with_materializer(materializer),
+        );
+        let direct_author: Option<Arc<dyn DirectPlanAuthor>> = crosschain
+            .direct_author
+            .as_ref()
+            .map(|direct| {
+                let maker_key = std::env::var("SOLVENT_CROSSCHAIN_MAKER_KEY")
+                    .map_err(|_| StartupError::MissingSecret("SOLVENT_CROSSCHAIN_MAKER_KEY"))?;
+                let maker = maker_key
+                    .parse::<PrivateKeySigner>()
+                    .map_err(|error| StartupError::Key(error.to_string()))?;
+                AlloyDirectPlanAuthor::new(
+                    DirectPlanAuthorConfig {
+                        origin_chain: ChainId(direct.origin_chain_id),
+                        destination_chain: ChainId(config.chain_id),
+                        origin_settler: crosschain.origin_settler,
+                        destination_app: crosschain.destination_app,
+                        origin_proof_outbox: direct.origin_proof_outbox,
+                        destination_proof_outbox: direct.destination_proof_outbox,
+                        origin_strategy_hash: solvent_core::primitives::StrategyHash(
+                            direct.origin_strategy_hash,
+                        ),
+                    },
+                    maker,
+                )
+                .map(|author| Arc::new(author) as Arc<dyn DirectPlanAuthor>)
+                .map_err(SolventError::from)
+                .map_err(StartupError::from)
+            })
+            .transpose()?;
+        let internal_listener = tokio::net::TcpListener::bind(crosschain.bind_addr).await?;
+        let internal_router = http::crosschain_internal_router_with_author(
+            local,
+            steps,
+            authorization,
+            direct_author,
+        );
+        info!(addr = %crosschain.bind_addr, "private cross-chain service listening");
+        tokio::spawn(async move {
+            if let Err(error) = axum::serve(internal_listener, internal_router).await {
+                obs_error!(error = %error, "private cross-chain service stopped");
+            }
+        });
+    }
     let rebate_store: Arc<dyn RebateStore> = Arc::new(SqliteRebateStore::new(pool.clone()));
     let rebates = Arc::new(RebateService::new(
         RebatePolicy::new(RebatePolicyConfig::new(
@@ -374,7 +513,7 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&rebate_store),
         Arc::new(FillerRebateCallBuilder::new(
             taker_credential,
-            Arc::clone(&authorizer),
+            Arc::clone(&uniswapx_authorizer),
         )),
         RebateMarketData::new(rebate_market, gas, Arc::clone(&assets)),
         RebateServiceConfig::new(
@@ -409,31 +548,52 @@ async fn main() -> Result<(), StartupError> {
             config.reservation_ttl_secs,
         ),
     ));
-    // One builder per protocol we can actually fill, each naming its own target contract in the
-    // `BuiltFill` it returns (`SwapService` no longer assumes a single filler address). 1inch's
-    // `oneinch_filler` has no real mainnet deployment yet: an unconfigured (zero) address still has
-    // no code, so a simulated call against it returns success with empty data rather than reverting,
-    // which would otherwise read as a real fillable order and broadcast a pointless, gas-spending
-    // transaction. Leaving the builder out entirely when unset makes that protocol decline the same
-    // clean way an unregistered one already does, instead of silently misreporting as submitted.
-    let mut fill_builders: BTreeMap<ProtocolId, Arc<dyn FillBuilder>> = BTreeMap::from([(
-        ProtocolId::UniswapXV2,
-        Arc::new(UniswapXFillBuilder::new(
-            config.app_address,
-            config.filler,
-            taker_credential,
-            Arc::clone(&authorizer),
-        )) as Arc<dyn FillBuilder>,
-    )]);
-    if config.oneinch_filler != Address::ZERO {
-        fill_builders.insert(
-            ProtocolId::OneInchLimitOrder,
-            Arc::new(OneInchFillBuilder::new(
+    // Each protocol names its own target contract in the `PreparedFill` it returns (`SwapService`
+    // no longer assumes a single filler address). 1inch's `oneinch_filler` has no real mainnet
+    // deployment yet: an unconfigured (zero) address still has no code, so a simulated call against
+    // it returns success with empty data rather than reverting, which would otherwise read as a
+    // real fillable order and broadcast a pointless, gas-spending transaction. Leaving the builder
+    // out entirely when unset makes that protocol decline the same clean way an unregistered one
+    // already does, instead of silently misreporting as submitted.
+    let uniswapx_fill: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(
+        config.app_address,
+        config.filler,
+        taker_credential,
+        uniswapx_authorizer,
+    ));
+    let erc7683_fill = erc7683_contracts
+        .zip(erc7683_authorizer)
+        .map(|(contracts, authorizer)| {
+            Arc::new(Erc7683FillBuilder::new(
                 config.app_address,
-                config.oneinch_filler,
-            )) as Arc<dyn FillBuilder>,
-        );
-    }
+                contracts.settler,
+                contracts.filler,
+                filler_owner,
+                taker_credential,
+                authorizer,
+            )) as Arc<dyn FillBuilder>
+        });
+    let oneinch_fill = (config.oneinch_filler != Address::ZERO).then(|| {
+        Arc::new(OneInchFillBuilder::new(
+            config.app_address,
+            config.oneinch_filler,
+        )) as Arc<dyn FillBuilder>
+    });
+    let fill_builder: Arc<dyn FillBuilder> = Arc::new(ProtocolFillBuilder::new(
+        uniswapx_fill,
+        erc7683_fill,
+        oneinch_fill,
+    ));
+    let erc7683 = erc7683_contracts
+        .zip(erc7683_fee_policy)
+        .map(|(contracts, fee_policy)| {
+            Arc::new(Erc7683Normalizer::new(
+                ChainId(config.chain_id),
+                config.permit2,
+                contracts.settler,
+                fee_policy,
+            ))
+        });
     let reconcile = Arc::new(ReconcileService::new(
         Arc::clone(&execution),
         Arc::clone(&trade_store),
@@ -446,7 +606,7 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&strategy_guard),
         Arc::clone(&trade_store),
         Arc::clone(&execution),
-        fill_builders,
+        fill_builder,
         Arc::clone(&leg_cost),
         Arc::new(SystemClock),
         SwapConfig {
@@ -621,7 +781,11 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&registry),
     ));
     let state = AppState {
-        config: Arc::new(config.app_config(cosigner.address(), taker_credential)),
+        config: Arc::new(config.app_config(
+            cosigner.address(),
+            taker_credential,
+            erc7683_contracts,
+        )),
         head,
         assets,
         pair_history,
@@ -634,6 +798,8 @@ async fn main() -> Result<(), StartupError> {
         rebates,
         cosigner,
         normalizer,
+        erc7683,
+        erc7683_fee_policy,
         trades,
         registry: Arc::clone(&registry),
         registry_store,
