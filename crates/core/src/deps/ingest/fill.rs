@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::deps::execution::ExecutionAuthorizerError;
 
-use crate::primitives::ingest::Intent;
+use crate::primitives::ingest::{Intent, ProtocolId};
 use crate::primitives::registry::Snapshot;
 use crate::primitives::routing::RoutePlan;
 
@@ -37,6 +37,14 @@ pub trait FillBuilder: Send + Sync {
         plan: &RoutePlan,
         snapshot: &Snapshot,
     ) -> Result<PreparedFill, FillBuilderError>;
+
+    /// Whether this builder can fill `protocol`, so the caller can decline before routing and
+    /// reserving rather than discovering it only at `build`. A builder scoped to one protocol is
+    /// never asked about another (the composition root wires it only where it applies), so `true`
+    /// is the correct default; only a multi-protocol dispatcher needs to override it.
+    fn supports(&self, _protocol: ProtocolId) -> bool {
+        true
+    }
 }
 
 /// A fill-build failure. All are unreachable on the normal route→fill path (a routed leg always has

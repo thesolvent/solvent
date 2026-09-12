@@ -53,4 +53,13 @@ impl FillBuilder for ProtocolFillBuilder {
             _ => Err(FillBuilderError::UnsupportedProtocol),
         }
     }
+
+    fn supports(&self, protocol: ProtocolId) -> bool {
+        match protocol {
+            ProtocolId::UniswapXV2 => true,
+            ProtocolId::Erc7683 => self.erc7683.is_some(),
+            ProtocolId::OneInchLimitOrder => self.oneinch.is_some(),
+            _ => false,
+        }
+    }
 }
