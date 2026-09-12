@@ -14,8 +14,8 @@ Ports are deliberately disjoint from the single-chain devnet's (`docker-compose.
 
 | Side        | Chain RPC | Explorer | Faucet | API  | Internal crosschain listener |
 |-------------|-----------|----------|--------|------|-------------------------------|
-| origin      | 9645      | 5300     | 9181   | 8399 | 9380 |
-| destination | 9646      | 5301     | 9182   | 8400 | 9381 |
+| origin      | 9745      | 5400     | 9281   | 8499 | 9480 |
+| destination | 9746      | 5401     | 9282   | 8500 | 9481 |
 
 ## What it does
 

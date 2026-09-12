@@ -182,12 +182,12 @@ async function main(): Promise<void> {
 
   await preflight({
     ports: [
-      { port: 9645, label: "anvil-origin RPC" },
-      { port: 9646, label: "anvil-destination RPC" },
-      { port: 5300, label: "explorer-origin" },
-      { port: 5301, label: "explorer-destination" },
-      { port: 9181, label: "faucet-origin" },
-      { port: 9182, label: "faucet-destination" },
+      { port: 9745, label: "anvil-origin RPC" },
+      { port: 9746, label: "anvil-destination RPC" },
+      { port: 5400, label: "explorer-origin" },
+      { port: 5401, label: "explorer-destination" },
+      { port: 9281, label: "faucet-origin" },
+      { port: 9282, label: "faucet-destination" },
       { port: PORTS.origin.apiPort, label: "solvent-origin API" },
       { port: PORTS.destination.apiPort, label: "solvent-destination API" },
     ],
@@ -254,8 +254,8 @@ async function main(): Promise<void> {
   );
 
   console.log("\n== done ==");
-  console.log(`  origin:      API http://127.0.0.1:${PORTS.origin.apiPort} · explorer http://127.0.0.1:5300 · faucet http://127.0.0.1:9181`);
-  console.log(`  destination: API http://127.0.0.1:${PORTS.destination.apiPort} · explorer http://127.0.0.1:5301 · faucet http://127.0.0.1:9182`);
+  console.log(`  origin:      API http://127.0.0.1:${PORTS.origin.apiPort} · explorer http://127.0.0.1:5400 · faucet http://127.0.0.1:9281`);
+  console.log(`  destination: API http://127.0.0.1:${PORTS.destination.apiPort} · explorer http://127.0.0.1:5401 · faucet http://127.0.0.1:9282`);
   console.log(`  relay + backend logs: devnet/generated/crosschain/logs/`);
   console.log(`  pids: ${running.map((p) => `${p.label}=${p.child.pid}`).join(" ")}`);
 }

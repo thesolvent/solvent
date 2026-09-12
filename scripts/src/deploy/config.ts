@@ -57,16 +57,16 @@ export interface SidePorts {
 // 8299/8300/9280/9281) — either may be someone else's active work running alongside this one.
 export const PORTS: Record<Side, SidePorts> = {
   origin: {
-    apiPort: 8399,
-    crosschainPort: 9380,
-    rpcUrl: "http://127.0.0.1:9645",
-    explorerUrl: "http://localhost:5300",
+    apiPort: 8499,
+    crosschainPort: 9480,
+    rpcUrl: "http://127.0.0.1:9745",
+    explorerUrl: "http://localhost:5400",
   },
   destination: {
-    apiPort: 8400,
-    crosschainPort: 9381,
-    rpcUrl: "http://127.0.0.1:9646",
-    explorerUrl: "http://localhost:5301",
+    apiPort: 8500,
+    crosschainPort: 9481,
+    rpcUrl: "http://127.0.0.1:9746",
+    explorerUrl: "http://localhost:5401",
   },
 };
 
@@ -86,6 +86,8 @@ function tokenList(manifest: Manifest) {
       symbol,
       name: NAMES[symbol] ?? symbol,
       decimals: token.decimals,
+      // Keyed by symbol, not address: a devnet redeploy moves every address.
+      logoURI: `/tokens/${symbol.toLowerCase()}.png`,
       tags: [TAGS[symbol] ?? "other"],
     })),
   };
@@ -159,6 +161,13 @@ wallet_state_db = "devnet/generated/crosschain/${side}/walletkit.redb"
 authorization_ttl_blocks = 90
 
 ${feeds}
+
+# Without this, the backend falls back to a single default chain (id 1, "Ethereum") — the fe then
+# can't match this side's actual chain id and renders assets as "on Unknown" with no chain icon.
+[[chains]]
+chain_id = ${manifest.chain_id}
+name = "Solvent ${side === "origin" ? "Origin" : "Destination"}"
+logo_uri = "/chains/ethereum.png"
 
 # Private cross-chain service: exposed only to the other side's process (or a proxy between them
 # in a real multi-host deployment). SOLVENT_INTERNAL_TOKEN below is the shared Bearer credential.

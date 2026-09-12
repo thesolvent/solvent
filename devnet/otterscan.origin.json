@@ -1,4 +1,4 @@
 {
-  "erigonURL": "http://127.0.0.1:9645",
-  "assetsURLPrefix": "http://127.0.0.1:5300"
+  "erigonURL": "http://127.0.0.1:9745",
+  "assetsURLPrefix": "http://127.0.0.1:5400"
 }
