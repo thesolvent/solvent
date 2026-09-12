@@ -2,7 +2,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  background: linear-gradient(180deg, #f6fbeb 0%, var(--paper) 55%);
+  background: var(--page-wash);
   display: flex;
   flex-direction: column;
   align-items: center;

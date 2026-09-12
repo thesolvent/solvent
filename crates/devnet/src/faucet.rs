@@ -2,11 +2,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use alloy::network::TransactionBuilder;
-use alloy::primitives::{Address, U256};
+use alloy::primitives::{Address, Bytes, TxHash, U256};
 use alloy::providers::{DynProvider, Provider};
-use alloy::rpc::types::TransactionRequest;
 use alloy::sol;
+use alloy::sol_types::SolCall;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -15,8 +14,13 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tower_http::cors::CorsLayer;
+use walletkit::core::deps::SubmissionOpts;
+use walletkit::core::wallet::{TxHandle, TxIntent, TxStatus};
+use walletkit::Wallet;
 
 use crate::cooldown::Cooldown;
+
+const CONFIRM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 sol! {
     #[sol(rpc)]
@@ -52,6 +56,8 @@ impl Manifest {
 
 pub struct AppState {
     provider: DynProvider,
+    wallet: Arc<Wallet>,
+    chain_id: u64,
     manifest: Manifest,
     cooldown: Cooldown,
     drip_units: u64,
@@ -61,6 +67,8 @@ pub struct AppState {
 impl AppState {
     pub fn new(
         provider: DynProvider,
+        wallet: Arc<Wallet>,
+        chain_id: u64,
         manifest: Manifest,
         cooldown: Cooldown,
         drip_units: u64,
@@ -68,6 +76,8 @@ impl AppState {
     ) -> Self {
         Self {
             provider,
+            wallet,
+            chain_id,
             manifest,
             cooldown,
             drip_units,
@@ -77,6 +87,51 @@ impl AppState {
 
     pub fn token_count(&self) -> usize {
         self.manifest.tokens.len()
+    }
+
+    async fn submit(&self, intent: TxIntent) -> Result<TxHandle, AppError> {
+        self.wallet
+            .send_with(&intent, SubmissionOpts::public())
+            .await
+            .map_err(AppError::chain)
+    }
+
+    async fn confirm(&self, submitted: TxHandle) -> Result<TxHash, AppError> {
+        let deadline = Instant::now() + CONFIRM_TIMEOUT;
+        loop {
+            let tracked = self
+                .wallet
+                .handle(submitted.id)
+                .await
+                .map_err(AppError::chain)?
+                .ok_or_else(|| AppError::Chain("faucet transaction disappeared".to_string()))?;
+            match tracked.status {
+                TxStatus::Confirmed { .. } => {
+                    return tracked.broadcasts.last().copied().ok_or_else(|| {
+                        AppError::Chain(
+                            "confirmed faucet transaction has no broadcast hash".to_string(),
+                        )
+                    });
+                }
+                TxStatus::Failed { reason } => return Err(AppError::Chain(reason)),
+                TxStatus::Replaced => {
+                    return Err(AppError::Chain(
+                        "faucet transaction was replaced".to_string(),
+                    ));
+                }
+                TxStatus::Dropped => {
+                    return Err(AppError::Chain(
+                        "faucet transaction was dropped".to_string(),
+                    ));
+                }
+                _ if Instant::now() >= deadline => {
+                    return Err(AppError::Chain(
+                        "faucet transaction confirmation timed out".to_string(),
+                    ));
+                }
+                _ => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
+            }
+        }
     }
 }
 
@@ -135,27 +190,24 @@ async fn faucet(
             .ok_or_else(|| AppError::BadRequest(format!("unknown token: {symbol}")))?;
         let amount =
             U256::from(state.drip_units) * U256::from(10u64).pow(U256::from(token.decimals));
-        let pending = IDevToken::new(token.address, state.provider.clone())
-            .mint(who, amount)
-            .send()
-            .await
-            .map_err(AppError::chain)?;
+        let intent = TxIntent::call(
+            state.chain_id,
+            state.wallet.account(),
+            token.address,
+            U256::ZERO,
+            Bytes::from(IDevToken::mintCall { to: who, amount }.abi_encode()),
+        );
+        let pending = state.submit(intent).await?;
         pending_mints.push((symbol, amount, pending));
     }
 
     let mut minted = Vec::with_capacity(pending_mints.len());
     for (symbol, amount, pending) in pending_mints {
-        let receipt = pending.get_receipt().await.map_err(AppError::chain)?;
-        if !receipt.status() {
-            return Err(AppError::Chain(format!(
-                "mint {symbol} reverted (tx {:#x})",
-                receipt.transaction_hash
-            )));
-        }
+        let tx = state.confirm(pending).await?;
         minted.push(Minted {
             symbol,
             amount: amount.to_string(),
-            tx: format!("{:#x}", receipt.transaction_hash),
+            tx: format!("{tx:#x}"),
         });
     }
 
@@ -165,21 +217,16 @@ async fn faucet(
         .await
         .map_err(AppError::chain)?;
     let gas_tx = if balance < state.gas_target_wei {
-        let request = TransactionRequest::default()
-            .with_to(who)
-            .with_value(state.gas_target_wei - balance);
-        let receipt = state
-            .provider
-            .send_transaction(request)
-            .await
-            .map_err(AppError::chain)?
-            .get_receipt()
-            .await
-            .map_err(AppError::chain)?;
-        if !receipt.status() {
-            return Err(AppError::Chain("gas top-up reverted".to_string()));
-        }
-        Some(format!("{:#x}", receipt.transaction_hash))
+        let intent = TxIntent::transfer(
+            state.chain_id,
+            state.wallet.account(),
+            who,
+            state.gas_target_wei - balance,
+        );
+        Some(format!(
+            "{:#x}",
+            state.confirm(state.submit(intent).await?).await?
+        ))
     } else {
         None
     };
@@ -224,6 +271,8 @@ pub enum StartupError {
     Config(String),
     #[error("manifest: {0}")]
     Manifest(String),
+    #[error("wallet state store: {0}")]
+    WalletStore(String),
     #[error(transparent)]
     Serve(#[from] std::io::Error),
 }

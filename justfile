@@ -76,12 +76,13 @@ COMPOSE := "docker compose -f devnet/docker-compose.yml"
 # Boot the devnet: chain + explorer + one-shot seed + faucet (builds the faucet image).
 devnet-up:
     {{COMPOSE}} up -d --build
-    @echo "devnet: RPC http://127.0.0.1:8545 · explorer http://127.0.0.1:5100 · faucet http://127.0.0.1:8080"
+    @echo "devnet: RPC http://127.0.0.1:8545 · explorer http://127.0.0.1:5100 · faucet http://127.0.0.1:8081"
     @echo "devnet: follow the deploy with 'just devnet-logs seed'"
 
-# Tear down and delete volumes (drops the deploy manifest).
+# Tear down and delete volumes plus host-generated deployment state.
 devnet-down:
     {{COMPOSE}} down -v
+    rm -f contracts/deployments/solvent-devnet.json devnet/generated/env.sh devnet/generated/tokens.json devnet/generated/solvent.db devnet/generated/filler-walletkit.redb devnet/generated/walletkit.redb
 
 devnet-logs service="":
     {{COMPOSE}} logs -f {{service}}

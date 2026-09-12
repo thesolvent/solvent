@@ -6,7 +6,7 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  background: var(--surface-page);
+  background: var(--page-wash);
 }
 
 /* ---------- Hero ---------- */

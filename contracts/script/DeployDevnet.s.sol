@@ -50,19 +50,22 @@ contract DeployDevnet is Script {
         toks[4] = Tok({ name: "Wrapped BTC", symbol: "WBTC", decimals: 8 });
         toks[5] = Tok({ name: "ChainLink Token", symbol: "LINK", decimals: 18 });
 
-        // The broadcasting key operates the router and both protocol fillers on devnet.
-        address owner = msg.sender;
+        address deployer = msg.sender;
+        uint256 fillerOwnerKey = vm.envUint("FILLER_OWNER_KEY");
+        address fillerOwner = vm.addr(fillerOwnerKey);
+        address policySigner = vm.addr(vm.envUint("POLICY_SIGNER_KEY"));
 
         vm.startBroadcast();
 
         Aqua aqua = new Aqua();
-        AquaSwapVMRouter router = new AquaSwapVMRouter(address(aqua), WETH, owner, ROUTER_NAME, ROUTER_VERSION);
+        AquaSwapVMRouter router = new AquaSwapVMRouter(address(aqua), WETH, deployer, ROUTER_NAME, ROUTER_VERSION);
         V2DutchOrderReactor reactor = new V2DutchOrderReactor(IPermit2(PERMIT2), address(0));
-        SolventTakerCredential credential = new SolventTakerCredential(owner);
+        SolventTakerCredential credential = new SolventTakerCredential(deployer);
         SolventSameChainSettler settler = new SolventSameChainSettler(ISignatureTransfer(PERMIT2), credential);
-        UniswapXAquaFiller filler = new UniswapXAquaFiller(owner, ISwapVM(address(router)), reactor, credential, owner);
+        UniswapXAquaFiller filler =
+            new UniswapXAquaFiller(fillerOwner, ISwapVM(address(router)), reactor, credential, policySigner);
         Erc7683AquaFiller erc7683Filler =
-            new Erc7683AquaFiller(owner, ISwapVM(address(router)), settler, credential, owner);
+            new Erc7683AquaFiller(fillerOwner, ISwapVM(address(router)), settler, credential, policySigner);
 
         credential.setTaker(address(filler), true);
         credential.setTaker(address(erc7683Filler), true);
@@ -74,10 +77,15 @@ contract DeployDevnet is Script {
         address[6] memory tokenAddrs;
         for (uint256 i = 0; i < toks.length; i++) {
             tokenAddrs[i] = address(new DevToken(toks[i].name, toks[i].symbol, toks[i].decimals));
+        }
+
+        vm.stopBroadcast();
+
+        vm.startBroadcast(fillerOwnerKey);
+        for (uint256 i = 0; i < tokenAddrs.length; i++) {
             filler.setTokenAllowed(tokenAddrs[i], true);
             erc7683Filler.setTokenAllowed(tokenAddrs[i], true);
         }
-
         vm.stopBroadcast();
 
         _writeManifest(

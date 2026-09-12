@@ -14,10 +14,12 @@ const TOKENS_OUT = resolve(REPO_ROOT, "devnet/generated/tokens.json");
 const CONFIG_OUT = resolve(REPO_ROOT, "solvent.toml");
 const ENV_OUT = resolve(REPO_ROOT, "devnet/generated/env.sh");
 
-// Anvil's deterministic dev accounts. #0 deploys, so it owns the router and filler; #1 cosigns.
+// Anvil's deterministic dev accounts. Each transaction-producing role has its own nonce domain.
 // Publicly known throwaway keys — devnet only, never a real network.
 const DEPLOYER_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const COSIGNER_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+const FILLER_OWNER_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
+const POLICY_SIGNER_KEY = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6";
 
 // Symbol -> token-list tag, mirroring the checked-in list's grouping. Tags are read by people in
 // the asset picker, so they are cased as they should appear.
@@ -127,7 +129,7 @@ confirmations = 1
 reservation_ttl_secs = 120
 decay_window_secs = 60
 
-wallet_state_db = "devnet/generated/walletkit.redb"
+wallet_state_db = "devnet/generated/filler-walletkit.redb"
 
 [rebate]
 authorization_ttl_blocks = 90
@@ -144,9 +146,9 @@ function main(): void {
   writeFileSync(CONFIG_OUT, configToml(manifest, tokenListPath));
   writeFileSync(
     ENV_OUT,
-    `# Signing keys the server reads from the environment. Anvil dev accounts — devnet only.\n` +
-      `export SOLVENT_SIGNER_KEY=${DEPLOYER_KEY}\n` +
-      `export SOLVENT_POLICY_SIGNER_KEY=${DEPLOYER_KEY}\n` +
+      `# Signing keys the server reads from the environment. Anvil dev accounts — devnet only.\n` +
+      `export SOLVENT_SIGNER_KEY=${FILLER_OWNER_KEY}\n` +
+      `export SOLVENT_POLICY_SIGNER_KEY=${POLICY_SIGNER_KEY}\n` +
       `export SOLVENT_COSIGNER_KEY=${COSIGNER_KEY}\n`,
   );
 
