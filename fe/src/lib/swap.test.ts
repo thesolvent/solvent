@@ -6,6 +6,7 @@ import {
   assetKey,
   impactLevel,
   isAboveBalance,
+  isAmountDraft,
   minimumOutput,
   minimumReceived,
   choices,
@@ -283,5 +284,21 @@ describe("price impact", () => {
     expect(swapAction({ ...trade, impactAcknowledged: true }).label).toBe(
       "Swap",
     );
+  });
+});
+
+describe("isAmountDraft", () => {
+  it("accepts a decimal still being typed", () => {
+    expect(isAmountDraft("")).toBe(true);
+    expect(isAmountDraft("0.")).toBe(true);
+    expect(isAmountDraft(".")).toBe(true);
+    expect(isAmountDraft("100.25")).toBe(true);
+  });
+
+  it("refuses what inputMode only discourages", () => {
+    expect(isAmountDraft("abc")).toBe(false);
+    expect(isAmountDraft("1e9")).toBe(false);
+    expect(isAmountDraft("1.2.3")).toBe(false);
+    expect(isAmountDraft("-1")).toBe(false);
   });
 });

@@ -353,8 +353,7 @@ describe("SwapPage", () => {
     );
     expect(submit).not.toHaveBeenCalled();
 
-    // The tab above the widget carries the same word; the action is the last one.
-    fireEvent.click(screen.getAllByRole("button", { name: "Swap" }).at(-1)!);
+    fireEvent.click(screen.getByRole("button", { name: "Swap" }));
     await waitFor(() => expect(submit).toHaveBeenCalledOnce());
   });
 
@@ -370,19 +369,6 @@ describe("SwapPage", () => {
     expect(
       await screen.findByLabelText("USDC token on Ethereum"),
     ).toBeInTheDocument();
-  });
-
-  it("shows the wallet's connected network in the card header", async () => {
-    renderWithServices(<SwapPage />, {
-      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
-      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
-    });
-
-    expect(
-      await screen.findByRole("button", {
-        name: "Connected network: Ethereum",
-      }),
-    ).toHaveTextContent("E");
   });
 
   it("loads both catalogs in SolventX and selects an output on Base", async () => {

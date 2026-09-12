@@ -12,8 +12,10 @@ import {
   choices,
   impactLevel,
   isAboveBalance,
+  isAmountDraft,
   minimumReceived,
-  networkOptions,
+  chainLogo,
+  chainOptions,
   selectedAsset,
   settleLegs,
   swapAction,
@@ -33,7 +35,8 @@ import type { GlossaryKey } from "@/lib/glossary";
 
 import styles from "./SwapPage.module.css";
 
-const SWAP_TABS = ["Swap"];
+/** Matches `.amountInput::placeholder`, so the caret is the height of the words it replaces. */
+const PLACEHOLDER_SIZE = "clamp(30px, 8cqi, 42px)";
 
 export function SwapPage() {
   const { state, set, config } = useApp();
@@ -109,15 +112,6 @@ export function SwapPage() {
   const { isConnected, chainId } = useAccount();
   const { openConnectModal } = useConnectModal();
   const { switchChain } = useSwitchChain();
-  const walletChain =
-    chainId === undefined
-      ? undefined
-      : assets.find((asset) => asset.chainId === chainId);
-  const walletNetwork =
-    isConnected && chainId !== undefined
-      ? (walletChain?.net ??
-        (chainId === chain.id ? chain.name : `Chain ${chainId}`))
-      : undefined;
   const submission = useSubmitSwap(
     {
       from,
@@ -172,31 +166,26 @@ export function SwapPage() {
       })
     : { label: "Select receive asset", ready: false };
 
+  const offered = useMemo(
+    () => choices(assets, state.picker ?? "from", state.fromToken, crossChain),
+    [assets, state.picker, state.fromToken, crossChain],
+  );
+  const chains = useMemo(() => chainOptions(offered), [offered]);
+  // A chain the current leg cannot reach must not stay selected from the previous one.
+  const activeChain = chains.includes(state.pNet) ? state.pNet : chains[0];
+
   const matches = useMemo(() => {
     const q = state.pQuery.trim().toLowerCase();
-    return choices(
-      assets,
-      state.picker ?? "from",
-      state.fromToken,
-      crossChain,
-    ).filter((t) => {
+    return offered.filter((t) => {
       const okQ =
         !q ||
         t.symbol.toLowerCase().includes(q) ||
         t.name.toLowerCase().includes(q);
       const okTag = state.pTag === ANY_TAG || t.tags.indexOf(state.pTag) > -1;
-      const okNet = state.pNet === ANY_NETWORK || t.net === state.pNet;
+      const okNet = activeChain === ANY_NETWORK || t.net === activeChain;
       return okQ && okTag && okNet;
     });
-  }, [
-    assets,
-    state.picker,
-    state.fromToken,
-    state.pQuery,
-    state.pTag,
-    state.pNet,
-    crossChain,
-  ]);
+  }, [offered, activeChain, state.pQuery, state.pTag]);
 
   useEffect(() => {
     if (!state.picker) return;
@@ -235,43 +224,6 @@ export function SwapPage() {
     <div data-scroll="1" className={styles.root}>
       <h1 className="srOnly">Swap</h1>
       <section className={styles.card} aria-label="Swap">
-        <div className={styles.cardHead}>
-          <div className={styles.tabs}>
-            {SWAP_TABS.map((t) => (
-              <button key={t} type="button" className={styles.tabActive}>
-                {t}
-              </button>
-            ))}
-          </div>
-          <div className={styles.headActions}>
-            <button
-              type="button"
-              className={styles.iconButton}
-              aria-label={
-                walletNetwork
-                  ? `Connected network: ${walletNetwork}`
-                  : "Wallet network not connected"
-              }
-              title={walletNetwork}
-            >
-              <span
-                className={
-                  walletNetwork ? styles.networkGlyph : styles.iconGlyph
-                }
-                aria-hidden="true"
-              >
-                {walletNetwork?.slice(0, 1).toUpperCase()}
-                {walletNetwork && walletChain?.chainLogoUri && (
-                  <img alt="" loading="lazy" src={walletChain.chainLogoUri} />
-                )}
-              </span>
-            </button>
-            <button type="button" className={styles.moreButton}>
-              ···
-            </button>
-          </div>
-        </div>
-
         <div className={styles.leg}>
           <button
             type="button"
@@ -289,9 +241,16 @@ export function SwapPage() {
             <div className={styles.amountBox}>
               <input
                 className={styles.amountInput}
-                style={{ fontSize: fit(state.amount) }}
+                // An empty field still carries the largest size, and the caret is drawn at the
+                // font size rather than the placeholder's, so it stands as tall as the box.
+                style={{
+                  fontSize: state.amount ? fit(state.amount) : PLACEHOLDER_SIZE,
+                }}
                 value={state.amount}
-                onChange={(e) => set({ amount: e.target.value })}
+                onChange={(e) => {
+                  if (isAmountDraft(e.target.value))
+                    set({ amount: e.target.value });
+                }}
                 placeholder="Enter amount"
                 aria-label="Swap amount"
                 inputMode="decimal"
@@ -411,6 +370,36 @@ export function SwapPage() {
                 />
               </label>
 
+              {/* Shown even when the leg can reach only one chain: which chain this leg is on is
+                  the fact the reader needs, and it is not otherwise on screen. */}
+              {chains.length > 0 && (
+                <div className={styles.tagRow}>
+                  {chains.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className={
+                        n === activeChain
+                          ? styles.tagChipActive
+                          : styles.tagChip
+                      }
+                      aria-pressed={n === activeChain}
+                      disabled={chains.length === 1}
+                      onClick={() => set({ pNet: n })}
+                    >
+                      {chainLogo(assets, n) && (
+                        <img
+                          alt=""
+                          className={styles.chainPillMark}
+                          loading="lazy"
+                          src={chainLogo(assets, n)}
+                        />
+                      )}
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className={styles.tagRow}>
                 {tagOptions(assets).map((t) => (
                   <button
@@ -486,28 +475,6 @@ export function SwapPage() {
                 />
               </div>
             </div>
-
-            {crossChain && (
-              <div className={styles.netCol}>
-                <div className={styles.netHead}>Network</div>
-                {networkOptions(assets).map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    className={
-                      n === state.pNet ? styles.netRowActive : styles.netRow
-                    }
-                    onClick={() => set({ pNet: n })}
-                  >
-                    <span className={styles.netDot} />
-                    <span className={styles.netLabel}>{n}</span>
-                    <span className={styles.netMark}>
-                      {n === state.pNet ? "✓" : ""}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         )}
       </section>

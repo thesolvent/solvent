@@ -2,11 +2,23 @@ import { formatUnits } from "viem";
 import { parseTokenAmount } from "@solvent/sdk/validation";
 
 import type { Asset, Quote } from "@/data";
+import { chain } from "@/adapters/wallet/config";
 import { tokenAmount } from "./format";
 
 /** The unfiltered choice in each list; not a value any asset carries. */
 export const ANY_TAG = "All";
 export const ANY_NETWORK = "All networks";
+
+/**
+ * Whether a keystroke leaves something that is still on its way to being a number.
+ *
+ * `inputMode` only hints at which keyboard to raise; it refuses nothing, so a typed letter
+ * reaches the amount and every consumer downstream has to survive it. A partial entry — "", "0.",
+ * "." — is accepted because it is a decimal mid-typing, not a wrong one.
+ */
+export function isAmountDraft(value: string): boolean {
+  return /^\d*\.?\d*$/.test(value);
+}
 
 /** Chain-qualified identity keeps the same token symbol on two networks selectable. */
 export function assetKey(asset: Asset): string {
@@ -47,6 +59,37 @@ export function networkOptions(assets: Asset[]): string[] {
   );
 }
 
+/**
+ * The chains a leg can actually use, read off the choices already offered rather than off the
+ * catalog: the destination is constrained to what the source can route to, so a chain the list
+ * cannot reach must not be offered as a filter. `All` appears only when there is a choice to make.
+ */
+export function chainOptions(offered: Asset[]): string[] {
+  const nets = options(
+    ANY_NETWORK,
+    offered.map((asset) => asset.net),
+  );
+  return nets.length > 2 ? nets : nets.slice(1);
+}
+
+/**
+ * The chain a cross-chain swap starts from.
+ *
+ * The deployment routes one way — the settler lives on the origin chain and the app on the
+ * destination, both holding the other's id immutably — so the origin is the build's own chain
+ * rather than whichever asset happened to sort first in a list concatenated from two deployments.
+ */
+export function crossChainOrigin(assets: Asset[]): number | undefined {
+  return assets.some((asset) => asset.chainId === chain.id)
+    ? chain.id
+    : assets[0]?.chainId;
+}
+
+/** A chain's mark, taken from any asset that reports living on it. */
+export function chainLogo(assets: Asset[], net: string): string | undefined {
+  return assets.find((asset) => asset.net === net)?.chainLogoUri ?? undefined;
+}
+
 /** Symbols quotable against `symbol`, read off the pairs it reports being part of. */
 function counterparts(asset: Asset | undefined): string[] {
   const symbol = asset?.symbol ?? "";
@@ -77,10 +120,9 @@ export function choices(
 ): Asset[] {
   if (leg === "from") {
     if (!crossChain) return assets.filter((asset) => asset.pairs.length > 0);
-    const originChain = assets[0]?.chainId;
     return assets.filter(
       (asset) =>
-        asset.chainId === originChain &&
+        asset.chainId === crossChainOrigin(assets) &&
         remoteRepresentation(assets, asset)?.pairs.length,
     );
   }
@@ -105,10 +147,9 @@ function firstSource(assets: Asset[]): string | undefined {
 }
 
 function firstCrossChainSource(assets: Asset[]): string | undefined {
-  const originChain = assets[0]?.chainId;
   return assets.find(
     (asset) =>
-      asset.chainId === originChain &&
+      asset.chainId === crossChainOrigin(assets) &&
       remoteRepresentation(assets, asset)?.pairs.length,
   )?.symbol;
 }

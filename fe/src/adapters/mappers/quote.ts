@@ -51,7 +51,9 @@ export function toCrossChainQuote(
     api.price_impact_bps != null
       ? percent(api.price_impact_bps / 100)
       : amountInUsd != null && amountOutUsd != null && amountInUsd > 0
-        ? percent(Math.max(0, ((amountInUsd - amountOutUsd) / amountInUsd) * 100))
+        ? percent(
+            Math.max(0, ((amountInUsd - amountOutUsd) / amountInUsd) * 100),
+          )
         : DASH;
   const makers = new Set(
     [...api.origin.sources, ...api.destination.sources].map((source) =>

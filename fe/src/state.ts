@@ -31,7 +31,6 @@ export type AppState = {
   productMode: ProductMode;
   trail: Crumb[];
 
-  swapTab: string;
   fromToken: string;
   toToken: string;
   amount: string;
@@ -94,18 +93,10 @@ export type AppState = {
 
 type SwapState = Pick<
   AppState,
-  | "swapTab"
-  | "fromToken"
-  | "toToken"
-  | "amount"
-  | "picker"
-  | "pQuery"
-  | "pTag"
-  | "pNet"
+  "fromToken" | "toToken" | "amount" | "picker" | "pQuery" | "pTag" | "pNet"
 >;
 
 export const INITIAL_SWAP_STATE: SwapState = {
-  swapTab: "Swap",
   fromToken: "",
   toToken: "",
   amount: "",
