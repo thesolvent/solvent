@@ -78,6 +78,8 @@
 }
 
 .iconGlyph {
+  position: relative;
+  overflow: hidden;
   width: 14px;
   height: 14px;
   border: 1.6px solid var(--ink);
@@ -598,4 +600,15 @@
 .netMark {
   font-size: 12px;
   color: var(--green-deep);
+}
+
+/* The chain's own mark, over its initial — a blocked or slow image leaves the letter standing. */
+.networkGlyph img,
+.iconGlyph img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
 }

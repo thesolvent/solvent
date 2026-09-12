@@ -27,7 +27,7 @@ import { useTokenBalance } from "@/services/balance";
 import { useSubmitSwap } from "@/services/swap";
 import { chain } from "@/adapters/wallet/config";
 import { useApp } from "@/state";
-import { AssetIdentity } from "@/components/AssetIdentity";
+import { AssetIdentity, TokenMark } from "@/components/AssetIdentity";
 import { Term } from "@/components/Tooltip";
 import type { GlossaryKey } from "@/lib/glossary";
 
@@ -109,9 +109,13 @@ export function SwapPage() {
   const { isConnected, chainId } = useAccount();
   const { openConnectModal } = useConnectModal();
   const { switchChain } = useSwitchChain();
+  const walletChain =
+    chainId === undefined
+      ? undefined
+      : assets.find((asset) => asset.chainId === chainId);
   const walletNetwork =
     isConnected && chainId !== undefined
-      ? (assets.find((asset) => asset.chainId === chainId)?.net ??
+      ? (walletChain?.net ??
         (chainId === chain.id ? chain.name : `Chain ${chainId}`))
       : undefined;
   const submission = useSubmitSwap(
@@ -257,6 +261,9 @@ export function SwapPage() {
                 aria-hidden="true"
               >
                 {walletNetwork?.slice(0, 1).toUpperCase()}
+                {walletNetwork && walletChain?.chainLogoUri && (
+                  <img alt="" loading="lazy" src={walletChain.chainLogoUri} />
+                )}
               </span>
             </button>
             <button type="button" className={styles.moreButton}>
@@ -438,9 +445,11 @@ export function SwapPage() {
                       }
                       onClick={() => choose(t)}
                     >
-                      <span className={styles.tokenChip}>
-                        {t.symbol.slice(0, 2)}
-                      </span>
+                      <TokenMark
+                        className={styles.tokenChip}
+                        logoUri={t.logoUri}
+                        symbol={t.symbol}
+                      />
                       <span className={styles.tokenMain}>
                         <span className={styles.tokenName}>{t.name}</span>
                         <span className={styles.tokenMeta}>
