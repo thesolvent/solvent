@@ -20,6 +20,11 @@ import {
 import { tradeRow } from "./explorer";
 
 export const SPANS = ["7D", "1M", "3M", "6M"] as const;
+
+/** Shared by the latency polyline geometry and the `viewBox` it is plotted against. */
+export const LATENCY_VIEWBOX_WIDTH = 420;
+export const LATENCY_VIEWBOX_HEIGHT = 120;
+
 export const PERIODS: Record<string, MakerPeriod> = {
   "7D": "7d",
   "1M": "1m",
@@ -64,6 +69,7 @@ function positionRow(p: Position, span: string) {
       p.rangeKind === "full" ? "var(--surface)" : "var(--lime-wash-soft)",
     widthFg:
       p.rangeKind === "full" ? "var(--text-mid)" : "var(--green-darkest)",
+    splitKnown: split != null,
     splitA: `${split ?? 0}%`,
     labelA: `${percent(split)} ${first?.symbol ?? ""}`,
     labelB: `${percent(split == null ? null : 100 - split)} ${second?.symbol ?? ""}`,
@@ -144,6 +150,8 @@ function shareChart(
     const length = Math.max(0, share * arcLength - 7);
     const result = {
       ...segment,
+      // Arcs are filtered before rendering, so a segment carries the index hover reads back.
+      index: i,
       label: segment.label,
       value: total ? percent(share * 100) : DASH,
       dot: segment.color,
@@ -159,6 +167,9 @@ function shareChart(
     trackDash: `${arcLength.toFixed(1)} ${(circumference * 0.25).toFixed(1)}`,
     arcs: shares.filter((share) => Number.parseFloat(share.dash) > 0),
     shares,
+    donutLabel: `Fill share: ${shares
+      .map((share) => `${share.label} ${share.value}`)
+      .join(", ")}`,
     donutCap: selected?.label ?? "total",
     donutVal: count(selected ? selected.count : total),
     tip: !!selected,
@@ -202,16 +213,21 @@ function activityCharts(
     : 0;
   const maxLatency = Math.max(1200, ...buckets.map((b) => b.latencyMs ?? 0));
   const y = (latency: number) => 116 - (latency / maxLatency) * 112;
+  // A period other than 7D returns a different bucket count; a fixed step would clip the tail
+  // while the visible remainder still read as the whole period. A lone bucket sits centred.
+  const frac = (i: number) =>
+    buckets.length > 1 ? i / (buckets.length - 1) : 0.5;
   const points = buckets.map((bucket, i) => ({
     bucket,
-    x: i * 70,
+    x: frac(i) * LATENCY_VIEWBOX_WIDTH,
     y: bucket.latencyMs == null ? null : y(bucket.latencyMs),
   }));
   // Empty buckets break the line: interpolating across them would invent measurements.
   const lines: string[] = [];
   let segment: string[] = [];
   for (const point of points) {
-    if (point.y !== null) segment.push(`${point.x},${point.y.toFixed(1)}`);
+    if (point.y !== null)
+      segment.push(`${point.x.toFixed(1)},${point.y.toFixed(1)}`);
     else if (segment.length) {
       lines.push(segment.join(" "));
       segment = [];
@@ -232,6 +248,7 @@ function activityCharts(
       : null,
     bars: buckets.map((bucket, i) => ({
       day: bucketLabel(bucket, state.mkSpan),
+      label: `${bucketRange(bucket)}: ${count(bucket.fills)} fills`,
       h: `${peak ? (bucket.fills / peak) * 100 : 0}%`,
       bg:
         state.mkBar === i
@@ -242,6 +259,10 @@ function activityCharts(
       dayFg:
         state.mkBar === i || i === topIndex ? "var(--ink)" : "var(--text-dim)",
     })),
+    fillsLabel: `Fills by ${state.mkSpan} bucket: ${
+      buckets.map((b) => `${bucketRange(b)} ${count(b.fills)}`).join(", ") ||
+      "no buckets"
+    }`,
     avgTop: `${peak ? 100 - (average / peak) * 100 : 100}%`,
     avgVal: count(average),
     latency:
@@ -255,6 +276,12 @@ function activityCharts(
       line.includes(" ") ? line : `${line} ${line}`,
     ),
     latDays: buckets.map((b) => bucketLabel(b, state.mkSpan)),
+    latencyLabel: `Fill latency p50 by ${state.mkSpan} bucket: ${
+      buckets
+        .filter((b) => b.latencyMs != null)
+        .map((b) => `${bucketRange(b)} ${count(b.latencyMs)} ms`)
+        .join(", ") || "no measured fills"
+    }`,
     latencyTip:
       latencyBucket?.latencyMs != null
         ? {
@@ -263,9 +290,14 @@ function activityCharts(
             detail: "p50",
           }
         : null,
-    latPts: points.map(({ y: value }, i) => ({
-      left: `${(i / 6) * 100}%`,
-      top: value === null ? null : `${(value / 120) * 100}%`,
+    latPts: points.map(({ bucket, y: value }, i) => ({
+      left: `${frac(i) * 100}%`,
+      top: value === null ? null : `${(value / LATENCY_VIEWBOX_HEIGHT) * 100}%`,
+      label: `${bucketRange(bucket)}: ${
+        bucket.latencyMs == null
+          ? "no fills"
+          : `${count(bucket.latencyMs)} ms p50`
+      }`,
     })),
   };
 }
@@ -372,11 +404,11 @@ export function makerView(
         stFg: row.statusStyle.color,
       };
     }),
-    insight:
-      data.notice ??
-      (d
-        ? `This maker filled ${count(d.fills)} ${d.fills === 1 ? "order" : "orders"} in the last ${d.windowDays} days.`
-        : DASH),
+    // Null rather than the notice: a load that failed is not an insight, and the caller renders
+    // the failure where a failure belongs.
+    insight: d
+      ? `This maker filled ${count(d.fills)} ${d.fills === 1 ? "order" : "orders"} in the last ${d.windowDays} days.`
+      : null,
     ...shareChart(d, state.mkTip),
     ...activityCharts(d, state),
   };

@@ -280,13 +280,23 @@ function PairPositions({
                     Coverage {position.covNum}
                   </span>
                   <span className={styles.coverageBar}>
-                    <span
-                      className={styles.coverageA}
-                      style={{ width: position.splitA }}
-                    >
-                      {position.labelA}
-                    </span>
-                    <span className={styles.coverageB}>{position.labelB}</span>
+                    {position.splitKnown ? (
+                      <>
+                        <span
+                          className={styles.coverageA}
+                          style={{ width: position.splitA }}
+                        >
+                          {position.labelA}
+                        </span>
+                        <span className={styles.coverageB}>
+                          {position.labelB}
+                        </span>
+                      </>
+                    ) : (
+                      <span className={styles.coverageUnknown}>
+                        Split unknown — neither side is valued
+                      </span>
+                    )}
                   </span>
                 </div>
               </div>

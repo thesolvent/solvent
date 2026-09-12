@@ -4,7 +4,13 @@ import { RebateList } from "@/components/RebateList";
 import { useLoadedPagination } from "@/components/useLoadedPagination";
 import { slug, usePools } from "@/services/pools";
 import { useAssets } from "@/services/assets";
-import { PERIODS, SPANS, makerView } from "@/lib/makers";
+import {
+  LATENCY_VIEWBOX_HEIGHT,
+  LATENCY_VIEWBOX_WIDTH,
+  PERIODS,
+  SPANS,
+  makerView,
+} from "@/lib/makers";
 import { loadedPageLabel } from "@/lib/pagination";
 import {
   useMakers,
@@ -20,6 +26,8 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { MakerAssets } from "./MakerAssets";
 import { MakerPositions } from "./MakerPositions";
+import { NotFoundPage } from "./NotFoundPage";
+import { AsyncNote } from "@/components/AsyncNote";
 import { Term } from "@/components/Tooltip";
 
 import styles from "./MakersPage.module.css";
@@ -107,6 +115,22 @@ export function MakersPage() {
     rebateCount: rebateRows.length,
     notice,
   });
+  // A path param is user input: without this an address that is not a maker 404s every query
+  // behind a caption, with nothing on screen saying so and no way back.
+  const unknownMaker =
+    maker !== undefined &&
+    roster.data !== undefined &&
+    !roster.data.some(({ address: a }) => sameAddress(a, maker));
+  const chartNote = (subject: string) =>
+    dashboard.isError || dashboard.isPending ? (
+      <AsyncNote
+        className={styles.chartNote}
+        query={dashboard}
+        subject={subject}
+      />
+    ) : null;
+
+  if (unknownMaker) return <NotFoundPage />;
 
   return (
     <div className={styles.root}>
@@ -215,100 +239,126 @@ export function MakersPage() {
             <span className={styles.tabNote}>{mk.tabNote}</span>
           </div>
 
-          {mk.tab === "Positions" && (
-            <MakerPositions
-              key={address}
-              positions={mk.positions}
-              canManage={canManage}
-              actionStatus={positionActions.status}
-              onClearAction={positionActions.clear}
-              onOpenPosition={(hash) =>
-                navigate(`/explorer/strategies/${encodeURIComponent(hash)}`)
-              }
-              onClone={(position) =>
-                navigate(
-                  `/pools/${slug(position.pair)}/new?clone=${encodeURIComponent(position.hash)}`,
-                )
-              }
-              onPush={positionActions.push}
-              onDock={positionActions.dock}
-            />
-          )}
-
-          {mk.tab === "Assets" && (
-            <MakerAssets
-              assets={mk.assets}
-              onToggle={(index) =>
-                set({ mkAsset: mk.assets[index]?.open ? -1 : index })
-              }
-              onOpenPosition={(hash) =>
-                navigate(`/explorer/strategies/${encodeURIComponent(hash)}`)
-              }
-            />
-          )}
-
-          {mk.tab === "Settlements" && (
-            <>
-              <div data-scroll="1" className={styles.list}>
-                {mk.settlements.map((t) => (
-                  <button
-                    type="button"
-                    key={t.trade}
-                    className={styles.settleRow}
-                    onClick={() => {
-                      set({ xpStrat: null });
-                      navigate(
-                        `/explorer/trades/${encodeURIComponent(t.trade)}`,
-                      );
-                    }}
-                  >
-                    <span className={styles.settlePair}>
-                      <span className={styles.settlePairName}>{t.pair}</span>
-                      <span className={styles.settleBlk}>{t.blk}</span>
-                    </span>
-                    <span className={styles.settleFlow}>
-                      <span className={styles.settleIn}>{t.inn}</span>
-                      <span className={styles.settleArrow}>→</span>
-                      <span className={styles.settleOut}>{t.out}</span>
-                    </span>
-                    <span className={styles.settleCell}>
-                      <span className={styles.settleCellValue}>{t.fee}</span>
-                      <span className={styles.settleCellLabel}>fee</span>
-                    </span>
-                    <span className={styles.settleCell}>
-                      <span className={styles.settleCellValue}>{t.share}</span>
-                      <span className={styles.settleCellLabel}>of fill</span>
-                    </span>
-                    <span className={styles.settleStatusCell}>
-                      <span
-                        className={styles.settleStatus}
-                        style={{
-                          background: t.stBg,
-                          color: t.stFg,
-                        }}
-                      >
-                        {t.status}
-                      </span>
-                      <span className={styles.settleTx}>{t.tx}</span>
-                    </span>
-                    <span className={styles.settleChevron}>›</span>
-                  </button>
-                ))}
-              </div>
-              <Pagination
-                label={loadedPageLabel(
-                  settlementPages,
-                  settlementPagination.page,
-                  Boolean(settlements.hasNextPage),
-                  "settlements",
-                )}
-                page={settlementPagination.page}
-                pageCount={settlementPagination.pageCount}
-                disabled={settlements.isFetching || settlements.isError}
-                onPage={(page) => void settlementPagination.select(page)}
+          {mk.tab === "Positions" &&
+            (mk.positions.length === 0 ? (
+              <AsyncNote
+                className={styles.emptyNote}
+                query={positions}
+                subject="positions"
+                empty="No positions — this maker is not quoting."
               />
-            </>
-          )}
+            ) : (
+              <MakerPositions
+                key={address}
+                positions={mk.positions}
+                canManage={canManage}
+                actionStatus={positionActions.status}
+                onClearAction={positionActions.clear}
+                onOpenPosition={(hash) =>
+                  navigate(`/explorer/strategies/${encodeURIComponent(hash)}`)
+                }
+                onClone={(position) =>
+                  navigate(
+                    `/pools/${slug(position.pair)}/new?clone=${encodeURIComponent(position.hash)}`,
+                  )
+                }
+                onPush={positionActions.push}
+                onDock={positionActions.dock}
+              />
+            ))}
+
+          {mk.tab === "Assets" &&
+            (mk.assets.length === 0 ? (
+              <AsyncNote
+                className={styles.emptyNote}
+                query={inventory}
+                subject="assets"
+                empty="No tokens committed in this period."
+              />
+            ) : (
+              <MakerAssets
+                assets={mk.assets}
+                onToggle={(index) =>
+                  set({ mkAsset: mk.assets[index]?.open ? -1 : index })
+                }
+                onOpenPosition={(hash) =>
+                  navigate(`/explorer/strategies/${encodeURIComponent(hash)}`)
+                }
+              />
+            ))}
+
+          {mk.tab === "Settlements" &&
+            (mk.settlements.length === 0 ? (
+              <AsyncNote
+                className={styles.emptyNote}
+                query={settlements}
+                subject="settlements"
+                empty="No settlements in this period."
+              />
+            ) : (
+              <>
+                <div data-scroll="1" className={styles.list}>
+                  {mk.settlements.map((t) => (
+                    <button
+                      type="button"
+                      key={t.trade}
+                      className={styles.settleRow}
+                      onClick={() => {
+                        set({ xpStrat: null });
+                        navigate(
+                          `/explorer/trades/${encodeURIComponent(t.trade)}`,
+                        );
+                      }}
+                    >
+                      <span className={styles.settlePair}>
+                        <span className={styles.settlePairName}>{t.pair}</span>
+                        <span className={styles.settleBlk}>{t.blk}</span>
+                      </span>
+                      <span className={styles.settleFlow}>
+                        <span className={styles.settleIn}>{t.inn}</span>
+                        <span className={styles.settleArrow}>→</span>
+                        <span className={styles.settleOut}>{t.out}</span>
+                      </span>
+                      <span className={styles.settleCell}>
+                        <span className={styles.settleCellValue}>{t.fee}</span>
+                        <span className={styles.settleCellLabel}>fee</span>
+                      </span>
+                      <span className={styles.settleCell}>
+                        <span className={styles.settleCellValue}>
+                          {t.share}
+                        </span>
+                        <span className={styles.settleCellLabel}>of fill</span>
+                      </span>
+                      <span className={styles.settleStatusCell}>
+                        <span
+                          className={styles.settleStatus}
+                          style={{
+                            background: t.stBg,
+                            color: t.stFg,
+                          }}
+                        >
+                          {t.status}
+                        </span>
+                        <span className={styles.settleTx}>{t.tx}</span>
+                      </span>
+                      <span className={styles.settleChevron}>›</span>
+                    </button>
+                  ))}
+                </div>
+                <Pagination
+                  label={loadedPageLabel(
+                    settlementPages,
+                    settlementPagination.page,
+                    Boolean(settlements.hasNextPage),
+                    "settlements",
+                  )}
+                  page={settlementPagination.page}
+                  pageCount={settlementPagination.pageCount}
+                  disabled={settlements.isFetching || settlements.isError}
+                  onPage={(page) => void settlementPagination.select(page)}
+                />
+              </>
+            ))}
 
           {mk.tab === "Rebates" && (
             <RebateList
@@ -324,11 +374,13 @@ export function MakersPage() {
             />
           )}
 
-          <div className={styles.insight}>
-            <span className={styles.insightTag}>Insight</span>
-            <span className={styles.insightText}>{mk.insight}</span>
-            <span className={styles.insightChevron}>›</span>
-          </div>
+          {mk.insight && (
+            <div className={styles.insight}>
+              <span className={styles.insightTag}>Insight</span>
+              <span className={styles.insightText}>{mk.insight}</span>
+              <span className={styles.insightChevron}>›</span>
+            </div>
+          )}
         </section>
 
         <div data-scroll="1" className={styles.rail}>
@@ -339,62 +391,74 @@ export function MakersPage() {
               <span className={styles.spacer} />
               <span className={styles.cardMore}>···</span>
             </div>
-            <div className={styles.donutRow}>
-              <div className={styles.donutWrap}>
-                <svg viewBox="0 0 120 120" className={styles.donutSvg}>
-                  <circle
-                    cx="60"
-                    cy="60"
-                    r="46"
-                    fill="none"
-                    stroke="var(--surface-alt)"
-                    strokeWidth="11"
-                    strokeLinecap="round"
-                    strokeDasharray={mk.trackDash}
-                  />
-                  {mk.arcs.map((arc, i) => (
+            {chartNote("fill share") ?? (
+              <div className={styles.donutRow}>
+                <div className={styles.donutWrap}>
+                  <svg
+                    viewBox="0 0 120 120"
+                    className={styles.donutSvg}
+                    role="img"
+                    aria-label={mk.donutLabel}
+                  >
                     <circle
-                      key={i}
                       cx="60"
                       cy="60"
                       r="46"
                       fill="none"
-                      strokeLinecap="round"
+                      stroke="var(--surface-alt)"
                       strokeWidth="11"
-                      className={styles.donutArc}
-                      stroke={arc.color}
-                      strokeDasharray={arc.dash}
-                      strokeDashoffset={arc.offset}
-                      opacity={arc.op}
+                      strokeLinecap="round"
+                      strokeDasharray={mk.trackDash}
+                    />
+                    {mk.arcs.map((arc, i) => (
+                      <circle
+                        key={i}
+                        cx="60"
+                        cy="60"
+                        r="46"
+                        fill="none"
+                        strokeLinecap="round"
+                        strokeWidth="11"
+                        className={styles.donutArc}
+                        stroke={arc.color}
+                        strokeDasharray={arc.dash}
+                        strokeDashoffset={arc.offset}
+                        opacity={arc.op}
+                        aria-hidden="true"
+                        onMouseEnter={() => set({ mkTip: arc.index })}
+                        onMouseLeave={() => set({ mkTip: null })}
+                      />
+                    ))}
+                  </svg>
+                  <div className={styles.donutCenter}>
+                    <div className={styles.donutCap}>{mk.donutCap}</div>
+                    <div className={styles.donutVal}>{mk.donutVal}</div>
+                  </div>
+                </div>
+                <div className={styles.shareList}>
+                  {mk.shares.map((s, i) => (
+                    <button
+                      type="button"
+                      key={s.label}
+                      className={styles.shareRow}
+                      style={{ opacity: s.op }}
+                      aria-label={`${s.label} ${s.value}`}
+                      onFocus={() => set({ mkTip: i })}
+                      onBlur={() => set({ mkTip: null })}
                       onMouseEnter={() => set({ mkTip: i })}
                       onMouseLeave={() => set({ mkTip: null })}
-                    />
+                    >
+                      <span
+                        className={styles.shareDot}
+                        style={{ background: s.dot }}
+                      />
+                      <span className={styles.shareLabel}>{s.label}</span>
+                      <span className={styles.shareValue}>{s.value}</span>
+                    </button>
                   ))}
-                </svg>
-                <div className={styles.donutCenter}>
-                  <div className={styles.donutCap}>{mk.donutCap}</div>
-                  <div className={styles.donutVal}>{mk.donutVal}</div>
                 </div>
               </div>
-              <div className={styles.shareList}>
-                {mk.shares.map((s, i) => (
-                  <div
-                    key={s.label}
-                    className={styles.shareRow}
-                    style={{ opacity: s.op }}
-                    onMouseEnter={() => set({ mkTip: i })}
-                    onMouseLeave={() => set({ mkTip: null })}
-                  >
-                    <span
-                      className={styles.shareDot}
-                      style={{ background: s.dot }}
-                    />
-                    <span className={styles.shareLabel}>{s.label}</span>
-                    <span className={styles.shareValue}>{s.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            )}
             {mk.tip && (
               <ChartTooltip
                 label={mk.tipLabel}
@@ -411,38 +475,54 @@ export function MakersPage() {
               <span className={styles.spacer} />
               <span className={styles.cardMore}>···</span>
             </div>
-            <div className={styles.metricRow}>
-              <span className={styles.metricValue}>{mk.fills}</span>
-              <span className={styles.metricDelta}>{mk.fillsDelta}</span>
-              <span className={styles.metricNote}>vs prev period</span>
-            </div>
-            <div className={styles.barsWrap}>
-              <div className={styles.avgLine} style={{ top: mk.avgTop }} />
-              <div className={styles.avgChip} style={{ top: mk.avgTop }}>
-                {mk.avgVal}
-              </div>
-              <div className={styles.bars}>
-                {mk.bars.map((b, i) => (
-                  <span
-                    key={i}
-                    className={styles.barCol}
-                    onMouseEnter={() => set({ mkBar: i })}
-                    onMouseLeave={() => set({ mkBar: null })}
+            {chartNote("fills") ?? (
+              <>
+                <div className={styles.metricRow}>
+                  <span className={styles.metricValue}>{mk.fills}</span>
+                  <span className={styles.metricDelta}>{mk.fillsDelta}</span>
+                  <span className={styles.metricNote}>vs prev period</span>
+                </div>
+                <div className={styles.barsWrap}>
+                  <div className={styles.avgLine} style={{ top: mk.avgTop }} />
+                  <div className={styles.avgChip} style={{ top: mk.avgTop }}>
+                    {mk.avgVal}
+                  </div>
+                  <div
+                    className={styles.bars}
+                    role="img"
+                    aria-label={mk.fillsLabel}
                   >
-                    <span
-                      className={styles.bar}
-                      style={{
-                        height: b.h,
-                        background: b.bg,
-                      }}
-                    />
-                    <span className={styles.barDay} style={{ color: b.dayFg }}>
-                      {b.day}
-                    </span>
-                  </span>
-                ))}
-              </div>
-            </div>
+                    {mk.bars.map((b, i) => (
+                      <button
+                        type="button"
+                        key={i}
+                        className={styles.barCol}
+                        aria-label={b.label}
+                        onFocus={() => set({ mkBar: i })}
+                        onBlur={() => set({ mkBar: null })}
+                        onMouseEnter={() => set({ mkBar: i })}
+                        onMouseLeave={() => set({ mkBar: null })}
+                      >
+                        <span
+                          className={styles.bar}
+                          style={{
+                            height: b.h,
+                            background: b.bg,
+                          }}
+                        />
+                        <span
+                          aria-hidden="true"
+                          className={styles.barDay}
+                          style={{ color: b.dayFg }}
+                        >
+                          {b.day}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
             {mk.fillsTip && <ChartTooltip {...mk.fillsTip} />}
           </section>
 
@@ -453,68 +533,81 @@ export function MakersPage() {
               <span className={styles.spacer} />
               <span className={styles.cardMore}>···</span>
             </div>
-            <div className={styles.latMetric}>
-              <span className={styles.metricValue}>{mk.latency}</span>
-              <span className={styles.latUnit}>p50</span>
-              <span className={styles.metricNote}>{mk.latDelta}</span>
-            </div>
-            <div className={styles.latWrap}>
-              <div className={styles.latAxis}>
-                {mk.latAxis.map((label) => (
-                  <span key={label}>{label}</span>
-                ))}
-              </div>
-              <div className={styles.latPlot}>
-                <svg
-                  viewBox="0 0 420 120"
-                  preserveAspectRatio="none"
-                  className={styles.latSvg}
-                >
-                  {[4, 60, 116].map((y) => (
-                    <line
-                      key={y}
-                      x1="0"
-                      y1={y}
-                      x2="420"
-                      y2={y}
-                      stroke="var(--surface-alt)"
-                      strokeWidth="1"
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  ))}
-                  {mk.latLines.map((line, i) => (
-                    <polyline
-                      key={i}
-                      points={line}
-                      fill="none"
-                      stroke="var(--green)"
-                      strokeWidth="2"
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  ))}
-                </svg>
-                {mk.latPts.map((pt, i) => (
-                  <span
-                    key={i}
-                    className={styles.latHit}
-                    style={{ left: pt.left }}
-                    onMouseEnter={() => set({ mkLat: i })}
-                    onMouseLeave={() => set({ mkLat: null })}
-                  >
-                    {pt.top !== null && (
-                      <span className={styles.latDot} style={{ top: pt.top }} />
-                    )}
-                  </span>
-                ))}
-              </div>
-              <div className={styles.latDays}>
-                {mk.latDays.map((d, i) => (
-                  <span key={i}>{d}</span>
-                ))}
-              </div>
-            </div>
+            {chartNote("fill latency") ?? (
+              <>
+                <div className={styles.latMetric}>
+                  <span className={styles.metricValue}>{mk.latency}</span>
+                  <span className={styles.latUnit}>p50</span>
+                  <span className={styles.metricNote}>{mk.latDelta}</span>
+                </div>
+                <div className={styles.latWrap}>
+                  <div className={styles.latAxis}>
+                    {mk.latAxis.map((label) => (
+                      <span key={label}>{label}</span>
+                    ))}
+                  </div>
+                  <div className={styles.latPlot}>
+                    <svg
+                      viewBox={`0 0 ${LATENCY_VIEWBOX_WIDTH} ${LATENCY_VIEWBOX_HEIGHT}`}
+                      preserveAspectRatio="none"
+                      className={styles.latSvg}
+                      role="img"
+                      aria-label={mk.latencyLabel}
+                    >
+                      {[4, 60, 116].map((y) => (
+                        <line
+                          key={y}
+                          x1="0"
+                          y1={y}
+                          x2={LATENCY_VIEWBOX_WIDTH}
+                          y2={y}
+                          stroke="var(--surface-alt)"
+                          strokeWidth="1"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      ))}
+                      {mk.latLines.map((line, i) => (
+                        <polyline
+                          key={i}
+                          points={line}
+                          fill="none"
+                          stroke="var(--green)"
+                          strokeWidth="2"
+                          strokeLinejoin="round"
+                          strokeLinecap="round"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      ))}
+                    </svg>
+                    {mk.latPts.map((pt, i) => (
+                      <button
+                        type="button"
+                        key={i}
+                        className={styles.latHit}
+                        style={{ left: pt.left }}
+                        aria-label={pt.label}
+                        onFocus={() => set({ mkLat: i })}
+                        onBlur={() => set({ mkLat: null })}
+                        onMouseEnter={() => set({ mkLat: i })}
+                        onMouseLeave={() => set({ mkLat: null })}
+                      >
+                        {pt.top !== null && (
+                          <span
+                            className={styles.latDot}
+                            style={{ top: pt.top }}
+                          />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <div className={styles.latDays}>
+                    {mk.latDays.map((d, i) => (
+                      <span key={i}>{d}</span>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
             {mk.latencyTip && <ChartTooltip {...mk.latencyTip} />}
           </section>
         </div>

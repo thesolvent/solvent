@@ -11,6 +11,7 @@ const position = {
   width: "Bounded",
   widthBg: "var(--lime-wash-soft)",
   widthFg: "var(--green-darkest)",
+  splitKnown: true,
   splitA: "50%",
   labelA: "50% LINK",
   labelB: "50% USDC",
