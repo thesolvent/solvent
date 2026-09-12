@@ -13,7 +13,6 @@ import {
 
 import { REPO_ROOT } from "../lib/manifest.ts";
 
-const RPC_URL = process.env.SOLVENT_RPC_URL ?? "http://127.0.0.1:8545";
 const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11";
 const PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 const ARTIFACT = resolve(
@@ -32,10 +31,12 @@ function runtimeBytecode(): Hex {
     return artifact.deployedBytecode.object;
 }
 
-async function main(): Promise<void> {
+/** Etches Permit2 + Multicall3 onto `rpcUrl` and verifies Permit2's signing domain. Shared by the
+ *  single-chain CLI entrypoint below and the multi-chain deploy orchestrator. */
+export async function etchCanonicalInfra(rpcUrl: string): Promise<void> {
     const client = createTestClient({
         mode: "anvil",
-        transport: http(RPC_URL),
+        transport: http(rpcUrl),
     }).extend(publicActions);
     const chainId = await client.getChainId();
     const contracts = [
@@ -86,4 +87,6 @@ async function main(): Promise<void> {
     console.log("etch: Permit2 signing domain verified");
 }
 
-await main();
+if (import.meta.main) {
+    await etchCanonicalInfra(process.env.SOLVENT_RPC_URL ?? "http://127.0.0.1:8545");
+}
