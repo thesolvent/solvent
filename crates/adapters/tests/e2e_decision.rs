@@ -311,8 +311,13 @@ async fn e2e_the_loop_waits_for_the_price_then_fills_from_the_feed() {
     ));
     let feed: Arc<dyn OrderFeed> = Arc::new(HostedFeed::new(
         Arc::new(
-            OrdersApiClient::new(base, ChainId(stack.chain_id), "Dutch_V2".to_string())
-                .expect("client"),
+            OrdersApiClient::new(
+                base,
+                ChainId(stack.chain_id),
+                "Dutch_V2".to_string(),
+                ProtocolId::UniswapXV2,
+            )
+            .expect("client"),
         ),
         ChainId(stack.chain_id),
         vec![Scope::Book],

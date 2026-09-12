@@ -45,12 +45,22 @@ pub struct OrdersApiClient {
     base: String,
     chain: ChainId,
     order_type: String,
+    /// Which reactor generation `order_type` resolves to on this deployment — the API's `orderType`
+    /// filter and this codebase's `ProtocolId` are two different taxonomies (e.g. `Limit` is the V1
+    /// `DutchOrderReactor`), so a client is tagged with the one it was built for rather than guessing
+    /// from the query string.
+    protocol: ProtocolId,
 }
 
 impl OrdersApiClient {
     /// `base` is the API root, e.g. `https://api.uniswap.org/v2` — or a local mirror serving the
     /// same shape, which is how the fork harness feeds this client without touching the network.
-    pub fn new(base: String, chain: ChainId, order_type: String) -> Result<Self, OrdersApiError> {
+    pub fn new(
+        base: String,
+        chain: ChainId,
+        order_type: String,
+        protocol: ProtocolId,
+    ) -> Result<Self, OrdersApiError> {
         let http = reqwest::Client::builder()
             .user_agent(USER_AGENT)
             .timeout(REQUEST_TIMEOUT)
@@ -63,7 +73,12 @@ impl OrdersApiClient {
             base: base.trim_end_matches('/').to_string(),
             chain,
             order_type,
+            protocol,
         })
+    }
+
+    pub fn protocol(&self) -> ProtocolId {
+        self.protocol
     }
 
     /// One page of the newest open orders. There is no "next page" — the caller re-polls and dedups.
@@ -121,7 +136,11 @@ pub struct OrderRecord {
 impl OrderRecord {
     /// The feed's output. Hex that does not parse is the API contradicting itself, so it is an
     /// error rather than an order we quietly drop.
-    pub fn to_raw_order(&self, chain: ChainId) -> Result<RawOrder, OrdersApiError> {
+    pub fn to_raw_order(
+        &self,
+        chain: ChainId,
+        protocol: ProtocolId,
+    ) -> Result<RawOrder, OrdersApiError> {
         let payload = self
             .encoded_order
             .parse::<Bytes>()
@@ -131,7 +150,7 @@ impl OrderRecord {
             .parse::<Bytes>()
             .map_err(|_| OrdersApiError::Malformed("signature"))?;
         Ok(RawOrder::new(
-            ProtocolId::UniswapXV2,
+            protocol,
             chain,
             payload,
             signature,
@@ -173,8 +192,13 @@ mod tests {
     use alloy::primitives::address;
 
     fn client(base: &str) -> OrdersApiClient {
-        OrdersApiClient::new(base.to_string(), ChainId(1), "Dutch_V2".to_string())
-            .expect("client builds")
+        OrdersApiClient::new(
+            base.to_string(),
+            ChainId(1),
+            "Dutch_V2".to_string(),
+            ProtocolId::UniswapXV2,
+        )
+        .expect("client builds")
     }
 
     #[test]
@@ -194,7 +218,9 @@ mod tests {
             signature: "0xabcd".to_string(),
             created_at: 1788941257,
         };
-        let raw = record.to_raw_order(ChainId(1)).expect("converts");
+        let raw = record
+            .to_raw_order(ChainId(1), ProtocolId::UniswapXV2)
+            .expect("converts");
         assert_eq!(raw.protocol, ProtocolId::UniswapXV2);
         assert_eq!(raw.chain, ChainId(1));
         assert_eq!(raw.payload, "0x1234".parse::<Bytes>().expect("hex"));
@@ -211,7 +237,7 @@ mod tests {
             created_at: 0,
         };
         assert!(matches!(
-            record.to_raw_order(ChainId(1)),
+            record.to_raw_order(ChainId(1), ProtocolId::UniswapXV2),
             Err(OrdersApiError::Malformed("encodedOrder"))
         ));
     }

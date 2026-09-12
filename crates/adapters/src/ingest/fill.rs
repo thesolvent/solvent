@@ -37,7 +37,11 @@ impl FillBuilder for ProtocolFillBuilder {
         snapshot: &Snapshot,
     ) -> Result<PreparedFill, FillBuilderError> {
         match intent.protocol {
-            ProtocolId::UniswapXV2 => self.uniswapx.build(intent, plan, snapshot).await,
+            // V1 (Limit-type) orders reuse the same builder: it forwards `intent.settler`/`raw`/
+            // `signature` opaquely and reads no reactor-generation-specific fields.
+            ProtocolId::UniswapXV1 | ProtocolId::UniswapXV2 => {
+                self.uniswapx.build(intent, plan, snapshot).await
+            }
             ProtocolId::Erc7683 => match &self.erc7683 {
                 Some(builder) => builder.build(intent, plan, snapshot).await,
                 None => Err(FillBuilderError::UnsupportedProtocol),
@@ -52,7 +56,7 @@ impl FillBuilder for ProtocolFillBuilder {
 
     fn supports(&self, protocol: ProtocolId) -> bool {
         match protocol {
-            ProtocolId::UniswapXV2 => true,
+            ProtocolId::UniswapXV1 | ProtocolId::UniswapXV2 => true,
             ProtocolId::Erc7683 => self.erc7683.is_some(),
             ProtocolId::OneInchLimitOrder => self.oneinch.is_some(),
             _ => false,

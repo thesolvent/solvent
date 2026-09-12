@@ -21,7 +21,7 @@ use solvent_adapters::ingest::uniswapx::{
 };
 use solvent_core::deps::ingest::Normalizer;
 use solvent_core::deps::ingest::OrderFeed;
-use solvent_core::primitives::ingest::RawOrder;
+use solvent_core::primitives::ingest::{ProtocolId, RawOrder};
 use solvent_core::primitives::ChainId;
 use tokio::net::TcpListener;
 
@@ -124,8 +124,13 @@ async fn spawn(behaviour: Behaviour) -> Harness {
 }
 
 fn feed(base: &str, scopes: Vec<Scope>, health: Arc<FeedHealth>) -> HostedFeed {
-    let client = OrdersApiClient::new(base.to_string(), ChainId(1), "Dutch_V2".to_string())
-        .expect("client builds");
+    let client = OrdersApiClient::new(
+        base.to_string(),
+        ChainId(1),
+        "Dutch_V2".to_string(),
+        ProtocolId::UniswapXV2,
+    )
+    .expect("client builds");
     HostedFeed::new(Arc::new(client), ChainId(1), scopes, POLL, health)
 }
 
@@ -258,6 +263,7 @@ async fn live_endpoint_accepts_this_client() {
         "https://api.uniswap.org/v2".to_string(),
         ChainId(1),
         "Dutch_V2".to_string(),
+        ProtocolId::UniswapXV2,
     )
     .expect("client builds");
 
@@ -274,7 +280,9 @@ async fn live_endpoint_accepts_this_client() {
         vec![address!("4449Cd34d1eb1FEDCF02A1Be3834FfDe8E6A6180")],
     );
     for record in &orders {
-        let raw = record.to_raw_order(ChainId(1)).expect("record converts");
+        let raw = record
+            .to_raw_order(ChainId(1), ProtocolId::UniswapXV2)
+            .expect("record converts");
         match normalizer.normalize(&raw) {
             Ok(intent) => {
                 assert_eq!(
@@ -308,6 +316,7 @@ async fn live_watch_the_book() {
             "https://api.uniswap.org/v2".to_string(),
             ChainId(1),
             "Dutch_V2".to_string(),
+            ProtocolId::UniswapXV2,
         )
         .expect("client builds");
         HostedFeed::new(

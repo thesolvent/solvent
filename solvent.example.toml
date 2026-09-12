@@ -70,6 +70,11 @@ feed_silence_secs = 300    # unreachable for longer than this and readiness turn
 # the identity is ours to do. This is Uniswap's operational key, identical on mainnet and Sepolia.
 expected_cosigners = ["0x4449Cd34d1eb1FEDCF02A1Be3834FfDe8E6A6180"]
 
+# UniswapX's `Limit` order type — the original ExclusiveDutchOrderReactor, separate from the V2
+# reactor above. Independent of orders_api_url in both directions; omit to leave this feed off.
+# uniswapx_v1_orders_api_url = "https://api.uniswap.org/v2"
+# uniswapx_v1_reactor = "0x6000da47483062a0d734ba3dc7576ce6a0b645c4"
+
 # 1inch Limit Order Protocol orders, seen and quote-priced alongside UniswapX's. Requires
 # ONEINCH_API_KEY in the environment; omit `oneinch_orderbook_url` to leave this feed off.
 # oneinch_orderbook_url = "https://api.1inch.dev/orderbook/v4.1"
