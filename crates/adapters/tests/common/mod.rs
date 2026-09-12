@@ -5,7 +5,7 @@
 
 #![allow(dead_code)] // each test binary uses a different subset of the harness.
 
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use alloy::{
     network::EthereumWallet,
@@ -18,12 +18,15 @@ use alloy::{
 };
 use serde::Deserialize;
 use solvent_adapters::execution::LocalPolicySigner;
+use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
+use solvent_adapters::ingest::erc7683::Erc7683FillBuilder;
 use solvent_adapters::ingest::uniswapx::UniswapXFillBuilder;
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::registry::{AlloyChainSource, SqliteStore};
 use solvent_core::{
     deps::ledger::BudgetSource,
     deps::registry::ChainSource,
+    execution::ExecutionService,
     ledger::{AvailableSnapshot, LedgerService},
     primitives::{
         ledger::AccountKey,
@@ -34,6 +37,12 @@ use solvent_core::{
 };
 use sqlx::SqlitePool;
 use tempfile::TempDir;
+use walletkit::adapters::policy::{AllowAll, DefaultPolicyEngine};
+use walletkit::adapters::{
+    LocalSigner, RedbStateStore, SystemClock as WalletkitSystemClock, Transport,
+};
+use walletkit::core::deps::SubmissionOpts;
+use walletkit::Wallet;
 
 sol!(
     #[sol(rpc)]
@@ -597,8 +606,26 @@ mod fill_abi {
         UniswapXAquaFiller,
         "tests/fixtures/artifacts/UniswapXAquaFiller.json"
     );
+    sol!(
+        #[sol(rpc)]
+        SolventTakerCredential,
+        "tests/fixtures/artifacts/SolventTakerCredential.json"
+    );
+    sol!(
+        #[sol(rpc)]
+        SolventSameChainSettler,
+        "tests/fixtures/artifacts/SolventSameChainSettler.json"
+    );
+    sol!(
+        #[sol(rpc)]
+        Erc7683AquaFiller,
+        "tests/fixtures/artifacts/Erc7683AquaFiller.json"
+    );
 }
-use fill_abi::{UniswapXAquaFiller, V2DutchOrderReactor};
+use fill_abi::{
+    Erc7683AquaFiller, SolventSameChainSettler, SolventTakerCredential, UniswapXAquaFiller,
+    V2DutchOrderReactor,
+};
 
 pub const MULTICALL3: Address = address!("cA11bde05977b3631167028862bE2a173976CA11");
 const MULTICALL3_CODE: &str = include_str!("../fixtures/multicall3_runtime.hex");
@@ -614,6 +641,8 @@ pub struct Stack {
     pub h: Harness,
     pub reactor: Address,
     pub filler: Address,
+    pub erc7683_settler: Address,
+    pub erc7683_filler: Address,
     pub credential: Address,
     pub chain_id: u64,
     pub policy_signer: PrivateKeySigner,
@@ -623,10 +652,26 @@ impl Stack {
     pub fn fill_builder(&self) -> UniswapXFillBuilder {
         UniswapXFillBuilder::new(
             self.h.app,
+            self.filler,
             self.credential,
             Arc::new(LocalPolicySigner::new(
                 self.chain_id,
                 self.filler,
+                self.policy_signer.clone(),
+            )),
+        )
+    }
+
+    pub fn erc7683_fill_builder(&self) -> Erc7683FillBuilder {
+        Erc7683FillBuilder::new(
+            self.h.app,
+            self.erc7683_settler,
+            self.erc7683_filler,
+            self.h.maker,
+            self.credential,
+            Arc::new(LocalPolicySigner::new(
+                self.chain_id,
+                self.erc7683_filler,
                 self.policy_signer.clone(),
             )),
         )
@@ -648,15 +693,51 @@ pub async fn setup() -> Stack {
         .await
         .expect("deploy reactor");
     let policy_signer = PrivateKeySigner::random();
+    let credential = SolventTakerCredential::deploy(h.maker_provider.clone(), h.maker)
+        .await
+        .expect("deploy taker credential");
+    let settler =
+        SolventSameChainSettler::deploy(h.maker_provider.clone(), PERMIT2, *credential.address())
+            .await
+            .expect("deploy ERC-7683 settler");
     let filler = UniswapXAquaFiller::deploy(
         h.maker_provider.clone(),
         h.maker,
         h.app,
         *reactor.address(),
+        *credential.address(),
         policy_signer.address(),
     )
     .await
     .expect("deploy filler");
+    let erc7683_filler = Erc7683AquaFiller::deploy(
+        h.maker_provider.clone(),
+        h.maker,
+        h.app,
+        *settler.address(),
+        *credential.address(),
+        policy_signer.address(),
+    )
+    .await
+    .expect("deploy ERC-7683 filler");
+    for taker in [*filler.address(), *erc7683_filler.address()] {
+        credential
+            .setTaker(taker, true)
+            .send()
+            .await
+            .expect("authorize credential taker")
+            .watch()
+            .await
+            .expect("credential authorization mined");
+    }
+    credential
+        .freeze()
+        .send()
+        .await
+        .expect("freeze credential")
+        .watch()
+        .await
+        .expect("credential freeze mined");
     for token in [h.t0, h.t1] {
         filler
             .setTokenAllowed(token, true)
@@ -666,19 +747,30 @@ pub async fn setup() -> Stack {
             .watch()
             .await
             .expect("allow token mined");
+        erc7683_filler
+            .setTokenAllowed(token, true)
+            .send()
+            .await
+            .expect("allow ERC-7683 token")
+            .watch()
+            .await
+            .expect("allow ERC-7683 token mined");
     }
-    let credential = filler
+    let filler_credential = filler
         .TAKER_CREDENTIAL()
         .call()
         .await
         .expect("taker credential");
-    protect_fixture(&mut h.fx, credential);
+    assert_eq!(filler_credential, *credential.address());
+    protect_fixture(&mut h.fx, filler_credential);
     let chain_id = h.maker_provider.get_chain_id().await.expect("chain id");
     Stack {
         h,
         reactor: *reactor.address(),
         filler: *filler.address(),
-        credential,
+        erc7683_settler: *settler.address(),
+        erc7683_filler: *erc7683_filler.address(),
+        credential: filler_credential,
         chain_id,
         policy_signer,
     }
@@ -735,6 +827,66 @@ pub async fn ledger(h: &Harness, snapshot: &Arc<SharedSnapshot>) -> (LedgerServi
         Arc::new(SystemClock),
     );
     (svc, dir)
+}
+
+/// The production wallet-backed execution service over the harness's Anvil endpoint.
+pub fn execution_service(
+    h: &Harness,
+    ledger: Arc<LedgerService>,
+    pool: SqlitePool,
+    redb: &std::path::Path,
+) -> ExecutionService {
+    let key_hex = format!("0x{}", alloy::hex::encode(h.maker_signer.to_bytes()));
+    let signer = LocalSigner::from_private_key(&key_hex).expect("local signer");
+    let policy = DefaultPolicyEngine::new(vec![Box::new(AllowAll)], Arc::new(WalletkitSystemClock));
+    let transport = Transport::url(h.endpoint.parse().expect("endpoint url")).expect("transport");
+    let store = RedbStateStore::open(redb).expect("redb state store");
+    let wallet = Wallet::builder(Arc::new(transport), Arc::new(signer), Arc::new(policy))
+        .store(Arc::new(store))
+        .confirmations(1)
+        .bump_timeout(0)
+        .build();
+    let executor = Arc::new(WalletkitExecutor::new(
+        wallet,
+        SubmissionOpts::public(),
+        Arc::new(SqliteFillStore::new(pool)),
+    ));
+    let settlement = Arc::new(AquaSettlementReader::new(
+        Arc::new(h.maker_provider.clone()),
+        *h.aqua.address(),
+    ));
+    ExecutionService::new(executor.clone(), executor, settlement, ledger)
+}
+
+/// A migrated durable fill store for an execution-service test instance.
+pub async fn execution_pool(dir: &Path) -> SqlitePool {
+    let url = format!("sqlite://{}?mode=rwc", dir.join("exec.db").display());
+    let pool = SqlitePool::connect(&url).await.expect("open exec sqlite");
+    SqliteFillStore::new(pool.clone())
+        .migrate()
+        .await
+        .expect("migrate exec");
+    pool
+}
+
+/// Mine and reconcile until the production executor has no in-flight fills.
+pub async fn drive_execution(service: &ExecutionService, h: &Harness) {
+    for _ in 0..10 {
+        if service.pending().await.expect("pending") == 0 {
+            break;
+        }
+        let _: () = h
+            .maker_provider
+            .raw_request("anvil_mine".into(), (2u64,))
+            .await
+            .expect("anvil_mine");
+        for fill in service.reconcile().await.expect("reconcile") {
+            service
+                .forget(fill.intent)
+                .await
+                .expect("forget settled fill");
+        }
+    }
 }
 
 /// Quote-time caps for the pair on the payout token, read from the budget source.

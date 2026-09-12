@@ -13,6 +13,30 @@ type PositionEditor =
   | { kind: "push"; strategyHash: string; tokenIndex: number; amount: string }
   | { kind: "dock"; strategyHash: string };
 
+function actionLabel(
+  kind: PositionEditor["kind"],
+  phase: PositionActionStatus["phase"],
+  tokens: PositionRow["tokens"],
+): string {
+  switch (phase?.kind) {
+    case "approving": {
+      const token = tokens?.find(
+        ({ address }) => address.toLowerCase() === phase.token.toLowerCase(),
+      );
+      return `Approve ${token?.symbol ?? "token"}…`;
+    }
+    case "submitting":
+      return kind === "push" ? "Submitting push…" : "Submitting dock…";
+    case "confirming":
+      return kind === "push" ? "Confirming push…" : "Confirming dock…";
+    case "signing":
+      return kind === "push" ? "Sign push…" : "Sign dock…";
+    case "preparing":
+    default:
+      return kind === "push" ? "Preparing push…" : "Preparing dock…";
+  }
+}
+
 function groupPositions(positions: PositionRow[]) {
   const groups = new Map<string, PositionRow[]>();
   for (const position of positions) {
@@ -31,6 +55,8 @@ function groupPositions(positions: PositionRow[]) {
 export function MakerPositions({
   positions,
   canManage = true,
+  walletAction,
+  onPrepareWallet,
   actionStatus,
   onClearAction,
   onOpenPosition,
@@ -40,6 +66,8 @@ export function MakerPositions({
 }: {
   positions: PositionRow[];
   canManage?: boolean;
+  walletAction?: string;
+  onPrepareWallet?: () => boolean;
   actionStatus?: PositionActionStatus;
   onClearAction?: () => void;
   onOpenPosition: (hash: string) => void;
@@ -108,6 +136,8 @@ export function MakerPositions({
                 selected={currentSelection.position}
                 editor={editor}
                 canManage={canManage}
+                walletAction={walletAction}
+                onPrepareWallet={onPrepareWallet}
                 actionStatus={actionStatus}
                 onToggle={(position) => {
                   closeEditor();
@@ -133,6 +163,8 @@ function PairPositions({
   selected,
   editor,
   canManage,
+  walletAction,
+  onPrepareWallet,
   actionStatus,
   onToggle,
   onOpenEditor,
@@ -146,6 +178,8 @@ function PairPositions({
   selected: string | null;
   editor: PositionEditor | undefined;
   canManage: boolean;
+  walletAction: string | undefined;
+  onPrepareWallet: (() => boolean) | undefined;
   actionStatus: PositionActionStatus | undefined;
   onToggle: (hash: string | null) => void;
   onOpenEditor: (editor: PositionEditor) => void;
@@ -247,6 +281,8 @@ function PairPositions({
               <PositionActionEditor
                 position={position}
                 editor={activeEditor}
+                walletAction={walletAction}
+                onPrepareWallet={onPrepareWallet}
                 status={actionStatus}
                 onChange={onOpenEditor}
                 onClose={onCloseEditor}
@@ -301,6 +337,8 @@ function PairPositions({
 function PositionActionEditor({
   position,
   editor,
+  walletAction,
+  onPrepareWallet,
   status,
   onChange,
   onClose,
@@ -309,6 +347,8 @@ function PositionActionEditor({
 }: {
   position: PositionRow;
   editor: PositionEditor;
+  walletAction: string | undefined;
+  onPrepareWallet: (() => boolean) | undefined;
   status: PositionActionStatus | undefined;
   onChange: (editor: PositionEditor) => void;
   onClose: () => void;
@@ -323,6 +363,10 @@ function PositionActionEditor({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (walletAction) {
+      onPrepareWallet?.();
+      return;
+    }
     const pending =
       editor.kind === "push"
         ? (() => {
@@ -413,16 +457,19 @@ function PositionActionEditor({
           className={styles.positionActionConfirm}
           disabled={
             submitting ||
-            (editor.kind === "push" &&
-              (!editor.amount.trim() || onPush === undefined)) ||
-            (editor.kind === "dock" && onDock === undefined)
+            (!walletAction &&
+              ((editor.kind === "push" &&
+                (!editor.amount.trim() || onPush === undefined)) ||
+                (editor.kind === "dock" && onDock === undefined)))
           }
         >
           {submitting
-            ? "Confirm in wallet…"
-            : editor.kind === "push"
-              ? "Push liquidity"
-              : "Confirm dock"}
+            ? actionLabel(editor.kind, currentStatus?.phase, position.tokens)
+            : walletAction
+              ? `Switch to ${walletAction}`
+              : editor.kind === "push"
+                ? "Push liquidity"
+                : "Confirm dock"}
         </button>
       </div>
       {currentStatus?.problem && (

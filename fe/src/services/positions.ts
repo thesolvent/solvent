@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useAccount, useClient, useConnectorClient } from "wagmi";
 
 import type { WalletClients } from "@solvent/sdk/swap";
+import { submissionProblem } from "@/lib/swap";
 import type {
   CreatedPosition,
   CreatePair,
@@ -9,8 +11,10 @@ import type {
   PairPricePoint,
   PositionActionIntent,
   PositionActionResult,
+  PositionCreationStatus,
   PositionForm,
   PositionIntent,
+  PositionTransactionStatus,
   PositionsPort,
   PriceHistoryPeriod,
   PushPositionInput,
@@ -21,11 +25,13 @@ import { useServices } from "./context";
 interface Submission {
   key: string;
   intent: PositionIntent | undefined;
+  onStatus: (status: PositionCreationStatus) => void;
 }
 
 export interface PositionSubmission {
   send: () => void;
   submitting: boolean;
+  status: PositionCreationStatus | undefined;
   result: CreatedPosition | undefined;
   problem: string | undefined;
 }
@@ -38,12 +44,14 @@ interface ActionSubmission {
   key: string;
   action: PositionAction;
   intent: PositionActionIntent | undefined;
+  onStatus: (status: PositionTransactionStatus) => void;
 }
 
 export interface PositionActionStatus {
   kind: PositionAction["kind"];
   strategyHash: string;
   submitting: boolean;
+  phase: PositionTransactionStatus | undefined;
   problem: string | undefined;
 }
 
@@ -119,7 +127,7 @@ async function submitCurrent(
 ): Promise<CreatedPosition> {
   if (attempt.key !== currentKey) throw new Error("Position inputs changed");
   if (!attempt.intent) throw new Error("Connect a wallet to create a position");
-  return attempt.intent.submit();
+  return attempt.intent.submit({ onStatus: attempt.onStatus });
 }
 
 /** React owns request state; the SDK intent owns strategy identity and transaction retries. */
@@ -132,9 +140,11 @@ export function useCreatePosition(
   const { address, chainId } = useAccount();
   const publicClient = useClient({ chainId });
   const { data: walletClient } = useConnectorClient();
+  const [status, setStatus] = useState<PositionCreationStatus>();
   const key = submissionKey(form, address, chainId);
   const mutation = useMutation({
     mutationFn: (attempt: Submission) => submitCurrent(attempt, key),
+    onMutate: () => setStatus({ kind: "preparing" }),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({
@@ -164,6 +174,7 @@ export function useCreatePosition(
               publicClient,
               walletClient,
             }),
+            onStatus: setStatus,
           },
       { onSuccess: onCreated },
     );
@@ -173,10 +184,11 @@ export function useCreatePosition(
   return {
     send,
     submitting: mutation.isPending,
+    status: current ? status : undefined,
     result: current ? mutation.data : undefined,
     problem:
       current && mutation.error instanceof Error
-        ? mutation.error.message
+        ? submissionProblem(mutation.error, "Could not create this position")
         : undefined,
   };
 }
@@ -206,7 +218,7 @@ async function submitAction(
 ): Promise<PositionActionResult> {
   if (!attempt.intent)
     throw new Error("Connect your wallet to manage positions");
-  return attempt.intent.submit();
+  return attempt.intent.submit({ onStatus: attempt.onStatus });
 }
 
 /** Keep one retry-safe SDK intent per position action while React owns its visible state. */
@@ -216,8 +228,10 @@ export function useManagePosition(): PositionManagement {
   const { address, chainId } = useAccount();
   const publicClient = useClient({ chainId });
   const { data: walletClient } = useConnectorClient();
+  const [phase, setPhase] = useState<PositionTransactionStatus>();
   const mutation = useMutation({
     mutationFn: submitAction,
+    onMutate: () => setPhase({ kind: "preparing" }),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({
@@ -243,6 +257,7 @@ export function useManagePosition(): PositionManagement {
               publicClient,
               walletClient,
             }),
+            onStatus: setPhase,
           },
     );
   }
@@ -257,9 +272,13 @@ export function useManagePosition(): PositionManagement {
           kind: attempt.action.kind,
           strategyHash: attempt.action.input.strategyHash,
           submitting: mutation.isPending,
+          phase,
           problem:
             mutation.error instanceof Error
-              ? mutation.error.message
+              ? submissionProblem(
+                  mutation.error,
+                  `Could not ${attempt.action.kind} this position`,
+                )
               : undefined,
         }
       : undefined,

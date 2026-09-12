@@ -17,9 +17,11 @@ function signed(pct?: number | null): string {
  */
 export function toAsset(api: ApiAsset, network: string): Asset {
   return {
+    chainId: api.chain_id,
     address: api.address as `0x${string}`,
     symbol: api.symbol,
     name: api.name,
+    logoUri: api.logo_uri,
     decimals: api.decimals,
     price: api.price_usd ?? 0,
     change: signed(api.change_24h_pct),

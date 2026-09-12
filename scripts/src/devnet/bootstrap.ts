@@ -117,6 +117,10 @@ binance_ws_url = "wss://stream.binance.com:9443"
 usd_stable_pegs = [${pegs}]
 
 filler = "${manifest.filler}"
+erc7683_settler = "${manifest.erc7683_settler}"
+erc7683_filler = "${manifest.erc7683_filler}"
+erc7683_resolver = "${manifest.erc7683_resolver}"
+erc7683_executor_fee_bps = 5
 reactor = "${manifest.reactor}"
 permit2 = "${manifest.permit2}"
 confirmations = 1

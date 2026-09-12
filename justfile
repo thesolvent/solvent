@@ -25,6 +25,10 @@ test-fork:
 abi:
     cd contracts && forge inspect src/UniswapXAquaFiller.sol:UniswapXAquaFiller abi --json > abi/UniswapXAquaFiller.json
     cd contracts && forge inspect src/DevToken.sol:DevToken abi --json > abi/DevToken.json
+    cd contracts && forge inspect src/CrossChainAquaApp.sol:CrossChainAquaApp abi --json > abi/CrossChainAquaApp.json
+    cd contracts && forge inspect src/CompactOriginSettler.sol:CompactOriginSettler abi --json > abi/CompactOriginSettler.json
+    cd contracts && forge inspect src/proof/CcipProofOutbox.sol:CcipProofOutbox abi --json > abi/CcipProofOutbox.json
+    cd contracts && forge inspect src/proof/CcipProofInbox.sol:CcipProofInbox abi --json > abi/CcipProofInbox.json
 
 fmt:
     cd contracts && forge fmt

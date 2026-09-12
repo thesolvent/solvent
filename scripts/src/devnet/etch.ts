@@ -38,10 +38,6 @@ async function main(): Promise<void> {
         transport: http(RPC_URL),
     }).extend(publicActions);
     const chainId = await client.getChainId();
-    if (chainId !== 31337)
-        throw new Error(
-            "canonical infrastructure placement requires Solvent Devnet (31337)",
-        );
     const contracts = [
         {
             name: "multicall3",

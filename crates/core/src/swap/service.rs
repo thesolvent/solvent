@@ -31,8 +31,10 @@ use crate::SolventError;
 pub struct SwapConfig {
     pub routing: RoutingConfig,
     pub chain_id: u64,
-    /// The filler contract and the account authorized to call it.
+    /// The UniswapX filler contract: the identity checked against an order's own exclusive-window
+    /// grant. Other protocols configure their own filler inside their own `FillBuilder`.
     pub filler: Address,
+    /// The account authorized to call each protocol filler.
     pub filler_owner: Address,
     /// How long a reservation holds before the TTL sweep may release it.
     pub reservation_ttl_secs: u64,
@@ -124,7 +126,7 @@ impl SwapService {
         let routed = route(
             RoutingBook::new(&snapshot, &caps, &guards),
             &request,
-            amounts.amount_in,
+            intent.routing_input_limit.unwrap_or(amounts.amount_in),
             &self.config.routing,
             per_leg_cost,
             None,
@@ -244,14 +246,14 @@ impl SwapService {
         reservation: ReservationId,
         now: u64,
     ) -> Result<SwapOutcome, SolventError> {
-        let calldata = self.fill_builder.build(intent, plan, snapshot).await?;
+        let fill = self.fill_builder.build(intent, plan, snapshot).await?;
         let pending = PendingFill::new(
             FillTx::new(
                 intent.id,
                 self.config.chain_id,
                 self.config.filler_owner,
-                self.config.filler,
-                calldata,
+                fill.target,
+                fill.calldata,
             ),
             reservation,
         );
@@ -658,8 +660,11 @@ mod tests {
             _: &Intent,
             _: &RoutePlan,
             _: &Snapshot,
-        ) -> Result<Bytes, FillBuilderError> {
-            Ok(Bytes::from(vec![0x01, 0x02]))
+        ) -> Result<crate::deps::ingest::PreparedFill, FillBuilderError> {
+            Ok(crate::deps::ingest::PreparedFill::new(
+                addr(0xF1),
+                Bytes::from(vec![0x01, 0x02]),
+            ))
         }
     }
 
@@ -871,7 +876,7 @@ mod tests {
             SwapConfig {
                 routing: RoutingConfig::new(16, 4, 150_000),
                 chain_id: 31337,
-                filler: addr(0xF1),
+                filler: addr(0xEE),
                 filler_owner: addr(0xF0),
                 reservation_ttl_secs: 60,
             },
@@ -1037,6 +1042,30 @@ mod tests {
             .unwrap()
             .legs
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn routing_limit_excludes_protocol_fee_but_trade_keeps_gross_input() {
+        let h = harness(vec![xyc(3, e(100, 18), e(300_000, 6))], SimVerdict::Ok).await;
+        let gross = e(2, 18);
+        let mut order = intent(2, addr(9), gross, e(3000, 6));
+        order.protocol = ProtocolId::Erc7683;
+        order.routing_input_limit = Some(e(1, 18));
+
+        let outcome = h
+            .swap
+            .submit(order, addr(9), tid(), TradePrices::default())
+            .await
+            .expect("declined trade");
+        let stored = h
+            .trades
+            .info(&outcome.trade_id)
+            .await
+            .expect("store read")
+            .expect("trade");
+
+        assert_eq!(outcome.status, TradeStatus::Declined);
+        assert_eq!(stored.trade.amount_in, gross);
     }
 
     #[tokio::test]

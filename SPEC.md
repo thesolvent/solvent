@@ -1,7 +1,7 @@
 # Solvent — a zero-inventory intent resolver on 1inch Aqua — Project Spec
 
 > **Status:** living spec — single source of truth. **Target:** ETHOnline 2026 (async, Sept 4–16).
-> Deep dives in `docs/`: `RESEARCH.md`, `CROSS_CHAIN_SETTLEMENT_PRIMER.md`, `RESOLVER_FLOW_CATALOG.md`, `ARCHITECTURE.md`.
+> Deep dives in `docs/`: `RESEARCH.md`, `CROSS_CHAIN_SETTLEMENT_PRIMER.md`, `CROSS_CHAIN_OPERATIONS.md`, `RESOLVER_FLOW_CATALOG.md`, `ARCHITECTURE.md`.
 
 ---
 
@@ -250,7 +250,7 @@ Skipped (would be forced): Hedera, Arc, World, ENS.
 2. **P1 — UniswapX MVP** — `UniswapXAquaFiller` + Rust engine (watch/price/reserve/execute/reconcile) + a sim whose headline is the **forced-contention test** (two orders, one maker balance → one granted, one declined off-chain, one fill).
 3. **P2** — second adapter (ERC-7683): proves protocol-agnostic.
 4. **P3** — utilization dashboard (The Graph) + multi-maker + risk caps.
-5. **P4** — cross-chain (Aqua + Compact + proof adapter + netting).
+5. **P4** — configured-pair cross-chain execution (Aqua + Compact + CCIP + direct/CCTP repayment) is implemented; arbitrary-pair routing and inventory netting remain future work.
 
 ---
 

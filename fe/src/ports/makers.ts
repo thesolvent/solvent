@@ -15,9 +15,9 @@ export interface MakersPort {
   dashboard(address: string, period: MakerPeriod): Promise<MakerDashboard>;
   inventory(address: string, period: MakerPeriod): Promise<InventoryAsset[]>;
   positions(address: string, period: MakerPeriod): Promise<Position[]>;
-  position(hash: string): Promise<Position>;
-  depth(hash: string, pair: PairRef): Promise<DepthCurve>;
-  history(hash: string): Promise<PositionHistory>;
+  position(hash: string, chainId?: number): Promise<Position>;
+  depth(hash: string, pair: PairRef, chainId?: number): Promise<DepthCurve>;
+  history(hash: string, chainId?: number): Promise<PositionHistory>;
   settlements(
     address: string,
     period: MakerPeriod,

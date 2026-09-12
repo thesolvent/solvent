@@ -32,6 +32,8 @@ pub struct QuoteLeg {
 pub struct QuoteResponse {
     pub quote_id: String,
     pub amount_out: Amount,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executor_fee: Option<Amount>,
     pub price_impact_pct: f64,
     pub makers_sourced: u32,
     pub legs: Vec<QuoteLeg>,

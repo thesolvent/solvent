@@ -3,7 +3,10 @@ import { createClient, custom } from "viem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig, Rebate } from "../../src/client";
-import { createRebateClient } from "../../src/rebates";
+import {
+    createRebateClient,
+    type RebateSubmissionStatus,
+} from "../../src/rebates";
 
 const wallet = vi.hoisted(() => ({
     currentBlock: vi.fn(),
@@ -89,13 +92,16 @@ describe("rebate intent", () => {
         });
         await intent.submit();
 
-        expect(wallet.ensureAllowance).toHaveBeenCalledWith({
-            owner: EXECUTOR,
-            chainId: 31337,
-            token: TOKEN_IN,
-            spender: FILLER,
-            amount: 109n,
-        });
+        expect(wallet.ensureAllowance).toHaveBeenCalledWith(
+            {
+                owner: EXECUTOR,
+                chainId: 31337,
+                token: TOKEN_IN,
+                spender: FILLER,
+                amount: 109n,
+            },
+            undefined,
+        );
         expect(wallet.sendTransaction).toHaveBeenCalledOnce();
         expect(wallet.confirmTransaction).toHaveBeenCalledOnce();
     });
@@ -120,6 +126,49 @@ describe("rebate intent", () => {
         }
         expect(wallet.ensureAllowance).not.toHaveBeenCalled();
         expect(wallet.sendTransaction).not.toHaveBeenCalled();
+    });
+
+    it("reports each wallet-visible execution phase", async () => {
+        const { rebates } = setup();
+        const statuses: RebateSubmissionStatus[] = [];
+        wallet.ensureAllowance.mockImplementationOnce(
+            async (
+                _request: unknown,
+                options?: {
+                    onStatus?(status: RebateSubmissionStatus): void;
+                },
+            ) => options?.onStatus?.({ kind: "approving", token: TOKEN_IN }),
+        );
+        wallet.sendTransaction.mockImplementationOnce(
+            async (
+                _request: unknown,
+                options?: {
+                    onStatus?(status: RebateSubmissionStatus): void;
+                },
+            ) => {
+                options?.onStatus?.({ kind: "submitting" });
+                return "0xtransaction";
+            },
+        );
+        wallet.confirmTransaction.mockImplementationOnce(
+            async (
+                _hash: unknown,
+                options?: {
+                    onStatus?(status: RebateSubmissionStatus): void;
+                },
+            ) => options?.onStatus?.({ kind: "confirming" }),
+        );
+
+        await rebates
+            .createIntent({ executor: EXECUTOR, rebateId: REBATE_ID })
+            .submit({ onStatus: (status) => statuses.push(status) });
+
+        expect(statuses).toEqual([
+            { kind: "preparing" },
+            { kind: "approving", token: TOKEN_IN },
+            { kind: "submitting" },
+            { kind: "confirming" },
+        ]);
     });
 
     it("reloads authorization after an unbroadcast attempt fails", async () => {
