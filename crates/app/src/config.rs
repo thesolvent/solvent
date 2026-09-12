@@ -126,6 +126,7 @@ pub struct PriceSymbol {
 #[derive(Clone, Debug, Deserialize)]
 pub struct UniswapAsset {
     pub source_address: Address,
+    pub symbol: String,
     pub decimals: u8,
     #[serde(default)]
     pub market_symbol: Option<String>,

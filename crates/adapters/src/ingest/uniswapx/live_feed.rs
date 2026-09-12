@@ -1,6 +1,7 @@
 //! The read-only UniswapX feed simulation and its SQLite record.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -12,7 +13,8 @@ use solvent_core::deps::routing::PriceOracle;
 use solvent_core::obs::{debug, warn};
 use solvent_core::primitives::ingest::Intent;
 use solvent_core::primitives::{IntentId, UsdPrice};
-use sqlx::SqlitePool;
+use sqlx::sqlite::SqliteRow;
+use sqlx::{Row, SqlitePool};
 use thiserror::Error;
 use tokio::time::{self, Instant, MissedTickBehavior};
 
@@ -24,14 +26,39 @@ use super::{
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const Q18: u64 = 1_000_000_000_000_000_000;
 
-/// A public order token identity and its unit scale.
-#[derive(Clone, Copy)]
+/// A public order token identity and its display metadata.
+#[derive(Clone, Debug)]
 pub struct UniswapFeedAsset {
     pub source_address: Address,
+    pub symbol: String,
     pub decimals: u8,
 }
 
+/// A stable continuation point in the descending feed order.
+#[derive(Clone, Copy)]
+pub struct UniswapXFeedCursor {
+    pub last_seen_at: u64,
+    pub order_hash: IntentId,
+}
+
+/// One persisted UniswapX order simulation.
+#[derive(Clone, Debug)]
+pub struct UniswapXFeedOrder {
+    pub order_hash: IntentId,
+    pub source_chain_id: u64,
+    pub token_in: Address,
+    pub token_out: Address,
+    pub amount_in: U256,
+    pub required_out: U256,
+    pub market_out_per_in_q18: U256,
+    pub simulated_amount_out: U256,
+    pub simulated_batch_id: u64,
+    pub observed_at: u64,
+    pub last_seen_at: u64,
+}
+
 /// SQLite storage for the first simulation of each public UniswapX order.
+#[derive(Clone)]
 pub struct SqliteUniswapXFeedStore {
     pool: SqlitePool,
 }
@@ -95,6 +122,42 @@ impl SqliteUniswapXFeedStore {
         .map(|_| ())
         .map_err(FeedStoreError::database)
     }
+
+    /// Lists simulated orders newest-first, with the hash breaking timestamp ties.
+    pub async fn list(
+        &self,
+        cursor: Option<UniswapXFeedCursor>,
+        limit: u32,
+    ) -> Result<Vec<UniswapXFeedOrder>, FeedStoreError> {
+        let rows = match cursor {
+            Some(cursor) => {
+                sqlx::query(
+                    "SELECT * FROM uniswapx_feed_order
+                     WHERE last_seen_at < ? OR (last_seen_at = ? AND order_hash < ?)
+                     ORDER BY last_seen_at DESC, order_hash DESC
+                     LIMIT ?",
+                )
+                .bind(i64_of(cursor.last_seen_at)?)
+                .bind(i64_of(cursor.last_seen_at)?)
+                .bind(cursor.order_hash.0.as_slice())
+                .bind(i64::from(limit))
+                .fetch_all(&self.pool)
+                .await
+            }
+            None => {
+                sqlx::query(
+                    "SELECT * FROM uniswapx_feed_order
+                     ORDER BY last_seen_at DESC, order_hash DESC
+                     LIMIT ?",
+                )
+                .bind(i64::from(limit))
+                .fetch_all(&self.pool)
+                .await
+            }
+        }
+        .map_err(FeedStoreError::database)?;
+        rows.iter().map(row_to_feed_order).collect()
+    }
 }
 
 #[derive(Debug, Error)]
@@ -102,6 +165,8 @@ impl SqliteUniswapXFeedStore {
 pub enum FeedStoreError {
     #[error("UniswapX feed database: {0}")]
     Database(String),
+    #[error("UniswapX feed contains invalid data: {0}")]
+    Data(String),
     #[error("UniswapX feed value exceeds SQLite integer range: {0}")]
     Value(&'static str),
 }
@@ -109,6 +174,10 @@ pub enum FeedStoreError {
 impl FeedStoreError {
     fn database(error: impl std::fmt::Display) -> Self {
         Self::Database(error.to_string())
+    }
+
+    fn data(error: impl std::fmt::Display) -> Self {
+        Self::Data(error.to_string())
     }
 }
 
@@ -270,6 +339,47 @@ fn market_out_per_in_q18(input: UsdPrice, output: UsdPrice) -> Option<U256> {
         .filter(|price| !price.is_zero())
 }
 
+fn row_to_feed_order(row: &SqliteRow) -> Result<UniswapXFeedOrder, FeedStoreError> {
+    Ok(UniswapXFeedOrder {
+        order_hash: IntentId(hash(row, "order_hash")?),
+        source_chain_id: count(row, "source_chain_id")?,
+        token_in: address(row, "token_in")?,
+        token_out: address(row, "token_out")?,
+        amount_in: amount(row, "amount_in")?,
+        required_out: amount(row, "required_out")?,
+        market_out_per_in_q18: amount(row, "market_out_per_in_q18")?,
+        simulated_amount_out: amount(row, "simulated_amount_out")?,
+        simulated_batch_id: count(row, "simulated_batch_id")?,
+        observed_at: count(row, "observed_at")?,
+        last_seen_at: count(row, "last_seen_at")?,
+    })
+}
+
+fn address(row: &SqliteRow, column: &str) -> Result<Address, FeedStoreError> {
+    let bytes: Vec<u8> = row.try_get(column).map_err(FeedStoreError::database)?;
+    <[u8; 20]>::try_from(bytes.as_slice())
+        .map(Address::from)
+        .map_err(|_| FeedStoreError::data(format!("column '{column}' must contain 20 bytes")))
+}
+
+fn hash(row: &SqliteRow, column: &str) -> Result<alloy::primitives::B256, FeedStoreError> {
+    let bytes: Vec<u8> = row.try_get(column).map_err(FeedStoreError::database)?;
+    alloy::primitives::B256::try_from(bytes.as_slice())
+        .map_err(|_| FeedStoreError::data(format!("column '{column}' must contain 32 bytes")))
+}
+
+fn amount(row: &SqliteRow, column: &str) -> Result<U256, FeedStoreError> {
+    let text: String = row.try_get(column).map_err(FeedStoreError::database)?;
+    U256::from_str(&text)
+        .map_err(|_| FeedStoreError::data(format!("column '{column}' must contain a uint256")))
+}
+
+fn count(row: &SqliteRow, column: &str) -> Result<u64, FeedStoreError> {
+    let value: i64 = row.try_get(column).map_err(FeedStoreError::database)?;
+    u64::try_from(value)
+        .map_err(|_| FeedStoreError::data(format!("column '{column}' must not be negative")))
+}
+
 fn i64_of(value: u64) -> Result<i64, FeedStoreError> {
     i64::try_from(value).map_err(|_| FeedStoreError::Value("timestamp or batch id"))
 }
@@ -336,6 +446,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn feed_rows_page_by_last_seen_and_order_hash() {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("in-memory database");
+        let store = SqliteUniswapXFeedStore::new(pool);
+        store.migrate().await.expect("migrations apply");
+        for (byte, last_seen_at) in [(1, 100), (3, 100), (2, 99)] {
+            store
+                .insert(&SimulatedFeedOrder {
+                    order_hash: IntentId(B256::repeat_byte(byte)),
+                    source_chain_id: 1,
+                    token_in: SOURCE_IN,
+                    token_out: SOURCE_OUT,
+                    amount_in: U256::from(1u8),
+                    required_out: U256::from(1u8),
+                    market_out_per_in_q18: U256::from(Q18),
+                    simulated_amount_out: U256::from(1u8),
+                    simulated_batch_id: 0,
+                    observed_at: last_seen_at,
+                })
+                .await
+                .expect("feed order inserts");
+        }
+
+        let first = store.list(None, 2).await.expect("first page");
+        assert_eq!(
+            first
+                .iter()
+                .map(|order| order.order_hash.0)
+                .collect::<Vec<_>>(),
+            vec![B256::repeat_byte(3), B256::repeat_byte(1)]
+        );
+        let cursor = first.last().map(|order| UniswapXFeedCursor {
+            last_seen_at: order.last_seen_at,
+            order_hash: order.order_hash,
+        });
+        let second = store.list(cursor, 2).await.expect("second page");
+        assert_eq!(
+            second
+                .iter()
+                .map(|order| order.order_hash.0)
+                .collect::<Vec<_>>(),
+            vec![B256::repeat_byte(2)]
+        );
+    }
+
+    #[tokio::test]
     async fn configured_order_is_simulated_once_and_duplicate_only_updates_last_seen() {
         let pool = SqlitePool::connect("sqlite::memory:")
             .await
@@ -351,10 +508,12 @@ mod tests {
             [
                 UniswapFeedAsset {
                     source_address: SOURCE_IN,
+                    symbol: "IN".to_string(),
                     decimals: 18,
                 },
                 UniswapFeedAsset {
                     source_address: SOURCE_OUT,
+                    symbol: "OUT".to_string(),
                     decimals: 18,
                 },
             ],

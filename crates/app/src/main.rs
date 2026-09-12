@@ -4,7 +4,7 @@
 
 mod config;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -227,7 +227,23 @@ async fn main() -> Result<(), StartupError> {
     let gas: Arc<dyn GasPrice> = market.clone();
     let oracle: Arc<dyn PriceOracle> = market.clone();
     let rebate_market: Arc<dyn RebateMarketBook> = market;
-    if !config.uniswap_assets.is_empty() {
+    let uniswap_feed_assets: Arc<HashMap<_, _>> = Arc::new(
+        config
+            .uniswap_assets
+            .iter()
+            .map(|asset| {
+                let feed_asset = UniswapFeedAsset {
+                    source_address: asset.source_address,
+                    symbol: asset.symbol.clone(),
+                    decimals: asset.decimals,
+                };
+                (feed_asset.source_address, feed_asset)
+            })
+            .collect(),
+    );
+    let uniswap_feed = if uniswap_feed_assets.is_empty() {
+        None
+    } else {
         let uniswap_market = MarketCache::new();
         for token in config.uniswap_usd_stable_pegs() {
             uniswap_market.seed_peg(token);
@@ -243,26 +259,24 @@ async fn main() -> Result<(), StartupError> {
                 .run(),
             );
         }
-        let feed_assets = config.uniswap_assets.iter().map(|asset| UniswapFeedAsset {
-            source_address: asset.source_address,
-            decimals: asset.decimals,
-        });
         let feed_client = OrdersApiClient::mainnet()
             .map_err(|error| StartupError::UniswapFeed(error.to_string()))?;
+        let feed_store = Arc::new(SqliteUniswapXFeedStore::new(pool.clone()));
         let feed_prices: Arc<dyn PriceOracle> = uniswap_market;
         let feed_worker = UniswapXFeedWorker::new(
             feed_client,
-            feed_assets,
+            uniswap_feed_assets.values().cloned(),
             feed_prices,
             SimulatedBatchPool::random(2),
-            SqliteUniswapXFeedStore::new(pool.clone()),
+            feed_store.as_ref().clone(),
         );
         tokio::spawn(feed_worker.run());
         info!(
-            asset_count = config.uniswap_assets.len(),
+            asset_count = uniswap_feed_assets.len(),
             "mainnet UniswapX feed simulation started"
         );
-    }
+        Some(feed_store)
+    };
     let valuation = Arc::new(Valuation::new(Arc::clone(&oracle)));
     let history_source: Arc<dyn PairPriceHistorySource> = Arc::new(
         BinanceHistory::new(
@@ -674,6 +688,8 @@ async fn main() -> Result<(), StartupError> {
         registry_store,
         valuation,
         quote_log,
+        uniswap_feed,
+        uniswap_feed_assets,
     };
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
