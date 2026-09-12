@@ -5304,6 +5304,7 @@ dependencies = [
  "futures",
  "moka",
  "parking_lot",
+ "rand 0.8.8",
  "reqwest",
  "rust_decimal",
  "serde",
