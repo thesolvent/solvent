@@ -11,6 +11,7 @@ export interface RebateAction {
   completedId?: string;
   failedId?: string;
   pendingId?: string;
+  pendingLabel?: string;
   problem?: string;
   label: string;
   onExecute: (id: string) => void;
@@ -108,7 +109,7 @@ export function RebateList({
                       onClick={() => action.onExecute(row.id)}
                     >
                       {executing
-                        ? "Confirming…"
+                        ? (action.pendingLabel ?? "Preparing rebate…")
                         : completed
                           ? "Earned"
                           : failed

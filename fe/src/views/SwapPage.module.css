@@ -57,6 +57,10 @@
   gap: 8px;
 }
 
+.protocolMenu {
+  position: relative;
+}
+
 .iconBox {
   width: 44px;
   height: 44px;
@@ -105,6 +109,124 @@
   font-size: 17px;
   letter-spacing: 0.14em;
   line-height: 1;
+}
+
+.protocolTrigger {
+  display: grid;
+  grid-template-columns: 1fr 44px;
+  box-sizing: border-box;
+  width: 156px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 17px;
+  text-align: left;
+}
+
+.protocolTriggerOpen {
+  composes: protocolTrigger;
+  border-top: 2px solid var(--lime);
+}
+
+.protocolTrigger > span:first-child {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+}
+
+.protocolTriggerMore {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--line);
+  font-size: 17px;
+  letter-spacing: 0.14em;
+  line-height: 1;
+}
+
+.protocolTriggerMoreOpen {
+  composes: protocolTriggerMore;
+  font-size: 12px;
+  letter-spacing: 0;
+  composes: pop120 from "../styles/animations.module.css";
+}
+
+.moreButton:disabled {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.protocolOptions {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  width: min(286px, calc(100vw - 64px));
+  border: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: 0 16px 36px rgba(11, 11, 11, 0.12);
+  transform-origin: top right;
+  composes: pop160 from "../styles/animations.module.css";
+}
+
+.protocolOption {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 78px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-left: 3px solid transparent;
+  padding: 15px 18px 15px 20px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.protocolOption:first-child {
+  border-top: 0;
+}
+
+.protocolOption:hover {
+  background: var(--line-faint);
+}
+
+.protocolOptionActive {
+  composes: protocolOption;
+  border-left-color: var(--lime);
+  background: var(--lime-wash);
+}
+
+.protocolCopy,
+.protocolName,
+.protocolDescription {
+  display: block;
+}
+
+.protocolName {
+  margin-bottom: 3px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.protocolDescription {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.protocolMark {
+  flex: none;
+  color: var(--green-deep);
+  font-size: 18px;
 }
 
 .leg {
@@ -215,6 +337,7 @@
 }
 
 .amountUsd {
+  min-height: 20px;
   font-size: 17px;
   color: var(--text-muted);
   font-weight: 300;
@@ -298,6 +421,17 @@
   background: var(--line);
   color: var(--text-muted);
   cursor: not-allowed;
+}
+
+/* A request may safely retry with the same intent after a transient server failure. */
+.ctaRetry {
+  background: var(--line);
+  color: var(--text-muted);
+}
+
+.ctaRetry:hover:not(:disabled) {
+  background: var(--dark-line);
+  color: var(--paper);
 }
 
 /* ---------- Token picker ---------- */

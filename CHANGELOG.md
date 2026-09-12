@@ -6,6 +6,15 @@ the project is pre-1.0 and evolving.
 
 ## [Unreleased]
 
+### Changed — frontend wallet experience
+
+- **Privy wallet integration** — supports embedded and external EVM wallets through Privy + Wagmi,
+  including the configured origin and destination devnet chains. Embedded-wallet owners can export
+  their wallet through Privy's secure modal; Solvent never handles the exported private key.
+- **Transaction progress** — swaps, position creation and management, rebates, and cross-chain
+  Compact deposits now report preparation, approval, signing, submission, and receipt-confirmation
+  phases in their existing action controls.
+
 ### Added — cross-chain execution
 
 - **Two chain-local Solvent services plus a keyless proxy** — authenticated private quote,

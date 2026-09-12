@@ -1,8 +1,7 @@
-import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useAccount, useSwitchChain } from "wagmi";
 
+import { chain } from "@/adapters/wallet/config";
 import { DASH, type Asset } from "@/data";
 import { fit, money } from "@/lib/format";
 import {
@@ -19,17 +18,45 @@ import {
 import { useAssets } from "@/services/assets";
 import { useQuote } from "@/services/quote";
 import { useSubmitSwap } from "@/services/swap";
-import { chain } from "@/adapters/wallet/config";
-import { useApp } from "@/state";
+import { useConfig } from "@/services/system";
+import { type SwapProtocol, useApp } from "@/state";
 import { AssetIdentity } from "@/components/AssetIdentity";
+import { useWalletAction } from "@/services/wallet";
 
 import styles from "./SwapPage.module.css";
 
 const SWAP_TABS = ["Swap"];
 
+type ProtocolOption = {
+  value: SwapProtocol;
+  label: string;
+  description: string;
+};
+
+const PROTOCOL_OPTIONS = [
+  {
+    value: "uniswapx",
+    label: "UniswapX",
+    description: "Dutch-auction intent settlement",
+  },
+  {
+    value: "erc7683",
+    label: "ERC-7683",
+    description: "Standardized same-chain order settlement",
+  },
+] satisfies readonly ProtocolOption[];
+
 export function SwapPage() {
   const { state, set, config } = useApp();
+  const [protocolMenuOpen, setProtocolMenuOpen] = useState(false);
   const crossChain = state.productMode === "SolventX";
+  const runtimeConfig = useConfig();
+  const erc7683Available = Boolean(runtimeConfig.data?.erc7683_settler);
+  const protocol =
+    crossChain || !erc7683Available ? "uniswapx" : state.swapProtocol;
+  const protocolLabel =
+    PROTOCOL_OPTIONS.find((option) => option.value === protocol)?.label ??
+    protocol;
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
@@ -54,7 +81,7 @@ export function SwapPage() {
   const fromUsdNum = amt * (from?.price ?? 0);
 
   // The output is the server's price for this size, not the mid — it carries fee and impact.
-  const { quote, pricing, problem } = useQuote(from, to, typed);
+  const { quote, pricing, problem } = useQuote(from, to, typed, protocol);
   // Nothing in means nothing out; anything else without a price is unknown, not zero.
   const outStr = quote?.amountOut ?? (hasAmount && amt > 0 && to ? DASH : "");
   const dotAt = outStr.indexOf(".");
@@ -70,13 +97,11 @@ export function SwapPage() {
     { label: "Max slippage", value: `${config.slippage}%` },
   ];
 
-  const { isConnected, chainId } = useAccount();
-  const { openConnectModal } = useConnectModal();
-  const { switchChain } = useSwitchChain();
+  const wallet = useWalletAction();
   const walletNetwork =
-    isConnected && chainId !== undefined
-      ? (assets.find((asset) => asset.chainId === chainId)?.net ??
-        (chainId === chain.id ? chain.name : `Chain ${chainId}`))
+    wallet.connected && wallet.chainId !== undefined
+      ? (assets.find((asset) => asset.chainId === wallet.chainId)?.net ??
+        (wallet.chainId === chain.id ? chain.name : `Chain ${wallet.chainId}`))
       : undefined;
   const submission = useSubmitSwap(
     {
@@ -85,6 +110,7 @@ export function SwapPage() {
       amount: typed,
       quote,
       slippagePct: config.slippage,
+      protocol,
     },
     ({ tradeId }) => {
       // BrowserRouter updates history before React renders a requested departure.
@@ -93,19 +119,15 @@ export function SwapPage() {
     },
   );
 
-  const switchTo = isConnected && chainId !== chain.id ? chain.name : undefined;
-
   // One button, whichever of the three things is missing.
   const act = () => {
-    if (!isConnected) return openConnectModal?.();
-    if (switchTo) return switchChain({ chainId: chain.id });
-    submission.send();
+    if (wallet.prepare()) submission.send();
   };
 
   const action = to
     ? swapAction({
-        connected: isConnected,
-        switchTo,
+        connected: wallet.connected,
+        switchTo: wallet.switchTo,
         submitting: submission.submitting,
         submitted: submission.result !== undefined,
         amount: amt,
@@ -113,6 +135,8 @@ export function SwapPage() {
         quote,
         problem,
         submissionProblem: submission.problem,
+        submissionStatus: submission.status,
+        inputToken: from?.symbol,
       })
     : { label: "Select receive asset", ready: false };
 
@@ -150,6 +174,19 @@ export function SwapPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [state.picker, set]);
+
+  useEffect(() => {
+    if (!protocolMenuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProtocolMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [protocolMenuOpen]);
+
+  useEffect(() => {
+    if (crossChain || !erc7683Available) setProtocolMenuOpen(false);
+  }, [crossChain, erc7683Available]);
 
   // Picking the asset already on the other leg swaps the two rather than
   // leaving both legs on the same token.
@@ -206,9 +243,75 @@ export function SwapPage() {
                 {walletNetwork?.slice(0, 1).toUpperCase()}
               </span>
             </button>
-            <button type="button" className={styles.moreButton}>
-              ···
-            </button>
+            {!crossChain && erc7683Available && (
+              <div className={styles.protocolMenu}>
+                <button
+                  type="button"
+                  className={
+                    protocolMenuOpen
+                      ? styles.protocolTriggerOpen
+                      : styles.protocolTrigger
+                  }
+                  aria-label="Select swap protocol"
+                  aria-expanded={protocolMenuOpen}
+                  aria-haspopup="menu"
+                  onClick={() => setProtocolMenuOpen((open) => !open)}
+                >
+                  <span>{protocolLabel}</span>
+                  <span
+                    className={
+                      protocolMenuOpen
+                        ? styles.protocolTriggerMoreOpen
+                        : styles.protocolTriggerMore
+                    }
+                    aria-hidden="true"
+                  >
+                    {protocolMenuOpen ? "▴" : "···"}
+                  </span>
+                </button>
+                {protocolMenuOpen && (
+                  <div className={styles.protocolOptions} role="menu">
+                    {PROTOCOL_OPTIONS.map(({ value, label, description }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={protocol === value}
+                        className={
+                          protocol === value
+                            ? styles.protocolOptionActive
+                            : styles.protocolOption
+                        }
+                        onClick={() => {
+                          set({
+                            swapProtocol: value,
+                          });
+                          setProtocolMenuOpen(false);
+                        }}
+                      >
+                        <span className={styles.protocolCopy}>
+                          <span className={styles.protocolName}>{label}</span>
+                          <span className={styles.protocolDescription}>
+                            {description}
+                          </span>
+                        </span>
+                        <span
+                          className={styles.protocolMark}
+                          aria-hidden="true"
+                        >
+                          {protocol === value ? "✓" : ""}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {(crossChain || !erc7683Available) && (
+              <button type="button" className={styles.moreButton} disabled>
+                ···
+              </button>
+            )}
           </div>
         </div>
 
@@ -238,9 +341,9 @@ export function SwapPage() {
                 maxLength={258}
               />
             </div>
-            {hasAmount && (
-              <div className={styles.amountUsd}>~$ {money(fromUsdNum)}</div>
-            )}
+            <div className={styles.amountUsd} aria-hidden={!hasAmount}>
+              {hasAmount ? `~$ ${money(fromUsdNum)}` : "\u00a0"}
+            </div>
           </div>
         </div>
 
@@ -283,11 +386,9 @@ export function SwapPage() {
                 </span>
               </div>
             </div>
-            {quote && (
-              <div className={styles.amountUsd}>
-                ~$ {money(quote.amountOutUsd)}
-              </div>
-            )}
+            <div className={styles.amountUsd} aria-hidden={!quote}>
+              {quote ? `~$ ${money(quote.amountOutUsd)}` : "\u00a0"}
+            </div>
           </div>
         </div>
 
@@ -304,7 +405,7 @@ export function SwapPage() {
 
         <button
           type="button"
-          className={styles.cta}
+          className={`${styles.cta} ${action.retry ? styles.ctaRetry : ""}`}
           disabled={!action.ready}
           onClick={act}
         >

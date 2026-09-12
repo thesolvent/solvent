@@ -529,6 +529,8 @@ export type Quote = {
   makersSourced: number;
   /** The output in base units, which is what an order has to name. */
   amountOutRaw: bigint;
+  /** The exact ERC-7683 executor fee in input-token base units. */
+  executorFeeRaw?: bigint;
   /** When the server stops honouring this price, as epoch milliseconds. */
   expiresAt: number;
   /** Full settlement terms retained only for SolventX submission. */

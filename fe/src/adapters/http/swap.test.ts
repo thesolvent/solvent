@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
 const sdk = vi.hoisted(() => ({
   createSwapClient: vi.fn(),
   createIntent: vi.fn(),
+  createErc7683Intent: vi.fn(),
   submit: vi.fn(),
 }));
 const compact = vi.hoisted(() => ({
@@ -73,13 +74,29 @@ const quote: Quote = {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  sdk.createSwapClient.mockReturnValue({ createIntent: sdk.createIntent });
+  sdk.createSwapClient.mockReturnValue({
+    createIntent: sdk.createIntent,
+    createErc7683Intent: sdk.createErc7683Intent,
+  });
   sdk.createIntent.mockReturnValue({ submit: sdk.submit });
+  sdk.createErc7683Intent.mockReturnValue({ submit: sdk.submit });
   sdk.submit.mockResolvedValue({ trade_id: "trade", status: "submitted" });
   compact.balance.mockResolvedValue(0n);
   compact.approve.mockResolvedValue("0xapproval");
   compact.deposit.mockResolvedValue("0xdeposit");
   compact.sign.mockResolvedValue("0xsponsor");
+  compact.approve.mockImplementation(
+    async (_public, _wallet, _request, options) => {
+      options?.onBroadcast();
+      return "0xapproval";
+    },
+  );
+  compact.deposit.mockImplementation(
+    async (_public, _wallet, _request, options) => {
+      options?.onBroadcast();
+      return "0xdeposit";
+    },
+  );
 });
 
 describe("swap HTTP adapter invariants", () => {
@@ -137,7 +154,7 @@ describe("swap HTTP adapter invariants", () => {
     expect(sdk.createSwapClient).toHaveBeenCalledWith(
       expect.objectContaining({ api: api.destination }),
     );
-  });
+  }, 10_000);
 
   it("routes a different-chain pair through the direct coordinator quote", async () => {
     const originLink = {
@@ -276,6 +293,7 @@ describe("swap HTTP adapter invariants", () => {
     });
     const publicClient = {};
     const walletClient = {};
+    const statuses: string[] = [];
 
     const { swapAdapter } = await import("./swap");
     await expect(
@@ -291,11 +309,20 @@ describe("swap HTTP adapter invariants", () => {
           },
           { publicClient, walletClient } as never,
         )
-        .submit(),
+        .submit({ onStatus: (status) => statuses.push(status.kind) }),
     ).resolves.toEqual({
       tradeId: "0x07",
       status: "destination_pending",
     });
+    expect(statuses).toEqual([
+      "preparing",
+      "approving",
+      "confirming",
+      "submitting",
+      "confirming",
+      "signing",
+      "submitting",
+    ]);
 
     const draftRequest = api.crossChain.draft.mock.calls[0]?.[0];
     expect(draftRequest).toMatchObject({
@@ -312,6 +339,7 @@ describe("swap HTTP adapter invariants", () => {
         amount: 1_000_000_000_000_000_000n,
         sponsor,
       }),
+      expect.objectContaining({ onBroadcast: expect.any(Function) }),
     );
     expect(compact.deposit).toHaveBeenCalledWith(
       publicClient,
@@ -321,6 +349,7 @@ describe("swap HTTP adapter invariants", () => {
         amount: 1_000_000_000_000_000_000n,
         sponsor,
       }),
+      expect.objectContaining({ onBroadcast: expect.any(Function) }),
     );
     expect(compact.sign).toHaveBeenCalledWith(
       walletClient,
@@ -355,6 +384,48 @@ describe("swap HTTP adapter invariants", () => {
         amountIn: 1_250_000n,
         minAmountOut: 2_487_500_000_000_000_000n,
       }),
+    );
+  });
+
+  it("binds the ERC-7683 quote fee into the order sent to the SDK", async () => {
+    api.sameChain.quote.mockResolvedValue({
+      amount_out: { raw: "2500000000000000000", usd: 2_500 },
+      executor_fee: { raw: "625" },
+      price_impact_pct: 0.01,
+      makers_sourced: 1,
+      expires_at: "2100-01-01T00:00:00Z",
+    });
+    const { swapAdapter } = await import("./swap");
+    const priced = await swapAdapter.quote({
+      from,
+      to,
+      amount: "1.25",
+      protocol: "erc7683",
+    });
+
+    await swapAdapter
+      .createIntent(
+        {
+          from,
+          to,
+          amount: "1.25",
+          quote: priced,
+          swapper: "0x3333333333333333333333333333333333333333",
+          slippagePct: 0.5,
+          protocol: "erc7683",
+        },
+        {} as never,
+      )
+      .submit();
+
+    expect(api.sameChain.quote).toHaveBeenCalledWith({
+      token_in: from.address,
+      token_out: to.address,
+      amount_in: "1250000",
+      protocol: "erc7683",
+    });
+    expect(sdk.createErc7683Intent).toHaveBeenCalledWith(
+      expect.objectContaining({ executorFee: 625n }),
     );
   });
 

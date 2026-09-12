@@ -117,6 +117,8 @@ contract DeployOriginSettler is Script {
             })
         );
         vm.stopBroadcast();
-        vm.writeJson(vm.serializeAddress("origin-settler", "settler", address(settler)), vm.envString("SETTLER_MANIFEST"));
+        vm.writeJson(
+            vm.serializeAddress("origin-settler", "settler", address(settler)), vm.envString("SETTLER_MANIFEST")
+        );
     }
 }

@@ -32,6 +32,7 @@ export function toQuote(
     priceImpact: `${api.price_impact_pct.toFixed(2)}%`,
     makersSourced: api.makers_sourced,
     amountOutRaw: BigInt(api.amount_out.raw),
+    executorFeeRaw: api.executor_fee ? BigInt(api.executor_fee.raw) : undefined,
     expiresAt: Date.parse(api.expires_at),
   };
 }

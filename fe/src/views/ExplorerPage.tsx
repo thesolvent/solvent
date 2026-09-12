@@ -1,14 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { useAccount, useSwitchChain } from "wagmi";
 import { Pagination } from "@/components/Pagination";
 import { RebateList } from "@/components/RebateList";
 import { useLoadedPagination } from "@/components/useLoadedPagination";
-import { chain } from "@/adapters/wallet/config";
 import { activityRow, explorerStats, tradeRow } from "@/lib/explorer";
 import { loadedPageLabel } from "@/lib/pagination";
 import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
+import type { RebateSubmissionStatus } from "@/ports/rebates";
 import { useAssets } from "@/services/assets";
 import { useActivity, useExplorerStats, useTrades } from "@/services/explorer";
 import { usePools } from "@/services/pools";
@@ -19,9 +17,26 @@ import {
 } from "@/services/rebates";
 import type { RebateExplorerStatus } from "@/state";
 import { useApp } from "@/state";
+import { useWalletAction } from "@/services/wallet";
 import styles from "./explorer.module.css";
 
 const TABS = ["Trades", "Activity", "Rebates"];
+
+function rebateSubmissionLabel(status: RebateSubmissionStatus | undefined) {
+  switch (status?.kind) {
+    case "approving":
+      return "Approve input token…";
+    case "signing":
+      return "Sign rebate…";
+    case "submitting":
+      return "Submitting rebate…";
+    case "confirming":
+      return "Confirming rebate…";
+    case "preparing":
+    default:
+      return "Preparing rebate…";
+  }
+}
 
 const DROP_OPTIONS = {
   xpType: ["All types", "pull", "push", "dock", "register"],
@@ -267,15 +282,10 @@ function ExplorerRebates({
     query.dataUpdatedAt,
   );
   const execution = useExecuteRebate();
-  const { isConnected, chainId } = useAccount();
-  const { openConnectModal } = useConnectModal();
-  const { switchChain } = useSwitchChain();
-  const wrongChain = isConnected && chainId !== chain.id;
+  const wallet = useWalletAction();
 
   function execute(id: string) {
-    if (!isConnected) return openConnectModal?.();
-    if (wrongChain) return switchChain({ chainId: chain.id });
-    execution.execute(id);
+    if (wallet.prepare()) execution.execute(id);
   }
 
   return (
@@ -296,13 +306,14 @@ function ExplorerRebates({
         active
           ? {
               availableIds: continuity.availableIds,
-              label: !isConnected
+              label: !wallet.connected
                 ? "Connect"
-                : wrongChain
-                  ? "Switch network"
+                : wallet.switchTo
+                  ? `Switch to ${wallet.switchTo}`
                   : "Earn",
               onExecute: execute,
               pendingId: execution.pendingId,
+              pendingLabel: rebateSubmissionLabel(execution.status),
               completedId: execution.completedId,
               failedId: execution.failedId,
               problem: execution.problem,

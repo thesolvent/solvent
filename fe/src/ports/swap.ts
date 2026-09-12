@@ -1,10 +1,18 @@
-import type { WalletClients } from "@solvent/sdk/swap";
+import type {
+  SwapSubmissionOptions,
+  SwapSubmissionStatus,
+  WalletClients,
+} from "@solvent/sdk/swap";
+import type { SwapProtocol } from "@/state";
 import type { Asset, Quote, SubmittedSwap } from "@/data";
+
+export type { SwapSubmissionOptions, SwapSubmissionStatus };
 
 export interface QuoteInput {
   from: Asset;
   to: Asset;
   amount: string;
+  protocol?: SwapProtocol;
 }
 
 export interface SwapInput extends QuoteInput {
@@ -15,7 +23,7 @@ export interface SwapInput extends QuoteInput {
 
 /** One payment authorization, retained by the caller when retrying submission. */
 export interface SwapIntent {
-  submit(): Promise<SubmittedSwap>;
+  submit(options?: SwapSubmissionOptions): Promise<SubmittedSwap>;
 }
 
 export interface SwapPort {

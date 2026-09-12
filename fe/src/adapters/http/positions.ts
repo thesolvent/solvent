@@ -4,7 +4,10 @@ import {
   strategyAllocator,
   type AllocationCurve,
 } from "@solvent/sdk/construction";
-import { createPositionClient } from "@solvent/sdk/positions";
+import {
+  createPositionClient,
+  type PositionTransactionSubmissionOptions,
+} from "@solvent/sdk/positions";
 import { MAX_UINT248, parseTokenAmount } from "@solvent/sdk/validation";
 import type { Address, Hex } from "viem";
 
@@ -72,7 +75,7 @@ export const positionsAdapter: PositionsPort = {
     const sdk = createPositionClient({ api: solventApi, ...clients });
     let intent: Promise<ReturnType<typeof sdk.createIntent>> | undefined;
     return {
-      async submit() {
+      async submit(options) {
         intent ??= solventApi
           .config()
           .then((config) =>
@@ -80,7 +83,7 @@ export const positionsAdapter: PositionsPort = {
               buildRequest(input, config.taker_credential as Address),
             ),
           );
-        return (await intent).submit();
+        return (await intent).submit(options);
       },
     };
   },
@@ -89,7 +92,7 @@ export const positionsAdapter: PositionsPort = {
     const sdk = createPositionClient({ api: solventApi, ...clients });
     let intent: ReturnType<typeof sdk.pushIntent> | undefined;
     return {
-      async submit() {
+      async submit(options?: PositionTransactionSubmissionOptions) {
         intent ??= sdk.pushIntent({
           maker: input.maker as Address,
           strategyHash: input.strategyHash as Hex,
@@ -100,7 +103,7 @@ export const positionsAdapter: PositionsPort = {
             `${input.token.symbol} amount`,
           ),
         });
-        return intent.submit();
+        return intent.submit(options);
       },
     };
   },
@@ -109,13 +112,13 @@ export const positionsAdapter: PositionsPort = {
     const sdk = createPositionClient({ api: solventApi, ...clients });
     let intent: ReturnType<typeof sdk.dockIntent> | undefined;
     return {
-      async submit() {
+      async submit(options?: PositionTransactionSubmissionOptions) {
         intent ??= sdk.dockIntent({
           maker: input.maker as Address,
           strategyHash: input.strategyHash as Hex,
           tokens: input.tokens.map((token) => token as Address),
         });
-        return intent.submit();
+        return intent.submit(options);
       },
     };
   },

@@ -1,5 +1,6 @@
-import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { useExportWallet, usePrivy, useWallets } from "@privy-io/react-auth";
 import { useEffect, useRef, useState } from "react";
+import { useAccount, useDisconnect } from "wagmi";
 
 import solventMarkActive from "@/assets/solvent-mark-active.svg";
 import solventMarkInactive from "@/assets/solvent-mark-inactive.svg";
@@ -17,17 +18,35 @@ export function Header() {
   // Inert in the design; kept local so the field still accepts input.
   const [query, setQuery] = useState("");
   const [productsOpen, setProductsOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [accountProblem, setAccountProblem] = useState<string>();
   const productMenu = useRef<HTMLDivElement>(null);
+  const accountMenu = useRef<HTMLDivElement>(null);
+  const { ready, authenticated, connectOrCreateWallet, logout } = usePrivy();
+  const { exportWallet } = useExportWallet();
+  const { wallets } = useWallets();
+  const { address } = useAccount();
+  const { disconnect } = useDisconnect();
+  // wagmi's active wallet is the signer the application will use.
+  const connected = address !== undefined;
+  const embeddedWallet = wallets.find(
+    (wallet) =>
+      wallet.walletClientType === "privy" &&
+      wallet.address.toLowerCase() === address?.toLowerCase(),
+  );
 
   useEffect(() => {
-    if (!productsOpen) return;
+    if (!productsOpen && !accountOpen) return;
     const close = (event: MouseEvent) => {
-      if (!productMenu.current?.contains(event.target as Node)) {
-        setProductsOpen(false);
-      }
+      const target = event.target as Node;
+      if (!productMenu.current?.contains(target)) setProductsOpen(false);
+      if (!accountMenu.current?.contains(target)) setAccountOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setProductsOpen(false);
+      if (event.key !== "Escape") return;
+      setProductsOpen(false);
+      setAccountOpen(false);
     };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", closeOnEscape);
@@ -35,11 +54,39 @@ export function Header() {
       document.removeEventListener("mousedown", close);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [productsOpen]);
+  }, [productsOpen, accountOpen]);
 
   const selectProduct = (mode: ProductMode) => {
     set({ productMode: mode, pNet: "All networks" });
     setProductsOpen(false);
+  };
+
+  const copyAddress = async () => {
+    if (!address) return;
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  const disconnectWallet = () => {
+    setAccountOpen(false);
+    setAccountProblem(undefined);
+    // Disconnecting closes Solvent's signer session even when an external wallet keeps site permission.
+    disconnect();
+    void logout().catch(() => undefined);
+  };
+
+  const exportEmbeddedWallet = () => {
+    if (!authenticated || !embeddedWallet) return;
+    setAccountOpen(false);
+    setAccountProblem(undefined);
+    void exportWallet({ address: embeddedWallet.address }).catch(() => {
+      setAccountProblem("Wallet export was not opened. Try again.");
+      setAccountOpen(true);
+    });
   };
 
   return (
@@ -107,37 +154,81 @@ export function Header() {
             placeholder="Search"
           />
         </label>
-        <ConnectButton.Custom>
-          {({
-            account,
-            chain,
-            openConnectModal,
-            openAccountModal,
-            mounted,
-          }) => {
-            const connected = mounted && account && chain;
-            return (
+        <div ref={accountMenu} className={styles.accountMenuWrap}>
+          <button
+            type="button"
+            className={styles.account}
+            aria-label={connected ? "Wallet account" : "Connect wallet"}
+            aria-haspopup={connected ? "menu" : undefined}
+            aria-expanded={connected ? accountOpen : undefined}
+            disabled={!ready}
+            onClick={
+              connected
+                ? () => {
+                    setAccountOpen((open) => !open);
+                    setCopied(false);
+                    setAccountProblem(undefined);
+                  }
+                : connectOrCreateWallet
+            }
+          >
+            {connected ? (
+              <span className={styles.accountAddress}>
+                {shortAddress(address)}
+              </span>
+            ) : (
+              <span className={styles.accountConnect}>Connect</span>
+            )}
+          </button>
+          {connected && accountOpen && (
+            <div
+              className={styles.accountMenu}
+              role="menu"
+              aria-label="Wallet account"
+            >
               <button
                 type="button"
-                className={styles.account}
-                aria-label={connected ? "Wallet account" : "Connect wallet"}
-                disabled={!mounted}
-                onClick={connected ? openAccountModal : openConnectModal}
+                className={styles.accountMenuAddress}
+                role="menuitem"
+                onClick={() => void copyAddress()}
               >
-                {connected ? (
-                  <span className={styles.accountAddress}>
-                    {account.displayName}
-                  </span>
-                ) : (
-                  <span className={styles.accountConnect}>Connect</span>
-                )}
+                <span>{shortAddress(address)}</span>
+                <span>{copied ? "Copied" : "Copy address"}</span>
               </button>
-            );
-          }}
-        </ConnectButton.Custom>
+              {authenticated && embeddedWallet && (
+                <button
+                  type="button"
+                  className={styles.accountMenuExport}
+                  role="menuitem"
+                  onClick={exportEmbeddedWallet}
+                >
+                  Export wallet
+                </button>
+              )}
+              <button
+                type="button"
+                className={styles.accountMenuDisconnect}
+                role="menuitem"
+                onClick={disconnectWallet}
+              >
+                Disconnect
+              </button>
+              {accountProblem && (
+                <p className={styles.accountMenuProblem} role="alert">
+                  {accountProblem}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );
+}
+
+function shortAddress(address: `0x${string}` | undefined) {
+  if (!address) return "";
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 function ProductOption({
