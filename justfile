@@ -90,3 +90,19 @@ devnet-logs service="":
 # Smoke: finality advances, faucet drips, explorer reachable. Run after `devnet-up`.
 devnet-smoke:
     sh devnet/smoke.sh
+
+# --- cross-chain devnet: two chains, contracts, liquidity, both backends, one command ---
+
+# One-click: infra up, both chains deployed + wired, liquidity seeded, backends + relay running,
+# same-chain swaps smoke-tested on both sides. Safe to rerun after any failure. See
+# scripts/src/deploy/all.ts for exactly what it does.
+deploy-crosschain:
+    cd scripts && pnpm run deploy
+
+# Tear down and redeploy from a clean chain state on both sides.
+deploy-crosschain-reset:
+    cd scripts && pnpm run deploy:reset
+
+# Stop the backends + relay this deploy started (chain state is left running).
+deploy-crosschain-down:
+    cd scripts && pnpm run deploy:down
