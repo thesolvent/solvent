@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAccount, useSwitchChain } from "wagmi";
 
 import { DASH, type Asset } from "@/data";
-import { fit, money } from "@/lib/format";
+import { fit, usd } from "@/lib/format";
 import {
   ANY_NETWORK,
   ANY_TAG,
@@ -61,7 +61,8 @@ export function SwapPage() {
   const hasAmount = typed.trim() !== "";
   const numericAmount = Number(typed);
   const amt = Number.isFinite(numericAmount) ? numericAmount : 0;
-  const fromUsdNum = amt * (from?.price ?? 0);
+  // An unpriced token has no dollar value to show; zero would read as worthless.
+  const fromUsdNum = from?.price == null ? null : amt * from.price;
 
   // The output is the server's price for this size, not the mid — it carries fee and impact.
   const { quote, pricing, problem, stale } = useQuote(from, to, typed);
@@ -291,7 +292,9 @@ export function SwapPage() {
               />
             </div>
             {hasAmount && (
-              <div className={styles.amountUsd}>~$ {money(fromUsdNum)}</div>
+              <div className={styles.amountUsd}>
+                ~{usd(fromUsdNum, { compact: false })}
+              </div>
             )}
           </div>
         </div>
@@ -337,7 +340,7 @@ export function SwapPage() {
             </div>
             {quote && (
               <div className={styles.amountUsd}>
-                ~$ {money(quote.amountOutUsd)}
+                ~{usd(quote.amountOutUsd, { compact: false })}
               </div>
             )}
           </div>
@@ -446,11 +449,7 @@ export function SwapPage() {
                       </span>
                       <span className={styles.tokenPrices}>
                         <span className={styles.tokenUsd}>
-                          $
-                          {t.price.toLocaleString("en-US", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          {usd(t.price, { compact: false })}
                         </span>
                         <span
                           className={

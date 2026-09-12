@@ -83,8 +83,8 @@ describe("Pool settlements", () => {
       undefined,
     );
     expect(forward).toHaveAttribute("href", `/explorer/trades/${trade.id}`);
-    expect(within(forward).getByText("5,000 DAI")).toBeInTheDocument();
-    expect(within(forward).getByText("4,946.047017 USDC")).toBeInTheDocument();
+    expect(within(forward).getByText("5,000.00 DAI")).toBeInTheDocument();
+    expect(within(forward).getByText("4,946.04 USDC")).toBeInTheDocument();
     expect(forward.querySelector("time")).toHaveAttribute(
       "datetime",
       new Date(detail.settled_at * 1000).toISOString(),
@@ -92,7 +92,7 @@ describe("Pool settlements", () => {
     const reverse = screen.getByRole("link", {
       name: "Open trade reverse-trade",
     });
-    expect(reverse.textContent).toMatch(/4,946.047017 USDC.*5,000 DAI/);
+    expect(reverse.textContent).toMatch(/4,946\.04 USDC.*5,000\.00 DAI/);
     fireEvent.click(reverse);
     expect(
       await screen.findByText("Trade destination reverse-trade"),

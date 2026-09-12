@@ -1,4 +1,5 @@
 import type { DepthCurve, Pool, PoolRoster, RosterMaker } from "@/data";
+import { DASH, truncateAddress, usd } from "@/lib/format";
 import { depthChart, type DepthChartModel } from "./depth-chart";
 
 export type DetailMaker = {
@@ -62,11 +63,11 @@ function rosterBy(
         maker.actualUsd < maker.virtualUsd;
       return {
         strategyHash: maker.strategyHash,
-        addr: maker.address,
+        addr: truncateAddress(maker.address),
         curve: maker.curve,
         // Quote uptime has no server source.
-        up: "—",
-        act: value == null ? "—" : USD.format(value),
+        up: DASH,
+        act: usd(value),
         gap: short ? "var(--ok-ink)" : "var(--green)",
         stateBg: short ? "var(--ok-bg)" : "var(--lime-wash-soft)",
         stateFg: short ? "var(--ok-ink-deep)" : "var(--green-darkest)",
@@ -74,13 +75,6 @@ function rosterBy(
       };
     });
 }
-
-const USD = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
 
 export function poolDetail(input: PoolDetailInput): PoolDetail {
   const { pool, roster, depth, hoverFrac, makerSort } = input;
@@ -93,14 +87,14 @@ export function poolDetail(input: PoolDetailInput): PoolDetail {
       quoteSymbol,
       hoverFrac,
     }),
-    pair: pair || "—",
-    fee: pool?.fee ?? "—",
-    apr: pool?.apr ?? "—",
-    tvl: pool?.tvl ?? "—",
+    pair: pair || DASH,
+    fee: pool?.fee ?? DASH,
+    apr: pool?.apr ?? DASH,
+    tvl: pool?.tvl ?? DASH,
     tvlChange: pool?.tvlChange,
-    vol: pool?.vol ?? "—",
-    fills: pool?.fills ?? "—",
-    spread: (pool?.range ?? "").replace(" spread", "") || "—",
+    vol: pool?.vol ?? DASH,
+    fills: pool?.fills ?? DASH,
+    spread: (pool?.range ?? "").replace(" spread", "") || DASH,
     makers: rosterBy(roster, makerSort === "Actual"),
     makerTotal: new Set(
       roster?.makers.map((maker) => maker.address.toLowerCase()),

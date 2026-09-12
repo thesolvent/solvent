@@ -1,6 +1,7 @@
 import type { Position, PositionHistory } from "@/data/makers";
 import type { TradeRecord } from "@/data/explorer";
-import { balanceText, compactAddress, percent, usd } from "./makers";
+import { DASH, count, truncateAddress, truncateHash } from "@/lib/format";
+import { balanceText, percent, usd } from "./makers";
 import { relativeTime, tokenText } from "./explorer";
 
 export function rangeDescription(position: Position | undefined): string {
@@ -51,15 +52,15 @@ export function strategyDetail(
   const full = position?.rangeKind === "full";
   return {
     title: position ? `${position.pair} · ${position.curve}` : "Strategy",
-    state: position?.state ?? "—",
+    state: position?.state ?? DASH,
     stBg: docked ? "var(--line-faint)" : "var(--lime-wash-soft)",
     stFg: docked ? "var(--text-mid)" : "var(--green-darkest)",
-    maker: compactAddress(position?.maker ?? ""),
-    pool: position?.pair ?? "—",
+    maker: truncateAddress(position?.maker),
+    pool: position?.pair ?? DASH,
     since:
       history?.createdBlock == null
-        ? "—"
-        : `since blk ${history.createdBlock.toLocaleString("en-US")}`,
+        ? DASH
+        : `since blk ${count(history.createdBlock)}`,
     shape: [
       cell(
         "Virtual balance",
@@ -73,13 +74,17 @@ export function strategyDetail(
           ? position.backed
             ? "fully backed ✓"
             : (position.shortfall ?? "partially backed")
-          : "—",
+          : DASH,
         position ? (position.backed ? "ok" : "warn") : "n",
       ),
-      cell("Fee", position ? `${position.feeBps} bps` : "—", "input fee"),
+      cell(
+        "Fee",
+        position ? percent(position.feeBps / 100) : DASH,
+        "input fee",
+      ),
       cell(
         "Range",
-        position?.range ?? "—",
+        position?.range ?? DASH,
         full
           ? "constant product"
           : position?.curve === "Pegged"
@@ -90,7 +95,7 @@ export function strategyDetail(
     active: [
       {
         label: "Fills (7d)",
-        value: position?.fills7d?.toLocaleString("en-US") ?? "—",
+        value: count(position?.fills7d),
         sub: docked ? "docked" : "pulls",
       },
       {
@@ -105,16 +110,16 @@ export function strategyDetail(
       },
       {
         label: "Last fill",
-        value: position?.lastFillAt ? relativeTime(position.lastFillAt) : "—",
+        value: position?.lastFillAt ? relativeTime(position.lastFillAt) : DASH,
         sub: "",
       },
     ].map((value, i) => ({ ...value, sep: i ? "var(--line)" : "transparent" })),
     fills: trades.map((trade) => ({
       id: trade.id,
-      hash: trade.txHash ? compactAddress(trade.txHash) : "—",
+      hash: truncateHash(trade.txHash),
       flow: `${tokenText(trade.input)} → ${tokenText(trade.output)}`,
-      blk: trade.blockNumber?.toLocaleString("en-US") ?? "—",
-      trade: `trade ${trade.id.slice(-6)}`,
+      blk: count(trade.blockNumber),
+      trade: `trade ${truncateHash(trade.id)}`,
     })),
     noFills: trades.length === 0,
   };

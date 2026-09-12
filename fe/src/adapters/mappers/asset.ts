@@ -1,13 +1,7 @@
 import type { Asset as ApiAsset } from "@solvent/sdk/client";
 
-import { DASH, type Asset, type ChainInfo } from "@/data";
-
-/** Signed to a leading `+`/`-`, which is how the picker decides the colour to print it in. */
-function signed(pct?: number | null): string {
-  return pct == null
-    ? DASH
-    : `${pct < 0 ? "-" : "+"}${Math.abs(pct).toFixed(2)}%`;
-}
+import { type Asset, type ChainInfo } from "@/data";
+import { percent } from "@/lib/format";
 
 /**
  * One served asset.
@@ -25,8 +19,9 @@ export function toAsset(api: ApiAsset, chains: ChainInfo[]): Asset {
     name: api.name,
     logoUri: api.logo_uri,
     decimals: api.decimals,
-    price: api.price_usd ?? 0,
-    change: signed(api.change_24h_pct),
+    price: api.price_usd ?? null,
+    // Signed to a leading `+`/`-`, which is how the picker decides the colour to print it in.
+    change: percent(api.change_24h_pct, { sign: "plus" }),
     tags: api.tags,
     net: chain?.name ?? "Unknown",
     chainLogoUri: chain?.logoUri,

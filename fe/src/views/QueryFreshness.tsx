@@ -1,4 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
+import { LOCALE } from "@/lib/format";
 import styles from "./explorer.module.css";
 
 export function QueryFreshness({
@@ -28,12 +29,14 @@ export function QueryFreshness({
     <span
       className={styles.freshness}
       data-state={state}
-      title={updated ? `Last updated ${updated.toLocaleString()}` : undefined}
+      title={
+        updated ? `Last updated ${updated.toLocaleString(LOCALE)}` : undefined
+      }
     >
       <span className={styles.refreshDot} aria-hidden="true" />
       <span>
         {label}
-        {updated && ` · ${updated.toLocaleTimeString()}`}
+        {updated && ` · ${updated.toLocaleTimeString(LOCALE)}`}
       </span>
     </span>
   );

@@ -8,6 +8,15 @@ import type {
   Position,
   PositionBalance,
 } from "@/data/makers";
+import {
+  DASH,
+  LOCALE,
+  count,
+  percent as percentText,
+  tokenAmount,
+  truncateAddress,
+  usd as usdText,
+} from "@/lib/format";
 import { tradeRow } from "./explorer";
 
 export const SPANS = ["7D", "1M", "3M", "6M"] as const;
@@ -18,42 +27,21 @@ export const PERIODS: Record<string, MakerPeriod> = {
   "6M": "6m",
 };
 
-export function compactAddress(address: string): string {
-  return address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "—";
-}
-
-export function usd(value: number | null | undefined): string {
-  return value == null
-    ? "—"
-    : value.toLocaleString("en-US", {
-        style: "currency",
-        currency: "USD",
-        notation: value >= 10_000 ? "compact" : "standard",
-        maximumFractionDigits: 2,
-      });
-}
+export const usd = usdText;
 
 export function percent(value: number | null | undefined): string {
-  return value == null ? "—" : `${value.toFixed(1)}%`;
+  return percentText(value, { digits: 1 });
 }
 
-const numberText = (value: number | null | undefined) =>
-  value == null
-    ? "—"
-    : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
-const quantityText = (value: string) =>
-  Number(value).toLocaleString("en-US", { maximumSignificantDigits: 8 });
 const ratioText = (value: number | null | undefined) =>
-  value == null ? "—" : `${value.toFixed(2)}×`;
+  value == null ? DASH : `${value.toFixed(2)}×`;
 const deltaText = (value: number | null | undefined) =>
-  value == null
-    ? "—"
-    : `${value < 0 ? "▼" : "▲"} ${Math.abs(value).toFixed(1)}%`;
+  percentText(value, { digits: 1, sign: "arrow" });
 
 export function balanceText(balances: PositionBalance[]): string {
   return balances.length
-    ? balances.map((b) => `${quantityText(b.display)} ${b.symbol}`).join(" · ")
-    : "—";
+    ? balances.map((b) => `${tokenAmount(b.display)} ${b.symbol}`).join(" · ")
+    : DASH;
 }
 
 function positionRow(p: Position, span: string) {
@@ -111,9 +99,9 @@ function assetRow(asset: InventoryAsset, open: boolean) {
     open,
     across: `Across ${asset.legs.length} ${asset.legs.length === 1 ? "position" : "positions"}`,
     wallet: usd(asset.wallet.usd),
-    walletAmt: `${quantityText(asset.wallet.display)} ${asset.symbol}`,
+    walletAmt: `${tokenAmount(asset.wallet.display)} ${asset.symbol}`,
     shared: usd(asset.shared.usd),
-    sharedAmt: `${quantityText(asset.shared.display)} ${asset.symbol}`,
+    sharedAmt: `${tokenAmount(asset.shared.display)} ${asset.symbol}`,
     fees: usd(asset.feesUsd),
     apy: percent(asset.apyPct),
     ratio: ratioText(ratio),
@@ -121,9 +109,9 @@ function assetRow(asset: InventoryAsset, open: boolean) {
       hash: leg.hash,
       pair: leg.pair,
       meta: `${leg.curve} · ${leg.feeBps / 100}%`,
-      cur: `${quantityText(leg.current.display)} ${asset.symbol}`,
+      cur: `${tokenAmount(leg.current.display)} ${asset.symbol}`,
       curUsd: usd(leg.current.usd),
-      op: `${quantityText(leg.opening.display)} ${asset.symbol}`,
+      op: `${tokenAmount(leg.opening.display)} ${asset.symbol}`,
       fees: usd(leg.feesUsd),
       apy: percent(leg.apyPct),
       cov: ratioText(leg.coverage),
@@ -157,7 +145,7 @@ function shareChart(
     const result = {
       ...segment,
       label: segment.label,
-      value: total ? percent(share * 100) : "—",
+      value: total ? percent(share * 100) : DASH,
       dot: segment.color,
       op: hovered === null || hovered === i ? 1 : 0.4,
       dash: `${length.toFixed(1)} ${(circumference - length).toFixed(1)}`,
@@ -172,11 +160,11 @@ function shareChart(
     arcs: shares.filter((share) => Number.parseFloat(share.dash) > 0),
     shares,
     donutCap: selected?.label ?? "total",
-    donutVal: numberText(selected ? selected.count : total),
+    donutVal: count(selected ? selected.count : total),
     tip: !!selected,
     tipLabel: selected?.label ?? "",
     tipPct: selected?.value ?? "",
-    tipAmt: `${numberText(selected?.count)} orders`,
+    tipAmt: `${count(selected?.count)} orders`,
   };
 }
 
@@ -184,9 +172,9 @@ function bucketLabel(bucket: ActivityBucket, span: string): string {
   const date = new Date(bucket.from * 1000);
   return span === "7D"
     ? date
-        .toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" })
+        .toLocaleDateString(LOCALE, { weekday: "short", timeZone: "UTC" })
         .slice(0, 1)
-    : date.toLocaleDateString("en-US", {
+    : date.toLocaleDateString(LOCALE, {
         day: "numeric",
         month: "numeric",
         timeZone: "UTC",
@@ -233,12 +221,12 @@ function activityCharts(
   const fillBucket = state.mkBar === null ? undefined : buckets[state.mkBar];
   const latencyBucket = state.mkLat === null ? undefined : buckets[state.mkLat];
   return {
-    fills: numberText(dashboard?.fills),
+    fills: count(dashboard?.fills),
     fillsDelta: deltaText(dashboard?.fillsChangePct),
     fillsTip: fillBucket
       ? {
           label: bucketRange(fillBucket),
-          value: numberText(fillBucket.fills),
+          value: count(fillBucket.fills),
           detail: "fills",
         }
       : null,
@@ -255,16 +243,14 @@ function activityCharts(
         state.mkBar === i || i === topIndex ? "var(--ink)" : "var(--text-dim)",
     })),
     avgTop: `${peak ? 100 - (average / peak) * 100 : 100}%`,
-    avgVal: numberText(average),
+    avgVal: count(average),
     latency:
-      dashboard?.latencyMs == null
-        ? "—"
-        : `${numberText(dashboard.latencyMs)} ms`,
+      dashboard?.latencyMs == null ? DASH : `${count(dashboard.latencyMs)} ms`,
     latDelta:
       dashboard?.previousLatencyMs == null
         ? "no previous fills"
-        : `from ${numberText(dashboard.previousLatencyMs)} ms baseline`,
-    latAxis: [numberText(maxLatency), numberText(maxLatency / 2), "0"],
+        : `from ${count(dashboard.previousLatencyMs)} ms baseline`,
+    latAxis: [count(maxLatency), count(maxLatency / 2), "0"],
     latLines: lines.map((line) =>
       line.includes(" ") ? line : `${line} ${line}`,
     ),
@@ -273,7 +259,7 @@ function activityCharts(
       latencyBucket?.latencyMs != null
         ? {
             label: bucketRange(latencyBucket),
-            value: `${numberText(latencyBucket.latencyMs)} ms`,
+            value: `${count(latencyBucket.latencyMs)} ms`,
             detail: "p50",
           }
         : null,
@@ -328,7 +314,7 @@ export function makerView(
     {
       label: "Active positions",
       term: "activePositions" as const,
-      value: numberText(d?.activePositions),
+      value: count(d?.activePositions),
     },
     {
       label: `Fees, ${span}`,
@@ -338,7 +324,7 @@ export function makerView(
   ];
   const settlements = data.settlements;
   return {
-    addr: compactAddress(data.address ?? ""),
+    addr: truncateAddress(data.address),
     span,
     tab: state.mkTab,
     kpis: kpis.map((k, i) => ({
@@ -360,11 +346,11 @@ export function makerView(
     tabNote:
       data.notice ??
       (state.mkTab === "Positions"
-        ? `${numberText(d?.activePositions)} active · ${span}`
+        ? `${count(d?.activePositions)} active · ${span}`
         : state.mkTab === "Assets"
           ? `${data.inventory.length} tokens committed`
           : state.mkTab === "Settlements"
-            ? `${numberText(d?.fills)} fills · ${span}`
+            ? `${count(d?.fills)} fills · ${span}`
             : `${data.rebateCount} recent rebates`),
     positions: data.positions.map((p) => positionRow(p, span)),
     assets: data.inventory.map((asset, i) =>
@@ -389,8 +375,8 @@ export function makerView(
     insight:
       data.notice ??
       (d
-        ? `This maker filled ${numberText(d.fills)} ${d.fills === 1 ? "order" : "orders"} in the last ${d.windowDays} days.`
-        : "—"),
+        ? `This maker filled ${count(d.fills)} ${d.fills === 1 ? "order" : "orders"} in the last ${d.windowDays} days.`
+        : DASH),
     ...shareChart(d, state.mkTip),
     ...activityCharts(d, state),
   };

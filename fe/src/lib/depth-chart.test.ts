@@ -27,8 +27,8 @@ it("quotes the selected small impact tier without rounding away fractional input
       ],
     },
   });
-  expect(chart.hover?.size).toBe("0.001 WBTC");
-  expect(chart.hover?.output).toBe("69.93 USDC");
+  expect(chart.hover?.size).toBe("0.001000 WBTC");
+  expect(chart.hover?.output).toBe("69.9300 USDC");
   expect(chart.hover?.price).toBe("69,930.00 USDC");
   expect(chart.hover?.left).toBe("0.10%");
   expect(chart.xTicks[1].label).toBe("0.25");

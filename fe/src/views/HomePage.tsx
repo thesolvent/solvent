@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { count } from "@/lib/format";
 import { useApp } from "@/state";
 
 import styles from "./HomePage.module.css";
@@ -402,7 +403,7 @@ function useAquaScene(
         });
       }
 
-      const fmt = (n: number) => Math.round(n).toLocaleString("en-US");
+      const fmt = (n: number) => count(Math.round(n));
       if (refs.weth.current) {
         refs.weth.current.textContent =
           c.weth > 99.95 ? "100" : c.weth.toFixed(1);

@@ -4,6 +4,15 @@ import type {
   TokenQuantity,
   TradeRecord,
 } from "@/data/explorer";
+import {
+  DASH,
+  LOCALE,
+  count,
+  percent,
+  tokenWithSymbol,
+  truncateAddress,
+  truncateHash,
+} from "@/lib/format";
 
 const STATUS_TONE: Record<string, { background: string; color: string }> = {
   confirmed: {
@@ -15,28 +24,21 @@ const STATUS_TONE: Record<string, { background: string; color: string }> = {
   pending: { background: "#eef0f4", color: "#4a5a72" },
 };
 
-export function shortHash(value: string | null): string {
-  return value ? `${value.slice(0, 8)}…${value.slice(-6)}` : "—";
-}
-
 export function tokenText(quantity: TokenQuantity): string {
-  const amount = Number(quantity.display).toLocaleString("en-US", {
-    maximumSignificantDigits: 12,
-  });
-  return `${amount} ${quantity.symbol}`;
+  return tokenWithSymbol(quantity.display, quantity.symbol);
 }
 
 function timestamp(at: number | null): string {
   return at == null
-    ? "—"
-    : new Date(at * 1000).toLocaleString(undefined, {
+    ? DASH
+    : new Date(at * 1000).toLocaleString(LOCALE, {
         dateStyle: "medium",
         timeStyle: "short",
       });
 }
 
 export function relativeTime(at: number | null, now = Date.now()): string {
-  if (at == null) return "—";
+  if (at == null) return DASH;
   const seconds = Math.max(0, Math.floor(now / 1000) - at);
   if (seconds < 60) return `${seconds}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
@@ -60,31 +62,26 @@ export function explorerUrl(
   }
 }
 
-const numberText = (value: number | null | undefined) =>
-  value == null ? "—" : value.toLocaleString("en-US");
-const percent = (value: number | null | undefined) =>
-  value == null ? "—" : `${value.toFixed(2)}%`;
-
 export function explorerStats(stats: ExplorerStats | undefined) {
   return [
     {
       label: "Block height",
       term: "blockHeight" as const,
-      value: numberText(stats?.blockHeight),
+      value: count(stats?.blockHeight),
       sub: "live",
       accent: "var(--green)",
     },
     {
       label: "Events, 24h",
       term: "events24h" as const,
-      value: numberText(stats?.events24h),
+      value: count(stats?.events24h),
       sub: "",
       accent: "var(--green-deep)",
     },
     {
       label: "Trades settled",
       term: "tradesSettled" as const,
-      value: numberText(stats?.tradesSettled),
+      value: count(stats?.tradesSettled),
       sub:
         stats?.confirmedPct == null
           ? ""
@@ -101,7 +98,7 @@ export function explorerStats(stats: ExplorerStats | undefined) {
     {
       label: "Active makers",
       term: "activeMakers" as const,
-      value: numberText(stats?.activeMakers),
+      value: count(stats?.activeMakers),
       sub:
         stats?.quotingNow == null
           ? ""
@@ -121,13 +118,13 @@ export function tradeRow(trade: TradeRecord) {
     blockLabel:
       trade.blockNumber == null
         ? "not settled"
-        : `blk ${numberText(trade.blockNumber)}`,
+        : `blk ${count(trade.blockNumber)}`,
     input: tokenText(trade.input),
     output: `${trade.status === "confirmed" ? "" : "min. "}${tokenText(trade.output)}`,
-    makers: numberText(trade.makers),
+    makers: count(trade.makers),
     impact: percent(trade.priceImpactPct),
     status: trade.status,
-    transactionLabel: shortHash(trade.txHash),
+    transactionLabel: truncateHash(trade.txHash),
     statusStyle: STATUS_TONE[trade.status] ?? STATUS_TONE.pending,
   };
 }
@@ -161,15 +158,15 @@ export function activityRow(record: ActivityRecord) {
     kind: kind.label,
     kindBg: kind.background,
     kindFg: kind.color,
-    who: shortHash(record.maker),
-    tx: shortHash(record.txHash),
-    when: `${record.blockNumber == null ? "block unknown" : `blk ${numberText(record.blockNumber)}`} · ${relativeTime(record.at)}`,
+    who: truncateAddress(record.maker),
+    tx: truncateHash(record.txHash),
+    when: `${record.blockNumber == null ? "block unknown" : `blk ${count(record.blockNumber)}`} · ${relativeTime(record.at)}`,
     flow: record.amount
       ? tokenText(record.amount)
       : record.kind === "docked"
         ? "Position closed"
-        : `Strategy ${shortHash(record.strategyHash)}`,
-    text: `strategy ${shortHash(record.strategyHash)}`,
+        : `Strategy ${truncateHash(record.strategyHash)}`,
+    text: `strategy ${truncateHash(record.strategyHash)}`,
   };
 }
 
@@ -194,30 +191,37 @@ export function tradeDetail(trade: TradeRecord) {
       sep: i === 0 ? "transparent" : "var(--line)",
     })),
     legs: trade.legs.map((leg) => ({
-      curve: leg.curve ?? "—",
+      curve: leg.curve ?? DASH,
       maker: leg.maker,
       hash: leg.strategyHash,
       chainId: leg.chainId,
-      name: shortHash(leg.maker),
-      shortHash: shortHash(leg.strategyHash),
+      name: truncateAddress(leg.maker),
+      shortHash: truncateHash(leg.strategyHash),
       tag: leg.maker.slice(2, 4).toUpperCase(),
       amt: `${tokenText(leg.input)} → ${tokenText(leg.output)}`,
       input: leg.input,
       output: leg.output,
-      share: `${leg.sharePct.toFixed(1)}%`,
+      share: percent(leg.sharePct, { digits: 1 }),
       barW: `${leg.sharePct}%`,
     })),
     facts: [
-      { label: "Taker", value: shortHash(trade.taker), fullValue: trade.taker },
+      {
+        label: "Taker",
+        value: truncateAddress(trade.taker),
+        fullValue: trade.taker,
+      },
       {
         label: "Order hash",
-        value: shortHash(trade.orderHash),
-        fullValue: trade.orderHash ?? "—",
+        value: truncateHash(trade.orderHash),
+        fullValue: trade.orderHash ?? DASH,
       },
       { label: "Deadline", value: timestamp(trade.deadlineAt) },
-      { label: "Signature", value: trade.signaturePresent ? "Provided" : "—" },
+      {
+        label: "Signature",
+        value: trade.signaturePresent ? "Provided" : DASH,
+      },
     ],
-    profit: trade.surplus ? tokenText(trade.surplus) : "—",
+    profit: trade.surplus ? tokenText(trade.surplus) : DASH,
     profitTag: ["declined", "failed"].includes(trade.status)
       ? `not earned — ${trade.status}`
       : "route estimate · net of estimated gas",

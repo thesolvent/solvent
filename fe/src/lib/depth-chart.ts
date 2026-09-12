@@ -1,6 +1,7 @@
 import { curveMonotoneX } from "d3-shape";
 import { path } from "d3-path";
 import type { DepthCurve, DepthLevel } from "@/data";
+import { DASH, LOCALE, count, tokenWithSymbol } from "@/lib/format";
 
 /** What one sampled tier costs, as the stat row reads it. */
 export type ImpactReadout = {
@@ -142,10 +143,10 @@ function heightAt(spans: Cubic[], x: number): number {
 /** Prices span pennies on stable pairs and thousands on majors, so precision follows magnitude. */
 function priceLabel(price: number): string {
   if (price > 0 && price < 0.0001) {
-    return price.toLocaleString("en-US", { maximumSignificantDigits: 4 });
+    return price.toLocaleString(LOCALE, { maximumSignificantDigits: 4 });
   }
   const digits = price < 10 ? 4 : 2;
-  return price.toLocaleString("en-US", {
+  return price.toLocaleString(LOCALE, {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
@@ -198,10 +199,7 @@ export function depthChart({
   quoteSymbol: string;
   hoverFrac: number | null;
 }): DepthChartModel {
-  const amount = new Intl.NumberFormat("en-US", { maximumSignificantDigits: 6 })
-    .format;
-  const amountLabel = (value: number, symbol: string) =>
-    `${amount(value)} ${symbol}`;
+  const amountLabel = tokenWithSymbol;
   const { levels, segments, total } = samplesOf(depth?.levels ?? []);
   const totalSize = total || 1;
 
@@ -228,7 +226,7 @@ export function depthChart({
     };
   });
   const xTicks = Array.from({ length: 5 }, (_, i) => ({
-    label: amount(totalSize * (i / 4)),
+    label: count(totalSize * (i / 4)),
     left: `${((i / 4) * 100).toFixed(1)}%`,
   }));
 
@@ -280,8 +278,8 @@ export function depthChart({
     );
   const impact = (level: DepthLevel | undefined) => ({
     label: level ? `${level.impactPct.toFixed(1)}% impact` : "impact",
-    price: level ? `~${priceLabel(level.price)}` : "—",
-    size: level ? `~${amountLabel(level.sizeIn, baseSym)}` : "—",
+    price: level ? `~${priceLabel(level.price)}` : DASH,
+    size: level ? `~${amountLabel(level.sizeIn, baseSym)}` : DASH,
   });
   // The tiers double as marker positions: hovering one drives the same marker the pointer does.
   const impacts: ImpactStop[] = levels.map((level) => ({
@@ -297,9 +295,9 @@ export function depthChart({
     impacts,
     axisTitle: depth?.axisTitle ?? `Cumulative ${baseSym} available`,
     priceTitle: `${quoteSym} per ${baseSym}`,
-    bestPrice: validBest != null ? priceLabel(validBest) : "—",
+    bestPrice: validBest != null ? priceLabel(validBest) : DASH,
     near: impact(tier(0.5)),
     far: impact(tier(1)),
-    totalLiq: levels.length ? amountLabel(totalSize, baseSym) : "—",
+    totalLiq: levels.length ? amountLabel(totalSize, baseSym) : DASH,
   };
 }

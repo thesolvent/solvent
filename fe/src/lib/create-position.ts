@@ -8,7 +8,14 @@ import { MAX_UINT248, parseTokenAmount } from "@solvent/sdk/validation";
 import { formatUnits } from "viem";
 
 import { BAND_K0 } from "@/data";
-import { tokenBalance } from "@/lib/format";
+import {
+  DASH,
+  LOCALE,
+  percent,
+  tokenAmount,
+  truncateAddress,
+  usd,
+} from "@/lib/format";
 import type {
   CreatePair,
   CreateToken,
@@ -113,7 +120,7 @@ const SUPERSCRIPT: Record<string, string> = {
 
 /** Keep small reversed prices readable without losing ordinary market-price formatting. */
 export function formatPrice(value: number): string {
-  if (!Number.isFinite(value)) return "—";
+  if (!Number.isFinite(value)) return DASH;
   if (value === 0) return "0";
   const magnitude = Math.abs(value);
   if (magnitude < 0.0001) {
@@ -129,7 +136,7 @@ export function formatPrice(value: number): string {
       : magnitude < 10
         ? 4
         : 2;
-  return value.toLocaleString("en-US", {
+  return value.toLocaleString(LOCALE, {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
@@ -228,18 +235,11 @@ function volumeBuckets(
 function formatChartDate(timestampMs: number, span: CreateSpan): string {
   const date = new Date(timestampMs);
   return date.toLocaleDateString(
-    "en-US",
+    LOCALE,
     span === "All"
       ? { month: "short", year: "numeric" }
       : { month: "short", day: "numeric", year: "numeric" },
   );
-}
-
-function formatVolume(value: number): string {
-  return `$${value.toLocaleString("en-US", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  })}`;
 }
 
 type PairView = {
@@ -261,8 +261,8 @@ type PairView = {
 
 const EMPTY_PAIR: PairView = {
   source: undefined,
-  a: "—",
-  b: "—",
+  a: DASH,
+  b: DASH,
   mid: 1,
   tvlUsd: undefined,
   type: "Unknown",
@@ -277,7 +277,7 @@ const EMPTY_PAIR: PairView = {
 };
 
 function percentFromBps(bps: number): string {
-  return `${(bps / 100).toFixed(2)}%`;
+  return percent(bps / 100);
 }
 
 function pairView(pair: CreatePair): PairView {
@@ -310,10 +310,6 @@ function recommendPairs(catalog: readonly PairView[]) {
         : rightTvl - leftTvl;
     })
     .slice(0, RECOMMENDATION_COUNT);
-}
-
-function shortAddress(address: string): string {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
 function reserveAmount(value: string, decimals: number): bigint | undefined {
@@ -444,7 +440,7 @@ function percentageUsed(amount: bigint | undefined, balance: bigint): string {
   const basisPoints = (amount * 10_000n) / balance;
   if (basisPoints > 1_000_000n) return ">10,000%";
   const value = Number(basisPoints) / 100;
-  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2)}%`;
+  return percent(value, { digits: Number.isInteger(value) ? 0 : 2 });
 }
 
 function walletTokens(pairs: readonly CreatePair[]) {
@@ -461,8 +457,8 @@ function walletTokens(pairs: readonly CreatePair[]) {
     sym: token.symbol,
     name: token.name,
     usd: token.valueUsd,
-    bal: tokenBalance(formatUnits(token.balanceRaw, token.decimals)),
-    addr: shortAddress(token.address),
+    bal: tokenAmount(formatUnits(token.balanceRaw, token.decimals)),
+    addr: truncateAddress(token.address),
     chg: token.changePct,
     tags: token.tags,
     tint: token.tint,
@@ -493,7 +489,7 @@ export function createPosition(
   const pegged = s.strategy === "Pegged";
 
   const fmtPx = formatPrice;
-  const pct = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+  const pct = (v: number) => percent(v, { sign: "plus" });
 
   const chart = chartPoints(history, mid, flip);
   const chartExtent = chart.reduce(
@@ -625,7 +621,7 @@ export function createPosition(
   const vols: Vol[] = volumeSource.map((point, index) => ({
     h: `${maxVolume > 0 ? Math.max(4, ((point.volumeUsd ?? 0) / maxVolume) * 100) : 0}%`,
     on: s.volHover === index,
-    vol: formatVolume(point.volumeUsd ?? 0),
+    vol: usd(point.volumeUsd),
     when: formatChartDate(point.timestampMs, s.createSpan),
     price: point.price,
     x: point.x,
@@ -813,15 +809,9 @@ export function createPosition(
         mark: s.slotA === t.sym ? "1" : s.slotB === t.sym ? "2" : "",
         markBg: sel ? "var(--ink)" : "transparent",
         markFg: sel ? "var(--paper)" : "transparent",
-        usd:
-          t.usd === undefined
-            ? "$—"
-            : `$${t.usd.toLocaleString("en-US", { maximumFractionDigits: 2 })}`,
+        usd: usd(t.usd, { compact: false }),
         amt: `${t.bal} ${t.sym}`,
-        delta:
-          t.chg === undefined
-            ? "—"
-            : `${t.chg > 0 ? "+" : ""}${t.chg.toFixed(2)}%`,
+        delta: percent(t.chg, { sign: "plus" }),
         deltaFg:
           t.chg === undefined
             ? "var(--text-muted)"
@@ -877,12 +867,12 @@ export function createPosition(
     stateA: okA
       ? "sufficient"
       : reserveA !== undefined && reserveA > wallet.rawA && tokenA
-        ? `over by ${tokenBalance(formatUnits(reserveA - wallet.rawA, tokenA.decimals))}`
+        ? `over by ${tokenAmount(formatUnits(reserveA - wallet.rawA, tokenA.decimals))}`
         : "enter an amount",
     stateB: okB
       ? "sufficient"
       : reserveB !== undefined && reserveB > wallet.rawB && tokenB
-        ? `over by ${tokenBalance(formatUnits(reserveB - wallet.rawB, tokenB.decimals))}`
+        ? `over by ${tokenAmount(formatUnits(reserveB - wallet.rawB, tokenB.decimals))}`
         : "enter an amount",
     bdA: okA ? "var(--line)" : "var(--ok-ink)",
     bdB: okB ? "var(--line)" : "var(--ok-ink)",
@@ -891,11 +881,11 @@ export function createPosition(
     fgA: okA ? "var(--green-darkest)" : "var(--ok-ink-deep)",
     fgB: okB ? "var(--green-darkest)" : "var(--ok-ink-deep)",
     walletA: tokenA
-      ? tokenBalance(formatUnits(wallet.rawA, tokenA.decimals))
-      : tokenBalance("0"),
+      ? tokenAmount(formatUnits(wallet.rawA, tokenA.decimals))
+      : tokenAmount("0"),
     walletB: tokenB
-      ? tokenBalance(formatUnits(wallet.rawB, tokenB.decimals))
-      : tokenBalance("0"),
+      ? tokenAmount(formatUnits(wallet.rawB, tokenB.decimals))
+      : tokenAmount("0"),
 
     rangeTag: full ? "Full range" : inRange ? "In range" : "Out of range",
     rangeTagBg: full

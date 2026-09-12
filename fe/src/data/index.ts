@@ -494,7 +494,7 @@ export type DepthLevel = {
 };
 
 /** Shown wherever there is no value to show — the domain deals in ready-to-render strings. */
-export const DASH = "—";
+export { DASH } from "@/lib/format";
 
 /**
  * A served asset: what the picker shows, plus what naming it to the server needs.
@@ -517,7 +517,8 @@ export type Asset = {
   /** Token artwork from the configured token list; the UI falls back to initials when absent. */
   logoUri?: string | null;
   decimals: number;
-  price: number;
+  /** USD mark, or `null` where nothing prices this token — which is not the same as free. */
+  price: number | null;
   /** Signed 24h move, already formatted. */
   change: string;
   tags: string[];
@@ -535,7 +536,8 @@ export type Quote = {
   amountInRaw: bigint;
   /** Output amount, at the precision the widget prints. */
   amountOut: string;
-  amountOutUsd: number;
+  /** The output valued, or `null` when either leg is unpriced. */
+  amountOutUsd: number | null;
   priceImpact: string;
   makersSourced: number;
   /** The output in base units, which is what an order has to name. */

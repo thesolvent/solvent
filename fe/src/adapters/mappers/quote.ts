@@ -2,8 +2,8 @@ import type { QuoteResponse } from "@solvent/sdk/client";
 import type { AggregateQuote } from "@solvent/sdk/cross-chain";
 import { formatUnits } from "viem";
 
-import { DASH, type Asset, type Quote } from "@/data";
-import { trimmedAmount } from "@/lib/format";
+import { type Asset, type Quote } from "@/data";
+import { DASH, percent, tokenAmount } from "@/lib/format";
 
 /**
  * One priced route.
@@ -18,11 +18,11 @@ export function toQuote(
 ): Quote {
   return {
     ...input,
-    amountOut: trimmedAmount(
+    amountOut: tokenAmount(
       formatUnits(BigInt(api.amount_out.raw), decimalsOut),
     ),
-    amountOutUsd: api.amount_out.usd ?? 0,
-    priceImpact: `${api.price_impact_pct.toFixed(2)}%`,
+    amountOutUsd: api.amount_out.usd ?? null,
+    priceImpact: percent(api.price_impact_pct),
     makersSourced: api.makers_sourced,
     amountOutRaw: BigInt(api.amount_out.raw),
     expiresAt: Date.parse(api.expires_at),
@@ -39,11 +39,16 @@ export function toCrossChainQuote(
   const amountOutRaw = BigInt(api.amount_out);
   const amountOutUnits = formatUnits(amountOutRaw, to.decimals);
   const amountInUsd =
-    Number(formatUnits(amountInRaw, from.decimals)) * from.price;
-  const amountOutUsd = Number(amountOutUnits) * to.price;
+    from.price == null
+      ? null
+      : Number(formatUnits(amountInRaw, from.decimals)) * from.price;
+  const amountOutUsd =
+    to.price == null ? null : Number(amountOutUnits) * to.price;
+  // Impact is the gap between what went in and what came out; unpriced either side, there is none
+  // to state, and stating zero would claim a free swap.
   const priceImpact =
-    amountInUsd > 0
-      ? `${Math.max(0, ((amountInUsd - amountOutUsd) / amountInUsd) * 100).toFixed(2)}%`
+    amountInUsd != null && amountOutUsd != null && amountInUsd > 0
+      ? percent(Math.max(0, ((amountInUsd - amountOutUsd) / amountInUsd) * 100))
       : DASH;
   const makers = new Set(
     [...api.origin.sources, ...api.destination.sources].map((source) =>
@@ -55,7 +60,7 @@ export function toCrossChainQuote(
     tokenIn: from.address,
     tokenOut: to.address,
     amountInRaw,
-    amountOut: trimmedAmount(amountOutUnits),
+    amountOut: tokenAmount(amountOutUnits),
     amountOutUsd,
     priceImpact,
     makersSourced: makers.size,

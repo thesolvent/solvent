@@ -1,6 +1,7 @@
 import { curveMonotoneX, line as d3Line, area as d3Area } from "d3-shape";
 
 import type { PairPricePoint } from "@/ports/positions";
+import { LOCALE, percent } from "@/lib/format";
 
 /** The plot is drawn in this space and stretched by the SVG's viewBox. */
 const W = 1000;
@@ -35,14 +36,14 @@ export interface PriceChartModel {
 /** Quote-per-base, at a precision that keeps small pairs legible. */
 function priceText(value: number): string {
   const digits = value >= 1000 ? 0 : value >= 1 ? 2 : 6;
-  return value.toLocaleString("en-US", {
+  return value.toLocaleString(LOCALE, {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
 }
 
 function dayText(ms: number): string {
-  return new Date(ms).toLocaleDateString("en-US", {
+  return new Date(ms).toLocaleDateString(LOCALE, {
     month: "short",
     day: "numeric",
   });
@@ -130,11 +131,11 @@ export function priceChart(
       label: priceText(latest.price),
       top: `${((y(latest.price) / H) * 100).toFixed(3)}%`,
     },
-    change: `${changeUp ? "↗" : "↘"} ${Math.abs(movePct).toFixed(2)}%`,
+    change: percent(movePct, { sign: "arrow" }),
     changeUp,
     summary:
       `${pairLabel} moved ${changeUp ? "up" : "down"} ` +
-      `${Math.abs(movePct).toFixed(2)}% over this period, from ` +
+      `${percent(Math.abs(movePct))} over this period, from ` +
       `${priceText(first.price)} to ${priceText(latest.price)}, ` +
       `low ${priceText(lo)}, high ${priceText(hi)}`,
   };

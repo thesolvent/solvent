@@ -17,8 +17,8 @@ describe("toQuote", () => {
     expect(toQuote(fixture, 6, input).amountOut).toBe("2,477.85");
   });
 
-  it("prints more places when the output is small", () => {
-    expect(toQuote(fixture, 18, input).amountOut).toBe("0.000000");
+  it("marks an output too small to print rather than showing it as zero", () => {
+    expect(toQuote(fixture, 18, input).amountOut).toBe("<0.000001");
   });
 
   it("reports the output's own USD value, not the input's", () => {

@@ -5,6 +5,7 @@ import { DepthChart } from "@/components/DepthChart";
 import { Crumbs } from "@/components/Crumbs";
 import { poolDetail } from "@/lib/pool-detail";
 import { tokenText } from "@/lib/explorer";
+import { LOCALE } from "@/lib/format";
 import { useTrades } from "@/services/explorer";
 import { Term } from "@/components/Tooltip";
 import { slug, usePoolDepth, usePools, usePoolRoster } from "@/services/pools";
@@ -233,9 +234,9 @@ export function PoolDetailPage() {
                   <time
                     className={styles.settleAgo}
                     dateTime={settledAt?.toISOString()}
-                    title={settledAt?.toLocaleString()}
+                    title={settledAt?.toLocaleString(LOCALE)}
                   >
-                    {settledAt?.toLocaleString(undefined, {
+                    {settledAt?.toLocaleString(LOCALE, {
                       month: "short",
                       day: "numeric",
                       hour: "2-digit",

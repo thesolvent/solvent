@@ -1,14 +1,7 @@
 import type { Pool as ApiPool } from "@solvent/sdk/client";
 
-import { DASH, type Pool } from "@/data";
-
-const USD = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-const COUNT = new Intl.NumberFormat("en-US");
+import { type Pool } from "@/data";
+import { count, percent, usd } from "@/lib/format";
 
 /** The Aqua deployment generation shown beside a fee tier. Fixed until the server reports one. */
 const AQUA_VERSION = "v1";
@@ -31,16 +24,12 @@ function curves(mix: CurveMix): string[] {
 /** A signed move, arrowed the way it went. */
 function change(pct?: number | null): string | undefined {
   if (pct == null) return undefined;
-  return `${pct < 0 ? "↘" : "↗"} ${Math.abs(pct).toFixed(1)}%`;
-}
-
-function usd(value?: number | null): string {
-  return value == null ? DASH : USD.format(value);
+  return percent(pct, { sign: "arrow" });
 }
 
 /** Basis points as the percentage the design labels a spread. */
 function spread(min: number, max: number): string {
-  const pct = (bps: number) => `${(bps / 100).toFixed(2)}%`;
+  const pct = (bps: number) => percent(bps / 100);
   return min === max ? `${pct(min)} spread` : `${pct(min)}–${pct(max)} spread`;
 }
 
@@ -58,9 +47,9 @@ export function toPool(api: ApiPool): Pool {
     range: spread(api.min_spread_bps, api.max_spread_bps),
     tvl: usd(api.tvl_usd),
     vol: usd(api.volume_24h_usd),
-    fills: COUNT.format(api.fills_24h),
+    fills: count(api.fills_24h),
     fee: `${api.popular_fee_tier} · ${AQUA_VERSION}`,
-    apr: api.apr_pct == null ? DASH : `${api.apr_pct.toFixed(1)}%`,
+    apr: percent(api.apr_pct, { digits: 1 }),
     feeTier: api.popular_fee_tier,
     curves: curves(api.curve_mix),
     ref: {

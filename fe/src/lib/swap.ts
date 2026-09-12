@@ -2,7 +2,7 @@ import { formatUnits } from "viem";
 import { parseTokenAmount } from "@solvent/sdk/validation";
 
 import type { Asset, Quote } from "@/data";
-import { trimmedAmount } from "./format";
+import { tokenAmount } from "./format";
 
 /** The unfiltered choice in each list; not a value any asset carries. */
 export const ANY_TAG = "All";
@@ -197,7 +197,7 @@ export function minimumReceived(
   decimalsOut: number,
   slippagePct: number,
 ): string {
-  return trimmedAmount(
+  return tokenAmount(
     formatUnits(minimumOutput(quote.amountOutRaw, slippagePct), decimalsOut),
   );
 }

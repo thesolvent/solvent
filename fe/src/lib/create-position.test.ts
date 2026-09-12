@@ -306,7 +306,7 @@ describe("market history", () => {
     const unavailable = createPosition(INITIAL_STATE, [pair]);
 
     expect(live.series).not.toBe("");
-    expect(live.vols.map(({ vol }) => vol)).toEqual(["$1K", "$2K"]);
+    expect(live.vols.map(({ vol }) => vol)).toEqual(["$1,000.00", "$2,000.00"]);
     expect(live.cross?.date).toBe("Sep 8, 2026");
     expect(unavailable.series).toBe("");
     expect(unavailable.vols).toEqual([]);
