@@ -848,6 +848,7 @@ pub fn execution_service(
         .build();
     let executor = Arc::new(WalletkitExecutor::new(
         wallet,
+        h.maker_provider.clone(),
         SubmissionOpts::public(),
         Arc::new(SqliteFillStore::new(pool)),
     ));

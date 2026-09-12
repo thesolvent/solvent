@@ -360,6 +360,7 @@ async fn main() -> Result<(), StartupError> {
     let fill_store = Arc::new(SqliteFillStore::new(pool.clone()));
     let executor = Arc::new(WalletkitExecutor::new(
         wallet,
+        provider.clone(),
         SubmissionOpts::public(),
         fill_store,
     ));
