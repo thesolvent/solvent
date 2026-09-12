@@ -27,7 +27,7 @@ use common::{
 use solvent_adapters::balances::AlloyBalancesOracle;
 use solvent_adapters::chain::ChainHead;
 use solvent_adapters::execution::LocalPolicySigner;
-use solvent_adapters::http::state::{AppConfig, AppState, Features};
+use solvent_adapters::http::state::{AppConfig, AppState, Chain, Features};
 use solvent_adapters::http::{router, DepthReader};
 use solvent_adapters::ingest::erc7683::{Erc7683Normalizer, Solvent7683Order};
 use solvent_adapters::ingest::uniswapx::{
@@ -552,7 +552,11 @@ async fn erc7683_http_state(
                     send_buy: false,
                 },
                 default_fee_bps: 5,
-                networks: vec!["Anvil".to_string()],
+                chains: vec![Chain {
+                    chain_id: 31337,
+                    name: "Anvil".to_string(),
+                    logo_uri: None,
+                }],
                 block_explorer_url: "http://localhost".to_string(),
                 aqua: *stack.h.aqua.address(),
                 app: stack.h.app,

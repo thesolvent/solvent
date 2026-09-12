@@ -20,6 +20,8 @@ import { useSubmitSwap } from "@/services/swap";
 import { useConfig } from "@/services/system";
 import { type SwapProtocol, useApp } from "@/state";
 import { AssetIdentity } from "@/components/AssetIdentity";
+import { Term } from "@/components/Tooltip";
+import type { GlossaryKey } from "@/lib/glossary";
 import { useAssetBalances, useWalletAction } from "@/services/wallet";
 
 import styles from "./SwapPage.module.css";
@@ -97,15 +99,24 @@ export function SwapPage() {
   const outStr = quote?.amountOut ?? (hasAmount && amt > 0 && to ? DASH : "");
   const dotAt = outStr.indexOf(".");
 
-  const routeStats = [
+  const routeStats: { label: string; term: GlossaryKey; value: string }[] = [
     {
       label: "Fills",
+      term: "fills",
       value: quote
         ? `${quote.makersSourced} ${quote.makersSourced === 1 ? "maker" : "makers"}`
         : DASH,
     },
-    { label: "Price impact", value: quote?.priceImpact ?? DASH },
-    { label: "Max slippage", value: `${config.slippage}%` },
+    {
+      label: "Price impact",
+      term: "priceImpact",
+      value: quote?.priceImpact ?? DASH,
+    },
+    {
+      label: "Max slippage",
+      term: "maxSlippage",
+      value: `${config.slippage}%`,
+    },
   ];
 
   const wallet = useWalletAction();
@@ -384,7 +395,9 @@ export function SwapPage() {
           <div className={styles.route}>
             {routeStats.map((s) => (
               <div key={s.label} className={styles.routeCell}>
-                <div className={styles.routeLabel}>{s.label}</div>
+                <div className={styles.routeLabel}>
+                  <Term term={s.term}>{s.label}</Term>
+                </div>
                 <div className={styles.routeValue}>{s.value}</div>
               </div>
             ))}
@@ -464,6 +477,7 @@ export function SwapPage() {
                     >
                       <span className={styles.tokenChip}>
                         {t.symbol.slice(0, 2)}
+                        {t.logoUri && <img alt="" loading="lazy" src={t.logoUri} />}
                       </span>
                       <span className={styles.tokenMain}>
                         <span className={styles.tokenName}>{t.name}</span>

@@ -5,9 +5,16 @@ import trades from "@/data/fixtures/trades.json";
 import activity from "@/data/fixtures/activity.json";
 import assets from "@/data/fixtures/assets.json";
 import type { Asset } from "@/data";
-import { toAsset } from "./asset";
+import { chainsOf, toAsset } from "./asset";
 import type { CrossChainOrder } from "@solvent/sdk/cross-chain";
 import { toActivity, toCrossChainTrade, toTrade } from "./explorer";
+
+const KNOWN = chainsOf({
+  chains: [
+    { chain_id: 31337, name: "Chain A", logo_uri: null },
+    { chain_id: 31338, name: "Base", logo_uri: null },
+  ],
+});
 
 describe("Explorer records", () => {
   it("keeps settlement amounts, profit denomination, and distinct maker shares", () => {
@@ -132,8 +139,10 @@ describe("Explorer records", () => {
 
     const trade = toCrossChainTrade(
       order,
-      assets.items.map((asset) => toAsset(asset, "Chain A")) as Asset[],
-      assets.items.map((asset) => toAsset(asset, "Base")) as Asset[],
+      assets.items.map((asset) => toAsset(asset, KNOWN)) as Asset[],
+      assets.items.map((asset) =>
+        toAsset({ ...asset, chain_id: 31338 }, KNOWN),
+      ) as Asset[],
     );
 
     expect(trade).toMatchObject({
@@ -235,8 +244,10 @@ describe("Explorer records", () => {
 
     const trade = toCrossChainTrade(
       order,
-      assets.items.map((asset) => toAsset(asset, "Chain A")) as Asset[],
-      assets.items.map((asset) => toAsset(asset, "Base")) as Asset[],
+      assets.items.map((asset) => toAsset(asset, KNOWN)) as Asset[],
+      assets.items.map((asset) =>
+        toAsset({ ...asset, chain_id: 31338 }, KNOWN),
+      ) as Asset[],
     );
 
     expect(trade.lifecycle.map((stage) => stage.status)).toEqual([
