@@ -74,7 +74,7 @@ export function Header() {
   const disconnectWallet = () => {
     setAccountOpen(false);
     setAccountProblem(undefined);
-    // MetaMask retains site permission, but this ends Solvent's active signer session.
+    // Disconnecting closes Solvent's signer session even when an external wallet keeps site permission.
     disconnect();
     void logout().catch(() => undefined);
   };

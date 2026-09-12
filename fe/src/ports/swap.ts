@@ -3,6 +3,7 @@ import type {
   SwapSubmissionStatus,
   WalletClients,
 } from "@solvent/sdk/swap";
+import type { SwapProtocol } from "@/state";
 import type { Asset, Quote, SubmittedSwap } from "@/data";
 
 export type { SwapSubmissionOptions, SwapSubmissionStatus };
@@ -11,6 +12,7 @@ export interface QuoteInput {
   from: Asset;
   to: Asset;
   amount: string;
+  protocol?: SwapProtocol;
 }
 
 export interface SwapInput extends QuoteInput {

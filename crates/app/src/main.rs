@@ -23,7 +23,9 @@ use solvent_adapters::execution::{
 };
 use solvent_adapters::http::state::AppState;
 use solvent_adapters::http::{self};
+use solvent_adapters::ingest::erc7683::{Erc7683FillBuilder, Erc7683Normalizer};
 use solvent_adapters::ingest::uniswapx::{ServerCosigner, UniswapXFillBuilder};
+use solvent_adapters::ingest::ProtocolFillBuilder;
 use solvent_adapters::ledger::{AlloyBudgetSource, SqliteLedgerStore, SystemClock};
 use solvent_adapters::metrics::{SqliteMakerMetrics, SqliteQuoteLog};
 use solvent_adapters::rebate::{
@@ -57,6 +59,7 @@ use solvent_core::maker::MakerService;
 use solvent_core::obs::{error as obs_error, info, warn};
 use solvent_core::pool::{DepthService, PoolService};
 use solvent_core::primitives::crosschain::RemoteCommand;
+use solvent_core::primitives::ingest::ExecutionFeePolicy;
 use solvent_core::primitives::routing::RoutingConfig;
 use solvent_core::primitives::{ChainConfig, ChainId};
 use solvent_core::quote::QuoteService;
@@ -112,6 +115,7 @@ async fn main() -> Result<(), StartupError> {
 
     let config_path = std::env::var("SOLVENT_CONFIG").unwrap_or_else(|_| "solvent".to_string());
     let config = Config::load(&config_path)?;
+    let erc7683_contracts = config.erc7683_contracts()?;
 
     let rpc = config
         .rpc_url
@@ -123,6 +127,22 @@ async fn main() -> Result<(), StartupError> {
         .call()
         .await
         .map_err(|error| StartupError::FillerConfiguration(error.to_string()))?;
+    if let Some(contracts) = erc7683_contracts {
+        let erc7683_credential = FillerConfiguration::new(contracts.filler, provider.clone())
+            .TAKER_CREDENTIAL()
+            .call()
+            .await
+            .map_err(|error| StartupError::FillerConfiguration(error.to_string()))?;
+        if erc7683_credential != taker_credential {
+            return Err(StartupError::FillerConfiguration(
+                "UniswapX and ERC-7683 fillers must share one taker credential".to_string(),
+            ));
+        }
+    }
+    let erc7683_fee_policy = erc7683_contracts
+        .map(|_| ExecutionFeePolicy::new(config.erc7683_executor_fee_bps))
+        .transpose()
+        .map_err(StartupError::from)?;
     let (head, poller) = ChainHead::new(provider.clone(), BLOCK_POLL_INTERVAL);
     tokio::spawn(poller);
 
@@ -303,11 +323,18 @@ async fn main() -> Result<(), StartupError> {
     let policy_signer = policy_signer_key.parse::<PrivateKeySigner>().map_err(|_| {
         StartupError::Key("SOLVENT_POLICY_SIGNER_KEY is not a valid private key".into())
     })?;
-    let authorizer: Arc<dyn ExecutionAuthorizer> = Arc::new(LocalPolicySigner::new(
+    let uniswapx_authorizer: Arc<dyn ExecutionAuthorizer> = Arc::new(LocalPolicySigner::new(
         config.chain_id,
         config.filler,
-        policy_signer,
+        policy_signer.clone(),
     ));
+    let erc7683_authorizer = erc7683_contracts.map(|contracts| {
+        Arc::new(LocalPolicySigner::new(
+            config.chain_id,
+            contracts.filler,
+            policy_signer,
+        )) as Arc<dyn ExecutionAuthorizer>
+    });
     let policy = DefaultPolicyEngine::new(
         vec![Box::new(AllowAll)],
         Arc::new(walletkit::adapters::SystemClock),
@@ -461,7 +488,7 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&rebate_store),
         Arc::new(FillerRebateCallBuilder::new(
             taker_credential,
-            Arc::clone(&authorizer),
+            Arc::clone(&uniswapx_authorizer),
         )),
         RebateMarketData::new(rebate_market, gas, Arc::clone(&assets)),
         RebateServiceConfig::new(
@@ -496,11 +523,36 @@ async fn main() -> Result<(), StartupError> {
             config.reservation_ttl_secs,
         ),
     ));
-    let fill_builder: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(
+    let uniswapx_fill: Arc<dyn FillBuilder> = Arc::new(UniswapXFillBuilder::new(
         config.app_address,
+        config.filler,
         taker_credential,
-        authorizer,
+        uniswapx_authorizer,
     ));
+    let erc7683_fill = erc7683_contracts
+        .zip(erc7683_authorizer)
+        .map(|(contracts, authorizer)| {
+            Arc::new(Erc7683FillBuilder::new(
+                config.app_address,
+                contracts.settler,
+                contracts.filler,
+                filler_owner,
+                taker_credential,
+                authorizer,
+            )) as Arc<dyn FillBuilder>
+        });
+    let fill_builder: Arc<dyn FillBuilder> =
+        Arc::new(ProtocolFillBuilder::new(uniswapx_fill, erc7683_fill));
+    let erc7683 = erc7683_contracts
+        .zip(erc7683_fee_policy)
+        .map(|(contracts, fee_policy)| {
+            Arc::new(Erc7683Normalizer::new(
+                ChainId(config.chain_id),
+                config.permit2,
+                contracts.settler,
+                fee_policy,
+            ))
+        });
     let reconcile = Arc::new(ReconcileService::new(
         Arc::clone(&execution),
         Arc::clone(&trade_store),
@@ -519,7 +571,6 @@ async fn main() -> Result<(), StartupError> {
         SwapConfig {
             routing: RoutingConfig::new(MAX_CANDIDATES, MAX_LEGS, config.gas_units_per_leg),
             chain_id: config.chain_id,
-            filler: config.filler,
             filler_owner,
             reservation_ttl_secs: config.reservation_ttl_secs,
         },
@@ -560,7 +611,11 @@ async fn main() -> Result<(), StartupError> {
         Arc::clone(&registry),
     ));
     let state = AppState {
-        config: Arc::new(config.app_config(cosigner.address(), taker_credential)),
+        config: Arc::new(config.app_config(
+            cosigner.address(),
+            taker_credential,
+            erc7683_contracts,
+        )),
         head,
         assets,
         pair_history,
@@ -572,6 +627,8 @@ async fn main() -> Result<(), StartupError> {
         swap,
         rebates,
         cosigner,
+        erc7683,
+        erc7683_fee_policy,
         trades,
         registry: Arc::clone(&registry),
         registry_store,

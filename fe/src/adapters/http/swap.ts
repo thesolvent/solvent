@@ -1,4 +1,4 @@
-import type { OrderTerms } from "@solvent/sdk/orders";
+import type { Erc7683OrderTerms, OrderTerms } from "@solvent/sdk/orders";
 import {
   createSwapClient,
   type SwapIntent as SdkSwapIntent,
@@ -256,17 +256,32 @@ function orderTerms({
   };
 }
 
+function erc7683OrderTerms(input: SwapInput): Erc7683OrderTerms {
+  const executorFee = input.quote.executorFeeRaw;
+  if (executorFee === undefined || executorFee <= 0n) {
+    throw new InputValidationError(
+      "quote",
+      "out_of_range",
+      "The ERC-7683 quote is missing its executor fee",
+    );
+  }
+  return { ...orderTerms(input), executorFee };
+}
+
 export const swapAdapter: SwapPort = {
-  async quote({ from, to, amount }) {
+  async quote({ from, to, amount, protocol = "uniswapx" }) {
     if (from.chainId !== to.chainId) {
       return crossChainQuote({ from, to, amount });
     }
     const amountInRaw = parseTokenAmount(amount, from.decimals, "Swap amount");
-    const priced = await sameChainApi(from.chainId).quote({
+    const request = {
       token_in: from.address,
       token_out: to.address,
       amount_in: amountInRaw.toString(),
-    });
+    };
+    const priced = await sameChainApi(from.chainId).quote(
+      protocol === "erc7683" ? { ...request, protocol } : request,
+    );
     const amountOutRaw = BigInt(priced.amount_out.raw);
     if (amountOutRaw > MAX_UINT256 || amountOutRaw <= 0n) {
       throw new Error("The resolver returned an invalid output amount");
@@ -290,7 +305,10 @@ export const swapAdapter: SwapPort = {
     return {
       async submit(options?: SwapSubmissionOptions) {
         // Validate display units inside the async operation so failures reach mutation state.
-        intent ??= swaps.createIntent(orderTerms(input));
+        intent ??=
+          input.protocol === "erc7683"
+            ? swaps.createErc7683Intent(erc7683OrderTerms(input))
+            : swaps.createIntent(orderTerms(input));
         const result = await intent.submit(options);
         return { tradeId: result.trade_id, status: result.status };
       },

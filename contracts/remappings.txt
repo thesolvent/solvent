@@ -2,6 +2,8 @@
 @1inch/aqua/=node_modules/@1inch/aqua/
 @1inch/solidity-utils/=node_modules/@1inch/solidity-utils/
 @openzeppelin/contracts/=node_modules/@openzeppelin/contracts/
+@openzeppelin/contracts-erc7683/=node_modules/@openzeppelin/contracts-erc7683/
+erc7683/=lib/erc7683/contracts/
 forge-std/=node_modules/forge-std/src/
 uniswapx/=lib/UniswapX/src/
 uniswapx-test/=lib/UniswapX/test/
@@ -9,3 +11,4 @@ permit2/=lib/UniswapX/lib/permit2/
 solmate/=lib/UniswapX/lib/solmate/
 openzeppelin-contracts/=lib/UniswapX/lib/openzeppelin-contracts/contracts/
 forge-gas-snapshot/=lib/UniswapX/lib/forge-gas-snapshot/src/
+the-compact/=lib/the-compact/

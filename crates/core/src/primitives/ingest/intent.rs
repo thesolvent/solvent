@@ -1,8 +1,8 @@
 //! The canonical intent — the protocol-agnostic order every downstream slice (routing, ledger,
 //! execution) consumes. Protocol-specific bytes ride along opaquely in `raw`, decoded only by the
-//! protocol's own adapter, so adding a protocol is a new adapter with no change here.
+//! protocol's own adapter, so downstream routing and execution stay independent of its wire format.
 
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::{Address, Bytes, U256};
 
 use crate::primitives::ingest::curve::AmountCurve;
 use crate::primitives::{ChainId, IntentId};
@@ -13,6 +13,7 @@ use crate::primitives::{ChainId, IntentId};
 #[non_exhaustive]
 pub enum ProtocolId {
     UniswapXV2,
+    Erc7683,
 }
 
 /// What the taker pays: the token and its amount over time.
@@ -71,6 +72,8 @@ pub struct Intent {
     pub id: IntentId,
     pub protocol: ProtocolId,
     pub input: IntentInput,
+    /// Optional protocol overhead excluded from routing while the signed input stays gross.
+    pub routing_input_limit: Option<U256>,
     pub outputs: Vec<IntentOutput>,
     pub deadline: u64,
     pub exclusivity: Option<Exclusivity>,
@@ -90,6 +93,7 @@ impl Intent {
         id: IntentId,
         protocol: ProtocolId,
         input: IntentInput,
+        routing_input_limit: Option<U256>,
         outputs: Vec<IntentOutput>,
         deadline: u64,
         exclusivity: Option<Exclusivity>,
@@ -103,6 +107,7 @@ impl Intent {
             id,
             protocol,
             input,
+            routing_input_limit,
             outputs,
             deadline,
             exclusivity,

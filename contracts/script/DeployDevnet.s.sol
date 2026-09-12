@@ -8,15 +8,19 @@ import { AquaSwapVMRouter } from "@1inch/swap-vm/src/routers/AquaSwapVMRouter.so
 import { ISwapVM } from "@1inch/swap-vm/src/interfaces/ISwapVM.sol";
 
 import { V2DutchOrderReactor } from "uniswapx/reactors/V2DutchOrderReactor.sol";
-import { IReactor } from "uniswapx/interfaces/IReactor.sol";
 import { IPermit2 } from "permit2/src/interfaces/IPermit2.sol";
+import { ISignatureTransfer } from "permit2/src/interfaces/ISignatureTransfer.sol";
 
+import { Erc7683AquaFiller } from "../src/Erc7683AquaFiller.sol";
+import { Solvent7683Resolver } from "../src/Solvent7683Resolver.sol";
+import { SolventSameChainSettler } from "../src/SolventSameChainSettler.sol";
+import { SolventTakerCredential } from "../src/SolventTakerCredential.sol";
+import { IErc7683AquaFiller, ISolventSameChainSettler } from "../src/interfaces/ISolvent7683.sol";
 import { UniswapXAquaFiller } from "../src/UniswapXAquaFiller.sol";
 import { DevToken } from "../src/DevToken.sol";
 
-/// @notice One-shot devnet deploy: the Aqua core + its SwapVM router, the UniswapX reactor + our
-///         filler, and a set of mintable test tokens at real-world decimals. Writes an address
-///         manifest the backend and frontend read. Devnet only — never a real network.
+/// @notice One-shot devnet deploy for Aqua, the supported protocol fillers, their settlement
+///         dependencies, and mintable test tokens. Writes the manifest consumed offchain.
 contract DeployDevnet is Script {
     /// Canonical, chain-agnostic infra already present on the devnet chain (baked into wharfnet's
     /// load-state). Referenced, not deployed.
@@ -46,7 +50,7 @@ contract DeployDevnet is Script {
         toks[4] = Tok({ name: "Wrapped BTC", symbol: "WBTC", decimals: 8 });
         toks[5] = Tok({ name: "ChainLink Token", symbol: "LINK", decimals: 18 });
 
-        // The broadcasting key owns the router and the filler (the resolver operator on devnet).
+        // The broadcasting key operates the router and both protocol fillers on devnet.
         address owner = msg.sender;
 
         vm.startBroadcast();
@@ -54,28 +58,52 @@ contract DeployDevnet is Script {
         Aqua aqua = new Aqua();
         AquaSwapVMRouter router = new AquaSwapVMRouter(address(aqua), WETH, owner, ROUTER_NAME, ROUTER_VERSION);
         V2DutchOrderReactor reactor = new V2DutchOrderReactor(IPermit2(PERMIT2), address(0));
-        address policySigner = vm.envOr("POLICY_SIGNER", owner);
-        UniswapXAquaFiller filler =
-            new UniswapXAquaFiller(owner, ISwapVM(address(router)), IReactor(address(reactor)), policySigner);
+        SolventTakerCredential credential = new SolventTakerCredential(owner);
+        SolventSameChainSettler settler = new SolventSameChainSettler(ISignatureTransfer(PERMIT2), credential);
+        UniswapXAquaFiller filler = new UniswapXAquaFiller(owner, ISwapVM(address(router)), reactor, credential, owner);
+        Erc7683AquaFiller erc7683Filler =
+            new Erc7683AquaFiller(owner, ISwapVM(address(router)), settler, credential, owner);
+
+        credential.setTaker(address(filler), true);
+        credential.setTaker(address(erc7683Filler), true);
+        credential.freeze();
+        Solvent7683Resolver erc7683Resolver = new Solvent7683Resolver(
+            ISolventSameChainSettler(address(settler)), IErc7683AquaFiller(address(erc7683Filler))
+        );
 
         address[6] memory tokenAddrs;
         for (uint256 i = 0; i < toks.length; i++) {
             tokenAddrs[i] = address(new DevToken(toks[i].name, toks[i].symbol, toks[i].decimals));
             filler.setTokenAllowed(tokenAddrs[i], true);
+            erc7683Filler.setTokenAllowed(tokenAddrs[i], true);
         }
 
         vm.stopBroadcast();
 
-        _writeManifest(address(aqua), address(router), address(reactor), address(filler), toks, tokenAddrs);
+        _writeManifest(
+            address(aqua),
+            address(router),
+            address(reactor),
+            address(filler),
+            address(settler),
+            address(erc7683Filler),
+            address(erc7683Resolver),
+            address(credential),
+            toks,
+            tokenAddrs
+        );
     }
 
-    /// Emit the address manifest as JSON. `router` is the Aqua app makers ship to; `filler` is the
-    /// reactor callback the resolver drives.
+    /// Emit the address manifest as JSON for backend and frontend startup.
     function _writeManifest(
         address aqua,
         address router,
         address reactor,
         address filler,
+        address erc7683Settler,
+        address erc7683Filler,
+        address erc7683Resolver,
+        address takerCredential,
         Tok[6] memory toks,
         address[6] memory tokenAddrs
     )
@@ -89,6 +117,10 @@ contract DeployDevnet is Script {
         vm.serializeAddress(root, "router", router);
         vm.serializeAddress(root, "reactor", reactor);
         vm.serializeAddress(root, "filler", filler);
+        vm.serializeAddress(root, "erc7683_settler", erc7683Settler);
+        vm.serializeAddress(root, "erc7683_filler", erc7683Filler);
+        vm.serializeAddress(root, "erc7683_resolver", erc7683Resolver);
+        vm.serializeAddress(root, "taker_credential", takerCredential);
 
         string memory tokensObj = "tokens";
         string memory tokensJson;

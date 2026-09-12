@@ -2,6 +2,7 @@ import { skipToken, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { parseTokenAmount } from "@solvent/sdk/validation";
 import type { Asset, Quote } from "@/data";
+import type { SwapProtocol } from "@/state";
 import { useServices } from "./context";
 
 /** Long enough that typing an amount does not price every keystroke. */
@@ -63,6 +64,7 @@ export function useQuote(
   from: Asset | undefined,
   to: Asset | undefined,
   amount: string,
+  protocol: SwapProtocol = "uniswapx",
 ): QuoteState {
   const { swap } = useServices();
   const settled = useSettled(amount, SETTLE_MS);
@@ -91,9 +93,10 @@ export function useQuote(
       to?.chainId,
       to?.address,
       settled,
+      protocol,
     ],
     queryFn: quotable
-      ? () => swap.quote({ from, to, amount: settled })
+      ? () => swap.quote({ from, to, amount: settled, protocol })
       : skipToken,
     staleTime: 0,
     refetchInterval: ({ state }) => refreshIn(state.data),
