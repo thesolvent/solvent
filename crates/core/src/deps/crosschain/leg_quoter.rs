@@ -5,7 +5,7 @@ use crate::primitives::crosschain::{LegQuote, LegQuoteRequest};
 
 #[derive(Debug, Error)]
 pub enum LegQuoterError {
-    #[error("no compatible chain-local route")]
+    #[error("no route for this pair and size")]
     NoRoute,
     #[error("chain-local quote backend: {0}")]
     Backend(String),

@@ -62,10 +62,11 @@ impl SolventClient {
                 .map_err(|error| RemoteSolventError::InvalidResponse(error.to_string()));
         }
         let status = response.status();
+        let message = status_message(status, response.text().await.ok());
         if status.is_client_error() {
-            Err(RemoteSolventError::Rejected(status_message(status)))
+            Err(RemoteSolventError::Rejected(message))
         } else {
-            Err(RemoteSolventError::Unavailable(status_message(status)))
+            Err(RemoteSolventError::Unavailable(message))
         }
     }
 }
@@ -205,6 +206,13 @@ impl RemoteSolvent for SolventClient {
     }
 }
 
-fn status_message(status: StatusCode) -> String {
-    format!("chain-local Solvent returned HTTP {status}")
+/// The refusal as the chain-local service worded it.
+///
+/// Its own sentence is what a caller can act on; the status code only names the layer that said
+/// no. The code is kept for the case where a service refuses without saying why.
+fn status_message(status: StatusCode, body: Option<String>) -> String {
+    match body.map(|body| body.trim().to_string()).filter(|b| !b.is_empty()) {
+        Some(body) => body,
+        None => format!("chain-local Solvent returned HTTP {status}"),
+    }
 }
