@@ -243,3 +243,37 @@ export async function deployCrossWiredApps(
 
   return { settler, app };
 }
+
+/** Complete the one-time proof-rail links once both contracts that emit proofs exist. */
+export async function configureProofRails(
+  origin: ChainTarget,
+  destination: ChainTarget,
+  originInfra: CrossChainInfraManifest,
+  destinationInfra: CrossChainInfraManifest,
+  settler: OriginSettlerManifest,
+  app: DestinationAppManifest,
+): Promise<void> {
+  const configure = async (
+    target: ChainTarget,
+    local: CrossChainInfraManifest,
+    remote: CrossChainInfraManifest,
+    recorder: string,
+  ): Promise<void> => {
+    await runForgeScript({
+      scriptPath: "script/DeployProofRail.s.sol",
+      contract: "ConfigureProofRail",
+      rpcUrl: target.internalRpcUrl,
+      privateKey: DEPLOYER_KEY,
+      env: {
+        PROOF_INBOX: local.inbox,
+        PROOF_OUTBOX: local.outbox,
+        CCIP_REMOTE_OUTBOX: remote.outbox,
+        PROOF_RECORDER: recorder,
+        CCIP_DESTINATION_INBOX: remote.inbox,
+      },
+    });
+  };
+
+  await configure(origin, originInfra, destinationInfra, settler.settler);
+  await configure(destination, destinationInfra, originInfra, app.app);
+}

@@ -8,7 +8,7 @@
  *   node src/deploy/all.ts --down     # stop everything this script started; keep chain state
  */
 import { execFile } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -18,12 +18,27 @@ import { PreflightError, preflight } from "./preflight.ts";
 import {
   deployCrossChainInfra,
   deployCrossWiredApps,
+  configureProofRails,
   deployOriginCompact,
   deploySameChainStack,
   type ChainTarget,
 } from "./phases.ts";
-import { generateInternalToken, writeSideConfig, PORTS } from "./config.ts";
-import { startBackend, startRelay, stopAll, type RunningProcess } from "./processes.ts";
+import {
+  COORDINATOR_PORT,
+  DIRECT_DESTINATION_PORTS,
+  generateInternalToken,
+  writeCoordinatorConfig,
+  writeSideConfig,
+  type DirectRouteConfig,
+  PORTS,
+} from "./config.ts";
+import {
+  startBackend,
+  startCoordinator,
+  startRelay,
+  stopAll,
+  type RunningProcess,
+} from "./processes.ts";
 import { CROSSCHAIN_ROOT, ensureManifestDirs } from "./manifests.ts";
 
 const execFileAsync = promisify(execFile);
@@ -35,6 +50,22 @@ const ORIGIN: ChainTarget = {
   internalRpcUrl: "http://anvil-origin:8545",
   chainId: 31337,
 };
+interface DirectSeed {
+  maker: string;
+  strategyHash: string;
+}
+
+function directSeed(side: "origin" | "destination"): DirectSeed {
+  const path = resolve(REPO_ROOT, "devnet/generated/crosschain", `direct-${side}.json`);
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as DirectSeed;
+    if (!parsed.maker || !parsed.strategyHash) throw new Error("missing maker or strategy hash");
+    return parsed;
+  } catch (error) {
+    throw new Error(`could not read ${side} direct route seed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 const DESTINATION: ChainTarget = {
   side: "destination",
   rpcUrl: PORTS.destination.rpcUrl,
@@ -141,12 +172,17 @@ async function main(): Promise<void> {
   const args = new Set(process.argv.slice(2));
 
   if (args.has("--down")) {
-    console.log("Stopping backends + relay (chain state and containers are left running)...");
+    console.log("Stopping backends, coordinator, and relay (chain state and containers are left running)...");
     // A separate invocation does not have the PIDs a prior `deploy` run printed — recover them by
     // identity instead: whatever is bound to *our* two API ports is, unambiguously, the backend
     // this script started (nothing else was allowed to hold them), and the relay is identified by
     // its exact script path, not a loose name match that could catch an unrelated node process.
-    for (const port of [PORTS.origin.apiPort, PORTS.destination.apiPort]) {
+    for (const port of [
+      PORTS.origin.apiPort,
+      PORTS.destination.apiPort,
+      DIRECT_DESTINATION_PORTS.apiPort,
+      COORDINATOR_PORT,
+    ]) {
       try {
         const { stdout } = await execFileAsync("lsof", ["-ti", `:${port}`]);
         for (const pid of stdout.trim().split("\n").filter(Boolean)) {
@@ -174,8 +210,8 @@ async function main(): Promise<void> {
     console.log("Resetting: tearing down infra and clearing generated state...");
     await tearDownInfra().catch(() => undefined);
     if (existsSync(CROSSCHAIN_ROOT)) rmSync(CROSSCHAIN_ROOT, { recursive: true, force: true });
-    for (const side of ["origin", "destination"] as const) {
-      const cfg = resolve(REPO_ROOT, `solvent.${side}.toml`);
+    for (const configName of ["solvent.origin", "solvent.destination", "solvent.destination-direct"]) {
+      const cfg = resolve(REPO_ROOT, `${configName}.toml`);
       if (existsSync(cfg)) rmSync(cfg);
     }
   }
@@ -190,6 +226,8 @@ async function main(): Promise<void> {
       { port: 9182, label: "faucet-destination" },
       { port: PORTS.origin.apiPort, label: "solvent-origin API" },
       { port: PORTS.destination.apiPort, label: "solvent-destination API" },
+      { port: COORDINATOR_PORT, label: "SolventX coordinator" },
+      { port: DIRECT_DESTINATION_PORTS.apiPort, label: "direct destination API" },
     ],
   });
 
@@ -212,6 +250,15 @@ async function main(): Promise<void> {
     destinationInfra,
     originCompact,
   );
+  console.log("\n== phase 5: proof-rail links ==");
+  await configureProofRails(
+    ORIGIN,
+    DESTINATION,
+    originInfra,
+    destinationInfra,
+    settler,
+    app,
+  );
 
   console.log("\n== config: generating solvent.origin.toml / solvent.destination.toml ==");
   const internalToken = generateInternalToken();
@@ -223,12 +270,24 @@ async function main(): Promise<void> {
     destinationInfra,
     wiring,
   );
-
-  console.log("\n== starting backends + relay ==");
+  console.log("\n== starting chain-local backends ==");
   const running: RunningProcess[] = [];
-  running.push(await startBackend("origin", originConfig.envPath));
-  running.push(await startBackend("destination", destinationConfig.envPath));
-  running.push(startRelay());
+  running.push(
+    await startBackend({
+      label: "origin",
+      apiPort: PORTS.origin.apiPort,
+      configName: "solvent.origin",
+      envPath: originConfig.envPath,
+    }),
+  );
+  running.push(
+    await startBackend({
+      label: "destination",
+      apiPort: PORTS.destination.apiPort,
+      configName: "solvent.destination",
+      envPath: destinationConfig.envPath,
+    }),
+  );
 
   // The seed script talks to the live API (asset list, chain-id cross-check), not just the RPC —
   // it has to run after the backend is up and healthy, not before.
@@ -242,20 +301,79 @@ async function main(): Promise<void> {
   await runSideScript("src/smoke/endpoints.ts", "origin");
   await runSideScript("src/smoke/endpoints.ts", "destination");
 
+  console.log("\n== direct route: seed WBTC origin -> USDC destination ==");
+  await runSideScript("src/seed/crosschain-direct.ts", "origin", {
+    SOLVENT_DIRECT_SIDE: "origin",
+    SOLVENT_STRATEGY_APP: settler.settler,
+    SOLVENT_DIRECT_OUTPUT: "devnet/generated/crosschain/direct-origin.json",
+  }, 4);
+  await runSideScript("src/seed/crosschain-direct.ts", "destination", {
+    SOLVENT_DIRECT_SIDE: "destination",
+    SOLVENT_STRATEGY_APP: app.app,
+    SOLVENT_DIRECT_OUTPUT: "devnet/generated/crosschain/direct-destination.json",
+  }, 4);
+  const originDirect = directSeed("origin");
+  const destinationDirect = directSeed("destination");
+  if (originDirect.maker.toLowerCase() !== destinationDirect.maker.toLowerCase()) {
+    throw new Error("direct origin and destination positions must share one maker");
+  }
+  const directRoute: DirectRouteConfig = {
+    maker: destinationDirect.maker,
+    originStrategyHash: originDirect.strategyHash,
+    originSettler: settler.settler,
+    compact: originCompact.compact,
+    compactLockTag: originCompact.lock_tag,
+    destinationApp: app.app,
+    originProofOutbox: originInfra.outbox,
+    destinationProofOutbox: destinationInfra.outbox,
+    destinationFillVerifier: destinationInfra.inbox,
+    originChainId: originDevnet.chain_id,
+    destinationChainId: destinationDevnet.chain_id,
+  };
+  const directDestinationConfig = writeSideConfig(
+    "destination",
+    destinationDevnet,
+    destinationInfra,
+    wiring,
+    {
+      configName: "solvent.destination-direct",
+      appAddress: app.app,
+      ports: DIRECT_DESTINATION_PORTS,
+      databaseName: "direct-solvent.db",
+      directRoute,
+    },
+  );
+  const coordinatorConfig = writeCoordinatorConfig(directRoute);
+
+  console.log("\n== starting isolated direct destination + coordinator + relay ==");
+  running.push(
+    await startBackend({
+      label: "destination-direct",
+      apiPort: DIRECT_DESTINATION_PORTS.apiPort,
+      configName: "solvent.destination-direct",
+      envPath: directDestinationConfig.envPath,
+    }),
+  );
+  running.push(await startCoordinator(coordinatorConfig.configPath, internalToken));
+  running.push(startRelay());
+
+  console.log("\n== smoke test: direct WBTC origin -> USDC destination ==");
+  await runSideScript("src/smoke/crosschain-direct.ts", "origin", {
+    SOLVENT_COORDINATOR_URL: `http://127.0.0.1:${COORDINATOR_PORT}`,
+  });
+
   console.log("\n== cross-chain infra summary ==");
   console.log(`  origin settler:      ${settler.settler} (chain ${originDevnet.chain_id})`);
   console.log(`  destination app:     ${app.app} (chain ${destinationDevnet.chain_id})`);
   console.log(
-    "  NOTE: this verifies the infra is deployed, wired, and both chains' same-chain swap " +
-      "paths work. A full signed cross-chain swap is not scriptable yet — the client-side " +
-      "signed Compact claim construction the routed lane needs is not built (see " +
-      "scripts/test-crosschain-direct-e2e.sh's own note on this boundary). Use " +
-      "`cargo test -p solvent-adapters --test e2e_crosschain_direct` for that proof today.",
+    "  direct lane: WBTC on origin -> USDC on destination via the isolated direct destination service.",
   );
 
   console.log("\n== done ==");
   console.log(`  origin:      API http://127.0.0.1:${PORTS.origin.apiPort} · explorer http://127.0.0.1:5300 · faucet http://127.0.0.1:9181`);
   console.log(`  destination: API http://127.0.0.1:${PORTS.destination.apiPort} · explorer http://127.0.0.1:5301 · faucet http://127.0.0.1:9182`);
+  console.log(`  direct destination: API http://127.0.0.1:${DIRECT_DESTINATION_PORTS.apiPort}`);
+  console.log(`  coordinator: http://127.0.0.1:${COORDINATOR_PORT}`);
   console.log(`  relay + backend logs: devnet/generated/crosschain/logs/`);
   console.log(`  pids: ${running.map((p) => `${p.label}=${p.child.pid}`).join(" ")}`);
 }

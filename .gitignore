@@ -42,6 +42,7 @@ proptest-regressions/
 /solvent.toml
 /solvent.origin.toml
 /solvent.destination.toml
+/solvent.destination-direct.toml
 
 # --- devnet: generated per-deploy from the manifest (untracked) ---
 /devnet/generated/

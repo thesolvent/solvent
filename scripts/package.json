@@ -11,6 +11,7 @@
     "bootstrap": "node src/devnet/bootstrap.ts",
     "etch": "node src/devnet/etch.ts",
     "smoke": "node src/smoke/endpoints.ts",
+    "smoke:crosschain-direct": "node src/smoke/crosschain-direct.ts",
     "seed": "node src/seed/strategies.ts",
     "trades": "node src/seed/trades.ts",
     "relay:crosschain": "node src/crosschain/relay.ts",
