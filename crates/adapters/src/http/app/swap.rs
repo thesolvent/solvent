@@ -1,15 +1,15 @@
-//! `POST /v1/swap/quote` — a read-only routing quote. `POST /v1/swap` — submit a taker-signed order
-//! (UniswapX Orders API shape): decode, verify the swapper signature, cosign, then route → reserve →
-//! persist → fill via the core `SwapService`.
+//! `POST /v1/swap/quote` — a read-only routing quote. `POST /v1/swap` — authenticate a supported
+//! taker-signed order, then route → reserve → persist → fill via the core `SwapService`.
 
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use alloy::primitives::{Address, U256};
+use alloy::primitives::{Address, Bytes, U256};
 use axum::extract::{Json, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use solvent_core::deps::ingest::Normalizer;
 use solvent_core::deps::quote_log::{QuoteParticipant, QuoteServed};
+use solvent_core::primitives::ingest::{ProtocolId, RawOrder};
 use solvent_core::primitives::quote::QuoteLeg;
 use solvent_core::primitives::registry::TokenPair;
 use solvent_core::primitives::trade::TradeId;
@@ -23,9 +23,19 @@ use crate::http::primitives::{parse_addr, ApiResult, Response};
 use crate::http::state::AppState;
 use crate::ingest::uniswapx::UniswapXV2Normalizer;
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SwapProtocol {
+    #[default]
+    Uniswapx,
+    Erc7683,
+}
+
 /// A quote request: the pair, and the input size in base units.
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct QuoteRequest {
+    #[serde(default)]
+    pub protocol: SwapProtocol,
     pub token_in: String,
     pub token_out: String,
     /// The input amount, in base units (a decimal integer string).
@@ -72,8 +82,27 @@ pub async fn quote(
         .into());
     }
 
+    let (routing_input, executor_fee) = match body.protocol {
+        SwapProtocol::Uniswapx => (amount_in, None),
+        SwapProtocol::Erc7683 => {
+            let policy = state.erc7683_fee_policy.ok_or_else(erc7683_unavailable)?;
+            (
+                policy.routing_input(amount_in)?,
+                Some(policy.fee(amount_in)?),
+            )
+        }
+    };
+
     let started = Instant::now();
-    let result = state.quote.quote(token_in, token_out, amount_in).await;
+    let mut result = state.quote.quote(token_in, token_out, routing_input).await;
+    if let (Some(quote), Some(fee)) = (&mut result, executor_fee) {
+        quote.executor_fee = Some(
+            state
+                .valuation
+                .amount(fee, token_in, state.assets.decimals(&token_in))
+                .await,
+        );
+    }
     let served = QuoteServed {
         chain_id: ChainId(state.config.chain_id),
         pair: TokenPair::new(token_in, token_out),
@@ -112,10 +141,11 @@ fn parse_amount(s: &str) -> Result<U256, SolventError> {
     })
 }
 
-/// A taker-signed order submission, mirroring the UniswapX Orders API (`{ encodedOrder, signature,
-/// chainId, quoteId? }`). The taker's client builds + signs the base order; the server cosigns.
+/// A taker-signed order submission. UniswapX remains the default when `protocol` is omitted.
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct SwapRequest {
+    #[serde(default)]
+    pub protocol: SwapProtocol,
     #[serde(rename = "encodedOrder")]
     pub encoded_order: String,
     pub signature: String,
@@ -132,9 +162,8 @@ pub struct SwapResponse {
     pub status: String,
 }
 
-/// Submit a taker-signed order: decode → verify the swapper signature → cosign → route → reserve →
-/// persist → fill. A malformed or unverifiable order is `400`; an unroutable one returns a
-/// `declined` trade (`200`).
+/// Submit a taker-signed order: authenticate → route → reserve → persist → fill. A malformed or
+/// unverifiable order is `400`; an unroutable one returns a `declined` trade (`200`).
 #[utoipa::path(
     post,
     path = "/v1/swap",
@@ -144,6 +173,7 @@ pub struct SwapResponse {
         (status = 400, description = "Malformed or unverifiable order"),
     )
 )]
+#[tracing::instrument(skip_all)]
 pub async fn submit(
     State(state): State<AppState>,
     Json(body): Json<SwapRequest>,
@@ -159,13 +189,32 @@ pub async fn submit(
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    let cosigned = state
-        .cosigner
-        .cosign(&encoded, signature.into(), now)
-        .map_err(|e| Response::error(e.to_string(), StatusCode::BAD_REQUEST))?;
-    let intent = UniswapXV2Normalizer
-        .normalize(&cosigned.raw)
-        .map_err(SolventError::from)?;
+    let (intent, taker) = match body.protocol {
+        SwapProtocol::Uniswapx => {
+            let cosigned = state
+                .cosigner
+                .cosign(&encoded, signature.into(), now)
+                .map_err(|e| Response::error(e.to_string(), StatusCode::BAD_REQUEST))?;
+            let intent = UniswapXV2Normalizer
+                .normalize(&cosigned.raw)
+                .map_err(SolventError::from)?;
+            (intent, cosigned.swapper)
+        }
+        SwapProtocol::Erc7683 => {
+            let raw = RawOrder::new(
+                ProtocolId::Erc7683,
+                ChainId(body.chain_id),
+                Bytes::from(encoded),
+                Bytes::from(signature),
+                now,
+            );
+            let normalizer = state.erc7683.as_ref().ok_or_else(erc7683_unavailable)?;
+            let normalized = normalizer
+                .normalize_order(&raw)
+                .map_err(SolventError::from)?;
+            (normalized.intent, normalized.user)
+        }
+    };
     // Capture trade-time token prices here (the adapter holds the oracle) so the trade's fee/value
     // figures stay fixed at submit rather than drifting with the market.
     let prices = TradePrices {
@@ -185,12 +234,19 @@ pub async fn submit(
     };
     let outcome = state
         .swap
-        .submit(intent, cosigned.swapper, TradeId(Ulid::new()), prices)
+        .submit(intent, taker, TradeId(Ulid::new()), prices)
         .await?;
     Ok(Response::ok(SwapResponse {
         trade_id: outcome.trade_id.to_string(),
         status: outcome.status.as_str().to_string(),
     }))
+}
+
+fn erc7683_unavailable() -> SolventError {
+    SolventError::InvalidId {
+        id_type: "swap protocol",
+        reason: "ERC-7683 is not configured on this deployment".to_string(),
+    }
 }
 
 fn hex_bytes(field: &'static str, s: &str) -> Result<Vec<u8>, SolventError> {

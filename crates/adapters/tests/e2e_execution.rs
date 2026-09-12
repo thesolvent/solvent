@@ -14,15 +14,13 @@ use alloy::signers::local::PrivateKeySigner;
 use futures::StreamExt;
 
 use common::{
-    balance_of, budget_source, first_supported, ledger, quote_caps, rid, setup, synced, Harness,
-    MockERC20, Stack, PERMIT2,
+    balance_of, budget_source, drive_execution, execution_pool, execution_service, first_supported,
+    ledger, quote_caps, rid, setup, synced, MockERC20, Stack, PERMIT2,
 };
-use solvent_adapters::execution::{AquaSettlementReader, SqliteFillStore, WalletkitExecutor};
 use solvent_adapters::ingest::uniswapx::{
     OrderSpec, SelfHostedFeed, SignedOrderBuilder, UniswapXV2Normalizer,
 };
 use solvent_core::deps::ingest::{FillBuilder, Normalizer, OrderFeed};
-use solvent_core::execution::ExecutionService;
 use solvent_core::ledger::{AvailableSnapshot, LedgerService};
 use solvent_core::primitives::execution::{FillOutcome, FillTx, PendingFill};
 use solvent_core::primitives::ingest::{Intent, RawOrder};
@@ -30,13 +28,6 @@ use solvent_core::primitives::ledger::{AccountKey, ReservationSource};
 use solvent_core::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 use solvent_core::registry::SharedSnapshot;
 use solvent_core::routing::{route, GuardSnapshot, RoutingBook};
-
-use sqlx::SqlitePool;
-use std::path::Path;
-use walletkit::adapters::policy::{AllowAll, DefaultPolicyEngine};
-use walletkit::adapters::{LocalSigner, RedbStateStore, SystemClock, Transport};
-use walletkit::core::deps::SubmissionOpts;
-use walletkit::Wallet;
 
 const RECIPIENT: Address = address!("dEADbEEF00000000000000000000000000000000");
 
@@ -139,73 +130,12 @@ async fn reserve_order(
     svc.reserve(rid(1), intent.id, sources, 60)
         .await
         .expect("reserve the routed plan");
-    let calldata = stack
+    let fill = stack
         .fill_builder()
         .build(&intent, &plan, &snap)
         .await
         .expect("fill calldata");
-    (intent, plan, calldata, caps)
-}
-
-/// A migrated SQLite pool for the executor's durable in-flight tracking, in `dir`. Kept across a
-/// simulated restart so the recovery test can reopen the same durable state.
-async fn exec_pool(dir: &Path) -> SqlitePool {
-    let url = format!("sqlite://{}?mode=rwc", dir.join("exec.db").display());
-    let pool = SqlitePool::connect(&url).await.expect("open exec sqlite");
-    SqliteFillStore::new(pool.clone())
-        .migrate()
-        .await
-        .expect("migrate exec");
-    pool
-}
-
-/// The production execution service over a real walletkit `Wallet` signing as the filler's owner
-/// (the maker), broadcasting on the public mempool (anvil has no private relay), confirming at
-/// depth 1, and reading settlement from the fill's own receipt. `pool` + `redb` are the durable
-/// stores that survive a restart.
-fn execution_service(
-    h: &Harness,
-    led: Arc<LedgerService>,
-    pool: SqlitePool,
-    redb: &Path,
-) -> ExecutionService {
-    let key_hex = format!("0x{}", alloy::hex::encode(h.maker_signer.to_bytes()));
-    let signer = LocalSigner::from_private_key(&key_hex).expect("local signer");
-    let policy = DefaultPolicyEngine::new(vec![Box::new(AllowAll)], Arc::new(SystemClock));
-    let transport = Transport::url(h.endpoint.parse().expect("endpoint url")).expect("transport");
-    let store = RedbStateStore::open(redb).expect("redb state store");
-    let wallet = Wallet::builder(Arc::new(transport), Arc::new(signer), Arc::new(policy))
-        .store(Arc::new(store))
-        .confirmations(1)
-        .bump_timeout(0)
-        .build();
-    let exec = Arc::new(WalletkitExecutor::new(
-        wallet,
-        SubmissionOpts::public(),
-        Arc::new(SqliteFillStore::new(pool)),
-    ));
-    let settlement = Arc::new(AquaSettlementReader::new(
-        Arc::new(h.maker_provider.clone()),
-        *h.aqua.address(),
-    ));
-    ExecutionService::new(exec.clone(), exec, settlement, led)
-}
-
-/// Mine + reconcile until every in-flight fill settles (bounded, like walletkit's localnet loop).
-async fn drive(svc: &ExecutionService, h: &Harness) {
-    for _ in 0..10 {
-        if svc.pending().await.expect("pending") == 0 {
-            break;
-        }
-        let _: () = h
-            .maker_provider
-            .raw_request("anvil_mine".into(), (2u64,))
-            .await
-            .expect("anvil_mine");
-        for fill in svc.reconcile().await.expect("reconcile") {
-            svc.forget(fill.intent).await.expect("forget settled fill");
-        }
-    }
+    (intent, plan, fill.calldata, caps)
 }
 
 #[tokio::test]
@@ -226,7 +156,7 @@ async fn e2e_fill_confirms_and_posts_the_actual_pulled_amount() {
         reserve_order(&stack, &snapshot, &led, output, input, false).await;
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let pool = exec_pool(dir.path()).await;
+    let pool = execution_pool(dir.path()).await;
     let svc = execution_service(&stack.h, led.clone(), pool, &dir.path().join("wallet.redb"));
     let fill = PendingFill::new(
         FillTx::new(
@@ -243,7 +173,7 @@ async fn e2e_fill_confirms_and_posts_the_actual_pulled_amount() {
         FillOutcome::Submitted { .. }
     ));
 
-    drive(&svc, &stack.h).await;
+    drive_execution(&svc, &stack.h).await;
     assert_eq!(svc.pending().await.expect("pending"), 0, "the fill settled");
 
     // The swapper's recipient received the promised output on-chain.
@@ -290,7 +220,7 @@ async fn e2e_stale_order_is_rejected_by_sim_and_voided() {
     );
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let pool = exec_pool(dir.path()).await;
+    let pool = execution_pool(dir.path()).await;
     let svc = execution_service(&stack.h, led.clone(), pool, &dir.path().join("wallet.redb"));
     let fill = PendingFill::new(
         FillTx::new(
@@ -339,7 +269,7 @@ async fn e2e_recovers_an_in_flight_fill_after_restart() {
 
     // Durable execution stores that outlive the "crashed" service instance.
     let dir = tempfile::tempdir().expect("tempdir");
-    let pool = exec_pool(dir.path()).await;
+    let pool = execution_pool(dir.path()).await;
     let redb = dir.path().join("wallet.redb");
 
     // First instance: submit the fill, then drop everything (a crash) WITHOUT reconciling.
@@ -376,7 +306,7 @@ async fn e2e_recovers_an_in_flight_fill_after_restart() {
         "the in-flight fill survived the restart"
     );
 
-    drive(&svc, &stack.h).await;
+    drive_execution(&svc, &stack.h).await;
     assert_eq!(
         svc.pending().await.expect("pending"),
         0,

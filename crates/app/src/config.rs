@@ -56,6 +56,15 @@ pub struct Config {
     /// The resolver's Aqua filler contract the swap path fills through.
     #[serde(default)]
     pub filler: Address,
+    /// Same-chain ERC-7683 contracts deployed with the filler stack.
+    #[serde(default)]
+    pub erc7683_settler: Address,
+    #[serde(default)]
+    pub erc7683_filler: Address,
+    #[serde(default)]
+    pub erc7683_resolver: Address,
+    #[serde(default = "default_erc7683_executor_fee_bps")]
+    pub erc7683_executor_fee_bps: u32,
     /// The UniswapX reactor a taker's order settles through; published so a client can name it.
     pub reactor: Address,
     /// The canonical Permit2 (same on every chain); overridable for a bespoke devnet deploy.
@@ -126,6 +135,13 @@ pub struct RebateConfig {
     pub authorization_ttl_blocks: u64,
 }
 
+#[derive(Clone, Copy)]
+pub struct Erc7683Contracts {
+    pub settler: Address,
+    pub filler: Address,
+    pub resolver: Address,
+}
+
 impl Default for RebateConfig {
     fn default() -> Self {
         Self {
@@ -157,7 +173,12 @@ impl Config {
     }
 
     /// The subset the FE reads at bootstrap (the `/config` payload). `earn`/`send_buy` are MVP-off.
-    pub fn app_config(&self, cosigner: Address, taker_credential: Address) -> AppConfig {
+    pub fn app_config(
+        &self,
+        cosigner: Address,
+        taker_credential: Address,
+        erc7683: Option<Erc7683Contracts>,
+    ) -> AppConfig {
         AppConfig {
             chain_id: self.chain_id,
             features: Features {
@@ -173,13 +194,40 @@ impl Config {
             reactor: self.reactor,
             permit2: self.permit2,
             filler: self.filler,
+            erc7683_settler: erc7683.map(|contracts| contracts.settler),
+            erc7683_filler: erc7683.map(|contracts| contracts.filler),
+            erc7683_resolver: erc7683.map(|contracts| contracts.resolver),
             taker_credential,
             cosigner,
         }
     }
+
+    pub fn erc7683_contracts(&self) -> Result<Option<Erc7683Contracts>, StartupError> {
+        let configured = [
+            self.erc7683_settler,
+            self.erc7683_filler,
+            self.erc7683_resolver,
+        ];
+        if configured.iter().all(|address| address.is_zero()) {
+            return Ok(None);
+        }
+        if configured.iter().any(|address| address.is_zero()) {
+            return Err(StartupError::FillerConfiguration(
+                "ERC-7683 settler, filler, and resolver must be configured together".to_string(),
+            ));
+        }
+        Ok(Some(Erc7683Contracts {
+            settler: self.erc7683_settler,
+            filler: self.erc7683_filler,
+            resolver: self.erc7683_resolver,
+        }))
+    }
 }
 
 fn default_fee_bps() -> u32 {
+    5
+}
+fn default_erc7683_executor_fee_bps() -> u32 {
     5
 }
 fn default_explorer() -> String {
