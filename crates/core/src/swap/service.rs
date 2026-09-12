@@ -21,7 +21,9 @@ use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
 use crate::primitives::trade::{Trade, TradeAttempt, TradeId, TradeLeg, TradeStatus};
 use crate::primitives::{IntentId, ReservationId};
 use crate::registry::SharedSnapshot;
-use crate::routing::{route, GuardAdmission, LegCostResolver, RoutingBook, StrategyGuard};
+use crate::routing::{
+    route, GuardAdmission, GuardSnapshot, LegCostResolver, RoutingBook, StrategyGuard,
+};
 use crate::SolventError;
 
 /// The chain/fill constants and routing knobs the swap path needs, bundled to keep the constructor
@@ -78,6 +80,12 @@ impl SwapService {
             clock,
             config,
         }
+    }
+
+    /// The current guard state, for a caller that routes a preview against it (e.g. the decision
+    /// loop's read-only re-pricing) without reserving or committing anything.
+    pub fn guards(&self) -> GuardSnapshot {
+        self.guards.snapshot()
     }
 
     /// Submit one taker-signed intent. Idempotent on the order hash: a resubmit returns the existing
