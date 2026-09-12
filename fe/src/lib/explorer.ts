@@ -5,6 +5,7 @@ import type {
   TradeRecord,
   UniswapXFeedRecord,
 } from "@/data/explorer";
+import { formatTokenAmount } from "@/lib/format";
 
 const STATUS_TONE: Record<string, { background: string; color: string }> = {
   confirmed: {
@@ -21,10 +22,7 @@ export function shortHash(value: string | null): string {
 }
 
 export function tokenText(quantity: TokenQuantity): string {
-  const amount = Number(quantity.display).toLocaleString("en-US", {
-    maximumSignificantDigits: 12,
-  });
-  return `${amount} ${quantity.symbol}`;
+  return `${formatTokenAmount(quantity.display)} ${quantity.symbol}`;
 }
 
 function timestamp(at: number | null): string {
@@ -120,6 +118,8 @@ export function tradeRow(trade: TradeRecord) {
         : `blk ${numberText(trade.blockNumber)}`,
     input: tokenText(trade.input),
     output: `${trade.status === "confirmed" ? "" : "min. "}${tokenText(trade.output)}`,
+    inputQuantity: trade.input,
+    outputQuantity: trade.output,
     makers: numberText(trade.makers),
     impact: percent(trade.priceImpactPct),
     status: trade.status,
@@ -145,8 +145,11 @@ export function uniswapXFeedRow(record: UniswapXFeedRecord) {
         : `UniswapX · Chain ${record.sourceChainId}`,
     input: tokenText(record.input),
     requiredOutput: `min. ${tokenText(record.requiredOutput)}`,
+    inputQuantity: record.input,
+    requiredOutputQuantity: record.requiredOutput,
     market: `${rateText(record.marketOutPerIn)} ${record.requiredOutput.symbol}/${record.input.symbol}`,
     simulatedOutput: tokenText(record.simulatedOutput),
+    simulatedOutputQuantity: record.simulatedOutput,
     batch: `batch #${record.simulatedBatchId} · ${relativeTime(record.lastSeenAt)}`,
   };
 }

@@ -90,6 +90,13 @@
   overflow: hidden;
 }
 
+.flowAmount {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .flow strong,
 .cell strong {
   overflow: hidden;

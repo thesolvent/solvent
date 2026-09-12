@@ -489,6 +489,9 @@
 }
 
 .poolBig {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: clamp(20px, 1.7vw, 30px);
   font-weight: 300;
   letter-spacing: -0.03em;
@@ -563,4 +566,10 @@
   font-weight: 300;
   letter-spacing: -0.03em;
   white-space: nowrap;
+}
+
+.poolIdentity {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }

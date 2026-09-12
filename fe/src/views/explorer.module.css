@@ -295,6 +295,7 @@
   font-weight: 600;
   letter-spacing: -0.03em;
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .statValueXs {
@@ -545,9 +546,10 @@
 
 .tradeFlow {
   min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 7px;
   padding: 0 14px;
   background-image: linear-gradient(var(--surface), var(--surface));
   background-size: 1px 68%;
@@ -556,8 +558,14 @@
 }
 
 .tradeIn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-size: 13px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tradeArrow {
@@ -566,6 +574,10 @@
 }
 
 .tradeOut {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--ink);
@@ -587,6 +599,10 @@
 }
 
 .tradeCellValue {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
@@ -627,6 +643,9 @@
 
 .activityFlow {
   composes: tradeFlow;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 13px;
   font-weight: 500;
 }
@@ -1085,6 +1104,7 @@
   min-width: 0;
   font-size: 12.5px;
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .legCurve {

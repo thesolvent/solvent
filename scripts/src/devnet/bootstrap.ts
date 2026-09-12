@@ -23,14 +23,40 @@ const POLICY_SIGNER_KEY = "0x7c852118294e51e653712a81e05800f419141751be58f605c37
 
 // Symbol -> token-list tag, mirroring the checked-in list's grouping. Tags are read by people in
 // the asset picker, so they are cased as they should appear.
-const TAGS: Record<string, string> = {
-  WETH: "Majors",
-  WBTC: "Majors",
-  USDC: "Stables",
-  USDT: "Stables",
-  DAI: "Stables",
-  LINK: "DeFi",
-};
+export const CORE_TOKEN_CATALOG = {
+  WETH: {
+    name: "Wrapped Ether",
+    tag: "Majors",
+    logoUri: "https://cdn.garden.finance/catalog/chain_images/ethereum.svg",
+  },
+  WBTC: {
+    name: "Wrapped BTC",
+    tag: "Majors",
+    logoUri: "https://cdn.garden.finance/catalog/token-images/wbtc.svg",
+  },
+  USDC: {
+    name: "USD Coin",
+    tag: "Stables",
+    logoUri: "https://cdn.garden.finance/catalog/token-images/usdc.svg",
+  },
+  USDT: {
+    name: "Tether USD",
+    tag: "Stables",
+    logoUri: "https://cdn.garden.finance/catalog/token-images/usdt.svg",
+  },
+  DAI: {
+    name: "Dai Stablecoin",
+    tag: "Stables",
+    logoUri:
+      "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x6B175474E89094C44Da98b954EedeAC495271d0F/logo.png",
+  },
+  LINK: {
+    name: "ChainLink Token",
+    tag: "DeFi",
+    logoUri:
+      "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x514910771AF9Ca656af840dff83E8264EcF986CA/logo.png",
+  },
+} as const;
 
 // Binance feed symbol -> the devnet token it prices.
 const PRICE_FEEDS: Record<string, string> = {
@@ -183,15 +209,6 @@ export const UNISWAP_ASSETS: readonly UniswapAsset[] = [
  *  is a dead pair that reports a zero price. */
 const PEGGED = ["USDT", "DAI"];
 
-const NAMES: Record<string, string> = {
-  WETH: "Wrapped Ether",
-  WBTC: "Wrapped BTC",
-  USDC: "USD Coin",
-  USDT: "Tether USD",
-  DAI: "Dai Stablecoin",
-  LINK: "ChainLink Token",
-};
-
 function tokenList(manifest: Manifest) {
   return {
     name: "Solvent Devnet",
@@ -200,9 +217,10 @@ function tokenList(manifest: Manifest) {
       chainId: manifest.chain_id,
       address: token.address,
       symbol,
-      name: NAMES[symbol] ?? symbol,
+      name: CORE_TOKEN_CATALOG[symbol as keyof typeof CORE_TOKEN_CATALOG]?.name ?? symbol,
       decimals: token.decimals,
-      tags: [TAGS[symbol] ?? "other"],
+      logoURI: CORE_TOKEN_CATALOG[symbol as keyof typeof CORE_TOKEN_CATALOG]?.logoUri,
+      tags: [CORE_TOKEN_CATALOG[symbol as keyof typeof CORE_TOKEN_CATALOG]?.tag ?? "other"],
     })),
   };
 }
@@ -238,6 +256,7 @@ function configToml(manifest: Manifest, tokenListPath: string): string {
 source_address = "${asset.sourceAddress}"
 symbol = "${asset.symbol}"
 decimals = ${asset.decimals}
+logo_uri = "${assetLogoUri(asset)}"
 ${market}${peg}`;
   }).join("\n");
 
@@ -257,6 +276,7 @@ app_address = "${manifest.router}"
 default_fee_bps = 5
 block_explorer_url = "http://localhost:5100"
 networks = ["Ethereum"]
+network_logo_uri = "https://cdn.garden.finance/catalog/chain_images/ethereum.svg"
 faucet = true
 
 token_list = "${tokenListPath}"
@@ -284,6 +304,12 @@ authorization_ttl_blocks = 90
 
 ${feeds}
 ${uniswapAssets}`;
+}
+
+function assetLogoUri(asset: UniswapAsset): string {
+  return asset.symbol === "ETH"
+    ? "https://cdn.garden.finance/catalog/chain_images/ethereum.svg"
+    : `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${asset.sourceAddress}/logo.png`;
 }
 
 function main(): void {

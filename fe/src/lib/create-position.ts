@@ -8,6 +8,7 @@ import { MAX_UINT248, parseTokenAmount } from "@solvent/sdk/validation";
 import { formatUnits } from "viem";
 
 import { BAND_K0 } from "@/data";
+import { formatTokenAmount } from "@/lib/format";
 import type {
   CreatePair,
   CreateToken,
@@ -449,7 +450,11 @@ function walletTokens(pairs: readonly CreatePair[]) {
   }
   return [...byAddress.values()].map((token) => ({
     sym: token.symbol,
+    symbol: token.symbol,
     name: token.name,
+    logoUri: token.logoUri,
+    net: token.net,
+    chainLogoUri: token.chainLogoUri,
     usd: token.valueUsd,
     bal: token.balance.toLocaleString("en-US", { maximumFractionDigits: 8 }),
     addr: shortAddress(token.address),
@@ -972,7 +977,7 @@ export function createPosition(
       { label: "Fee", value: feeLabel },
       {
         label: "Deposit",
-        value: `${s.amtA} ${A} + ${s.amtB} ${B}`,
+        value: `${formatTokenAmount(s.amtA)} ${A} + ${formatTokenAmount(s.amtB)} ${B}`,
       },
     ],
   };

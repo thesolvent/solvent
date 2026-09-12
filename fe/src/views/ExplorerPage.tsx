@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Pagination } from "@/components/Pagination";
+import { AssetIdentity } from "@/components/AssetIdentity";
 import { RebateList } from "@/components/RebateList";
 import { RetryNotice } from "@/components/RetryNotice";
 import { useLoadedPagination } from "@/components/useLoadedPagination";
@@ -166,9 +167,19 @@ function TradeList({ filter }: { filter: TradeFilter }) {
               <span className={styles.tradeBlk}>{trade.blockLabel}</span>
             </span>
             <span className={styles.tradeFlow}>
-              <span className={styles.tradeIn}>{trade.input}</span>
+              <span className={styles.tradeIn}>
+                {trade.inputQuantity.net && (
+                  <AssetIdentity asset={trade.inputQuantity} />
+                )}
+                {trade.input}
+              </span>
               <span className={styles.tradeArrow}>→</span>
-              <span className={styles.tradeOut}>{trade.output}</span>
+              <span className={styles.tradeOut}>
+                {trade.outputQuantity.net && (
+                  <AssetIdentity asset={trade.outputQuantity} />
+                )}
+                {trade.output}
+              </span>
             </span>
             <span className={styles.tradeCell}>
               <span className={styles.tradeCellValue}>{trade.makers}</span>
@@ -251,7 +262,10 @@ function ActivityList({ filter }: { filter: ActivityFilter }) {
                 </span>
                 <span className={styles.tradeCellLabel}>position</span>
               </span>
-              <span className={styles.activityFlow}>{row.flow}</span>
+              <span className={styles.activityFlow}>
+                {row.amount?.net && <AssetIdentity asset={row.amount} />}
+                {row.flow}
+              </span>
               <span className={styles.tradeCell}>
                 <span className={styles.tradeCellValue} title={row.maker}>
                   {row.who}
@@ -359,9 +373,15 @@ function UniswapXFeedList() {
               <span className={styles.tradeBlk}>{row.source}</span>
             </span>
             <span className={styles.tradeFlow}>
-              <span className={styles.tradeIn}>{row.input}</span>
+              <span className={styles.tradeIn}>
+                <AssetIdentity asset={row.inputQuantity} />
+                {row.input}
+              </span>
               <span className={styles.tradeArrow}>→</span>
-              <span className={styles.tradeOut}>{row.requiredOutput}</span>
+              <span className={styles.tradeOut}>
+                <AssetIdentity asset={row.requiredOutputQuantity} />
+                {row.requiredOutput}
+              </span>
             </span>
             <span className={styles.tradeCell}>
               <span className={styles.tradeCellValue}>{row.market}</span>
@@ -369,6 +389,7 @@ function UniswapXFeedList() {
             </span>
             <span className={styles.tradeCell}>
               <span className={styles.tradeCellValue}>
+                <AssetIdentity asset={row.simulatedOutputQuantity} />
                 {row.simulatedOutput}
               </span>
               <span className={styles.tradeCellLabel}>simulated output</span>

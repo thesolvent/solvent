@@ -29,6 +29,8 @@ pub struct Config {
     pub block_explorer_url: String,
     #[serde(default = "default_networks")]
     pub networks: Vec<String>,
+    #[serde(default = "default_network_logo")]
+    pub network_logo_uri: Option<String>,
     #[serde(default = "default_true")]
     pub faucet: bool,
     #[serde(default = "default_token_list")]
@@ -127,6 +129,7 @@ pub struct PriceSymbol {
 pub struct UniswapAsset {
     pub source_address: Address,
     pub symbol: String,
+    pub logo_uri: Option<String>,
     pub decimals: u8,
     #[serde(default)]
     pub market_symbol: Option<String>,
@@ -226,6 +229,7 @@ impl Config {
             },
             default_fee_bps: self.default_fee_bps,
             networks: self.networks.clone(),
+            network_logo_uri: self.network_logo_uri.clone(),
             block_explorer_url: self.block_explorer_url.clone(),
             aqua: self.aqua_address,
             app: self.app_address,
@@ -273,6 +277,9 @@ fn default_explorer() -> String {
 }
 fn default_networks() -> Vec<String> {
     vec!["Ethereum".to_string()]
+}
+fn default_network_logo() -> Option<String> {
+    Some("https://cdn.garden.finance/catalog/chain_images/ethereum.svg".to_string())
 }
 fn default_true() -> bool {
     true

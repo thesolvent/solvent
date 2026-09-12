@@ -26,6 +26,7 @@ pub struct UniswapXFeedAssetView {
     #[schema(value_type = String)]
     pub address: Address,
     pub symbol: String,
+    pub logo_uri: Option<String>,
     pub decimals: u8,
 }
 
@@ -138,6 +139,7 @@ fn asset(
     Ok(UniswapXFeedAssetView {
         address,
         symbol: asset.symbol.clone(),
+        logo_uri: asset.logo_uri.clone(),
         decimals: asset.decimals,
     })
 }

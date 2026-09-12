@@ -23,6 +23,8 @@ export function rebateRow(rebate: RebateRecord, assets: Asset[]) {
     id: rebate.id,
     originTradeId: rebate.originTradeId,
     pair: `${tokenIn?.symbol ?? shortHash(rebate.tokenIn)}/${tokenOut?.symbol ?? shortHash(rebate.tokenOut)}`,
+    inputAsset: tokenIn,
+    outputAsset: tokenOut,
     strategy: `strategy ${shortHash(rebate.strategyHash)}`,
     deposit: amount(rebate.amountIn + rebate.makerRebate, tokenIn),
     output: amount(rebate.amountOut, tokenOut),

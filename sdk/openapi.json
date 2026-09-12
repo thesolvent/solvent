@@ -1321,6 +1321,12 @@
             "type": "string",
             "description": "The public executor target for encoded rebate transactions."
           },
+          "network_logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "networks": {
             "type": "array",
             "items": {
@@ -2856,6 +2862,12 @@
               "filler": {
                 "type": "string",
                 "description": "The public executor target for encoded rebate transactions."
+              },
+              "network_logo_uri": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "networks": {
                 "type": "array",
@@ -5244,6 +5256,12 @@
             "format": "int32",
             "minimum": 0
           },
+          "logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "symbol": {
             "type": "string"
           }
@@ -5459,6 +5477,12 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "symbol": {
             "type": "string"

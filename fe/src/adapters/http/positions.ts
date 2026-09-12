@@ -31,10 +31,11 @@ const TOKEN_TINTS: Record<string, string> = {
 
 export const positionsAdapter: PositionsPort = {
   async pairs(wallet) {
-    const [catalog, assets, pools] = await Promise.all([
+    const [catalog, assets, pools, config] = await Promise.all([
       solventApi.pairs(wallet ? { wallet } : undefined),
       solventApi.assets(),
       solventApi.pools(),
+      solventApi.config(),
     ]);
     const metadata = new Map(
       assets.items.map((asset) => [asset.address.toLowerCase(), asset]),
@@ -52,6 +53,8 @@ export const positionsAdapter: PositionsPort = {
               pair,
               metadata,
               tvlByPair.get(pairKey(pair.base.address, pair.quote.address)),
+              config.networks[0] ?? "Network",
+              config.network_logo_uri,
             ),
           ]
         : [],
@@ -128,6 +131,8 @@ function toCreatePair(
   pair: PairInfo,
   metadata: ReadonlyMap<string, Asset>,
   tvlUsd: number | undefined,
+  network: string,
+  chainLogoUri?: string | null,
 ): CreatePair {
   return {
     base: toCreateToken(
@@ -135,12 +140,16 @@ function toCreatePair(
       pair.wallet?.base ?? 0,
       pair.wallet?.base_raw ?? "0",
       metadata.get(pair.base.address.toLowerCase()),
+      network,
+      chainLogoUri,
     ),
     quote: toCreateToken(
       pair.quote,
       pair.wallet?.quote ?? 0,
       pair.wallet?.quote_raw ?? "0",
       metadata.get(pair.quote.address.toLowerCase()),
+      network,
+      chainLogoUri,
     ),
     mid: pair.mid as number,
     tvlUsd,
@@ -159,12 +168,17 @@ function toCreateToken(
   balance: number,
   balanceRaw: string,
   asset: Asset | undefined,
+  network: string,
+  chainLogoUri?: string | null,
 ): CreateToken {
   return {
     address: token.address as Address,
     decimals: token.decimals,
     symbol: token.symbol,
     name: asset?.name ?? token.symbol,
+    logoUri: asset?.logo_uri,
+    net: network,
+    chainLogoUri,
     tags: asset?.tags ?? [],
     balance,
     balanceRaw: BigInt(balanceRaw),

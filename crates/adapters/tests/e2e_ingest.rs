@@ -553,6 +553,7 @@ async fn erc7683_http_state(
                 },
                 default_fee_bps: 5,
                 networks: vec!["Anvil".to_string()],
+                network_logo_uri: Some("https://example.com/anvil.svg".to_string()),
                 block_explorer_url: "http://localhost".to_string(),
                 aqua: *stack.h.aqua.address(),
                 app: stack.h.app,

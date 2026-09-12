@@ -40,6 +40,8 @@ pub struct AppConfig {
     pub features: Features,
     pub default_fee_bps: u32,
     pub networks: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network_logo_uri: Option<String>,
     pub block_explorer_url: String,
     /// The Aqua deployment holding maker virtual balances.
     #[schema(value_type = String)]

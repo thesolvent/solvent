@@ -235,6 +235,7 @@ async fn main() -> Result<(), StartupError> {
                 let feed_asset = UniswapFeedAsset {
                     source_address: asset.source_address,
                     symbol: asset.symbol.clone(),
+                    logo_uri: asset.logo_uri.clone(),
                     decimals: asset.decimals,
                 };
                 (feed_asset.source_address, feed_asset)

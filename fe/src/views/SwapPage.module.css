@@ -83,7 +83,7 @@
   display: grid;
   grid-template-columns: 1fr 44px;
   box-sizing: border-box;
-  width: 156px;
+  width: 172px;
   height: 44px;
   padding: 0;
   border: 1px solid var(--line);
@@ -100,10 +100,20 @@
   border-top: 2px solid var(--lime);
 }
 
-.protocolTrigger > span:first-child {
+.protocolTriggerLabel {
   display: flex;
   align-items: center;
-  padding: 0 14px;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.protocolTriggerLogo {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  object-fit: contain;
 }
 
 .protocolTriggerMore {
@@ -171,6 +181,20 @@
   composes: protocolOption;
   border-left-color: var(--lime);
   background: var(--lime-wash);
+}
+
+.protocolOptionMain {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.protocolOptionLogo {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  object-fit: contain;
 }
 
 .protocolCopy,

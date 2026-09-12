@@ -46,13 +46,18 @@ const assets: AssetsPort = {
       solventApi.config(),
     ]);
     const network = config.networks[0] ?? "Unknown";
-    const primary = served.items.map((asset) => toAsset(asset, network));
+    const primary = served.items.map((asset) =>
+      toAsset(asset, network, config.network_logo_uri),
+    );
     if (!includeCrossChain) return primary;
 
-    const [originServed, destinationServed] = await Promise.all([
-      crossChainOriginApi.assets(),
-      directDestinationApi.assets({ supported: true }),
-    ]);
+    const [originServed, originConfig, destinationServed, destinationConfig] =
+      await Promise.all([
+        crossChainOriginApi.assets(),
+        crossChainOriginApi.config(),
+        directDestinationApi.assets({ supported: true }),
+        directDestinationApi.config(),
+      ]);
     const directPair = [
       ...new Set(destinationServed.items.flatMap((asset) => asset.pairs)),
     ][0];
@@ -71,9 +76,21 @@ const assets: AssetsPort = {
     if (!originAsset || !destinationInput || !destinationOutput) return [];
 
     return [
-      toAsset(originAsset, SOLVENTX_ORIGIN_NETWORK),
-      toAsset(destinationInput, SOLVENTX_DESTINATION_NETWORK),
-      toAsset(destinationOutput, SOLVENTX_DESTINATION_NETWORK),
+      toAsset(
+        originAsset,
+        SOLVENTX_ORIGIN_NETWORK,
+        originConfig.network_logo_uri,
+      ),
+      toAsset(
+        destinationInput,
+        SOLVENTX_DESTINATION_NETWORK,
+        destinationConfig.network_logo_uri,
+      ),
+      toAsset(
+        destinationOutput,
+        SOLVENTX_DESTINATION_NETWORK,
+        destinationConfig.network_logo_uri,
+      ),
     ];
   },
 };

@@ -6,6 +6,7 @@ import { Crumbs } from "@/components/Crumbs";
 import { AssetIdentity } from "@/components/AssetIdentity";
 import { RetryNotice } from "@/components/RetryNotice";
 import { explorerUrl, tradeDetail } from "@/lib/explorer";
+import { formatTokenAmount } from "@/lib/format";
 import { useAppActions } from "@/state";
 import { TradeLifecycle } from "./TradeLifecycle";
 
@@ -107,27 +108,21 @@ export function TradeDetailPage() {
             }}
           >
             <div className={styles.statLabel}>{stat.label}</div>
-            {trade.flow === "cross-chain" && stat.label === "In → out" ? (
+            {stat.label === "In → out" &&
+            trade.input.net &&
+            trade.output.net ? (
               <div className={styles.crossChainFlow} title={stat.value}>
-                <span>{trade.input.display}</span>
+                <span>{formatTokenAmount(trade.input.display)}</span>
                 <AssetIdentity
-                  asset={
-                    trade.input.net
-                      ? { ...trade.input, net: trade.input.net }
-                      : undefined
-                  }
+                  asset={{ ...trade.input, net: trade.input.net }}
                 />
                 <span aria-hidden="true">→</span>
                 <span>
                   {trade.status === "confirmed" ? "" : "min. "}
-                  {trade.output.display}
+                  {formatTokenAmount(trade.output.display)}
                 </span>
                 <AssetIdentity
-                  asset={
-                    trade.output.net
-                      ? { ...trade.output, net: trade.output.net }
-                      : undefined
-                  }
+                  asset={{ ...trade.output, net: trade.output.net }}
                 />
               </div>
             ) : (
@@ -178,27 +173,19 @@ export function TradeDetailPage() {
                 </span>
                 <span className={styles.legAmountCol}>
                   <span className={styles.legAmountRow}>
-                    {trade.flow === "cross-chain" ? (
+                    {leg.input.net && leg.output.net ? (
                       <span
                         className={styles.crossChainLegFlow}
                         title={leg.amt}
                       >
-                        <span>{leg.input.display}</span>
+                        <span>{formatTokenAmount(leg.input.display)}</span>
                         <AssetIdentity
-                          asset={
-                            leg.input.net
-                              ? { ...leg.input, net: leg.input.net }
-                              : undefined
-                          }
+                          asset={{ ...leg.input, net: leg.input.net }}
                         />
                         <span aria-hidden="true">→</span>
-                        <span>{leg.output.display}</span>
+                        <span>{formatTokenAmount(leg.output.display)}</span>
                         <AssetIdentity
-                          asset={
-                            leg.output.net
-                              ? { ...leg.output, net: leg.output.net }
-                              : undefined
-                          }
+                          asset={{ ...leg.output, net: leg.output.net }}
                         />
                       </span>
                     ) : (

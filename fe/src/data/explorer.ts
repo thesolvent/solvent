@@ -3,6 +3,7 @@ export interface TokenQuantity {
   display: string;
   net?: string;
   logoUri?: string | null;
+  chainLogoUri?: string | null;
 }
 
 export interface TradeStage {

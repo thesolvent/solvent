@@ -507,6 +507,8 @@ export type Asset = {
   name: string;
   /** Token artwork from the configured token list; the UI falls back to initials when absent. */
   logoUri?: string | null;
+  /** Chain artwork from the deployment config. */
+  chainLogoUri?: string | null;
   decimals: number;
   price: number;
   /** Signed 24h move, already formatted. */

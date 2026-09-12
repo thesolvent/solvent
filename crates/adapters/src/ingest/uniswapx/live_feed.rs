@@ -31,6 +31,7 @@ const Q18: u64 = 1_000_000_000_000_000_000;
 pub struct UniswapFeedAsset {
     pub source_address: Address,
     pub symbol: String,
+    pub logo_uri: Option<String>,
     pub decimals: u8,
 }
 
@@ -509,11 +510,13 @@ mod tests {
                 UniswapFeedAsset {
                     source_address: SOURCE_IN,
                     symbol: "IN".to_string(),
+                    logo_uri: Some("https://example.com/in.svg".to_string()),
                     decimals: 18,
                 },
                 UniswapFeedAsset {
                     source_address: SOURCE_OUT,
                     symbol: "OUT".to_string(),
+                    logo_uri: Some("https://example.com/out.svg".to_string()),
                     decimals: 18,
                 },
             ],

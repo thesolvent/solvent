@@ -14,7 +14,23 @@ import type {
   UniswapXFeedRecord,
 } from "@/data/explorer";
 
-export function toTrade(api: Trade): TradeRecord {
+type ChainIdentity = { name: string; logoUri?: string | null };
+
+function tokenQuantity(
+  token: { symbol: string; logo_uri?: string | null },
+  display: string,
+  chain?: ChainIdentity,
+) {
+  return {
+    symbol: token.symbol,
+    display,
+    net: chain?.name,
+    logoUri: token.logo_uri,
+    chainLogoUri: chain?.logoUri,
+  };
+}
+
+export function toTrade(api: Trade, chain?: ChainIdentity): TradeRecord {
   const legs = api.legs ?? [];
   const total = legs.reduce((sum, leg) => sum + BigInt(leg.amount_out.raw), 0n);
   return {
@@ -23,16 +39,10 @@ export function toTrade(api: Trade): TradeRecord {
     id: api.id,
     status: api.status,
     taker: api.taker,
-    input: {
-      symbol: api.input.token.symbol,
-      display: api.input.amount.display,
-    },
-    output: {
-      symbol: api.output.token.symbol,
-      display: api.output.amount.display,
-    },
+    input: tokenQuantity(api.input.token, api.input.amount.display, chain),
+    output: tokenQuantity(api.output.token, api.output.amount.display, chain),
     surplus: api.surplus
-      ? { symbol: api.input.token.symbol, display: api.surplus.display }
+      ? tokenQuantity(api.input.token, api.surplus.display, chain)
       : null,
     priceImpactPct: api.price_impact_pct ?? null,
     makers:
@@ -50,11 +60,8 @@ export function toTrade(api: Trade): TradeRecord {
       maker: leg.maker,
       strategyHash: leg.strategy_hash,
       curve: leg.curve ?? null,
-      input: { symbol: api.input.token.symbol, display: leg.amount_in.display },
-      output: {
-        symbol: api.output.token.symbol,
-        display: leg.amount_out.display,
-      },
+      input: tokenQuantity(api.input.token, leg.amount_in.display, chain),
+      output: tokenQuantity(api.output.token, leg.amount_out.display, chain),
       sharePct:
         total === 0n
           ? 0
@@ -156,12 +163,14 @@ export function toCrossChainTrade(
       display: formatUnits(BigInt(order.quote.amount_in), inputDecimals),
       net: input?.net ?? `Chain ${order.quote.origin.local_chain}`,
       logoUri: input?.logoUri,
+      chainLogoUri: input?.chainLogoUri,
     },
     output: {
       symbol: output?.symbol ?? "TOKEN",
       display: formatUnits(amountOut, outputDecimals),
       net: output?.net ?? `Chain ${order.quote.destination.local_chain}`,
       logoUri: output?.logoUri,
+      chainLogoUri: output?.chainLogoUri,
     },
     surplus: crossChainProfit(amountIn, input, amountOut, output),
     priceImpactPct: null,
@@ -192,12 +201,14 @@ export function toCrossChainTrade(
             destinationInput?.net ??
             `Chain ${order.quote.destination.local_chain}`,
           logoUri: destinationInput?.logoUri,
+          chainLogoUri: destinationInput?.chainLogoUri,
         },
         output: {
           symbol: output?.symbol ?? "TOKEN",
           display: formatUnits(sourceOutput, outputDecimals),
           net: output?.net ?? `Chain ${order.quote.destination.local_chain}`,
           logoUri: output?.logoUri,
+          chainLogoUri: output?.chainLogoUri,
         },
         sharePct:
           total === 0n ? 0 : Number((sourceOutput * 10_000n) / total) / 100,
@@ -206,7 +217,11 @@ export function toCrossChainTrade(
   };
 }
 
-export function toActivity(api: ActivityEvent): ActivityRecord {
+export function toActivity(
+  api: ActivityEvent,
+  chain?: ChainIdentity | number,
+): ActivityRecord {
+  const identity = typeof chain === "number" ? undefined : chain;
   return {
     id: [
       api.tx_hash,
@@ -221,7 +236,7 @@ export function toActivity(api: ActivityEvent): ActivityRecord {
     maker: api.maker,
     strategyHash: api.strategy_hash,
     amount: api.token
-      ? { symbol: api.token.token.symbol, display: api.token.amount.display }
+      ? tokenQuantity(api.token.token, api.token.amount.display, identity)
       : null,
     at: api.at,
     blockNumber: api.block_number ?? null,
@@ -229,26 +244,29 @@ export function toActivity(api: ActivityEvent): ActivityRecord {
   };
 }
 
-export function toUniswapXFeed(api: UniswapXFeedOrder): UniswapXFeedRecord {
+export function toUniswapXFeed(
+  api: UniswapXFeedOrder,
+  chain: ChainIdentity = { name: "Ethereum" },
+): UniswapXFeedRecord {
   return {
     orderHash: api.order_hash,
     sourceChainId: api.source_chain_id,
-    input: {
-      symbol: api.token_in.symbol,
-      display: formatUnits(BigInt(api.amount_in), api.token_in.decimals),
-    },
-    requiredOutput: {
-      symbol: api.token_out.symbol,
-      display: formatUnits(BigInt(api.required_out), api.token_out.decimals),
-    },
+    input: tokenQuantity(
+      api.token_in,
+      formatUnits(BigInt(api.amount_in), api.token_in.decimals),
+      chain,
+    ),
+    requiredOutput: tokenQuantity(
+      api.token_out,
+      formatUnits(BigInt(api.required_out), api.token_out.decimals),
+      chain,
+    ),
     marketOutPerIn: formatUnits(BigInt(api.market_out_per_in_q18), 18),
-    simulatedOutput: {
-      symbol: api.token_out.symbol,
-      display: formatUnits(
-        BigInt(api.simulated_amount_out),
-        api.token_out.decimals,
-      ),
-    },
+    simulatedOutput: tokenQuantity(
+      api.token_out,
+      formatUnits(BigInt(api.simulated_amount_out), api.token_out.decimals),
+      chain,
+    ),
     simulatedBatchId: api.simulated_batch_id,
     lastSeenAt: api.last_seen_at,
   };

@@ -1,10 +1,12 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import { AssetIdentity } from "@/components/AssetIdentity";
 import { DepthChart } from "@/components/DepthChart";
 import { Crumbs } from "@/components/Crumbs";
 import { RetryNotice } from "@/components/RetryNotice";
 import { poolDetail } from "@/lib/pool-detail";
 import { tokenText } from "@/lib/explorer";
+import { useAssets } from "@/services/assets";
 import { useTrades } from "@/services/explorer";
 import { usePool, usePoolDepth, usePoolRoster } from "@/services/pools";
 import { useApp } from "@/state";
@@ -19,6 +21,18 @@ export function PoolDetailPage() {
   const navigate = useNavigate();
   const { pair } = useParams();
   const pool = usePool(pair);
+  const assets = useAssets();
+  const base = pool?.ref
+    ? assets.find(
+        (asset) => asset.address.toLowerCase() === pool.ref!.base.toLowerCase(),
+      )
+    : undefined;
+  const quote = pool?.ref
+    ? assets.find(
+        (asset) =>
+          asset.address.toLowerCase() === pool.ref!.quote.toLowerCase(),
+      )
+    : undefined;
   const settlements = useTrades(
     pool?.ref
       ? { status: "confirmed", base: pool.ref.base, quote: pool.ref.quote }
@@ -44,7 +58,13 @@ export function PoolDetailPage() {
         </button>
         <div className={styles.headTitle}>
           <Crumbs current={d.pair} trail={[{ label: "Pools", to: "/pools" }]} />
-          <div className={styles.pair}>{d.pair}</div>
+          <div className={styles.pair}>
+            <span className={styles.pairIdentity}>
+              <AssetIdentity asset={base} />
+              <AssetIdentity asset={quote} />
+            </span>
+            {d.pair}
+          </div>
         </div>
         <span className={styles.limeSquare} />
         <span className={styles.spacer} />

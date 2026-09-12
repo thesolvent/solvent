@@ -10,6 +10,7 @@ import {
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { formatUnits } from "viem";
 
+import { AssetIdentity } from "@/components/AssetIdentity";
 import { Crumbs } from "@/components/Crumbs";
 import { BAND_K0 } from "@/data";
 import {
@@ -221,6 +222,12 @@ export function CreatePoolPage() {
     pairQuery.isError ? "Couldn’t load supported pairs." : undefined,
     historyQuery.data,
   );
+  const selectedSlotA = c.walletRows.find(
+    (row) => row.token.sym === state.slotA,
+  )?.token;
+  const selectedSlotB = c.walletRows.find(
+    (row) => row.token.sym === state.slotB,
+  )?.token;
   const creation = useCreatePosition(
     c.pair
       ? {
@@ -650,14 +657,7 @@ export function CreatePoolPage() {
                       <div className={styles.slotA}>
                         {state.slotA ? (
                           <div className={styles.slotFilled}>
-                            <span
-                              className={styles.slotChip}
-                              style={{
-                                background: c.tintA,
-                              }}
-                            >
-                              {state.slotA}
-                            </span>
+                            <AssetIdentity asset={selectedSlotA} />
                             <span className={styles.slotSym}>
                               {state.slotA}
                             </span>
@@ -698,14 +698,7 @@ export function CreatePoolPage() {
                       <div className={styles.slotB}>
                         {state.slotB ? (
                           <div className={styles.slotFilledRight}>
-                            <span
-                              className={styles.slotChip}
-                              style={{
-                                background: c.tintB,
-                              }}
-                            >
-                              {state.slotB}
-                            </span>
+                            <AssetIdentity asset={selectedSlotB} />
                             <span className={styles.slotSym}>
                               {state.slotB}
                             </span>
@@ -797,14 +790,7 @@ export function CreatePoolPage() {
                           }}
                           onClick={() => pickWalletToken(row.token.sym)}
                         >
-                          <span
-                            className={styles.walletChip}
-                            style={{
-                              background: row.token.tint,
-                            }}
-                          >
-                            {row.token.sym}
-                          </span>
+                          <AssetIdentity asset={row.token} />
                           <span className={styles.walletMain}>
                             <span className={styles.walletName}>
                               {row.token.name}

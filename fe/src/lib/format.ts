@@ -34,6 +34,13 @@ export function money(n: number): string {
   });
 }
 
+export function formatTokenAmount(value: string): string {
+  const amount = Number(value);
+  return Number.isFinite(amount)
+    ? amount.toLocaleString("en-US", { maximumSignificantDigits: 12 })
+    : value;
+}
+
 export function poolByPair(pair: string): Pool | undefined {
   return POOLS.find((p) => p.pair === pair);
 }

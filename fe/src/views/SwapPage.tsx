@@ -20,6 +20,8 @@ import { useConfig } from "@/services/system";
 import { type SwapProtocol, useApp } from "@/state";
 import { AssetIdentity } from "@/components/AssetIdentity";
 import { useAssetBalances, useWalletAction } from "@/services/wallet";
+import erc7683Logo from "@/assets/protocol-erc7683.svg";
+import uniswapXLogo from "@/assets/protocol-uniswapx.svg";
 
 import styles from "./SwapPage.module.css";
 
@@ -34,6 +36,7 @@ type ProtocolOption = {
   value: SwapProtocol;
   label: string;
   description: string;
+  logo: string;
 };
 
 const PROTOCOL_OPTIONS = [
@@ -41,11 +44,13 @@ const PROTOCOL_OPTIONS = [
     value: "uniswapx",
     label: "UniswapX",
     description: "Dutch-auction intent settlement",
+    logo: uniswapXLogo,
   },
   {
     value: "erc7683",
     label: "ERC-7683",
     description: "Standardized same-chain order settlement",
+    logo: erc7683Logo,
   },
 ] satisfies readonly ProtocolOption[];
 
@@ -57,9 +62,9 @@ export function SwapPage() {
   const erc7683Available = Boolean(runtimeConfig.data?.erc7683_settler);
   const protocol =
     crossChain || !erc7683Available ? "uniswapx" : state.swapProtocol;
-  const protocolLabel =
-    PROTOCOL_OPTIONS.find((option) => option.value === protocol)?.label ??
-    protocol;
+  const protocolOption =
+    PROTOCOL_OPTIONS.find((option) => option.value === protocol) ??
+    PROTOCOL_OPTIONS[0];
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
@@ -258,7 +263,15 @@ export function SwapPage() {
                   aria-haspopup="menu"
                   onClick={() => setProtocolMenuOpen((open) => !open)}
                 >
-                  <span>{protocolLabel}</span>
+                  <span className={styles.protocolTriggerLabel}>
+                    <img
+                      className={styles.protocolTriggerLogo}
+                      src={protocolOption.logo}
+                      alt=""
+                      aria-hidden="true"
+                    />
+                    <span>{protocolOption.label}</span>
+                  </span>
                   <span
                     className={
                       protocolMenuOpen
@@ -272,35 +285,45 @@ export function SwapPage() {
                 </button>
                 {protocolMenuOpen && (
                   <div className={styles.protocolOptions} role="menu">
-                    {PROTOCOL_OPTIONS.map(({ value, label, description }) => (
+                    {PROTOCOL_OPTIONS.map((option) => (
                       <button
-                        key={value}
+                        key={option.value}
                         type="button"
                         role="menuitemradio"
-                        aria-checked={protocol === value}
+                        aria-checked={protocol === option.value}
                         className={
-                          protocol === value
+                          protocol === option.value
                             ? styles.protocolOptionActive
                             : styles.protocolOption
                         }
                         onClick={() => {
                           set({
-                            swapProtocol: value,
+                            swapProtocol: option.value,
                           });
                           setProtocolMenuOpen(false);
                         }}
                       >
-                        <span className={styles.protocolCopy}>
-                          <span className={styles.protocolName}>{label}</span>
-                          <span className={styles.protocolDescription}>
-                            {description}
+                        <span className={styles.protocolOptionMain}>
+                          <img
+                            className={styles.protocolOptionLogo}
+                            src={option.logo}
+                            alt=""
+                            aria-hidden="true"
+                          />
+                          <span className={styles.protocolCopy}>
+                            <span className={styles.protocolName}>
+                              {option.label}
+                            </span>
+                            <span className={styles.protocolDescription}>
+                              {option.description}
+                            </span>
                           </span>
                         </span>
                         <span
                           className={styles.protocolMark}
                           aria-hidden="true"
                         >
-                          {protocol === value ? "✓" : ""}
+                          {protocol === option.value ? "✓" : ""}
                         </span>
                       </button>
                     ))}
@@ -325,7 +348,7 @@ export function SwapPage() {
             <span className={styles.assetSymbol}>
               {from?.symbol || "Select"}
             </span>
-            <AssetIdentity asset={from} />
+            <AssetIdentity asset={from} showChain />
             <span className={styles.assetCaret}>▾</span>
           </button>
           <div className={styles.amountCol}>
@@ -377,7 +400,7 @@ export function SwapPage() {
             onClick={() => openPicker("to")}
           >
             <span className={styles.assetSymbol}>{to?.symbol || "Select"}</span>
-            <AssetIdentity asset={to} />
+            <AssetIdentity asset={to} showChain />
             <span className={styles.assetCaret}>▾</span>
           </button>
           <div className={styles.amountCol}>
@@ -493,9 +516,7 @@ export function SwapPage() {
                       }
                       onClick={() => choose(t)}
                     >
-                      <span className={styles.tokenChip}>
-                        {t.symbol.slice(0, 2)}
-                      </span>
+                      <AssetIdentity asset={t} showChain />
                       <span className={styles.tokenMain}>
                         <span className={styles.tokenName}>{t.name}</span>
                         <span className={styles.tokenMeta}>

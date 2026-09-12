@@ -2,6 +2,7 @@ import type { Asset } from "@/data";
 import type { RebateRecord } from "@/data/rebates";
 import { loadedPageLabel } from "@/lib/pagination";
 import { rebateRow } from "@/lib/rebates";
+import { AssetIdentity } from "./AssetIdentity";
 import { Pagination } from "./Pagination";
 import { RetryNotice } from "./RetryNotice";
 import { useLoadedPagination } from "./useLoadedPagination";
@@ -119,9 +120,15 @@ export function RebateList({
                 <span className={styles.sub}>{row.strategy}</span>
               </span>
               <span className={styles.flow}>
-                <span title={row.deposit}>{row.deposit}</span>
+                <span className={styles.flowAmount} title={row.deposit}>
+                  <AssetIdentity asset={row.inputAsset} />
+                  {row.deposit}
+                </span>
                 <span className={styles.arrow}>→</span>
-                <strong title={row.output}>{row.output}</strong>
+                <strong className={styles.flowAmount} title={row.output}>
+                  <AssetIdentity asset={row.outputAsset} />
+                  {row.output}
+                </strong>
               </span>
               <span className={styles.cell}>
                 <strong title={row.makerRebate}>{row.makerRebate}</strong>

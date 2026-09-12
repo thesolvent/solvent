@@ -18,6 +18,9 @@ export interface CreateToken {
   decimals: number;
   symbol: string;
   name: string;
+  logoUri?: string | null;
+  net?: string;
+  chainLogoUri?: string | null;
   tags: string[];
   balance: number;
   balanceRaw: bigint;

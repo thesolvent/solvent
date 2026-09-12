@@ -8,7 +8,11 @@ import { dirname, resolve } from "node:path";
 
 import { REPO_ROOT } from "../lib/manifest.ts";
 import type { Manifest } from "../lib/manifest.ts";
-import { UNISWAP_ASSETS } from "../devnet/bootstrap.ts";
+import {
+  CORE_TOKEN_CATALOG,
+  UNISWAP_ASSETS,
+  type UniswapAsset,
+} from "../devnet/bootstrap.ts";
 import type { CrossChainInfraManifest, Side } from "./manifests.ts";
 
 // Anvil's deterministic dev accounts — well-known throwaway keys, devnet only. Each chain is
@@ -22,22 +26,6 @@ export const FILLER_OWNER_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca87
 const POLICY_SIGNER_KEY = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6";
 const COSIGNER_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
-const NAMES: Record<string, string> = {
-  WETH: "Wrapped Ether",
-  WBTC: "Wrapped BTC",
-  USDC: "USD Coin",
-  USDT: "Tether USD",
-  DAI: "Dai Stablecoin",
-  LINK: "ChainLink Token",
-};
-const TAGS: Record<string, string> = {
-  WETH: "Majors",
-  WBTC: "Majors",
-  USDC: "Stables",
-  USDT: "Stables",
-  DAI: "Stables",
-  LINK: "DeFi",
-};
 const PRICE_FEEDS: Record<string, string> = {
   ETHUSDT: "WETH",
   BTCUSDT: "WBTC",
@@ -94,9 +82,10 @@ function tokenList(manifest: Manifest) {
       chainId: manifest.chain_id,
       address: token.address,
       symbol,
-      name: NAMES[symbol] ?? symbol,
+      name: CORE_TOKEN_CATALOG[symbol as keyof typeof CORE_TOKEN_CATALOG]?.name ?? symbol,
       decimals: token.decimals,
-      tags: [TAGS[symbol] ?? "other"],
+      logoURI: CORE_TOKEN_CATALOG[symbol as keyof typeof CORE_TOKEN_CATALOG]?.logoUri,
+      tags: [CORE_TOKEN_CATALOG[symbol as keyof typeof CORE_TOKEN_CATALOG]?.tag ?? "other"],
     })),
   };
 }
@@ -166,6 +155,7 @@ function configToml(
 source_address = "${asset.sourceAddress}"
 symbol = "${asset.symbol}"
 decimals = ${asset.decimals}
+logo_uri = "${assetLogoUri(asset)}"
 ${market}${peg}`;
   }).join("\n");
 
@@ -184,6 +174,7 @@ app_address = "${appAddress}"
 default_fee_bps = 5
 block_explorer_url = "${ports.explorerUrl}"
 networks = ["Ethereum"]
+network_logo_uri = "${side === "origin" ? "https://cdn.garden.finance/catalog/chain_images/ethereum.svg" : "https://cdn.garden.finance/catalog/chain_images/BaseIcon.svg"}"
 faucet = true
 
 token_list = "${tokenListPath}"
@@ -228,6 +219,12 @@ origin_proof_outbox = "${options.directRoute.originProofOutbox}"
 destination_proof_outbox = "${options.directRoute.destinationProofOutbox}"
 origin_strategy_hash = "${options.directRoute.originStrategyHash}"
 ` : ""}`;
+}
+
+function assetLogoUri(asset: UniswapAsset): string {
+  return asset.symbol === "ETH"
+    ? "https://cdn.garden.finance/catalog/chain_images/ethereum.svg"
+    : `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${asset.sourceAddress}/logo.png`;
 }
 
 export function writeSideConfig(

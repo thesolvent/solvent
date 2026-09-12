@@ -520,6 +520,7 @@ export interface components {
             features: components["schemas"]["Features"];
             /** @description The public executor target for encoded rebate transactions. */
             filler: string;
+            network_logo_uri?: string | null;
             networks: string[];
             /** @description The Permit2 contract verifying the taker witness. */
             permit2: string;
@@ -1053,6 +1054,7 @@ export interface components {
                 features: components["schemas"]["Features"];
                 /** @description The public executor target for encoded rebate transactions. */
                 filler: string;
+                network_logo_uri?: string | null;
                 networks: string[];
                 /** @description The Permit2 contract verifying the taker witness. */
                 permit2: string;
@@ -1773,6 +1775,7 @@ export interface components {
             chain_id: number;
             /** Format: int32 */
             decimals: number;
+            logo_uri?: string | null;
             symbol: string;
         };
         /** @description One token paired with an amount. */
@@ -1843,6 +1846,7 @@ export interface components {
             address: string;
             /** Format: int32 */
             decimals: number;
+            logo_uri?: string | null;
             symbol: string;
         };
         UniswapXFeedOrderView: {

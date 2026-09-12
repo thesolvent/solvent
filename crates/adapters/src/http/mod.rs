@@ -662,6 +662,7 @@ mod tests {
                 },
                 default_fee_bps: 5,
                 networks: vec!["Ethereum".to_string()],
+                network_logo_uri: Some("https://example.com/ethereum.svg".to_string()),
                 block_explorer_url: "http://localhost:5100".to_string(),
                 aqua: Address::ZERO,
                 app: Address::ZERO,
