@@ -7,7 +7,7 @@ use alloy::sol_types::{SolCall, SolValue};
 use async_trait::async_trait;
 
 use solvent_core::deps::execution::ExecutionAuthorizer;
-use solvent_core::deps::ingest::{FillBuilder, FillBuilderError};
+use solvent_core::deps::ingest::{BuiltFill, FillBuilder, FillBuilderError};
 use solvent_core::primitives::execution::{ExecutionAuthorization, UserFillAuthorization};
 use solvent_core::primitives::ingest::Intent;
 use solvent_core::primitives::registry::{Snapshot, StrategyKey};
@@ -17,10 +17,13 @@ use crate::execution::filler::{
     fillCall, uses_taker_credential, Authorization, Order, SignedOrder, SourceSwap,
 };
 
-/// The router is the deployment's Aqua app and hashes each source strategy. The authorizer binds
+/// The router is the deployment's Aqua app and hashes each source strategy. `filler` is this
+/// builder's own deployed `UniswapXAquaFiller` — one per reactor, since the contract binds its
+/// reactor at construction — and the contract a built fill must be sent to. The authorizer binds
 /// the exact routed amounts and signed UniswapX order before the filler can execute them.
 pub struct UniswapXFillBuilder {
     router: Address,
+    filler: Address,
     taker_credential: Address,
     authorizer: Arc<dyn ExecutionAuthorizer>,
 }
@@ -28,11 +31,13 @@ pub struct UniswapXFillBuilder {
 impl UniswapXFillBuilder {
     pub fn new(
         router: Address,
+        filler: Address,
         taker_credential: Address,
         authorizer: Arc<dyn ExecutionAuthorizer>,
     ) -> Self {
         Self {
             router,
+            filler,
             taker_credential,
             authorizer,
         }
@@ -94,7 +99,7 @@ impl FillBuilder for UniswapXFillBuilder {
         intent: &Intent,
         plan: &RoutePlan,
         snapshot: &Snapshot,
-    ) -> Result<Bytes, FillBuilderError> {
+    ) -> Result<BuiltFill, FillBuilderError> {
         if plan.legs.is_empty() {
             return Err(FillBuilderError::NoLegs);
         }
@@ -109,7 +114,10 @@ impl FillBuilder for UniswapXFillBuilder {
             sources.push(self.source_for(leg, index, context_hash, snapshot).await?);
         }
 
-        Ok(Bytes::from(fillCall { order, sources }.abi_encode()))
+        Ok(BuiltFill::new(
+            self.filler,
+            Bytes::from(fillCall { order, sources }.abi_encode()),
+        ))
     }
 }
 
@@ -158,8 +166,12 @@ mod tests {
         address!("9999999999999999999999999999999999999999")
     }
 
+    fn filler() -> Address {
+        address!("8888888888888888888888888888888888888888")
+    }
+
     fn builder() -> UniswapXFillBuilder {
-        UniswapXFillBuilder::new(router(), credential(), Arc::new(FakeAuthorizer))
+        UniswapXFillBuilder::new(router(), filler(), credential(), Arc::new(FakeAuthorizer))
     }
 
     fn credential() -> Address {

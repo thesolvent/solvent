@@ -164,7 +164,7 @@ async fn exercise_protected_curve(label: &str) {
         .expect("reserve the routed plan");
 
     // Build the fill calldata and settle it on-chain as the filler's owner.
-    let calldata = stack
+    let built = stack
         .fill_builder()
         .build(&intent, &plan, &snap)
         .await
@@ -173,8 +173,8 @@ async fn exercise_protected_curve(label: &str) {
         .maker_provider
         .send_transaction(
             TransactionRequest::default()
-                .to(stack.filler)
-                .input(TransactionInput::new(calldata)),
+                .to(built.target)
+                .input(TransactionInput::new(built.calldata)),
         )
         .await
         .expect("send fill")

@@ -138,7 +138,7 @@ mod tests {
     use solvent_core::deps::execution::{
         Execution, ExecutionError, SettlementError, SettlementReader, SimError, SimGate,
     };
-    use solvent_core::deps::ingest::{FillBuilder, FillBuilderError};
+    use solvent_core::deps::ingest::{BuiltFill, FillBuilder, FillBuilderError};
     use solvent_core::deps::ledger::{
         BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError,
     };
@@ -162,7 +162,7 @@ mod tests {
     use solvent_core::primitives::execution::{
         ExecHandle, ExecStatus, FillTx, SimVerdict, TrackedFill,
     };
-    use solvent_core::primitives::ingest::Intent;
+    use solvent_core::primitives::ingest::{Intent, ProtocolId};
     use solvent_core::primitives::ledger::{AccountKey, Reservation, ReservationSource};
     use solvent_core::primitives::rebate::{RebateBatch, RebateExecution, RebatePlan};
     use solvent_core::primitives::registry::MakerStrategy;
@@ -548,8 +548,8 @@ mod tests {
             _: &Intent,
             _: &RoutePlan,
             _: &Snapshot,
-        ) -> Result<Bytes, FillBuilderError> {
-            Ok(Bytes::new())
+        ) -> Result<BuiltFill, FillBuilderError> {
+            Ok(BuiltFill::new(Address::ZERO, Bytes::new()))
         }
     }
 
@@ -632,7 +632,10 @@ mod tests {
             Arc::clone(&strategy_guard),
             Arc::clone(&trades),
             execution,
-            Arc::new(FakeFill),
+            BTreeMap::from([(
+                ProtocolId::UniswapXV2,
+                Arc::new(FakeFill) as Arc<dyn FillBuilder>,
+            )]),
             Arc::clone(&leg_cost),
             Arc::new(SystemClock),
             SwapConfig {

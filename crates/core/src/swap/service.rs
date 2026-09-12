@@ -3,6 +3,7 @@
 //! synchronously behind `POST /swap`; the reconcile worker later settles the trade. Protocol-agnostic
 //! — it takes an already-normalized [`Intent`] (the adapter decodes/verifies/cosigns the order).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use alloy_primitives::{keccak256, Address, U256};
@@ -14,7 +15,7 @@ use crate::execution::ExecutionService;
 use crate::ledger::LedgerService;
 use crate::obs::warn;
 use crate::primitives::execution::{FillOutcome, FillTx, PendingFill};
-use crate::primitives::ingest::Intent;
+use crate::primitives::ingest::{Intent, ProtocolId};
 use crate::primitives::ledger::{LedgerError, ReservationSource};
 use crate::primitives::registry::Snapshot;
 use crate::primitives::routing::{RoutePlan, RouteRequest, RoutingConfig};
@@ -31,8 +32,13 @@ use crate::SolventError;
 pub struct SwapConfig {
     pub routing: RoutingConfig,
     pub chain_id: u64,
-    /// The filler contract and the account authorized to call it.
+    /// Matched against an order's exclusive filler (`Intent::required_output`) to decide whether
+    /// we owe the toll. Protocol-agnostic in practice: only a UniswapX-sourced intent ever carries
+    /// exclusivity, so this is unused for any other protocol's intent. Not the same thing as a
+    /// fill's target contract — that comes from the intent's own `FillBuilder::build`.
     pub filler: Address,
+    /// The account authorized to call a fill's target contract — whichever one the intent's
+    /// protocol builder names in its `BuiltFill`.
     pub filler_owner: Address,
     /// How long a reservation holds before the TTL sweep may release it.
     pub reservation_ttl_secs: u64,
@@ -50,7 +56,10 @@ pub struct SwapService {
     guards: Arc<StrategyGuard>,
     trades: Arc<dyn TradeStore>,
     execution: Arc<ExecutionService>,
-    fill_builder: Arc<dyn FillBuilder>,
+    /// One builder per protocol a feed can source from. Keyed rather than singular so an intent
+    /// from a protocol we only observe (no builder registered) declines here rather than being
+    /// handed to another protocol's builder, which would encode calldata for the wrong settler.
+    fill_builders: BTreeMap<ProtocolId, Arc<dyn FillBuilder>>,
     leg_cost: Arc<LegCostResolver>,
     clock: Arc<dyn Clock>,
     config: SwapConfig,
@@ -64,7 +73,7 @@ impl SwapService {
         guards: Arc<StrategyGuard>,
         trades: Arc<dyn TradeStore>,
         execution: Arc<ExecutionService>,
-        fill_builder: Arc<dyn FillBuilder>,
+        fill_builders: BTreeMap<ProtocolId, Arc<dyn FillBuilder>>,
         leg_cost: Arc<LegCostResolver>,
         clock: Arc<dyn Clock>,
         config: SwapConfig,
@@ -75,7 +84,7 @@ impl SwapService {
             guards,
             trades,
             execution,
-            fill_builder,
+            fill_builders,
             leg_cost,
             clock,
             config,
@@ -100,6 +109,12 @@ impl SwapService {
         prices: TradePrices,
     ) -> Result<SwapOutcome, SolventError> {
         let now = self.clock.now_unix();
+        let Some(fill_builder) = self.fill_builders.get(&intent.protocol).cloned() else {
+            // Observed and quoted upstream, but this protocol has no builder to fill it with.
+            return self
+                .declined(trade_id, &intent, taker, now, prices, None)
+                .await;
+        };
         let Some(amounts) = swap_amounts(&intent, self.config.filler, now) else {
             // No single delivery to source, so there is no cost to quote either.
             return self
@@ -184,8 +199,16 @@ impl SwapService {
             .advance(&created.id, TradeStatus::Reserved, now)
             .await?;
 
-        self.submit_fill(&created.id, &intent, &plan, &snapshot, reservation, now)
-            .await
+        self.submit_fill(
+            &fill_builder,
+            &created.id,
+            &intent,
+            &plan,
+            &snapshot,
+            reservation,
+            now,
+        )
+        .await
     }
 
     /// Reserve the plan's payouts. `Ok(None)` continues to the fill; `Ok(Some(..))` is a decline
@@ -235,8 +258,10 @@ impl SwapService {
 
     /// Build and submit the fill: `Submitted` on success, or settle `Declined` when the sim gate
     /// rejects (it has already voided the reservation).
+    #[allow(clippy::too_many_arguments)]
     async fn submit_fill(
         &self,
+        fill_builder: &Arc<dyn FillBuilder>,
         id: &TradeId,
         intent: &Intent,
         plan: &RoutePlan,
@@ -244,14 +269,14 @@ impl SwapService {
         reservation: ReservationId,
         now: u64,
     ) -> Result<SwapOutcome, SolventError> {
-        let calldata = self.fill_builder.build(intent, plan, snapshot).await?;
+        let built = fill_builder.build(intent, plan, snapshot).await?;
         let pending = PendingFill::new(
             FillTx::new(
                 intent.id,
                 self.config.chain_id,
                 self.config.filler_owner,
-                self.config.filler,
-                calldata,
+                built.target,
+                built.calldata,
             ),
             reservation,
         );
@@ -480,7 +505,7 @@ mod tests {
     use crate::deps::execution::{
         Execution, ExecutionError, SettlementError, SettlementReader, SimError, SimGate,
     };
-    use crate::deps::ingest::FillBuilderError;
+    use crate::deps::ingest::{BuiltFill, FillBuilderError};
     use crate::deps::ledger::{BudgetSource, BudgetSourceError, LedgerStore, LedgerStoreError};
     use crate::deps::routing::{GasPrice, GasPriceError, PriceOracle, PriceOracleError};
     use crate::deps::trade::{
@@ -658,8 +683,11 @@ mod tests {
             _: &Intent,
             _: &RoutePlan,
             _: &Snapshot,
-        ) -> Result<Bytes, FillBuilderError> {
-            Ok(Bytes::from(vec![0x01, 0x02]))
+        ) -> Result<BuiltFill, FillBuilderError> {
+            Ok(BuiltFill {
+                target: addr(0xF1),
+                calldata: Bytes::from(vec![0x01, 0x02]),
+            })
         }
     }
 
@@ -865,7 +893,10 @@ mod tests {
             Arc::new(StrategyGuard::default()),
             trades.clone(),
             execution,
-            Arc::new(FakeFill),
+            BTreeMap::from([(
+                ProtocolId::UniswapXV2,
+                Arc::new(FakeFill) as Arc<dyn FillBuilder>,
+            )]),
             leg_cost,
             Arc::new(FixedClock),
             SwapConfig {
@@ -965,6 +996,30 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.status, TradeStatus::Declined);
+    }
+
+    /// A protocol with no registered builder (an observation-only feed) must decline before
+    /// routing or reserving anything — never fall through to another protocol's builder, which
+    /// would encode calldata for the wrong settler.
+    #[tokio::test]
+    async fn a_protocol_with_no_fill_builder_is_declined_before_reserving() {
+        let h = harness(vec![xyc(3, e(100, 18), e(300_000, 6))], SimVerdict::Ok).await;
+        let before = h.ledger.available(&virt(3, USDC));
+        let mut order = intent(1, addr(9), e(2, 18), e(3000, 6));
+        order.protocol = ProtocolId::OneInchLimitOrder;
+
+        let out = h
+            .swap
+            .submit(order, addr(9), tid(), TradePrices::default())
+            .await
+            .unwrap();
+
+        assert_eq!(out.status, TradeStatus::Declined);
+        assert_eq!(
+            h.ledger.available(&virt(3, USDC)),
+            before,
+            "nothing should have been reserved for a protocol we cannot fill"
+        );
     }
 
     /// The taker's input is the max-in bound, and it is the only thing standing between the

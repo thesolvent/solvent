@@ -54,7 +54,7 @@ impl FeedHealth {
     }
 
     /// A poll that reached the API, whether or not it carried orders.
-    fn record_success(&self, now: u64) {
+    pub(crate) fn record_success(&self, now: u64) {
         self.last_success.store(now, Ordering::Relaxed);
         self.consecutive_failures.store(0, Ordering::Relaxed);
         self.refused.store(0, Ordering::Relaxed);

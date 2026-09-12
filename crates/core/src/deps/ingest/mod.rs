@@ -5,5 +5,5 @@ pub mod fill;
 pub mod normalizer;
 
 pub use feed::OrderFeed;
-pub use fill::{FillBuilder, FillBuilderError};
+pub use fill::{BuiltFill, FillBuilder, FillBuilderError};
 pub use normalizer::{NormalizeError, Normalizer};

@@ -17,6 +17,7 @@ const BPS: u64 = 10_000;
 #[non_exhaustive]
 pub enum ProtocolId {
     UniswapXV2,
+    OneInchLimitOrder,
 }
 
 /// What the taker pays: the token and its amount over time.

@@ -623,6 +623,7 @@ impl Stack {
     pub fn fill_builder(&self) -> UniswapXFillBuilder {
         UniswapXFillBuilder::new(
             self.h.app,
+            self.filler,
             self.credential,
             Arc::new(LocalPolicySigner::new(
                 self.chain_id,
@@ -631,6 +632,16 @@ impl Stack {
             )),
         )
     }
+}
+
+/// Etch just Multicall3 — every protocol's budget/depth reads batch through it, whether or not
+/// that protocol's own fill path touches Permit2 or a protected UniswapX strategy.
+pub async fn etch_multicall3(h: &Harness) {
+    let bytes: Bytes = MULTICALL3_CODE.trim().parse().expect("bytecode");
+    h.maker_provider
+        .anvil_set_code(MULTICALL3, bytes)
+        .await
+        .expect("etch multicall3");
 }
 
 /// Deploy the ingest→fill stack: the base harness, etched Permit2 + Multicall3, and the reactor +

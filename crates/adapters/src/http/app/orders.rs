@@ -22,7 +22,8 @@ pub struct OrdersQuery {
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ObservedOrder {
     pub order_hash: String,
-    /// Where it came from: `uniswapx` (the public book) or `solvent` (our own endpoint).
+    /// Where it came from: `uniswapx` (the public book), `oneinch` (the public book), or `solvent`
+    /// (our own endpoint).
     pub source: String,
     pub token_in: String,
     #[serde(skip_serializing_if = "Option::is_none")]
