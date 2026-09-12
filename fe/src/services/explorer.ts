@@ -26,6 +26,15 @@ export function useActivity(filter: ActivityFilter) {
   });
 }
 
+export function useUniswapXFeed(cursor?: string) {
+  const { explorer } = useServices();
+  return useQuery({
+    ...LIVE_QUERY_OPTIONS,
+    queryKey: ["uniswapx-feed", cursor],
+    queryFn: () => explorer.uniswapxFeed(cursor),
+  });
+}
+
 export function useExplorerStats() {
   const { explorer } = useServices();
   return useQuery({
@@ -61,5 +70,5 @@ function isMissingTrade(error: unknown): boolean {
 
 export function tradeProblem(error: unknown): string {
   if (isMissingTrade(error)) return "Trade not found.";
-  return "Couldn’t load this trade. Try again.";
+  return "Couldn’t load this trade.";
 }

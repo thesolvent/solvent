@@ -21,6 +21,7 @@ export function rebateRow(rebate: RebateRecord, assets: Asset[]) {
   const at = rebate.executedAt ?? rebate.publishedAt;
   return {
     id: rebate.id,
+    originTradeId: rebate.originTradeId,
     pair: `${tokenIn?.symbol ?? shortHash(rebate.tokenIn)}/${tokenOut?.symbol ?? shortHash(rebate.tokenOut)}`,
     strategy: `strategy ${shortHash(rebate.strategyHash)}`,
     deposit: amount(rebate.amountIn + rebate.makerRebate, tokenIn),

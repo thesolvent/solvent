@@ -416,6 +416,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/uniswapx-feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["uniswapx_feed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/wallets/{addr}/balances": {
         parameters: {
             query?: never;
@@ -1406,6 +1422,37 @@ export interface components {
             status: components["schemas"]["Status"];
         };
         /** @description The envelope wrapping every response. `status_code` sets the HTTP status (never serialized). */
+        Response_List_UniswapXFeedOrderView: {
+            error?: string | null;
+            /**
+             * @description A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an
+             *     optional `total`. Carried inside the response envelope's `result`.
+             */
+            result?: {
+                items: {
+                    amount_in: string;
+                    /** Format: int64 */
+                    last_seen_at: number;
+                    market_out_per_in_q18: string;
+                    /** Format: int64 */
+                    observed_at: number;
+                    order_hash: string;
+                    required_out: string;
+                    simulated_amount_out: string;
+                    /** Format: int64 */
+                    simulated_batch_id: number;
+                    /** Format: int64 */
+                    source_chain_id: number;
+                    token_in: components["schemas"]["UniswapXFeedAssetView"];
+                    token_out: components["schemas"]["UniswapXFeedAssetView"];
+                }[];
+                next_cursor?: string | null;
+                /** Format: int64 */
+                total?: number | null;
+            };
+            status: components["schemas"]["Status"];
+        };
+        /** @description The envelope wrapping every response. `status_code` sets the HTTP status (never serialized). */
         Response_MakerDashboard: {
             error?: string | null;
             /**
@@ -1791,6 +1838,29 @@ export interface components {
             surplus?: null | components["schemas"]["Amount"];
             taker: string;
             tx_hash?: string | null;
+        };
+        UniswapXFeedAssetView: {
+            address: string;
+            /** Format: int32 */
+            decimals: number;
+            symbol: string;
+        };
+        UniswapXFeedOrderView: {
+            amount_in: string;
+            /** Format: int64 */
+            last_seen_at: number;
+            market_out_per_in_q18: string;
+            /** Format: int64 */
+            observed_at: number;
+            order_hash: string;
+            required_out: string;
+            simulated_amount_out: string;
+            /** Format: int64 */
+            simulated_batch_id: number;
+            /** Format: int64 */
+            source_chain_id: number;
+            token_in: components["schemas"]["UniswapXFeedAssetView"];
+            token_out: components["schemas"]["UniswapXFeedAssetView"];
         };
     };
     responses: never;
@@ -2471,6 +2541,30 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    uniswapx_feed: {
+        parameters: {
+            query?: {
+                /** @description Page size (default 50, max 200) */
+                limit?: number;
+                /** @description Opaque next-page cursor */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_List_UniswapXFeedOrderView"];
+                };
             };
         };
     };

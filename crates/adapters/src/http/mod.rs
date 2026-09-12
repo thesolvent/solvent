@@ -47,6 +47,7 @@ pub fn router(state: AppState) -> Router {
         .route("/swap", post(app::swap::submit))
         .route("/trades", get(app::trades::trades))
         .route("/trades/{id}", get(app::trades::trade_detail))
+        .route("/uniswapx-feed", get(app::uniswapx_feed::uniswapx_feed))
         .route("/activity", get(app::activity::activity))
         .route("/makers", get(app::makers::makers))
         .route("/makers/{maker}", get(app::makers::maker_dashboard))
@@ -99,7 +100,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
 
     use alloy::primitives::{Address, Bytes, B256, U256};
     use alloy::signers::local::PrivateKeySigner;
@@ -691,6 +692,8 @@ mod tests {
             registry_store: Arc::new(NoopEventStore),
             valuation,
             quote_log: Arc::new(NoopQuoteLog),
+            uniswap_feed: None,
+            uniswap_feed_assets: Arc::new(HashMap::new()),
         }
     }
 

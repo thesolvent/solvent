@@ -3,6 +3,7 @@ import type {
   ExplorerStats,
   RecordPage,
   TradeRecord,
+  UniswapXFeedRecord,
 } from "@/data/explorer";
 
 export interface TradeFilter {
@@ -24,6 +25,7 @@ export interface ExplorerPort {
     cursor?: string,
   ): Promise<RecordPage<TradeRecord>>;
   trade(id: string): Promise<TradeRecord>;
+  uniswapxFeed(cursor?: string): Promise<RecordPage<UniswapXFeedRecord>>;
   activity(
     filter: ActivityFilter,
     cursor?: string,

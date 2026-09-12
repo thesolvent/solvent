@@ -1,4 +1,9 @@
-import type { ActivityEvent, Stats, Trade } from "@solvent/sdk/client";
+import type {
+  ActivityEvent,
+  Stats,
+  Trade,
+  UniswapXFeedOrder,
+} from "@solvent/sdk/client";
 import type { CrossChainOrder, SagaState } from "@solvent/sdk/cross-chain";
 import { formatUnits } from "viem";
 import type { Asset } from "@/data";
@@ -6,6 +11,7 @@ import type {
   ActivityRecord,
   ExplorerStats,
   TradeRecord,
+  UniswapXFeedRecord,
 } from "@/data/explorer";
 
 export function toTrade(api: Trade): TradeRecord {
@@ -201,6 +207,31 @@ export function toActivity(api: ActivityEvent): ActivityRecord {
     at: api.at,
     blockNumber: api.block_number ?? null,
     txHash: api.tx_hash ?? null,
+  };
+}
+
+export function toUniswapXFeed(api: UniswapXFeedOrder): UniswapXFeedRecord {
+  return {
+    orderHash: api.order_hash,
+    sourceChainId: api.source_chain_id,
+    input: {
+      symbol: api.token_in.symbol,
+      display: formatUnits(BigInt(api.amount_in), api.token_in.decimals),
+    },
+    requiredOutput: {
+      symbol: api.token_out.symbol,
+      display: formatUnits(BigInt(api.required_out), api.token_out.decimals),
+    },
+    marketOutPerIn: formatUnits(BigInt(api.market_out_per_in_q18), 18),
+    simulatedOutput: {
+      symbol: api.token_out.symbol,
+      display: formatUnits(
+        BigInt(api.simulated_amount_out),
+        api.token_out.decimals,
+      ),
+    },
+    simulatedBatchId: api.simulated_batch_id,
+    lastSeenAt: api.last_seen_at,
   };
 }
 

@@ -26,6 +26,29 @@
   composes: row200 from "../styles/animations.module.css";
 }
 
+.rowHover {
+  background: var(--paper);
+  transition: background 140ms ease;
+}
+
+.rowHover:hover {
+  background: var(--lime-wash-faint);
+  color: var(--green-deep);
+}
+
+.rowHover:hover .flow strong {
+  color: var(--ink);
+}
+
+.rowNavigate {
+  cursor: pointer;
+}
+
+.rowNavigate:focus-visible {
+  outline: 2px solid var(--green-deep);
+  outline-offset: -2px;
+}
+
 .pair,
 .cell,
 .actionCell {
@@ -160,16 +183,6 @@
   padding: 20px 18px;
   color: var(--text-muted);
   font-size: 12px;
-}
-
-.emptyNote button {
-  border: 0;
-  border-bottom: 1px solid var(--line-mid);
-  background: none;
-  padding: 0;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
 }
 
 @container (max-width: 900px) {
