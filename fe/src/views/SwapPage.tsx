@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { chain } from "@/adapters/wallet/config";
 import { DASH, type Asset } from "@/data";
 import { fit, money } from "@/lib/format";
 import {
@@ -93,22 +92,26 @@ export function SwapPage() {
 
   const routeStats = [
     {
-      label: "Fills",
+      label: "Makers",
       value: quote
         ? `${quote.makersSourced} ${quote.makersSourced === 1 ? "maker" : "makers"}`
         : DASH,
+      tooltip: "Makers included in this quote.",
     },
-    { label: "Price impact", value: quote?.priceImpact ?? DASH },
-    { label: "Max slippage", value: `${config.slippage}%` },
+    {
+      label: "Price impact",
+      value: quote?.priceImpact ?? DASH,
+      tooltip: "Quote difference from market price.",
+    },
+    {
+      label: "Max slippage",
+      value: `${config.slippage}%`,
+      tooltip: "Maximum price movement allowed.",
+    },
   ];
 
   const wallet = useWalletAction();
   const balances = useAssetBalances(assets);
-  const walletNetwork =
-    wallet.connected && wallet.chainId !== undefined
-      ? (assets.find((asset) => asset.chainId === wallet.chainId)?.net ??
-        (wallet.chainId === chain.id ? chain.name : `Chain ${wallet.chainId}`))
-      : undefined;
   const submission = useSubmitSwap(
     {
       from,
@@ -230,25 +233,6 @@ export function SwapPage() {
             ))}
           </div>
           <div className={styles.headActions}>
-            <button
-              type="button"
-              className={styles.iconButton}
-              aria-label={
-                walletNetwork
-                  ? `Connected network: ${walletNetwork}`
-                  : "Wallet network not connected"
-              }
-              title={walletNetwork}
-            >
-              <span
-                className={
-                  walletNetwork ? styles.networkGlyph : styles.iconGlyph
-                }
-                aria-hidden="true"
-              >
-                {walletNetwork?.slice(0, 1).toUpperCase()}
-              </span>
-            </button>
             {!crossChain && erc7683Available && (
               <div className={styles.protocolMenu}>
                 <button
@@ -407,7 +391,19 @@ export function SwapPage() {
         {config.showResolverRoute && (
           <div className={styles.route}>
             {routeStats.map((s) => (
-              <div key={s.label} className={styles.routeCell}>
+              <div
+                key={s.label}
+                className={styles.routeCell}
+                tabIndex={0}
+                aria-describedby={`${s.label.toLowerCase().replace(" ", "-")}-tooltip`}
+              >
+                <span
+                  id={`${s.label.toLowerCase().replace(" ", "-")}-tooltip`}
+                  role="tooltip"
+                  className={styles.routeTooltip}
+                >
+                  {s.tooltip}
+                </span>
                 <div className={styles.routeLabel}>{s.label}</div>
                 <div className={styles.routeValue}>{s.value}</div>
               </div>

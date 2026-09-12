@@ -367,6 +367,15 @@ describe("SwapPage", () => {
     expect(await screen.findByText("2,477")).toBeInTheDocument();
     expect(await screen.findByText("0.12%")).toBeInTheDocument();
     expect(await screen.findByText("3 makers")).toBeInTheDocument();
+    expect(
+      screen.getByText("Makers included in this quote."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Quote difference from market price."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Maximum price movement allowed."),
+    ).toBeInTheDocument();
   });
 
   it("identifies the selected token and its chain on both swap legs", async () => {
@@ -381,19 +390,6 @@ describe("SwapPage", () => {
     expect(
       await screen.findByLabelText("USDC token on Ethereum"),
     ).toBeInTheDocument();
-  });
-
-  it("shows the wallet's connected network in the card header", async () => {
-    renderWithServices(<SwapPage />, {
-      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
-      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
-    });
-
-    expect(
-      await screen.findByRole("button", {
-        name: "Connected network: Ethereum",
-      }),
-    ).toHaveTextContent("E");
   });
 
   it("uses ERC-7683 only when the deployment publishes its settler", async () => {

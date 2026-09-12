@@ -72,38 +72,6 @@
   justify-content: center;
 }
 
-.iconButton {
-  composes: iconBox;
-  padding: 0;
-}
-
-.iconButton:hover {
-  border-color: var(--ink);
-}
-
-.iconGlyph {
-  width: 14px;
-  height: 14px;
-  border: 1.6px solid var(--ink);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 8px;
-  font-weight: 600;
-  line-height: 1;
-}
-
-.networkGlyph {
-  composes: iconGlyph;
-  width: calc(100% - 6px);
-  height: calc(100% - 6px);
-  box-sizing: border-box;
-  border-color: var(--lime);
-  background: var(--lime);
-  font-size: 12px;
-}
-
 .moreButton {
   composes: iconBox;
   font-size: 17px;
@@ -377,8 +345,44 @@
 }
 
 .routeCell {
+  position: relative;
   padding: 13px 16px;
   border-right: 1px solid var(--line);
+  cursor: help;
+}
+
+.routeCell:focus {
+  outline: none;
+}
+
+.routeCell:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+
+.routeTooltip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  bottom: calc(100% + 8px);
+  left: 12px;
+  width: max-content;
+  max-width: min(220px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 0;
+  outline: 0;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  pointer-events: none;
+}
+
+.routeCell:hover .routeTooltip,
+.routeCell:focus .routeTooltip {
+  display: block;
 }
 
 .routeLabel {
