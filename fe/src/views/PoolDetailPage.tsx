@@ -2,6 +2,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { DepthChart } from "@/components/DepthChart";
 import { Crumbs } from "@/components/Crumbs";
+import { RetryNotice } from "@/components/RetryNotice";
 import { poolDetail } from "@/lib/pool-detail";
 import { tokenText } from "@/lib/explorer";
 import { useTrades } from "@/services/explorer";
@@ -186,15 +187,10 @@ export function PoolDetailPage() {
               </p>
             )}
             {settlements.isError && (
-              <p className={styles.settleLive} role="alert">
-                Couldn’t refresh settlements.{" "}
-                <button
-                  type="button"
-                  onClick={() => void settlements.refetch()}
-                >
-                  Try again
-                </button>
-              </p>
+              <RetryNotice
+                message="Couldn’t refresh settlements."
+                onRetry={() => void settlements.refetch()}
+              />
             )}
             {settlements.isSuccess && settlements.data.items.length === 0 && (
               <p className={styles.settleLive}>

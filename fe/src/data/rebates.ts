@@ -16,6 +16,7 @@ export interface RebateRecord {
   publishedAt: number | null;
   executedAt: number | null;
   transactionHash: string | null;
+  originTradeId: string | null;
 }
 
 export interface ExecutedRebate {

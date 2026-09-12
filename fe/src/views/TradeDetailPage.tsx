@@ -4,6 +4,7 @@ import { tradeProblem, useTrade } from "@/services/explorer";
 import { useConfig } from "@/services/system";
 import { Crumbs } from "@/components/Crumbs";
 import { AssetIdentity } from "@/components/AssetIdentity";
+import { RetryNotice } from "@/components/RetryNotice";
 import { explorerUrl, tradeDetail } from "@/lib/explorer";
 import { useAppActions } from "@/state";
 import { TradeLifecycle } from "./TradeLifecycle";
@@ -28,12 +29,10 @@ export function TradeDetailPage() {
           ←
         </Link>
         {query.isError ? (
-          <p className={styles.emptyNote} role="alert">
-            {tradeProblem(query.error)}{" "}
-            <button type="button" onClick={() => void query.refetch()}>
-              Try again
-            </button>
-          </p>
+          <RetryNotice
+            message={tradeProblem(query.error)}
+            onRetry={() => void query.refetch()}
+          />
         ) : (
           <p className={styles.emptyNote} role="status">
             Loading trade…
@@ -93,9 +92,10 @@ export function TradeDetailPage() {
       </div>
 
       {query.isError && (
-        <p role="alert" className={styles.srOnly}>
-          Couldn’t refresh this trade. Retrying automatically.
-        </p>
+        <RetryNotice
+          message="Couldn’t refresh this trade."
+          onRetry={() => void query.refetch()}
+        />
       )}
       <div className={styles.stats4}>
         {detail.summary.map((stat) => (

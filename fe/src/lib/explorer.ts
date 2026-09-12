@@ -3,6 +3,7 @@ import type {
   ExplorerStats,
   TokenQuantity,
   TradeRecord,
+  UniswapXFeedRecord,
 } from "@/data/explorer";
 
 const STATUS_TONE: Record<string, { background: string; color: string }> = {
@@ -127,6 +128,29 @@ export function tradeRow(trade: TradeRecord) {
   };
 }
 
+function rateText(value: string): string {
+  const rate = Number(value);
+  return Number.isFinite(rate)
+    ? rate.toLocaleString("en-US", { maximumSignificantDigits: 8 })
+    : value;
+}
+
+export function uniswapXFeedRow(record: UniswapXFeedRecord) {
+  return {
+    id: record.orderHash,
+    pair: `${record.input.symbol}/${record.requiredOutput.symbol}`,
+    source:
+      record.sourceChainId === 1
+        ? "UniswapX · Ethereum"
+        : `UniswapX · Chain ${record.sourceChainId}`,
+    input: tokenText(record.input),
+    requiredOutput: `min. ${tokenText(record.requiredOutput)}`,
+    market: `${rateText(record.marketOutPerIn)} ${record.requiredOutput.symbol}/${record.input.symbol}`,
+    simulatedOutput: tokenText(record.simulatedOutput),
+    batch: `batch #${record.simulatedBatchId} · ${relativeTime(record.lastSeenAt)}`,
+  };
+}
+
 const KINDS: Record<
   string,
   { label: string; background: string; color: string }
@@ -158,13 +182,17 @@ export function activityRow(record: ActivityRecord) {
     kindFg: kind.color,
     who: shortHash(record.maker),
     tx: shortHash(record.txHash),
-    when: `${record.blockNumber == null ? "block unknown" : `blk ${numberText(record.blockNumber)}`} · ${relativeTime(record.at)}`,
+    block:
+      record.blockNumber == null
+        ? "block unknown"
+        : `blk ${numberText(record.blockNumber)}`,
+    age: relativeTime(record.at),
     flow: record.amount
       ? tokenText(record.amount)
       : record.kind === "docked"
         ? "Position closed"
         : `Strategy ${shortHash(record.strategyHash)}`,
-    text: `strategy ${shortHash(record.strategyHash)}`,
+    position: `position ${shortHash(record.strategyHash)}`,
   };
 }
 
