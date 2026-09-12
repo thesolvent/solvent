@@ -60,6 +60,7 @@ impl Normalizer for UniswapXV2Normalizer {
             IntentId(order_hash(&order)),
             ProtocolId::UniswapXV2,
             input,
+            None,
             outputs,
             u64::try_from(order.info.deadline).map_err(|_| bad())?,
             exclusivity,

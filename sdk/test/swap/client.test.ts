@@ -18,11 +18,13 @@ const TOKEN_OUT = "0x3333333333333333333333333333333333333333";
 const REACTOR = "0x4444444444444444444444444444444444444444";
 const PERMIT2 = "0x5555555555555555555555555555555555555555";
 const COSIGNER = "0x6666666666666666666666666666666666666666";
+const ERC7683_SETTLER = "0x7777777777777777777777777777777777777777";
 const config = {
     chain_id: 31337,
     reactor: REACTOR,
     permit2: PERMIT2,
     cosigner: COSIGNER,
+    erc7683_settler: ERC7683_SETTLER,
 } as AppConfig;
 const terms = {
     swapper: ADDRESS,
@@ -94,6 +96,32 @@ describe("swap intent", () => {
             .createIntent(terms)
             .submit({ onStatus: (status) => statuses.push(status) });
 
+        expect(statuses).toEqual([
+            { kind: "preparing" },
+            { kind: "signing" },
+            { kind: "submitting" },
+        ]);
+    });
+
+    it("submits an ERC-7683 Permit2 order with the same wallet-status callbacks", async () => {
+        const { api, swaps } = setup();
+        const statuses: SwapSubmissionStatus[] = [];
+        sign.mockImplementationOnce(async (_order, options) => {
+            options?.onStatus?.({ kind: "signing" });
+            return "0xsigned";
+        });
+
+        await swaps
+            .createErc7683Intent({ ...terms, executorFee: 1n })
+            .submit({ onStatus: (status) => statuses.push(status) });
+
+        expect(sign).toHaveBeenCalledWith(
+            expect.objectContaining({ approval: expect.any(Object) }),
+            expect.objectContaining({ onStatus: expect.any(Function) }),
+        );
+        expect(api.swap).toHaveBeenCalledWith(
+            expect.objectContaining({ protocol: "erc7683" }),
+        );
         expect(statuses).toEqual([
             { kind: "preparing" },
             { kind: "signing" },

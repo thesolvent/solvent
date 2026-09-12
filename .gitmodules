@@ -10,3 +10,6 @@
 [submodule "contracts/lib/evm-cctp-contracts"]
 	path = contracts/lib/evm-cctp-contracts
 	url = https://github.com/circlefin/evm-cctp-contracts
+[submodule "contracts/lib/erc7683"]
+	path = contracts/lib/erc7683
+	url = https://github.com/openintentsframework/erc7683

@@ -352,9 +352,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Submit a taker-signed order: decode → verify the swapper signature → cosign → route → reserve →
-         *     persist → fill. A malformed or unverifiable order is `400`; an unroutable one returns a
-         *     `declined` trade (`200`).
+         * Submit a taker-signed order: authenticate → route → reserve → persist → fill. A malformed or
+         *     unverifiable order is `400`; an unroutable one returns a `declined` trade (`200`).
          */
         post: operations["submit"];
         delete?: never;
@@ -497,6 +496,12 @@ export interface components {
             cosigner: string;
             /** Format: int32 */
             default_fee_bps: number;
+            /** @description The ERC-7683 filler selected by the backend execution dispatcher. */
+            erc7683_filler?: string;
+            /** @description The ERC-7683 resolver exposing the order through the standard interface. */
+            erc7683_resolver?: string;
+            /** @description The ERC-7683 same-chain settler used in user-signed order payloads. */
+            erc7683_settler?: string;
             features: components["schemas"]["Features"];
             /** @description The public executor target for encoded rebate transactions. */
             filler: string;
@@ -962,6 +967,7 @@ export interface components {
         QuoteRequest: {
             /** @description The input amount, in base units (a decimal integer string). */
             amount_in: string;
+            protocol?: components["schemas"]["SwapProtocol"];
             token_in: string;
             token_out: string;
         };
@@ -972,6 +978,7 @@ export interface components {
          */
         QuoteResponse: {
             amount_out: components["schemas"]["Amount"];
+            executor_fee?: null | components["schemas"]["Amount"];
             expires_at: string;
             legs: components["schemas"]["QuoteLeg"][];
             /** Format: int32 */
@@ -1033,6 +1040,12 @@ export interface components {
                 cosigner: string;
                 /** Format: int32 */
                 default_fee_bps: number;
+                /** @description The ERC-7683 filler selected by the backend execution dispatcher. */
+                erc7683_filler?: string;
+                /** @description The ERC-7683 resolver exposing the order through the standard interface. */
+                erc7683_resolver?: string;
+                /** @description The ERC-7683 same-chain settler used in user-signed order payloads. */
+                erc7683_settler?: string;
                 features: components["schemas"]["Features"];
                 /** @description The public executor target for encoded rebate transactions. */
                 filler: string;
@@ -1541,6 +1554,7 @@ export interface components {
              */
             result?: {
                 amount_out: components["schemas"]["Amount"];
+                executor_fee?: null | components["schemas"]["Amount"];
                 expires_at: string;
                 legs: components["schemas"]["QuoteLeg"][];
                 /** Format: int32 */
@@ -1701,14 +1715,14 @@ export interface components {
             at: number;
             price?: string | null;
         };
-        /**
-         * @description A taker-signed order submission, mirroring the UniswapX Orders API (`{ encodedOrder, signature,
-         *     chainId, quoteId? }`). The taker's client builds + signs the base order; the server cosigns.
-         */
+        /** @enum {string} */
+        SwapProtocol: "uniswapx" | "erc7683";
+        /** @description A taker-signed order submission. UniswapX remains the default when `protocol` is omitted. */
         SwapRequest: {
             /** Format: int64 */
             chainId: number;
             encodedOrder: string;
+            protocol?: components["schemas"]["SwapProtocol"];
             quoteId?: string | null;
             signature: string;
         };

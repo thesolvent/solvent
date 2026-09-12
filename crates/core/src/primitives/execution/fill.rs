@@ -55,8 +55,8 @@ impl FillTx {
 #[non_exhaustive]
 pub enum ExecStatus {
     Pending,
-    /// Reached the configured confirmation depth. `tx` is the *mined* hash (the latest broadcast,
-    /// so it survives an RBF bump) — the settlement reader keys off it.
+    /// Reached the configured confirmation depth. `tx` is the receipt-backed mined hash; a later
+    /// replacement may remain unmined, so the settlement reader must not assume the latest broadcast.
     Confirmed {
         block: u64,
         tx: B256,

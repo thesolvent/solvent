@@ -5362,6 +5362,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "walletkit-rs",
 ]
 
 [[package]]

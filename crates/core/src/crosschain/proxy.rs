@@ -983,6 +983,22 @@ mod tests {
                 .cloned()
                 .collect())
         }
+
+        async fn by_taker(
+            &self,
+            taker: Address,
+            limit: u32,
+        ) -> Result<Vec<CrossChainSaga>, SagaStoreError> {
+            Ok(self
+                .0
+                .lock()
+                .await
+                .values()
+                .filter(|saga| saga.taker == Some(taker))
+                .take(limit as usize)
+                .cloned()
+                .collect())
+        }
     }
 
     struct FakeRemote {

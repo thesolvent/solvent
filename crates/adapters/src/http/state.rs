@@ -12,6 +12,7 @@ use solvent_core::deps::quote_log::QuoteLog;
 use solvent_core::deps::registry::EventStore;
 use solvent_core::maker::MakerService;
 use solvent_core::pool::PoolService;
+use solvent_core::primitives::ingest::ExecutionFeePolicy;
 use solvent_core::quote::QuoteService;
 use solvent_core::rebate::RebateService;
 use solvent_core::registry::SharedSnapshot;
@@ -20,6 +21,7 @@ use solvent_core::trade::TradeService;
 use solvent_core::valuation::Valuation;
 
 use crate::chain::ChainHead;
+use crate::ingest::erc7683::Erc7683Normalizer;
 use crate::ingest::uniswapx::ServerCosigner;
 
 /// Feature flags the FE reads at bootstrap. `earn` / `send_buy` are always off in the MVP.
@@ -63,6 +65,18 @@ pub struct AppConfig {
     /// The public executor target for encoded rebate transactions.
     #[schema(value_type = String)]
     pub filler: Address,
+    /// The ERC-7683 same-chain settler used in user-signed order payloads.
+    #[schema(value_type = String)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub erc7683_settler: Option<Address>,
+    /// The ERC-7683 filler selected by the backend execution dispatcher.
+    #[schema(value_type = String)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub erc7683_filler: Option<Address>,
+    /// The ERC-7683 resolver exposing the order through the standard interface.
+    #[schema(value_type = String)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub erc7683_resolver: Option<Address>,
     /// The immutable token whose balance gates every strategy to the filler contract.
     #[schema(value_type = String)]
     pub taker_credential: Address,
@@ -90,6 +104,8 @@ pub struct AppState {
     pub rebates: Arc<RebateService>,
     /// Cosigns taker-signed orders on the swap path (holds only the resolver's cosigner key).
     pub cosigner: Arc<ServerCosigner>,
+    pub erc7683: Option<Arc<Erc7683Normalizer>>,
+    pub erc7683_fee_policy: Option<ExecutionFeePolicy>,
     /// The trade read-surface, backing the `/trades` and maker-settlements endpoints.
     pub trades: Arc<TradeService>,
     /// The live registry snapshot — the stat tiles read active-maker counts lock-free.

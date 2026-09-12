@@ -9,10 +9,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use alloy::network::EthereumWallet;
 use alloy::primitives::U256;
 use alloy::providers::{Provider, ProviderBuilder};
-use alloy::signers::local::PrivateKeySigner;
+use walletkit::adapters::policy::{AllowAll, DefaultPolicyEngine};
+use walletkit::adapters::{LocalSigner, RedbStateStore, Transport};
+use walletkit::Wallet;
 
 use crate::cooldown::Cooldown;
 use crate::faucet::{router, AppState, Manifest, StartupError};
@@ -28,22 +29,39 @@ async fn main() -> Result<(), StartupError> {
     let cfg = Config::from_env()?;
     let manifest = Manifest::load(&cfg.manifest_path)?;
 
-    let signer: PrivateKeySigner = cfg
-        .private_key
-        .parse()
-        .map_err(|e| StartupError::Config(format!("FAUCET_PRIVATE_KEY: {e}")))?;
-    let rpc = cfg
+    let read_rpc = cfg
         .rpc_url
         .parse()
         .map_err(|e| StartupError::Config(format!("RPC_URL: {e}")))?;
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(signer))
-        .connect_http(rpc);
+    let provider = ProviderBuilder::new().connect_http(read_rpc);
     provider.client().set_poll_interval(RECEIPT_POLL_INTERVAL);
-    let provider = provider.erased();
+    let transport = Transport::url(
+        cfg.rpc_url
+            .parse()
+            .map_err(|e| StartupError::Config(format!("RPC_URL: {e}")))?,
+    )
+    .map_err(|e| StartupError::Config(format!("RPC_URL: {e}")))?;
+    let signer = LocalSigner::from_private_key(&cfg.private_key)
+        .map_err(|e| StartupError::Config(format!("FAUCET_PRIVATE_KEY: {e}")))?;
+    let policy = DefaultPolicyEngine::new(
+        vec![Box::new(AllowAll)],
+        Arc::new(walletkit::adapters::SystemClock),
+    );
+    let state_store = RedbStateStore::open(&cfg.wallet_state_db)
+        .map_err(|e| StartupError::WalletStore(e.to_string()))?;
+    let wallet = Arc::new(
+        Wallet::builder(Arc::new(transport), Arc::new(signer), Arc::new(policy))
+            .store(Arc::new(state_store))
+            .confirmations(1)
+            .bump_timeout(30)
+            .build(),
+    );
+    let _wallet_runner = Arc::clone(&wallet).run(RECEIPT_POLL_INTERVAL);
 
     let state = AppState::new(
-        provider,
+        provider.erased(),
+        wallet,
+        cfg.chain_id,
         manifest,
         Cooldown::new(cfg.cooldown),
         cfg.drip_units,
@@ -62,6 +80,8 @@ struct Config {
     rpc_url: String,
     private_key: String,
     manifest_path: String,
+    wallet_state_db: String,
+    chain_id: u64,
     bind_addr: SocketAddr,
     cooldown: Duration,
     drip_units: u64,
@@ -88,11 +108,16 @@ impl Config {
         let gas_target_eth: u64 = optional("GAS_TARGET_ETH", "1")
             .parse()
             .map_err(|e| StartupError::Config(format!("GAS_TARGET_ETH: {e}")))?;
+        let chain_id: u64 = optional("CHAIN_ID", "31337")
+            .parse()
+            .map_err(|e| StartupError::Config(format!("CHAIN_ID: {e}")))?;
 
         Ok(Config {
             rpc_url: required("RPC_URL")?,
             private_key: required("FAUCET_PRIVATE_KEY")?,
             manifest_path: optional("MANIFEST_PATH", "deployments/solvent-devnet.json"),
+            wallet_state_db: optional("FAUCET_WALLET_STATE_DB", "faucet-walletkit.redb"),
+            chain_id,
             bind_addr,
             cooldown: Duration::from_secs(cooldown_secs),
             drip_units,

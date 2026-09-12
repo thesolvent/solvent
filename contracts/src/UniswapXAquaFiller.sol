@@ -17,27 +17,7 @@ import { TakerTraitsLib } from "@1inch/swap-vm/src/libs/TakerTraits.sol";
 import { IReactor } from "uniswapx/interfaces/IReactor.sol";
 import { IReactorCallback } from "uniswapx/interfaces/IReactorCallback.sol";
 import { OutputToken, ResolvedOrder, SignedOrder } from "uniswapx/base/ReactorStructs.sol";
-
-/// @notice A permanent, nontransferable credential recognized by protected SwapVM strategies.
-contract SolventTakerCredential {
-    address public immutable HOLDER;
-
-    error ZeroHolder();
-
-    constructor(address holder_) {
-        if (holder_ == address(0)) {
-            revert ZeroHolder();
-        }
-        HOLDER = holder_;
-    }
-
-    /// @notice Reports the credential only for the filler that deployed this contract.
-    /// @dev SwapVM's credential opcode needs only this selector. Omitting ERC-20 transfer and
-    ///      approval methods makes the credential impossible to move, delegate, or destroy.
-    function balanceOf(address account) external view returns (uint256) {
-        return account == HOLDER ? 1 : 0;
-    }
-}
+import { SolventTakerCredential } from "./SolventTakerCredential.sol";
 
 /// @title UniswapXAquaFiller
 /// @notice Executes policy-authorized UniswapX fills and public price-restoring swaps against
@@ -159,11 +139,13 @@ contract UniswapXAquaFiller is IReactorCallback, Ownable2Step, EIP712, Pausable,
     /// @param owner_ Operator allowed to submit UniswapX fills and administer policy controls.
     /// @param router_ Immutable SwapVM router used by every maker leg.
     /// @param reactor_ Immutable UniswapX reactor allowed to enter the callback.
+    /// @param takerCredential_ Frozen credential shared by the supported protocol fillers.
     /// @param policySigner_ EOA whose EIP-712 signatures authorize exact maker executions.
     constructor(
         address owner_,
         ISwapVM router_,
         IReactor reactor_,
+        SolventTakerCredential takerCredential_,
         address policySigner_
     )
         Ownable(owner_)
@@ -171,14 +153,14 @@ contract UniswapXAquaFiller is IReactorCallback, Ownable2Step, EIP712, Pausable,
     {
         if (
             owner_ == address(0) || address(router_) == address(0) || address(reactor_) == address(0)
-                || policySigner_ == address(0)
+                || address(takerCredential_) == address(0) || policySigner_ == address(0)
         ) {
             revert ZeroAddress();
         }
         ROUTER = router_;
         REACTOR = reactor_;
+        TAKER_CREDENTIAL = takerCredential_;
         policySigner = policySigner_;
-        TAKER_CREDENTIAL = new SolventTakerCredential(address(this));
     }
 
     // --------------------------------------------------------------------------------------------

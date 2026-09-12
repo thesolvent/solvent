@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useAccount, useClient, useConnectorClient } from "wagmi";
 import type { Asset, Quote, SubmittedSwap } from "@/data";
+import type { SwapProtocol } from "@/state";
 import { isSwapDeclined, submissionProblem } from "@/lib/swap";
 import type { SwapIntent, SwapPort, SwapSubmissionStatus } from "@/ports/swap";
 import { useServices } from "./context";
@@ -13,6 +14,7 @@ export interface SwapForm {
   amount: string;
   quote: Quote | undefined;
   slippagePct: number;
+  protocol?: SwapProtocol;
 }
 
 interface Submission {
@@ -40,6 +42,7 @@ function submissionKey(
     form.to?.address,
     form.amount,
     form.slippagePct,
+    form.protocol,
     form.quote?.amountInRaw.toString(),
     form.quote?.amountOutRaw.toString(),
     form.quote?.expiresAt,

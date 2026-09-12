@@ -25,8 +25,9 @@ import { AsyncNote } from "@/components/AsyncNote";
 import { useQuote } from "@/services/quote";
 import { useTokenBalance } from "@/services/balance";
 import { useSubmitSwap } from "@/services/swap";
-import { useApp } from "@/state";
-import { useWalletAction } from "@/services/wallet";
+import { useConfig } from "@/services/system";
+import { type SwapProtocol, useApp } from "@/state";
+import { useAssetBalances, useWalletAction } from "@/services/wallet";
 import { AssetIdentity, TokenMark } from "@/components/AssetIdentity";
 import { Term } from "@/components/Tooltip";
 import type { GlossaryKey } from "@/lib/glossary";
@@ -36,9 +37,36 @@ import styles from "./SwapPage.module.css";
 /** Matches `.amountInput::placeholder`, so the caret is the height of the words it replaces. */
 const PLACEHOLDER_SIZE = "clamp(30px, 8cqi, 42px)";
 
+type ProtocolOption = {
+  value: SwapProtocol;
+  label: string;
+  description: string;
+};
+
+const PROTOCOL_OPTIONS = [
+  {
+    value: "uniswapx",
+    label: "UniswapX",
+    description: "Dutch-auction intent settlement",
+  },
+  {
+    value: "erc7683",
+    label: "ERC-7683",
+    description: "Standardized same-chain order settlement",
+  },
+] satisfies readonly ProtocolOption[];
+
 export function SwapPage() {
   const { state, set, config } = useApp();
+  const [protocolMenuOpen, setProtocolMenuOpen] = useState(false);
   const crossChain = state.productMode === "SolventX";
+  const runtimeConfig = useConfig();
+  const erc7683Available = Boolean(runtimeConfig.data?.erc7683_settler);
+  const protocol =
+    crossChain || !erc7683Available ? "uniswapx" : state.swapProtocol;
+  const protocolLabel =
+    PROTOCOL_OPTIONS.find((option) => option.value === protocol)?.label ??
+    protocol;
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
@@ -66,7 +94,12 @@ export function SwapPage() {
   const fromUsdNum = from?.price == null ? null : amt * from.price;
 
   // The output is the server's price for this size, not the mid — it carries fee and impact.
-  const { quote, pricing, problem, stale } = useQuote(from, to, typed);
+  const { quote, pricing, problem, stale } = useQuote(
+    from,
+    to,
+    typed,
+    protocol,
+  );
   // Nothing in means nothing out; anything else without a price is unknown, not zero.
   const outStr = quote?.amountOut ?? (hasAmount && amt > 0 && to ? DASH : "");
   const dotAt = outStr.indexOf(".");
@@ -108,6 +141,7 @@ export function SwapPage() {
   ];
 
   const wallet = useWalletAction();
+  const balances = useAssetBalances(assets);
   const submission = useSubmitSwap(
     {
       from,
@@ -115,6 +149,7 @@ export function SwapPage() {
       amount: typed,
       quote,
       slippagePct: config.slippage,
+      protocol,
     },
     ({ tradeId }) => {
       // BrowserRouter updates history before React renders a requested departure.
@@ -192,6 +227,19 @@ export function SwapPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [state.picker, set]);
 
+  useEffect(() => {
+    if (!protocolMenuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProtocolMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [protocolMenuOpen]);
+
+  useEffect(() => {
+    if (crossChain || !erc7683Available) setProtocolMenuOpen(false);
+  }, [crossChain, erc7683Available]);
+
   // Picking the asset already on the other leg swaps the two rather than
   // leaving both legs on the same token.
   const choose = (asset: Asset) => {
@@ -220,6 +268,81 @@ export function SwapPage() {
     <div data-scroll="1" className={styles.root}>
       <h1 className="srOnly">Swap</h1>
       <section className={styles.card} aria-label="Swap">
+        <div className={styles.cardHead}>
+          <div className={styles.headActions}>
+            {!crossChain && erc7683Available ? (
+              <div className={styles.protocolMenu}>
+                <button
+                  type="button"
+                  className={
+                    protocolMenuOpen
+                      ? styles.protocolTriggerOpen
+                      : styles.protocolTrigger
+                  }
+                  aria-label="Select swap protocol"
+                  aria-expanded={protocolMenuOpen}
+                  aria-haspopup="menu"
+                  onClick={() => setProtocolMenuOpen((open) => !open)}
+                >
+                  <span>{protocolLabel}</span>
+                  <span
+                    className={
+                      protocolMenuOpen
+                        ? styles.protocolTriggerMoreOpen
+                        : styles.protocolTriggerMore
+                    }
+                    aria-hidden="true"
+                  >
+                    {protocolMenuOpen ? "▴" : "···"}
+                  </span>
+                </button>
+                {protocolMenuOpen && (
+                  <div className={styles.protocolOptions} role="menu">
+                    {PROTOCOL_OPTIONS.map(({ value, label, description }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={protocol === value}
+                        className={
+                          protocol === value
+                            ? styles.protocolOptionActive
+                            : styles.protocolOption
+                        }
+                        onClick={() => {
+                          set({
+                            swapProtocol: value,
+                          });
+                          setProtocolMenuOpen(false);
+                        }}
+                      >
+                        <span className={styles.protocolCopy}>
+                          <span className={styles.protocolName}>{label}</span>
+                          <span className={styles.protocolDescription}>
+                            {description}
+                          </span>
+                        </span>
+                        <span
+                          className={styles.protocolMark}
+                          aria-hidden="true"
+                        >
+                          {protocol === value ? "✓" : ""}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Nothing to choose here — cross-chain has one protocol, and a deployment without
+                 the settler cannot offer the other — but the control keeps its place. */
+              <button type="button" className={styles.moreButton} disabled>
+                ···
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className={styles.leg}>
           <button
             type="button"
@@ -253,11 +376,11 @@ export function SwapPage() {
                 maxLength={258}
               />
             </div>
-            {hasAmount && (
-              <div className={styles.amountUsd}>
-                ~{usd(fromUsdNum, { compact: false })}
-              </div>
-            )}
+            {/* The row keeps its height whether or not there is a figure, so typing the first
+                digit does not shift everything below it. */}
+            <div className={styles.amountUsd} aria-hidden={!hasAmount}>
+              {hasAmount ? `~${usd(fromUsdNum, { compact: false })}` : "\u00a0"}
+            </div>
           </div>
         </div>
 
@@ -300,11 +423,11 @@ export function SwapPage() {
                 </span>
               </div>
             </div>
-            {quote && (
-              <div className={styles.amountUsd}>
-                ~{usd(quote.amountOutUsd, { compact: false })}
-              </div>
-            )}
+            <div className={styles.amountUsd} aria-hidden={!quote}>
+              {quote
+                ? `~${usd(quote.amountOutUsd, { compact: false })}`
+                : "\u00a0"}
+            </div>
           </div>
         </div>
 
@@ -421,6 +544,7 @@ export function SwapPage() {
                     selected !== undefined &&
                     assetKey(selected) === assetKey(t);
                   const down = t.change.charAt(0) === "-";
+                  const balance = balances.get(assetKey(t)) ?? DASH;
                   return (
                     <button
                       key={assetKey(t)}
@@ -438,7 +562,11 @@ export function SwapPage() {
                       <span className={styles.tokenMain}>
                         <span className={styles.tokenName}>{t.name}</span>
                         <span className={styles.tokenMeta}>
-                          {t.symbol} · {t.net}
+                          <span className={styles.tokenBalance}>
+                            Balance {balance} {t.symbol}
+                          </span>
+                          <span aria-hidden="true"> · </span>
+                          {t.net}
                         </span>
                       </span>
                       <span className={styles.tokenPrices}>

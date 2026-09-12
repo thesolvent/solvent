@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 
-import { useWalletAction } from "./wallet";
+import { displayBalance, useWalletAction } from "./wallet";
 
 const wallet = vi.hoisted(() => ({
   address: undefined as `0x${string}` | undefined,
@@ -65,4 +65,9 @@ it("switches an external wallet before any protocol write", () => {
     chainId: 31337,
   });
   expect(wallet.connectOrCreateWallet).not.toHaveBeenCalled();
+});
+
+it("formats an on-chain balance for compact picker display", () => {
+  expect(displayBalance(399_300_000_000n, 6)).toBe("399,300");
+  expect(displayBalance(1_234_567_890_000_000_000n, 18)).toBe("1.2345679");
 });

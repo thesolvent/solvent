@@ -40,20 +40,19 @@ const EPS: Frame = {
   earned: 0.05,
 };
 
-const SEED_WORD = "liquidity layer.";
+const SEED_WORD = "One liquidity layer.";
 
 const LANG_WORDS = [
-  "capa de liquidez.",
-  "流動性レイヤー。",
-  "couche de liquidité.",
-  "Liquiditätsschicht.",
-  "유동성 레이어.",
-  "camada de liquidez.",
-  "livello di liquidità.",
-  "流动性层。",
-  "слой ликвидности.",
-  "طبقة السيولة.",
-  "liquidity layer.",
+  "Una capa de liquidez.",
+  "一つの流動性レイヤー。",
+  "Une couche de liquidité.",
+  "Eine Liquiditätsschicht.",
+  "하나의 유동성 레이어.",
+  "Uma camada de liquidez.",
+  "Un livello di liquidità.",
+  "一层流动性。",
+  "Один слой ликвидности.",
+  "One liquidity layer.",
 ];
 
 function prefersReducedMotion() {
@@ -483,6 +482,10 @@ export function HomePage() {
 
   const sceneClass = (i: number) =>
     `${styles.scene} ${i === scene ? styles.sceneOn : ""}`;
+  const highlightedFillClass = (i: number) =>
+    `${styles.cardLimeFill} ${i === scene ? styles.cardLimeFillActive : ""}`;
+  const highlightedContentClass = (i: number) =>
+    `${styles.cardLimeContent} ${i === scene ? styles.cardLimeContentActive : ""}`;
 
   return (
     <div
@@ -495,9 +498,8 @@ export function HomePage() {
         <h1 data-reveal="1" className={`${styles.heroTitle} ${styles.reveal}`}>
           Every intent.
           <br />
-          One{" "}
           <span ref={langRef} className={styles.lang}>
-            liquidity layer.
+            One liquidity layer.
           </span>
         </h1>
 
@@ -625,9 +627,17 @@ export function HomePage() {
                 <div className={styles.sceneInner}>
                   <div className={styles.row3Center}>
                     <div className={styles.cardLime}>
-                      <div className={styles.cardLabelLime}>Someone signs</div>
-                      <div className={styles.cardValue}>I want 1 WETH</div>
-                      <div className={styles.cardNote}>Signed, not sent</div>
+                      <span
+                        aria-hidden="true"
+                        className={highlightedFillClass(1)}
+                      />
+                      <div className={highlightedContentClass(1)}>
+                        <div className={styles.cardLabelLime}>
+                          Someone signs
+                        </div>
+                        <div className={styles.cardValue}>I want 1 WETH</div>
+                        <div className={styles.cardNote}>Signed, not sent</div>
+                      </div>
                     </div>
                     <div className={styles.connectorNarrow}>
                       <div className={styles.solidRule} />
@@ -691,9 +701,15 @@ export function HomePage() {
                       <div className={styles.cardNote}>Paid in</div>
                     </div>
                     <div className={styles.cardLime}>
-                      <div className={styles.cardLabelLime}>Their price</div>
-                      <div className={styles.cardValue}>Nudged up</div>
-                      <div className={styles.cardNote}>Above market</div>
+                      <span
+                        aria-hidden="true"
+                        className={highlightedFillClass(3)}
+                      />
+                      <div className={highlightedContentClass(3)}>
+                        <div className={styles.cardLabelLime}>Their price</div>
+                        <div className={styles.cardValue}>Nudged up</div>
+                        <div className={styles.cardNote}>Above market</div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -703,10 +719,16 @@ export function HomePage() {
                 <div className={styles.sceneInner}>
                   <div className={styles.row2}>
                     <div className={styles.cardLime}>
-                      <div className={styles.cardLabelLime}>Traders</div>
-                      <div className={styles.cardValue}>Buy it back</div>
-                      <div className={styles.cardNote}>
-                        Paying the maker&apos;s fee
+                      <span
+                        aria-hidden="true"
+                        className={highlightedFillClass(4)}
+                      />
+                      <div className={highlightedContentClass(4)}>
+                        <div className={styles.cardLabelLime}>Traders</div>
+                        <div className={styles.cardValue}>Buy it back</div>
+                        <div className={styles.cardNote}>
+                          Paying the maker&apos;s fee
+                        </div>
                       </div>
                     </div>
                     <div className={styles.card}>
@@ -746,14 +768,20 @@ export function HomePage() {
                       </div>
                     </div>
                     <div className={styles.cardLime}>
-                      <div
-                        className={styles.cardLabelLime}
-                        style={{ marginBottom: 5 }}
-                      >
-                        Maker earned
+                      <span
+                        aria-hidden="true"
+                        className={highlightedFillClass(5)}
+                      />
+                      <div className={highlightedContentClass(5)}>
+                        <div
+                          className={styles.cardLabelLime}
+                          style={{ marginBottom: 5 }}
+                        >
+                          Maker earned
+                        </div>
+                        <div className={styles.bigNum}>89</div>
+                        <div className={styles.bigNumUnit}>USDC</div>
                       </div>
-                      <div className={styles.bigNum}>89</div>
-                      <div className={styles.bigNumUnit}>USDC</div>
                     </div>
                     <div className={styles.card}>
                       <div

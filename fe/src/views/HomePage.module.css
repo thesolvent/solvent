@@ -6,7 +6,7 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  background: var(--surface-page);
+  background: var(--page-wash);
 }
 
 /* ---------- Hero ---------- */
@@ -284,7 +284,62 @@
 
 .cardLime {
   composes: card;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   border-color: var(--lime-hero);
+}
+
+.cardLimeContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  clip-path: inset(0 100% 0 0);
+}
+
+.cardLimeFill {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: var(--lime-hero);
+  transform: scaleX(0);
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+.cardLimeFillActive {
+  composes: fill520 from "../styles/animations.module.css";
+  animation-delay: 100ms;
+}
+
+.cardLimeContent .cardLabelLime,
+.cardLimeContent .cardValue,
+.cardLimeContent .cardValueLime,
+.cardLimeContent .bigNum {
+  color: var(--ink);
+}
+
+.cardLimeContent .cardNote,
+.cardLimeContent .cardFoot,
+.cardLimeContent .bigNumUnit {
+  color: var(--on-lime-faint);
+}
+
+.cardLimeContentActive {
+  animation: card-lime-content-reveal 520ms cubic-bezier(0.22, 0.8, 0.3, 1)
+    100ms both;
+}
+
+@keyframes card-lime-content-reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0);
+  }
 }
 
 .cardLabel {
@@ -686,4 +741,16 @@
 .payoffLink:hover {
   background: var(--lime-hero);
   color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cardLimeFillActive {
+    animation: none;
+    transform: scaleX(1);
+  }
+
+  .cardLimeContentActive {
+    animation: none;
+    clip-path: none;
+  }
 }

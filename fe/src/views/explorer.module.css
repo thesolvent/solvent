@@ -4,7 +4,7 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: var(--paper);
+  background: var(--page-wash);
   display: flex;
   flex-direction: column;
   padding: 0 20px;
@@ -14,7 +14,7 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: var(--surface-alt);
+  background: var(--page-wash);
   padding: 12px 20px 16px;
   display: flex;
   flex-direction: column;

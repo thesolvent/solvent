@@ -2,6 +2,7 @@ import { createContext, useContext } from "react";
 
 export type Page = "Home" | "Swap" | "Pools" | "Makers" | "Explorer";
 export type ProductMode = "Solvent" | "SolventX";
+export type SwapProtocol = "uniswapx" | "erc7683";
 
 /** Explorer strategy selector — identifies a maker's curve on a pair. */
 export type StratSel = { maker: string; curve: string; pair: string };
@@ -31,6 +32,7 @@ export type AppState = {
   productMode: ProductMode;
   trail: Crumb[];
 
+  swapProtocol: SwapProtocol;
   fromToken: string;
   toToken: string;
   amount: string;
@@ -93,10 +95,18 @@ export type AppState = {
 
 type SwapState = Pick<
   AppState,
-  "fromToken" | "toToken" | "amount" | "picker" | "pQuery" | "pTag" | "pNet"
+  | "swapProtocol"
+  | "fromToken"
+  | "toToken"
+  | "amount"
+  | "picker"
+  | "pQuery"
+  | "pTag"
+  | "pNet"
 >;
 
 export const INITIAL_SWAP_STATE: SwapState = {
+  swapProtocol: "uniswapx",
   fromToken: "",
   toToken: "",
   amount: "",

@@ -2,7 +2,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  background: linear-gradient(180deg, #f6fbeb 0%, var(--paper) 55%);
+  background: var(--page-wash);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -22,6 +22,14 @@
   overflow: hidden;
 }
 
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
 .tab {
   border: 0;
   padding: 12px 26px;
@@ -33,6 +41,11 @@
   color: var(--ink);
 }
 
+.headActions {
+  display: flex;
+  gap: 8px;
+}
+
 .iconBox {
   width: 44px;
   height: 44px;
@@ -42,6 +55,135 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.moreButton {
+  composes: iconBox;
+  font-size: 17px;
+  letter-spacing: 0.14em;
+  line-height: 1;
+}
+
+.moreButton:disabled {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.protocolMenu {
+  position: relative;
+}
+
+.protocolTrigger {
+  display: grid;
+  grid-template-columns: 1fr 44px;
+  box-sizing: border-box;
+  width: 156px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 17px;
+  text-align: left;
+}
+
+.protocolTriggerOpen {
+  composes: protocolTrigger;
+  border-top: 2px solid var(--lime);
+}
+
+.protocolTrigger > span:first-child {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+}
+
+.protocolTriggerMore {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--line);
+  font-size: 17px;
+  letter-spacing: 0.14em;
+  line-height: 1;
+}
+
+.protocolTriggerMoreOpen {
+  composes: protocolTriggerMore;
+  font-size: 12px;
+  letter-spacing: 0;
+  composes: pop120 from "../styles/animations.module.css";
+}
+
+.protocolOptions {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  width: min(286px, calc(100vw - 64px));
+  border: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: 0 16px 36px rgba(11, 11, 11, 0.12);
+  transform-origin: top right;
+  composes: pop160 from "../styles/animations.module.css";
+}
+
+.protocolOption {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 78px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-left: 3px solid transparent;
+  padding: 15px 18px 15px 20px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.protocolOption:first-child {
+  border-top: 0;
+}
+
+.protocolOption:hover {
+  background: var(--line-faint);
+}
+
+.protocolOptionActive {
+  composes: protocolOption;
+  border-left-color: var(--lime);
+  background: var(--lime-wash);
+}
+
+.protocolCopy,
+.protocolName,
+.protocolDescription {
+  display: block;
+}
+
+.protocolName {
+  margin-bottom: 3px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.protocolDescription {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.protocolMark {
+  flex: none;
+  color: var(--green-deep);
+  font-size: 18px;
 }
 
 .leg {
@@ -156,6 +298,7 @@
 }
 
 .amountUsd {
+  min-height: 20px;
   font-size: 17px;
   color: var(--text-muted);
   font-weight: 300;
@@ -195,7 +338,7 @@
 
 .route {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   border-top: 1px solid var(--line);
 }
 
@@ -217,26 +360,6 @@
   font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
-}
-
-/* Impact reads as a number to scan past until it is large enough to change the decision. */
-.routeValue[data-impact="high"] {
-  color: var(--warn-ink);
-}
-
-.routeValue[data-impact="severe"] {
-  color: var(--err-ink);
-}
-
-.routeNote {
-  margin: 0;
-  padding: 10px 16px;
-  border-top: 1px solid var(--line);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: var(--warn-ink);
 }
 
 .cta {
@@ -467,6 +590,14 @@
   display: block;
   font-size: 12.5px;
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tokenBalance {
+  color: var(--text-mid);
+  font-variant-numeric: tabular-nums;
 }
 
 .tokenPrices {
@@ -502,7 +633,6 @@
 }
 
 .empty {
-  margin: 0;
   padding: 34px 18px;
   text-align: center;
   font-size: 14px;
@@ -570,5 +700,3 @@
   font-size: 12px;
   color: var(--green-deep);
 }
-
-/* The chain's own mark, over its initial — a blocked or slow image leaves the letter standing. */

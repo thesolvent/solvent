@@ -22,11 +22,15 @@ export interface ManifestToken {
 export interface Manifest {
     aqua: string;
     chain_id: number;
+    erc7683_filler: string;
+    erc7683_resolver: string;
+    erc7683_settler: string;
     filler: string;
     multicall3: string;
     permit2: string;
     reactor: string;
     router: string;
+    taker_credential: string;
     tokens: Record<string, ManifestToken>;
 }
 
