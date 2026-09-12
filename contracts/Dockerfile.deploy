@@ -1,0 +1,9 @@
+# One-shot deploy-tools container: forge/cast (from the base image) + this repo's contracts/
+# source baked in, kept alive so `scheduled_tasks.run_once` can exec deploy-remote.sh and any
+# follow-up cast/forge calls against anvil-origin / anvil-destination over the `coolify` network.
+FROM ghcr.io/foundry-rs/foundry:stable
+RUN apt-get update && apt-get install -y --no-install-recommends jq && rm -rf /var/lib/apt/lists/*
+COPY . /repo/contracts
+WORKDIR /repo/contracts
+RUN chmod +x deploy-remote.sh
+ENTRYPOINT ["sh", "-c", "sleep infinity"]
