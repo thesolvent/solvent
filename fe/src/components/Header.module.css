@@ -238,33 +238,6 @@
   justify-content: flex-end;
 }
 
-.search {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: var(--dark-field);
-  height: 48px;
-  padding: 0 18px;
-  width: clamp(140px, 22vw, 300px);
-}
-
-.searchGlyph {
-  width: 16px;
-  height: 16px;
-  border: 1.6px solid var(--on-dark-dim);
-  border-radius: 50%;
-  flex: none;
-}
-
-.searchInput {
-  background: none;
-  border: 0;
-  color: var(--paper);
-  font-size: 14px;
-  width: 100%;
-  min-width: 0;
-}
-
 .account {
   display: flex;
   align-items: center;

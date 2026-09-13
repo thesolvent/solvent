@@ -18,8 +18,6 @@ export function Header() {
   const navigate = useNavigate();
   const location = useLocation();
   const productMode = useAppSlice((state) => state.productMode);
-  // Inert in the design; kept local so the field still accepts input.
-  const [query, setQuery] = useState("");
   const [productsOpen, setProductsOpen] = useState(false);
   const [poolsOpen, setPoolsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -215,15 +213,6 @@ export function Header() {
       </nav>
 
       <div className={styles.right}>
-        <label className={styles.search}>
-          <span className={styles.searchGlyph} />
-          <input
-            className={styles.searchInput}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search"
-          />
-        </label>
         <div ref={accountMenu} className={styles.accountMenuWrap}>
           <button
             type="button"
