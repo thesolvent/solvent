@@ -1,6 +1,40 @@
-import type { MouseEvent, ReactNode } from "react";
+import { useId, type MouseEvent, type ReactNode } from "react";
 import type { DepthChartModel } from "@/lib/depth-chart";
 import styles from "./DepthChart.module.css";
+
+const METRIC_HELP = {
+  bestPrice: "Current best executable price before price impact.",
+  near: "Estimated price after a trade moves the market by 0.5%.",
+  far: "Estimated price after a trade moves the market by 1.0%.",
+  liquidity: "Total base asset currently available across makers.",
+} as const;
+
+function ImpactMetric({
+  children,
+  className,
+  help,
+  id,
+}: {
+  children: ReactNode;
+  className: string;
+  help?: string;
+  id: string;
+}) {
+  if (!help) return <div className={className}>{children}</div>;
+
+  return (
+    <div
+      className={`${className} ${styles.metricHint}`}
+      tabIndex={0}
+      aria-describedby={id}
+    >
+      <span id={id} role="tooltip" className={styles.metricTooltip}>
+        {help}
+      </span>
+      {children}
+    </div>
+  );
+}
 
 export function DepthChart({
   data: d,
@@ -10,6 +44,8 @@ export function DepthChart({
   className,
   notice,
   liquidityLabel = "Total liquidity",
+  showMetricHelp = false,
+  titleHelp,
 }: {
   data: DepthChartModel;
   title: string;
@@ -18,7 +54,11 @@ export function DepthChart({
   className?: string;
   notice?: string;
   liquidityLabel?: string;
+  showMetricHelp?: boolean;
+  titleHelp?: string;
 }) {
+  const titleHelpId = useId();
+  const impactHelpId = useId();
   const onHover = (event: MouseEvent<HTMLDivElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     if (bounds.width <= 0) return;
@@ -30,7 +70,24 @@ export function DepthChart({
     <section className={className ?? styles.depth}>
       <div className={styles.depthHead}>
         <span className={styles.kpiSwatch} />
-        <span className={styles.depthTitle}>{title}</span>
+        {titleHelp ? (
+          <span
+            className={`${styles.depthTitle} ${styles.depthTitleHint}`}
+            tabIndex={0}
+            aria-describedby={titleHelpId}
+          >
+            <span
+              id={titleHelpId}
+              role="tooltip"
+              className={styles.depthTitleTooltip}
+            >
+              {titleHelp}
+            </span>
+            {title}
+          </span>
+        ) : (
+          <span className={styles.depthTitle}>{title}</span>
+        )}
         <span className={styles.depthSub}>{d.priceTitle}</span>
       </div>
 
@@ -40,21 +97,41 @@ export function DepthChart({
           <span className={styles.depthLegendText}>{legend}</span>
         </div>
         {d.impacts.length > 0 && (
-          <div className={styles.segmented}>
-            {d.impacts.map((stop) => (
-              <button
-                key={stop.frac}
-                type="button"
-                className={styles.segment}
-                onFocus={() => onHoverChange(stop.frac)}
-                onBlur={() => onHoverChange(null)}
-                onClick={() => onHoverChange(stop.frac)}
-                onMouseEnter={() => onHoverChange(stop.frac)}
-                onMouseLeave={() => onHoverChange(null)}
+          <div className={styles.impactControls}>
+            {showMetricHelp && (
+              <span
+                className={`${styles.impactKey} ${styles.impactKeyHint}`}
+                tabIndex={0}
+                aria-describedby={impactHelpId}
               >
-                {stop.label}
-              </button>
-            ))}
+                <span className={styles.impactKeyMark} />
+                Target price impact
+                <span
+                  id={impactHelpId}
+                  role="tooltip"
+                  className={styles.impactKeyTooltip}
+                >
+                  The percentage is the price movement used to mark each trade
+                  size.
+                </span>
+              </span>
+            )}
+            <div className={styles.segmented}>
+              {d.impacts.map((stop) => (
+                <button
+                  key={stop.frac}
+                  type="button"
+                  className={styles.segment}
+                  onFocus={() => onHoverChange(stop.frac)}
+                  onBlur={() => onHoverChange(null)}
+                  onClick={() => onHoverChange(stop.frac)}
+                  onMouseEnter={() => onHoverChange(stop.frac)}
+                  onMouseLeave={() => onHoverChange(null)}
+                >
+                  {stop.label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -194,24 +271,40 @@ export function DepthChart({
       <div className={styles.axisTitle}>{d.axisTitle}</div>
 
       <div className={styles.impacts}>
-        <div className={styles.impactFirst}>
+        <ImpactMetric
+          className={styles.impactFirst}
+          id="depth-best-price-tooltip"
+          help={showMetricHelp ? METRIC_HELP.bestPrice : undefined}
+        >
           <div className={styles.impactLabel}>Best price</div>
           <div className={styles.impactValue}>{notice ? "—" : d.bestPrice}</div>
-        </div>
-        <div className={styles.impact}>
+        </ImpactMetric>
+        <ImpactMetric
+          className={styles.impact}
+          id="depth-half-impact-tooltip"
+          help={showMetricHelp ? METRIC_HELP.near : undefined}
+        >
           <div className={styles.impactLabel}>{d.near.label}</div>
           <div className={styles.impactValue}>{d.near.price}</div>
           <div className={styles.impactSize}>{d.near.size}</div>
-        </div>
-        <div className={styles.impact}>
+        </ImpactMetric>
+        <ImpactMetric
+          className={styles.impact}
+          id="depth-one-impact-tooltip"
+          help={showMetricHelp ? METRIC_HELP.far : undefined}
+        >
           <div className={styles.impactLabel}>{d.far.label}</div>
           <div className={styles.impactValue}>{d.far.price}</div>
           <div className={styles.impactSize}>{d.far.size}</div>
-        </div>
-        <div className={styles.impactLast}>
+        </ImpactMetric>
+        <ImpactMetric
+          className={styles.impactLast}
+          id="depth-total-liquidity-tooltip"
+          help={showMetricHelp ? METRIC_HELP.liquidity : undefined}
+        >
           <div className={styles.impactLabel}>{liquidityLabel}</div>
           <div className={styles.impactValueGreen}>{d.totalLiq}</div>
-        </div>
+        </ImpactMetric>
       </div>
     </section>
   );

@@ -69,5 +69,5 @@ it("switches an external wallet before any protocol write", () => {
 
 it("formats an on-chain balance for compact picker display", () => {
   expect(displayBalance(399_300_000_000n, 6)).toBe("399,300");
-  expect(displayBalance(1_234_567_890_000_000_000n, 18)).toBe("1.2345679");
+  expect(displayBalance(1_234_567_890_000_000_000n, 18)).toBe("1.234567");
 });

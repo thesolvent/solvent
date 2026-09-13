@@ -99,6 +99,20 @@
   font-size: clamp(18px, 1.9vw, 25px);
 }
 
+.strategyTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.strategyIdentity {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
 .statusPill {
   padding: 4px 11px;
   border-radius: 3px;
@@ -336,6 +350,39 @@
   padding: 2px 7px;
 }
 
+.statHelp {
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+
+.statHelp:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+
+.statTooltip {
+  display: none;
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 220px;
+  padding: 12px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  pointer-events: none;
+}
+
+.statHelp:hover .statTooltip,
+.statHelp:focus .statTooltip {
+  display: block;
+}
+
 /* ---------- Filter bar ---------- */
 
 .filterBar {
@@ -374,6 +421,36 @@
   composes: tab;
   background: var(--ink);
   color: var(--paper);
+}
+
+.tabHelp {
+  position: relative;
+}
+
+.tabTooltip {
+  display: none;
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 8px);
+  left: 50%;
+  width: 220px;
+  padding: 12px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  pointer-events: none;
+  text-align: left;
+  transform: translateX(-50%);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tabHelp:hover .tabTooltip,
+.tabHelp:focus-visible .tabTooltip {
+  display: block;
 }
 
 .drops {
@@ -762,6 +839,40 @@
   font-weight: 700;
   letter-spacing: -0.02em;
   white-space: nowrap;
+}
+
+.detailHelp {
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+
+.detailHelp:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.detailTooltip {
+  display: none;
+  position: absolute;
+  z-index: 7;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 220px;
+  padding: 12px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  pointer-events: none;
+  white-space: normal;
+}
+
+.detailHelp:hover .detailTooltip,
+.detailHelp:focus-visible .detailTooltip {
+  display: block;
 }
 
 .lifecycleCount {

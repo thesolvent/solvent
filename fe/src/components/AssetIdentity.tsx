@@ -32,7 +32,7 @@ function IdentityIcon({
 
 export function AssetIdentity({
   asset,
-  showChain = false,
+  showChain = true,
 }: {
   asset: IdentifiedAsset | undefined;
   showChain?: boolean;

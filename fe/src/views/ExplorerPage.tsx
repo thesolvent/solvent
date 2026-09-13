@@ -36,6 +36,29 @@ import styles from "./explorer.module.css";
 
 const TABS = ["Trades", "Activity", "Rebates", "UniswapX Feed"];
 
+const STAT_HELP: Record<string, string> = {
+  "Block height": "Latest block indexed by the protocol.",
+  "Events, 24h": "Protocol events recorded during the past 24 hours.",
+  "Trades settled": "Trades that completed settlement on-chain.",
+  "Median impact": "Median price movement across settled trades.",
+  "Active makers": "Makers with at least one strategy currently quoting.",
+};
+
+const TAB_HELP: Record<(typeof TABS)[number], string> = {
+  Trades: "Solvent trades and their settlement status.",
+  Activity: "Maker and strategy events recorded on Aqua.",
+  Rebates: "Available and completed protected-strategy rebates.",
+  "UniswapX Feed": "Public UniswapX orders evaluated by Solvent makers.",
+};
+
+function HelpTooltip({ id, text }: { id: string; text: string }) {
+  return (
+    <span id={id} role="tooltip" className={styles.statTooltip}>
+      {text}
+    </span>
+  );
+}
+
 function rebateSubmissionLabel(status: RebateSubmissionStatus | undefined) {
   switch (status?.kind) {
     case "approving":
@@ -521,25 +544,31 @@ export function ExplorerPage() {
         </p>
       </div>
       <div className={styles.stats5}>
-        {explorerStats(stats.data).map((stat) => (
-          <div
-            key={stat.label}
-            className={styles.stat}
-            style={{
-              backgroundImage: `linear-gradient(${stat.sep}, ${stat.sep})`,
-            }}
-          >
-            <div className={styles.statLabel}>{stat.label}</div>
-            <div className={styles.statRow}>
-              <span className={styles.statValue}>{stat.value}</span>
-              <span className={styles.statSub} style={{ color: stat.accent }}>
-                {stats.isError && stat.label === "Block height"
-                  ? "updates delayed"
-                  : stat.sub}
-              </span>
+        {explorerStats(stats.data).map((stat) => {
+          const id = `explorer-${stat.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tooltip`;
+          return (
+            <div
+              key={stat.label}
+              className={`${styles.stat} ${styles.statHelp}`}
+              tabIndex={0}
+              aria-describedby={id}
+              style={{
+                backgroundImage: `linear-gradient(${stat.sep}, ${stat.sep})`,
+              }}
+            >
+              <HelpTooltip id={id} text={STAT_HELP[stat.label]} />
+              <div className={styles.statLabel}>{stat.label}</div>
+              <div className={styles.statRow}>
+                <span className={styles.statValue}>{stat.value}</span>
+                <span className={styles.statSub} style={{ color: stat.accent }}>
+                  {stats.isError && stat.label === "Block height"
+                    ? "updates delayed"
+                    : stat.sub}
+                </span>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {stats.isError && (
         <p role="alert" className={styles.srOnly}>
@@ -552,10 +581,18 @@ export function ExplorerPage() {
             <button
               key={tab}
               type="button"
-              className={tab === state.xpTab ? styles.tabOn : styles.tab}
+              className={`${tab === state.xpTab ? styles.tabOn : styles.tab} ${styles.tabHelp}`}
+              aria-describedby={`explorer-${tab.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tooltip`}
               onClick={() => set({ xpTab: tab, xpOpen: null })}
             >
               {tab}
+              <span
+                id={`explorer-${tab.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tooltip`}
+                role="tooltip"
+                className={styles.tabTooltip}
+              >
+                {TAB_HELP[tab]}
+              </span>
             </button>
           ))}
         </div>

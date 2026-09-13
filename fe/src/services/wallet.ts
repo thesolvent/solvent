@@ -4,7 +4,8 @@ import { useAccount, useReadContracts, useSwitchChain } from "wagmi";
 import { usePrivy } from "@privy-io/react-auth";
 
 import { chain } from "@/adapters/wallet/config";
-import { DASH, type Asset } from "@/data";
+import type { Asset } from "@/data";
+import { formatTokenAmount } from "@/lib/format";
 import { assetKey } from "@/lib/swap";
 
 import { LIVE_QUERY_OPTIONS } from "./live";
@@ -74,7 +75,5 @@ export function useAssetBalances(assets: readonly Asset[]) {
 
 /** Limits display precision without changing the wallet's exact on-chain value. */
 export function displayBalance(raw: bigint, decimals: number): string {
-  const value = Number(formatUnits(raw, decimals));
-  if (!Number.isFinite(value)) return DASH;
-  return value.toLocaleString("en-US", { maximumSignificantDigits: 8 });
+  return formatTokenAmount(formatUnits(raw, decimals));
 }

@@ -251,6 +251,15 @@ export function SwapPage() {
           <div className={styles.headActions}>
             {!crossChain && erc7683Available && (
               <div className={styles.protocolMenu}>
+                {!protocolMenuOpen && (
+                  <span
+                    id="swap-protocol-tooltip"
+                    role="tooltip"
+                    className={styles.protocolTooltip}
+                  >
+                    Choose the protocol used to settle this swap.
+                  </span>
+                )}
                 <button
                   type="button"
                   className={
@@ -259,6 +268,9 @@ export function SwapPage() {
                       : styles.protocolTrigger
                   }
                   aria-label="Select swap protocol"
+                  aria-describedby={
+                    protocolMenuOpen ? undefined : "swap-protocol-tooltip"
+                  }
                   aria-expanded={protocolMenuOpen}
                   aria-haspopup="menu"
                   onClick={() => setProtocolMenuOpen((open) => !open)}

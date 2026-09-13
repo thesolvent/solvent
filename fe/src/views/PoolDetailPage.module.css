@@ -161,6 +161,39 @@
   flex: none;
 }
 
+.helpTrigger {
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+
+.helpTrigger:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.helpTooltip {
+  display: none;
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 220px;
+  padding: 12px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  pointer-events: none;
+}
+
+.helpTrigger:hover .helpTooltip,
+.helpTrigger:focus .helpTooltip {
+  display: block;
+}
+
 .kpiSwatch {
   width: 13px;
   height: 13px;
@@ -481,4 +514,5 @@
   display: flex;
   align-items: center;
   gap: 2px;
+  flex: none;
 }

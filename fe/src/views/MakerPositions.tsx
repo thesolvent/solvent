@@ -216,7 +216,6 @@ function PairPositions({
                 aria-label={`Open ${position.pair} position ${position.hash}`}
                 onClick={() => onOpenPosition(position.hash)}
               >
-                <span className={styles.posPair}>{position.pair}</span>
                 <span className={styles.posMeta}>{position.meta}</span>
                 <span className={styles.posCov}>{position.cov}</span>
                 <span

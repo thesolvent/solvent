@@ -84,9 +84,22 @@ export function PoolDetailPage() {
       <div className={styles.grid}>
         <div className={styles.kpis}>
           <section className={styles.kpiWide}>
-            <div className={styles.kpiTag}>
-              <span className={styles.kpiSwatch} />
-              <span className={styles.kpiLabel}>Depth</span>
+            <div
+              className={styles.helpTrigger}
+              tabIndex={0}
+              aria-describedby="pool-depth-tooltip"
+            >
+              <div className={styles.kpiTag}>
+                <span className={styles.kpiSwatch} />
+                <span className={styles.kpiLabel}>Depth</span>
+              </div>
+              <span
+                id="pool-depth-tooltip"
+                role="tooltip"
+                className={styles.helpTooltip}
+              >
+                Total maker liquidity available to trade in this pool.
+              </span>
             </div>
             <div>
               <div className={styles.kpiRow}>
@@ -133,14 +146,26 @@ export function PoolDetailPage() {
           title="Aggregated depth"
           legend={`${d.makerTotal} ${d.makerTotal === 1 ? "maker" : "makers"}`}
           onHoverChange={(hoverFrac) => set({ hoverFrac })}
+          showMetricHelp
         />
 
         <section className={styles.side}>
           <div className={styles.sideHead}>
-            <div className={styles.sideTitleGroup}>
+            <div
+              className={`${styles.sideTitleGroup} ${styles.helpTrigger}`}
+              tabIndex={0}
+              aria-describedby="pool-makers-tooltip"
+            >
               <span className={styles.kpiSwatch} />
               <span className={styles.sideTitle}>Makers</span>
               <span className={styles.sideCount}>{d.makerTotal}</span>
+              <span
+                id="pool-makers-tooltip"
+                role="tooltip"
+                className={styles.helpTooltip}
+              >
+                Makers currently providing quotes for this pool.
+              </span>
             </div>
             <div className={styles.segmented}>
               {MAKER_SORTS.map((t) => (

@@ -491,12 +491,13 @@
 .poolBig {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
   font-size: clamp(20px, 1.7vw, 30px);
   font-weight: 300;
   letter-spacing: -0.03em;
   line-height: 1.15;
-  white-space: nowrap;
 }
 
 .poolSub {
@@ -572,4 +573,5 @@
   display: flex;
   align-items: center;
   gap: 2px;
+  flex: none;
 }

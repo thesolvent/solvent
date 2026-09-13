@@ -456,7 +456,7 @@ function walletTokens(pairs: readonly CreatePair[]) {
     net: token.net,
     chainLogoUri: token.chainLogoUri,
     usd: token.valueUsd,
-    bal: token.balance.toLocaleString("en-US", { maximumFractionDigits: 8 }),
+    bal: formatTokenAmount(String(token.balance)),
     addr: shortAddress(token.address),
     chg: token.changePct,
     tags: token.tags,
@@ -872,12 +872,12 @@ export function createPosition(
     stateA: okA
       ? "sufficient"
       : reserveA !== undefined && reserveA > wallet.rawA && tokenA
-        ? `over by ${formatUnits(reserveA - wallet.rawA, tokenA.decimals)}`
+        ? `over by ${formatTokenAmount(formatUnits(reserveA - wallet.rawA, tokenA.decimals))}`
         : "enter an amount",
     stateB: okB
       ? "sufficient"
       : reserveB !== undefined && reserveB > wallet.rawB && tokenB
-        ? `over by ${formatUnits(reserveB - wallet.rawB, tokenB.decimals)}`
+        ? `over by ${formatTokenAmount(formatUnits(reserveB - wallet.rawB, tokenB.decimals))}`
         : "enter an amount",
     bdA: okA ? "var(--line)" : "var(--ok-ink)",
     bdB: okB ? "var(--line)" : "var(--ok-ink)",
@@ -885,8 +885,12 @@ export function createPosition(
     tagB: okB ? "var(--lime-wash-soft)" : "var(--ok-bg)",
     fgA: okA ? "var(--green-darkest)" : "var(--ok-ink-deep)",
     fgB: okB ? "var(--green-darkest)" : "var(--ok-ink-deep)",
-    walletA: tokenA ? formatUnits(wallet.rawA, tokenA.decimals) : "0",
-    walletB: tokenB ? formatUnits(wallet.rawB, tokenB.decimals) : "0",
+    walletA: tokenA
+      ? formatTokenAmount(formatUnits(wallet.rawA, tokenA.decimals))
+      : "0",
+    walletB: tokenB
+      ? formatTokenAmount(formatUnits(wallet.rawB, tokenB.decimals))
+      : "0",
 
     rangeTag: full ? "Full range" : inRange ? "In range" : "Out of range",
     rangeTagBg: full

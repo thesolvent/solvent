@@ -9,6 +9,7 @@ import type {
   PositionBalance,
 } from "@/data/makers";
 import { tradeRow } from "./explorer";
+import { formatTokenAmount } from "./format";
 
 export const SPANS = ["7D", "1M", "3M", "6M"] as const;
 export const PERIODS: Record<string, MakerPeriod> = {
@@ -41,8 +42,7 @@ const numberText = (value: number | null | undefined) =>
   value == null
     ? "—"
     : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
-const quantityText = (value: string) =>
-  Number(value).toLocaleString("en-US", { maximumSignificantDigits: 8 });
+const quantityText = (value: string) => formatTokenAmount(value);
 const ratioText = (value: number | null | undefined) =>
   value == null ? "—" : `${value.toFixed(2)}×`;
 const deltaText = (value: number | null | undefined) =>

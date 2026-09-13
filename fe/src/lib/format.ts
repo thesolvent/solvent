@@ -34,11 +34,28 @@ export function money(n: number): string {
   });
 }
 
+const TOKEN_FRACTION_DIGITS = 6;
+
+/** Token amounts are truncated rather than rounded so the UI never overstates a balance. */
 export function formatTokenAmount(value: string): string {
-  const amount = Number(value);
-  return Number.isFinite(amount)
-    ? amount.toLocaleString("en-US", { maximumSignificantDigits: 12 })
-    : value;
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!match) return value;
+
+  const [, sign, integer, fraction = ""] = match;
+  const whole = integer
+    .replace(/^0+(?=\d)/, "")
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const decimal = fraction.slice(0, TOKEN_FRACTION_DIGITS).replace(/0+$/, "");
+
+  if (
+    sign !== "-" &&
+    /^0+$/.test(integer) &&
+    !decimal &&
+    /[1-9]/.test(fraction)
+  )
+    return "<0.000001";
+
+  return `${sign}${whole}${decimal ? `.${decimal}` : ""}`;
 }
 
 export function poolByPair(pair: string): Pool | undefined {

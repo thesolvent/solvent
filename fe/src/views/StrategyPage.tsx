@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { AssetIdentity } from "@/components/AssetIdentity";
 import { DepthChart } from "@/components/DepthChart";
 import { depthChart } from "@/lib/depth-chart";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -8,6 +9,7 @@ import {
   usePositionDepth,
 } from "@/services/makers";
 import { useTrades } from "@/services/explorer";
+import { useAssets } from "@/services/assets";
 import { slug } from "@/services/pools";
 import { Crumbs } from "@/components/Crumbs";
 import { strategyDetail, rangeDescription } from "@/lib/strategy";
@@ -15,10 +17,22 @@ import type { RouteState } from "@/routes";
 
 import styles from "./explorer.module.css";
 
+const STAT_HELP: Record<string, string> = {
+  "Virtual balance": "Inventory assigned to this strategy at current prices.",
+  "Actual / pullable": "Token inventory available to serve fills or withdraw.",
+  Fee: "Fee charged on each input amount filled by this strategy.",
+  "Fills (7d)": "Completed fills in the past seven days.",
+  "Volume (7d)": "Value routed through this strategy in the past seven days.",
+  "Quote uptime":
+    "Share of the past seven days this strategy was available to quote.",
+  "Last fill": "Time since this strategy last completed a fill.",
+};
+
 export function StrategyPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { strategyHash } = useParams();
+  const assets = useAssets();
   const chainParam = new URLSearchParams(location.search).get("chain");
   const source =
     new URLSearchParams(location.search).get("source") === "direct"
@@ -63,6 +77,15 @@ export function StrategyPage() {
   const [baseSymbol = "", quoteSymbol = ""] = (position.data?.pair ?? "").split(
     /\s*\/\s*/,
   );
+  const base = assets.find(
+    (asset) =>
+      asset.address.toLowerCase() === position.data?.base.address.toLowerCase(),
+  );
+  const quote = assets.find(
+    (asset) =>
+      asset.address.toLowerCase() ===
+      position.data?.quote.address.toLowerCase(),
+  );
   const chart = {
     ...depthChart({
       depth: position.isError || depth.isError ? undefined : depth.data,
@@ -104,7 +127,13 @@ export function StrategyPage() {
           </button>
           <div className={styles.headTitle}>
             <Crumbs current="Strategy" />
-            <div className={styles.titleSm}>{sd.title}</div>
+            <div className={styles.strategyTitle}>
+              <span className={styles.strategyIdentity}>
+                <AssetIdentity asset={base} />
+                <AssetIdentity asset={quote} />
+              </span>
+              <span className={styles.titleSm}>{sd.title}</span>
+            </div>
           </div>
           <span
             className={styles.statePill}
@@ -154,10 +183,16 @@ export function StrategyPage() {
             <div
               key={k.label}
               className={
-                k.label === "Range" ? styles.rangeStat : styles.statTight
+                k.label === "Range"
+                  ? styles.rangeStat
+                  : `${styles.statTight} ${styles.statHelp}`
               }
-              tabIndex={k.label === "Range" ? 0 : undefined}
-              aria-describedby={k.label === "Range" ? rangeHint : undefined}
+              tabIndex={0}
+              aria-describedby={
+                k.label === "Range"
+                  ? rangeHint
+                  : `strategy-${k.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tooltip`
+              }
               style={{
                 backgroundImage: `linear-gradient(${k.sep}, ${k.sep})`,
               }}
@@ -169,6 +204,15 @@ export function StrategyPage() {
                   className={styles.rangeTooltip}
                 >
                   {rangeDescription(position.data)}
+                </span>
+              )}
+              {k.label !== "Range" && (
+                <span
+                  id={`strategy-${k.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tooltip`}
+                  role="tooltip"
+                  className={styles.statTooltip}
+                >
+                  {STAT_HELP[k.label]}
                 </span>
               )}
               <div className={styles.statLabel}>{k.label}</div>
@@ -192,11 +236,20 @@ export function StrategyPage() {
           {sd.active.map((k) => (
             <div
               key={k.label}
-              className={styles.statTighter}
+              className={`${styles.statTighter} ${styles.statHelp}`}
+              tabIndex={0}
+              aria-describedby={`strategy-${k.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tooltip`}
               style={{
                 backgroundImage: `linear-gradient(${k.sep}, ${k.sep})`,
               }}
             >
+              <span
+                id={`strategy-${k.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tooltip`}
+                role="tooltip"
+                className={styles.statTooltip}
+              >
+                {STAT_HELP[k.label]}
+              </span>
               <div className={styles.statLabel}>{k.label}</div>
               <div className={styles.statRow}>
                 <span className={styles.statValueXs}>{k.value}</span>
@@ -215,6 +268,8 @@ export function StrategyPage() {
             className={styles.curvePane}
             onHoverChange={setHoverFrac}
             notice={notice}
+            showMetricHelp
+            titleHelp="Liquidity this strategy can quote across its active price range."
           />
 
           <section data-scroll="1" className={styles.fillsPane}>

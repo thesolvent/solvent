@@ -61,6 +61,29 @@
   position: relative;
 }
 
+.protocolTooltip {
+  display: none;
+  position: absolute;
+  z-index: 11;
+  top: calc(100% + 8px);
+  right: 0;
+  width: max-content;
+  max-width: min(240px, calc(100vw - 64px));
+  padding: 12px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  pointer-events: none;
+}
+
+.protocolMenu:hover .protocolTooltip,
+.protocolMenu:focus-within .protocolTooltip {
+  display: block;
+}
+
 .iconBox {
   width: 44px;
   height: 44px;

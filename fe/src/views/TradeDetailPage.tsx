@@ -12,6 +12,21 @@ import { TradeLifecycle } from "./TradeLifecycle";
 
 import styles from "./explorer.module.css";
 
+const SUMMARY_HELP: Record<string, string> = {
+  "In → out": "Assets supplied by the taker and received on settlement.",
+  "Price impact": "Difference between the executed price and market price.",
+  Resolver: "System that selected the route and coordinated settlement.",
+  Makers: "Makers whose liquidity filled this trade.",
+};
+
+function DetailTooltip({ id, text }: { id: string; text: string }) {
+  return (
+    <span id={id} role="tooltip" className={styles.detailTooltip}>
+      {text}
+    </span>
+  );
+}
+
 export function TradeDetailPage() {
   const { set } = useAppActions();
   const { tradeId } = useParams();
@@ -99,39 +114,45 @@ export function TradeDetailPage() {
         />
       )}
       <div className={styles.stats4}>
-        {detail.summary.map((stat) => (
-          <div
-            key={stat.label}
-            className={styles.stat}
-            style={{
-              backgroundImage: `linear-gradient(${stat.sep}, ${stat.sep})`,
-            }}
-          >
-            <div className={styles.statLabel}>{stat.label}</div>
-            {stat.label === "In → out" &&
-            trade.input.net &&
-            trade.output.net ? (
-              <div className={styles.crossChainFlow} title={stat.value}>
-                <span>{formatTokenAmount(trade.input.display)}</span>
-                <AssetIdentity
-                  asset={{ ...trade.input, net: trade.input.net }}
-                />
-                <span aria-hidden="true">→</span>
-                <span>
-                  {trade.status === "confirmed" ? "" : "min. "}
-                  {formatTokenAmount(trade.output.display)}
-                </span>
-                <AssetIdentity
-                  asset={{ ...trade.output, net: trade.output.net }}
-                />
-              </div>
-            ) : (
-              <div className={styles.statValueSm} title={stat.value}>
-                {stat.value}
-              </div>
-            )}
-          </div>
-        ))}
+        {detail.summary.map((stat) => {
+          const id = `trade-${stat.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tooltip`;
+          return (
+            <div
+              key={stat.label}
+              className={`${styles.stat} ${styles.detailHelp}`}
+              tabIndex={0}
+              aria-describedby={id}
+              style={{
+                backgroundImage: `linear-gradient(${stat.sep}, ${stat.sep})`,
+              }}
+            >
+              <DetailTooltip id={id} text={SUMMARY_HELP[stat.label]} />
+              <div className={styles.statLabel}>{stat.label}</div>
+              {stat.label === "In → out" &&
+              trade.input.net &&
+              trade.output.net ? (
+                <div className={styles.crossChainFlow} title={stat.value}>
+                  <span>{formatTokenAmount(trade.input.display)}</span>
+                  <AssetIdentity
+                    asset={{ ...trade.input, net: trade.input.net }}
+                  />
+                  <span aria-hidden="true">→</span>
+                  <span>
+                    {trade.status === "confirmed" ? "" : "min. "}
+                    {formatTokenAmount(trade.output.display)}
+                  </span>
+                  <AssetIdentity
+                    asset={{ ...trade.output, net: trade.output.net }}
+                  />
+                </div>
+              ) : (
+                <div className={styles.statValueSm} title={stat.value}>
+                  {stat.value}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <div className={styles.split}>
@@ -139,7 +160,19 @@ export function TradeDetailPage() {
           <TradeLifecycle trade={trade} />
 
           <div className={styles.sourcedHead}>
-            <span className={styles.sourcedTitle}>
+            <span
+              className={`${styles.sourcedTitle} ${styles.detailHelp}`}
+              tabIndex={0}
+              aria-describedby="trade-sourced-tooltip"
+            >
+              <DetailTooltip
+                id="trade-sourced-tooltip"
+                text={
+                  trade.flow === "cross-chain"
+                    ? "Destination positions that supplied this trade’s output."
+                    : "Maker positions whose liquidity filled this trade."
+                }
+              />
               {trade.flow === "cross-chain"
                 ? "Destination liquidity"
                 : "Sourced from"}
@@ -225,7 +258,17 @@ export function TradeDetailPage() {
           </div>
 
           <div className={styles.facts}>
-            <div className={styles.factsTitle}>Order details</div>
+            <div
+              className={`${styles.factsTitle} ${styles.detailHelp}`}
+              tabIndex={0}
+              aria-describedby="trade-details-tooltip"
+            >
+              <DetailTooltip
+                id="trade-details-tooltip"
+                text="Immutable order terms and the signatures that authorize them."
+              />
+              Order details
+            </div>
             {detail.facts.map((d) => (
               <div key={d.label} className={styles.factRow}>
                 <span className={styles.factLabel}>{d.label}</span>
