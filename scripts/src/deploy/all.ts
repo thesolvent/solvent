@@ -7,7 +7,7 @@
  *   node src/deploy/all.ts --reset    # tear down and redeploy from a clean chain state
  *   node src/deploy/all.ts --down     # stop everything this script started; keep chain state
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
@@ -42,7 +42,13 @@ import {
 import { CROSSCHAIN_ROOT, ensureManifestDirs } from "./manifests.ts";
 
 const execFileAsync = promisify(execFile);
-const COMPOSE = ["compose", "-f", "devnet/docker-compose.crosschain.yml"];
+const COMPOSE = [
+  "compose",
+  "--progress",
+  "plain",
+  "-f",
+  "devnet/docker-compose.crosschain.yml",
+];
 
 const ORIGIN: ChainTarget = {
   side: "origin",
@@ -73,8 +79,28 @@ const DESTINATION: ChainTarget = {
   chainId: 31338,
 };
 
-function compose(...args: string[]): Promise<{ stdout: string; stderr: string }> {
-  return execFileAsync("docker", [...COMPOSE, ...args], { cwd: REPO_ROOT });
+function compose(...args: string[]): Promise<void> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn("docker", [...COMPOSE, ...args], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, BUILDKIT_PROGRESS: "plain" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stdout.pipe(process.stdout);
+    child.stderr.on("data", (chunk: Buffer) => {
+      process.stderr.write(chunk);
+      stderr = `${stderr}${chunk.toString()}`.slice(-64 * 1024);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolvePromise();
+      } else {
+        reject(new Error(stderr || `docker compose exited ${code}`));
+      }
+    });
+  });
 }
 
 /** Docker Desktop can restore previously-running compose stacks (including this repo's other

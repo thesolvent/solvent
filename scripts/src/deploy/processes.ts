@@ -45,6 +45,12 @@ export interface BackendProcessConfig {
   envPath: string;
 }
 
+function buildProfile(): { cargoArgs: string[]; binaryDir: string } {
+  return process.env.SOLVENT_BUILD_PROFILE === "release"
+    ? { cargoArgs: ["build", "--release"], binaryDir: "release" }
+    : { cargoArgs: ["build"], binaryDir: "debug" };
+}
+
 export async function startBackend(config: BackendProcessConfig): Promise<RunningProcess> {
   if (await isPortOpen(config.apiPort)) {
     throw new Error(
@@ -54,8 +60,9 @@ export async function startBackend(config: BackendProcessConfig): Promise<Runnin
   }
 
   console.log(`[${config.label}] building solvent (first run only takes a while)...`);
+  const profile = buildProfile();
   await new Promise<void>((resolvePromise, reject) => {
-    const build = spawn("cargo", ["build", "--bin", "solvent"], {
+    const build = spawn("cargo", [...profile.cargoArgs, "--bin", "solvent"], {
       cwd: REPO_ROOT,
       stdio: "inherit",
     });
@@ -66,7 +73,7 @@ export async function startBackend(config: BackendProcessConfig): Promise<Runnin
 
   const logPath = logFileFor(`solvent-${config.label}`);
   const log = openSync(logPath, "a");
-  const child = spawn("./target/debug/solvent", [], {
+  const child = spawn(`./target/${profile.binaryDir}/solvent`, [], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
@@ -108,8 +115,9 @@ export async function startCoordinator(
   }
 
   console.log("[coordinator] building solvent-proxy (first run only takes a while)...");
+  const profile = buildProfile();
   await new Promise<void>((resolvePromise, reject) => {
-    const build = spawn("cargo", ["build", "--bin", "solvent-proxy"], {
+    const build = spawn("cargo", [...profile.cargoArgs, "--bin", "solvent-proxy"], {
       cwd: REPO_ROOT,
       stdio: "inherit",
     });
@@ -120,7 +128,7 @@ export async function startCoordinator(
 
   const logPath = logFileFor("solvent-proxy");
   const log = openSync(logPath, "a");
-  const child = spawn("./target/debug/solvent-proxy", [], {
+  const child = spawn(`./target/${profile.binaryDir}/solvent-proxy`, [], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
