@@ -128,7 +128,7 @@ const ERC7683_CONFIG: AppConfig = {
 };
 
 describe("SwapPage", () => {
-  it("keeps a letter out of the amount, which inputMode only discourages", async () => {
+  it("rejects non-numeric amount input while keeping partial decimals", async () => {
     renderWithServices(<SwapPage />, {
       assets: { list: vi.fn().mockResolvedValue(ASSETS) },
       swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
@@ -137,10 +137,10 @@ describe("SwapPage", () => {
     const amount = await screen.findByLabelText("Swap amount");
 
     // A decimal still being typed is not a wrong one.
-    fireEvent.change(amount, { target: { value: "100." } });
-    expect(amount).toHaveValue("100.");
-    fireEvent.change(amount, { target: { value: "100.5" } });
-    expect(amount).toHaveValue("100.5");
+    for (const value of [".", "0.", "100.", "100.5"]) {
+      fireEvent.change(amount, { target: { value } });
+      expect(amount).toHaveValue(value);
+    }
 
     // A letter leaves the amount as it was, rather than reaching every consumer downstream.
     fireEvent.change(amount, { target: { value: "100.5x" } });

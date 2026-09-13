@@ -9,7 +9,7 @@
 # (9545/9546/5200/5201/9081/9082) so any of the three stacks can run side by side without a port
 # fight — another worktree's stack may be someone else's active work, never assume it is safe to
 # stop.
-name: solvent-crosschain-swapux
+name: solvent-crosschain-erc7683
 
 services:
   anvil-origin:
@@ -35,7 +35,7 @@ services:
     volumes:
       - "anvil-origin-state:/state"
     ports:
-      - "9745:8545"
+      - "9645:8545"
     restart: unless-stopped
 
   anvil-destination:
@@ -61,7 +61,7 @@ services:
     volumes:
       - "anvil-destination-state:/state"
     ports:
-      - "9746:8546"
+      - "9646:8546"
     restart: unless-stopped
 
   explorer-origin:
@@ -69,7 +69,7 @@ services:
     depends_on:
       - anvil-origin
     ports:
-      - "5400:80"
+      - "5300:80"
     volumes:
       - "./otterscan.origin.json:/usr/share/nginx/html/config.json:ro"
     restart: unless-stopped
@@ -79,7 +79,7 @@ services:
     depends_on:
       - anvil-destination
     ports:
-      - "5401:80"
+      - "5301:80"
     volumes:
       - "./otterscan.destination.json:/usr/share/nginx/html/config.json:ro"
     restart: unless-stopped
@@ -98,7 +98,7 @@ services:
       COOLDOWN_SECS: "1"
       DRIP_UNITS: "100000"
     ports:
-      - "9281:8080"
+      - "9181:8080"
     volumes:
       - "../contracts/deployments/crosschain/origin:/manifest:ro"
       - "faucet-origin-state:/state"
@@ -118,7 +118,7 @@ services:
       COOLDOWN_SECS: "1"
       DRIP_UNITS: "100000"
     ports:
-      - "9282:8080"
+      - "9182:8080"
     volumes:
       - "../contracts/deployments/crosschain/destination:/manifest:ro"
       - "faucet-destination-state:/state"

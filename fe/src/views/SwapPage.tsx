@@ -331,8 +331,9 @@ export function SwapPage() {
                 }}
                 value={state.amount}
                 onChange={(e) => {
-                  if (isAmountDraft(e.target.value))
+                  if (isAmountDraft(e.target.value)) {
                     set({ amount: e.target.value });
+                  }
                 }}
                 placeholder="Enter amount"
                 aria-label="Swap amount"

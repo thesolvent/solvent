@@ -8,8 +8,7 @@ import { resolve } from "node:path";
 
 import { REPO_ROOT } from "../lib/manifest.ts";
 import { isPortOpen } from "./preflight.ts";
-import type { Side } from "./manifests.ts";
-import { PORTS } from "./config.ts";
+import { COORDINATOR_PORT } from "./config.ts";
 
 export interface RunningProcess {
   label: string;
@@ -39,16 +38,22 @@ async function waitHealthy(
 /** Builds once (so the health-check loop below isn't racing a multi-minute compile) and starts
  *  the backend for one side, refusing to start if its port is already held by something that
  *  isn't a prior instance of this exact script's own tracked process. */
-export async function startBackend(side: Side, envPath: string): Promise<RunningProcess> {
-  const ports = PORTS[side];
-  if (await isPortOpen(ports.apiPort)) {
+export interface BackendProcessConfig {
+  label: string;
+  apiPort: number;
+  configName: string;
+  envPath: string;
+}
+
+export async function startBackend(config: BackendProcessConfig): Promise<RunningProcess> {
+  if (await isPortOpen(config.apiPort)) {
     throw new Error(
-      `[${side}] :${ports.apiPort} is already answering — a backend is already running here. ` +
+      `[${config.label}] :${config.apiPort} is already answering — a backend is already running here. ` +
         "Stop it first (this script does not assume ownership of a port it did not open).",
     );
   }
 
-  console.log(`[${side}] building solvent (first run only takes a while)...`);
+  console.log(`[${config.label}] building solvent (first run only takes a while)...`);
   await new Promise<void>((resolvePromise, reject) => {
     const build = spawn("cargo", ["build", "--bin", "solvent"], {
       cwd: REPO_ROOT,
@@ -59,27 +64,27 @@ export async function startBackend(side: Side, envPath: string): Promise<Running
     );
   });
 
-  const logPath = logFileFor(`solvent-${side}`);
+  const logPath = logFileFor(`solvent-${config.label}`);
   const log = openSync(logPath, "a");
   const child = spawn("./target/debug/solvent", [], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
-      SOLVENT_CONFIG: `solvent.${side}`,
+      SOLVENT_CONFIG: config.configName,
       // `.env.sh` sets keys via `export`; load it into this child's own environment directly.
-      ...(await loadEnvFile(envPath)),
+      ...(await loadEnvFile(config.envPath)),
     },
     stdio: ["ignore", log, log],
     detached: true,
   });
   child.unref();
-  console.log(`[${side}] solvent starting (pid ${child.pid}), log: ${logPath}`);
+  console.log(`[${config.label}] solvent starting (pid ${child.pid}), log: ${logPath}`);
 
   await waitHealthy(
-    `[${side}] solvent :${ports.apiPort}`,
+    `[${config.label}] solvent :${config.apiPort}`,
     async () => {
       try {
-        const res = await fetch(`http://127.0.0.1:${ports.apiPort}/healthz`);
+        const res = await fetch(`http://127.0.0.1:${config.apiPort}/healthz`);
         return res.ok;
       } catch {
         return false;
@@ -87,8 +92,61 @@ export async function startBackend(side: Side, envPath: string): Promise<Running
     },
     60_000,
   );
-  console.log(`[${side}] solvent healthy on :${ports.apiPort}`);
-  return { label: `solvent-${side}`, child, logPath };
+  console.log(`[${config.label}] solvent healthy on :${config.apiPort}`);
+  return { label: `solvent-${config.label}`, child, logPath };
+}
+
+export async function startCoordinator(
+  configPath: string,
+  internalToken: string,
+): Promise<RunningProcess> {
+  if (await isPortOpen(COORDINATOR_PORT)) {
+    throw new Error(
+      `[coordinator] :${COORDINATOR_PORT} is already answering — stop it first with ` +
+        "`pnpm --dir scripts run deploy:down`.",
+    );
+  }
+
+  console.log("[coordinator] building solvent-proxy (first run only takes a while)...");
+  await new Promise<void>((resolvePromise, reject) => {
+    const build = spawn("cargo", ["build", "--bin", "solvent-proxy"], {
+      cwd: REPO_ROOT,
+      stdio: "inherit",
+    });
+    build.on("close", (code) =>
+      code === 0 ? resolvePromise() : reject(new Error(`cargo build exited ${code}`)),
+    );
+  });
+
+  const logPath = logFileFor("solvent-proxy");
+  const log = openSync(logPath, "a");
+  const child = spawn("./target/debug/solvent-proxy", [], {
+    cwd: REPO_ROOT,
+    env: {
+      ...process.env,
+      SOLVENT_PROXY_CONFIG: configPath.replace(/\.toml$/, ""),
+      SOLVENT_INTERNAL_TOKEN: internalToken,
+    },
+    stdio: ["ignore", log, log],
+    detached: true,
+  });
+  child.unref();
+  console.log(`[coordinator] starting (pid ${child.pid}), log: ${logPath}`);
+
+  await waitHealthy(
+    `[coordinator] :${COORDINATOR_PORT}`,
+    async () => {
+      try {
+        const res = await fetch(`http://127.0.0.1:${COORDINATOR_PORT}/healthz`);
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+    60_000,
+  );
+  console.log(`[coordinator] healthy on :${COORDINATOR_PORT}`);
+  return { label: "solvent-proxy", child, logPath };
 }
 
 /** Parses `export KEY=value` lines from a generated env file into a plain object, without

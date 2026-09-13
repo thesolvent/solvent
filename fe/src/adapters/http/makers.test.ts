@@ -11,11 +11,17 @@ const api = vi.hoisted(() => ({
     positionDepth: vi.fn(),
     positionHistory: vi.fn(),
   },
+  direct: {
+    position: vi.fn(),
+    positionDepth: vi.fn(),
+    positionHistory: vi.fn(),
+  },
 }));
 
 vi.mock("./client", () => ({
   solventApi: api.primary,
   baseApi: api.destination,
+  directDestinationApi: api.direct,
 }));
 
 beforeEach(() => vi.resetAllMocks());
@@ -60,4 +66,16 @@ describe("maker HTTP adapter", () => {
     expect(api.destination[method]).toHaveBeenCalled();
     expect(api.primary[method]).not.toHaveBeenCalled();
   });
+});
+
+it("reads a direct-route strategy from the direct destination index", async () => {
+  const failure = new Error("direct destination request reached");
+  api.direct.position.mockRejectedValue(failure);
+
+  const { makersAdapter } = await import("./makers");
+  await expect(makersAdapter.position("0x01", 31338, "direct")).rejects.toBe(
+    failure,
+  );
+  expect(api.direct.position).toHaveBeenCalledWith("0x01");
+  expect(api.destination.position).not.toHaveBeenCalled();
 });

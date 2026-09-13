@@ -7,6 +7,8 @@ import {
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8080";
 const BASE_CHAIN_URL =
   import.meta.env.VITE_SOLVENTX_BASE_API_URL ?? "http://127.0.0.1:8082";
+const DIRECT_DESTINATION_URL =
+  import.meta.env.VITE_SOLVENTX_DIRECT_API_URL ?? "http://127.0.0.1:8401";
 const CROSS_CHAIN_ORIGIN_URL =
   import.meta.env.VITE_SOLVENTX_ORIGIN_API_URL ?? "http://127.0.0.1:8081";
 const CROSS_CHAIN_PROXY_URL =
@@ -20,6 +22,11 @@ export const solventApi: SolventClient = createSolventClient({
 /** The second deployment SolventX composes with the primary Solvent service. */
 export const baseApi: SolventClient = createSolventClient({
   baseUrl: BASE_CHAIN_URL,
+});
+
+/** The destination index scoped to the direct settlement app. */
+export const directDestinationApi: SolventClient = createSolventClient({
+  baseUrl: DIRECT_DESTINATION_URL,
 });
 
 /** The paired origin deployment used by the cross-chain coordinator. */

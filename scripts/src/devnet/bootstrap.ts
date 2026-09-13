@@ -41,7 +41,7 @@ const PRICE_FEEDS: Record<string, string> = {
 };
 
 // Mainnet source identities and their independent price sources for the read-only UniswapX feed.
-type UniswapAsset = {
+export type UniswapAsset = {
   sourceAddress: string;
   symbol: string;
   decimals: number;
@@ -49,7 +49,7 @@ type UniswapAsset = {
   usdPeg?: boolean;
 };
 
-const UNISWAP_ASSETS: readonly UniswapAsset[] = [
+export const UNISWAP_ASSETS: readonly UniswapAsset[] = [
   { sourceAddress: "0x0000000000000000000000000000000000000000", symbol: "ETH", decimals: 18, marketSymbol: "ETHUSDT" },
   { sourceAddress: "0x000006c2A22ff4A44ff1f5d0F2ed65F781F55555", symbol: "ZKC", decimals: 18, marketSymbol: "ZKCUSDT" },
   { sourceAddress: "0x00c83aeCC790e8a4453e5dD3B0B4b3680501a7A7", symbol: "SKL", decimals: 18, marketSymbol: "SKLUSDT" },
@@ -315,4 +315,6 @@ function main(): void {
   console.log(`bootstrap: wrote ${relative(REPO_ROOT, ENV_OUT)}`);
 }
 
-main();
+if (import.meta.main) {
+  main();
+}

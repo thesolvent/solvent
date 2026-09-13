@@ -20,7 +20,7 @@ export interface RunForgeScriptOptions {
   scriptPath: string;
   contract: string;
   /** The RPC URL reachable *from inside the docker network* (a container DNS name, not
-   *  `127.0.0.1`) — this always runs in a container attached to `solvent-crosschain-swapux_default`. */
+   *  `127.0.0.1`) — this always runs in a container attached to `solvent-crosschain-erc7683_default`. */
   rpcUrl: string;
   privateKey: string;
   /** Extra env vars the script's `vm.env*` calls read. Paths in these must be container paths
@@ -32,7 +32,7 @@ export interface RunForgeScriptOptions {
 const IMAGE = "ghcr.io/foundry-rs/foundry:stable";
 // Dedicated to this branch's crosschain stack — never the same network as the pr14-merge-master
 // worktree's own crosschain deploy (`solvent-crosschain_default`), so the two can run side by side.
-const NETWORK = "solvent-crosschain-swapux_default";
+const NETWORK = "solvent-crosschain-erc7683_default";
 
 /** `/repo`-relative path for anything under REPO_ROOT — the manifest/env paths this module's
  *  callers pass are host-absolute, but the script runs with REPO_ROOT bind-mounted at `/repo`. */

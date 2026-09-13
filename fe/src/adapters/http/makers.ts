@@ -1,4 +1,4 @@
-import type { MakersPort } from "@/ports/makers";
+import type { MakersPort, StrategyReadSource } from "@/ports/makers";
 import {
   toDashboard,
   toInventory,
@@ -7,9 +7,10 @@ import {
   toPosition,
 } from "../mappers/makers";
 import { toDepthCurve } from "../mappers/pool-detail";
-import { baseApi, solventApi } from "./client";
+import { baseApi, directDestinationApi, solventApi } from "./client";
 
-function strategyApi(chainId?: number) {
+function strategyApi(chainId?: number, source?: StrategyReadSource) {
+  if (source === "direct") return directDestinationApi;
   return chainId == null ? solventApi : baseApi;
 }
 
@@ -30,14 +31,17 @@ export const makersAdapter: MakersPort = {
       toPosition,
     );
   },
-  async position(hash, chainId) {
-    return toPosition(await strategyApi(chainId).position(hash));
+  async position(hash, chainId, source) {
+    return toPosition(await strategyApi(chainId, source).position(hash));
   },
-  async depth(hash, pair, chainId) {
-    return toDepthCurve(await strategyApi(chainId).positionDepth(hash), pair);
+  async depth(hash, pair, chainId, source) {
+    return toDepthCurve(
+      await strategyApi(chainId, source).positionDepth(hash),
+      pair,
+    );
   },
-  async history(hash, chainId) {
-    const history = await strategyApi(chainId).positionHistory(hash);
+  async history(hash, chainId, source) {
+    const history = await strategyApi(chainId, source).positionHistory(hash);
     return {
       from: history.from,
       to: history.to,

@@ -14,8 +14,9 @@ Ports are deliberately disjoint from the single-chain devnet's (`docker-compose.
 
 | Side        | Chain RPC | Explorer | Faucet | API  | Internal crosschain listener |
 |-------------|-----------|----------|--------|------|-------------------------------|
-| origin      | 9745      | 5400     | 9281   | 8499 | 9480 |
-| destination | 9746      | 5401     | 9282   | 8500 | 9481 |
+| origin      | 9645      | 5300     | 9181   | 8399 | 9380 |
+| destination | 9646      | 5301     | 9182   | 8400 | 9381 |
+| direct destination | 9646 | — | — | 8401 | 9382 |
 
 ## What it does
 
@@ -36,21 +37,13 @@ Ports are deliberately disjoint from the single-chain devnet's (`docker-compose.
    addresses are precomputed from each deployer's current nonce before either deploys, then the
    actual deployed address is checked against the prediction — the only way to break a two-sided
    immutable reference cycle these contracts don't have a redeploy-and-relink path for.
-6. **Config** — one `solvent.<side>.toml` per chain, each with a `[crosschain]` block pointing at
-   the other, plus a generated shared internal-auth token.
-7. **Backends + relay** — one `solvent` process per chain (matches how `[crosschain]` config is
-   already shaped: each deployment is chain-local, reaching its counterpart through the internal
-   proxy), plus `src/crosschain/relay.ts` watching both chains' CCIP-mock routers and delivering
-   messages between them (there is no real cross-chain messaging locally — this stands in for it).
+6. **Config** — the normal per-chain configs plus an isolated destination config that indexes only
+   the cross-chain app and receives the generated WBTC origin strategy hash.
+7. **Backends + relay** — the two normal `solvent` services, the isolated direct destination
+   service, the coordinator, and `src/crosschain/relay.ts`.
 8. **Liquidity + smoke test** — maker positions seeded on both chains' 8 core pairs, 24 real signed
-   same-chain swaps executed and confirmed on *each* chain, then the full read-API smoke check on
-   both.
-
-**Scope note:** this proves both chains' infra is deployed and wired correctly, and that each
-chain's own same-chain swap path works for real. It does not run a live, signed, end-to-end
-cross-chain swap — the client-side construction of a signed Compact claim that the routed lane
-needs is not built yet (see `scripts/test-crosschain-direct-e2e.sh`'s own note on this same
-boundary). For that proof today, use `cargo test -p solvent-adapters --test e2e_crosschain_direct`.
+   same-chain swaps confirmed on each chain, followed by a live WBTC-origin → USDC-destination
+   direct order through Compact, the coordinator, both settlement contracts, and the relay.
 
 ## Why it's safe to rerun
 

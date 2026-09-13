@@ -251,6 +251,7 @@ describe("Trade detail navigation", () => {
         {
           ...toTrade(detail).legs[0],
           chainId: 31338,
+          strategySource: "direct" as const,
           input: { symbol: "DAI", display: "1", net: "Base" },
           output: { symbol: "USDC", display: "0.999899", net: "Base" },
         },
@@ -281,7 +282,7 @@ describe("Trade detail navigation", () => {
       screen.getByLabelText("DAI token on Base").closest("a"),
     ).toHaveAttribute(
       "href",
-      `/explorer/strategies/${detail.legs[0].strategy_hash}?chain=31338`,
+      `/explorer/strategies/${detail.legs[0].strategy_hash}?chain=31338&source=direct`,
     );
   });
 });

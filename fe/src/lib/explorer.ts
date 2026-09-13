@@ -221,6 +221,7 @@ export function tradeDetail(trade: TradeRecord) {
       maker: leg.maker,
       hash: leg.strategyHash,
       chainId: leg.chainId,
+      strategySource: leg.strategySource,
       name: shortHash(leg.maker),
       shortHash: shortHash(leg.strategyHash),
       tag: leg.maker.slice(2, 4).toUpperCase(),
@@ -243,7 +244,9 @@ export function tradeDetail(trade: TradeRecord) {
     profit: trade.surplus ? tokenText(trade.surplus) : "—",
     profitTag: ["declined", "failed"].includes(trade.status)
       ? `not earned — ${trade.status}`
-      : "route estimate · net of estimated gas",
+      : trade.flow === "cross-chain"
+        ? "market-value estimate · before gas"
+        : "route estimate · net of estimated gas",
     empty: trade.legs.length === 0,
     emptyText: "No maker legs recorded for this order.",
   };

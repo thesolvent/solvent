@@ -150,6 +150,7 @@ describe("Explorer records", () => {
       taker: "0x3333333333333333333333333333333333333333",
       input: { symbol: "LINK", display: "1" },
       output: { symbol: "USDC", display: "11.467239" },
+      surplus: { symbol: "USD" },
       makers: 1,
       txHash:
         "0x243a599bce767f1783a3e5c66348496e349c8a1539815209a498673d3b4f471c",
@@ -170,6 +171,7 @@ describe("Explorer records", () => {
       1_900_000_000, 1_900_000_030, 1_900_000_060, 1_900_000_090, 1_900_000_120,
       1_900_000_150,
     ]);
+    expect(Number(trade.surplus?.display)).toBeCloseTo(1.298942267515, 10);
     expect(trade.legs).toEqual([
       expect.objectContaining({
         input: expect.objectContaining({
@@ -183,6 +185,7 @@ describe("Explorer records", () => {
           net: "Base",
         }),
         chainId: 31338,
+        strategySource: "direct",
         sharePct: 100,
       }),
     ]);

@@ -163,7 +163,7 @@ export function TradeDetailPage() {
                 to={
                   leg.chainId == null
                     ? `/explorer/strategies/${leg.hash}`
-                    : `/explorer/strategies/${leg.hash}?chain=${leg.chainId}`
+                    : `/explorer/strategies/${leg.hash}?chain=${leg.chainId}${leg.strategySource ? `&source=${leg.strategySource}` : ""}`
                 }
                 title={leg.maker}
               >
