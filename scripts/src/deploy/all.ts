@@ -210,6 +210,8 @@ async function main(): Promise<void> {
     console.log("Resetting: tearing down infra and clearing generated state...");
     await tearDownInfra().catch(() => undefined);
     if (existsSync(CROSSCHAIN_ROOT)) rmSync(CROSSCHAIN_ROOT, { recursive: true, force: true });
+    const generatedRoot = resolve(REPO_ROOT, "devnet/generated/crosschain");
+    if (existsSync(generatedRoot)) rmSync(generatedRoot, { recursive: true, force: true });
     for (const configName of ["solvent.origin", "solvent.destination", "solvent.destination-direct"]) {
       const cfg = resolve(REPO_ROOT, `${configName}.toml`);
       if (existsSync(cfg)) rmSync(cfg);

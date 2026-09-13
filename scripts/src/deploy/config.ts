@@ -236,11 +236,13 @@ export function writeSideConfig(
 ): { configPath: string; envPath: string } {
   const configName = options.configName ?? `solvent.${side}`;
   const dir = resolve(REPO_ROOT, "devnet/generated/crosschain", configName);
+  const databaseDir = resolve(REPO_ROOT, "devnet/generated/crosschain", side);
   const tokensOut = resolve(dir, "tokens.json");
   const configOut = resolve(REPO_ROOT, `${configName}.toml`);
   const envOut = resolve(dir, "env.sh");
 
   mkdirSync(dir, { recursive: true });
+  mkdirSync(databaseDir, { recursive: true });
   writeFileSync(tokensOut, `${JSON.stringify(tokenList(manifest), null, 2)}\n`);
   writeFileSync(
     configOut,
