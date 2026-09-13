@@ -159,10 +159,18 @@
 .nav {
   display: flex;
   align-items: center;
+  align-self: stretch;
   gap: 28px;
   font-size: 15px;
   justify-content: center;
   padding: 0 40px;
+}
+
+.navMenu {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
 }
 
 .navItem {
@@ -175,6 +183,41 @@
 
 .navItem:hover {
   opacity: 0.75;
+}
+
+.poolsMenu {
+  position: absolute;
+  z-index: 2;
+  top: 72px;
+  left: 50%;
+  width: 184px;
+  transform: translateX(-50%);
+  border: 1px solid var(--dark-line);
+  background: var(--dark-bg);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28);
+}
+
+.poolsMenuItem {
+  display: block;
+  width: 100%;
+  padding: 13px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--dark-line);
+  background: transparent;
+  color: var(--paper);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  text-align: left;
+}
+
+.poolsMenuItem:last-child {
+  border-bottom: 0;
+}
+
+.poolsMenuItem:hover,
+.poolsMenuItem:focus-visible {
+  background: var(--dark-field);
 }
 
 .navLabel {

@@ -1,5 +1,6 @@
 import { useExportWallet, usePrivy, useWallets } from "@privy-io/react-auth";
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAccount, useDisconnect } from "wagmi";
 
 import solventMarkActive from "@/assets/solvent-mark-active.svg";
@@ -14,14 +15,17 @@ import styles from "./Header.module.css";
 
 export function Header() {
   const { page, navTo, set } = useAppActions();
+  const navigate = useNavigate();
   const productMode = useAppSlice((state) => state.productMode);
   // Inert in the design; kept local so the field still accepts input.
   const [query, setQuery] = useState("");
   const [productsOpen, setProductsOpen] = useState(false);
+  const [poolsOpen, setPoolsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [accountProblem, setAccountProblem] = useState<string>();
   const productMenu = useRef<HTMLDivElement>(null);
+  const poolsMenu = useRef<HTMLDivElement>(null);
   const accountMenu = useRef<HTMLDivElement>(null);
   const { ready, authenticated, connectOrCreateWallet, logout } = usePrivy();
   const { exportWallet } = useExportWallet();
@@ -37,15 +41,17 @@ export function Header() {
   );
 
   useEffect(() => {
-    if (!productsOpen && !accountOpen) return;
+    if (!productsOpen && !poolsOpen && !accountOpen) return;
     const close = (event: MouseEvent) => {
       const target = event.target as Node;
       if (!productMenu.current?.contains(target)) setProductsOpen(false);
+      if (!poolsMenu.current?.contains(target)) setPoolsOpen(false);
       if (!accountMenu.current?.contains(target)) setAccountOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setProductsOpen(false);
+      setPoolsOpen(false);
       setAccountOpen(false);
     };
     document.addEventListener("mousedown", close);
@@ -54,11 +60,22 @@ export function Header() {
       document.removeEventListener("mousedown", close);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [productsOpen, accountOpen]);
+  }, [productsOpen, poolsOpen, accountOpen]);
 
   const selectProduct = (mode: ProductMode) => {
     set({ productMode: mode, pNet: "All networks" });
     setProductsOpen(false);
+  };
+
+  const openPools = () => {
+    setPoolsOpen((open) => !open);
+    setProductsOpen(false);
+    setAccountOpen(false);
+  };
+
+  const goToPools = (path: "/pools" | "/pools/new") => {
+    setPoolsOpen(false);
+    navigate(path, { state: { resetSubviews: true } });
   };
 
   const copyAddress = async () => {
@@ -126,22 +143,66 @@ export function Header() {
       </div>
 
       <nav className={styles.nav}>
-        {NAV.map((label) => (
-          <button
-            key={label}
-            type="button"
-            className={styles.navItem}
-            onClick={() => navTo(label)}
-          >
-            <span
-              className={
-                label === page ? styles.navLabelActive : styles.navLabel
-              }
+        {NAV.map((label) =>
+          label === "Pools" ? (
+            <div key={label} ref={poolsMenu} className={styles.navMenu}>
+              <button
+                type="button"
+                className={styles.navItem}
+                aria-haspopup="menu"
+                aria-expanded={poolsOpen}
+                onClick={openPools}
+              >
+                <span
+                  className={
+                    label === page ? styles.navLabelActive : styles.navLabel
+                  }
+                >
+                  {label}
+                </span>
+              </button>
+              {poolsOpen && (
+                <div
+                  className={styles.poolsMenu}
+                  role="menu"
+                  aria-label="Pools"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.poolsMenuItem}
+                    onClick={() => goToPools("/pools")}
+                  >
+                    Explore pools
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.poolsMenuItem}
+                    onClick={() => goToPools("/pools/new")}
+                  >
+                    Create position
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              key={label}
+              type="button"
+              className={styles.navItem}
+              onClick={() => navTo(label)}
             >
-              {label}
-            </span>
-          </button>
-        ))}
+              <span
+                className={
+                  label === page ? styles.navLabelActive : styles.navLabel
+                }
+              >
+                {label}
+              </span>
+            </button>
+          ),
+        )}
       </nav>
 
       <div className={styles.right}>
