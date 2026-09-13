@@ -45,15 +45,18 @@ export function PoolDetailPage() {
     hoverFrac: state.hoverFrac,
     makerSort: state.makerSort,
   });
+  const goBack = () => {
+    if (window.history.state?.idx > 0) {
+      navigate(-1);
+      return;
+    }
+    navigate("/pools", { replace: true });
+  };
 
   return (
     <div className={styles.root}>
       <div className={styles.head}>
-        <button
-          type="button"
-          className={styles.back}
-          onClick={() => navigate("/pools")}
-        >
+        <button type="button" className={styles.back} onClick={goBack}>
           ←
         </button>
         <div className={styles.headTitle}>

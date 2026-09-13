@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { tradeProblem, useTrade } from "@/services/explorer";
 import { useConfig } from "@/services/system";
 import { Crumbs } from "@/components/Crumbs";
@@ -29,21 +29,30 @@ function DetailTooltip({ id, text }: { id: string; text: string }) {
 
 export function TradeDetailPage() {
   const { set } = useAppActions();
+  const navigate = useNavigate();
   const { tradeId } = useParams();
   const query = useTrade(tradeId);
   const config = useConfig();
+  const goBack = () => {
+    if (window.history.state?.idx > 0) {
+      navigate(-1);
+      return;
+    }
+    navigate("/explorer", { replace: true });
+  };
   // A direct trade URL must return to the list regardless of the previous strategy selection.
   useEffect(() => set({ xpStrat: null, trail: [] }), [set]);
   if (!query.data)
     return (
       <div className={styles.root}>
-        <Link
-          to="/explorer"
+        <button
+          type="button"
           className={styles.back}
           aria-label="Back to Explorer"
+          onClick={goBack}
         >
           ←
-        </Link>
+        </button>
         {query.isError ? (
           <RetryNotice
             message={tradeProblem(query.error)}
@@ -67,13 +76,14 @@ export function TradeDetailPage() {
   return (
     <div className={styles.root}>
       <div className={styles.head}>
-        <Link
-          to="/explorer"
+        <button
+          type="button"
           className={styles.back}
           aria-label="Back to Explorer"
+          onClick={goBack}
         >
           ←
-        </Link>
+        </button>
         <div className={styles.headTitle}>
           <Crumbs
             current={detail.title}

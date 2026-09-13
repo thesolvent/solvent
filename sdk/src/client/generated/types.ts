@@ -373,7 +373,7 @@ export interface paths {
         put?: never;
         /**
          * Route `amount_in` of `token_in` into `token_out`, returning the split and its impact. `422` when
-         *     no route exists (no makers, or the size is beyond the book).
+         *     no route exists or the submitted order could not cover estimated settlement costs.
          */
         post: operations["quote"];
         delete?: never;
@@ -974,6 +974,12 @@ export interface components {
             /** @description The input amount, in base units (a decimal integer string). */
             amount_in: string;
             protocol?: components["schemas"]["SwapProtocol"];
+            /**
+             * Format: int32
+             * @description The permitted price movement, in basis points. When present, the quote is also checked
+             *     against the exact order bound used at submission.
+             */
+            slippage_bps?: number | null;
             token_in: string;
             token_out: string;
         };
@@ -2476,7 +2482,7 @@ export interface operations {
                     "application/json": components["schemas"]["Response_QuoteResponse"];
                 };
             };
-            /** @description No route for the pair and size */
+            /** @description No route for the pair and size, or order cannot cover estimated settlement costs */
             422: {
                 headers: {
                     [name: string]: unknown;

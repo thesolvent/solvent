@@ -13,6 +13,8 @@ export interface QuoteInput {
   to: Asset;
   amount: string;
   protocol?: SwapProtocol;
+  /** The order's permitted price movement, forwarded so the quote can preflight its bound. */
+  slippagePct?: number;
 }
 
 export interface SwapInput extends QuoteInput {

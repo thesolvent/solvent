@@ -214,6 +214,7 @@ export function CreatePoolPage() {
   const cloneQuery = usePosition(cloneHash);
   const pairQuery = useCreatePairs();
   const pairs = pairQuery.data ?? EMPTY_PAIRS;
+  const backPath = routePair ? `/pools/${routePair}` : "/pools";
   const selectedPair = pairs[state.corePair] ?? pairs[0];
   const historyQuery = usePairPriceHistory(selectedPair, state.createSpan);
   const c = createPosition(
@@ -261,6 +262,13 @@ export function CreatePoolPage() {
   const plotRef = useRef<HTMLDivElement>(null);
   const initializedRoute = useRef<string | null>(null);
   const initializedClone = useRef<string | null>(null);
+  const goBack = () => {
+    if (window.history.state?.idx > 0) {
+      navigate(-1);
+      return;
+    }
+    navigate(backPath, { replace: true });
+  };
 
   useLayoutEffect(() => {
     if (
@@ -531,11 +539,7 @@ export function CreatePoolPage() {
   return (
     <div className={styles.root}>
       <div className={styles.head}>
-        <button
-          type="button"
-          className={styles.back}
-          onClick={() => navigate(routePair ? `/pools/${routePair}` : "/pools")}
-        >
+        <button type="button" className={styles.back} onClick={goBack}>
           ←
         </button>
         <div className={styles.headTitle}>

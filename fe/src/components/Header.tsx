@@ -1,6 +1,6 @@
 import { useExportWallet, usePrivy, useWallets } from "@privy-io/react-auth";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAccount, useDisconnect } from "wagmi";
 
 import solventMarkActive from "@/assets/solvent-mark-active.svg";
@@ -16,6 +16,7 @@ import styles from "./Header.module.css";
 export function Header() {
   const { page, navTo, set } = useAppActions();
   const navigate = useNavigate();
+  const location = useLocation();
   const productMode = useAppSlice((state) => state.productMode);
   // Inert in the design; kept local so the field still accepts input.
   const [query, setQuery] = useState("");
@@ -63,8 +64,16 @@ export function Header() {
   }, [productsOpen, poolsOpen, accountOpen]);
 
   const selectProduct = (mode: ProductMode) => {
+    if (mode === productMode) {
+      setProductsOpen(false);
+      return;
+    }
     set({ productMode: mode, pNet: "All networks" });
     setProductsOpen(false);
+    navigate(`${location.pathname}${location.search}${location.hash}`, {
+      replace: true,
+      state: location.state,
+    });
   };
 
   const openPools = () => {

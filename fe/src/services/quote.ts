@@ -65,6 +65,7 @@ export function useQuote(
   to: Asset | undefined,
   amount: string,
   protocol: SwapProtocol = "uniswapx",
+  slippagePct?: number,
 ): QuoteState {
   const { swap } = useServices();
   const settled = useSettled(amount, SETTLE_MS);
@@ -94,9 +95,10 @@ export function useQuote(
       to?.address,
       settled,
       protocol,
+      slippagePct,
     ],
     queryFn: quotable
-      ? () => swap.quote({ from, to, amount: settled, protocol })
+      ? () => swap.quote({ from, to, amount: settled, protocol, slippagePct })
       : skipToken,
     staleTime: 0,
     refetchInterval: ({ state }) => refreshIn(state.data),

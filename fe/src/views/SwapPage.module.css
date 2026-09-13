@@ -79,8 +79,7 @@
   pointer-events: none;
 }
 
-.protocolMenu:hover .protocolTooltip,
-.protocolMenu:focus-within .protocolTooltip {
+.protocolMenu:hover .protocolTooltip {
   display: block;
 }
 

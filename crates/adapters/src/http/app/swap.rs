@@ -14,7 +14,7 @@ use solvent_core::primitives::quote::QuoteLeg;
 use solvent_core::primitives::registry::TokenPair;
 use solvent_core::primitives::trade::TradeId;
 use solvent_core::primitives::{ChainId, MakerId, StrategyHash};
-use solvent_core::quote::QuoteResponse;
+use solvent_core::quote::{QuoteOutcome, QuoteResponse};
 use solvent_core::swap::TradePrices;
 use solvent_core::SolventError;
 use ulid::Ulid;
@@ -40,17 +40,20 @@ pub struct QuoteRequest {
     pub token_out: String,
     /// The input amount, in base units (a decimal integer string).
     pub amount_in: String,
+    /// The permitted price movement, in basis points. When present, the quote is also checked
+    /// against the exact order bound used at submission.
+    pub slippage_bps: Option<u16>,
 }
 
 /// Route `amount_in` of `token_in` into `token_out`, returning the split and its impact. `422` when
-/// no route exists (no makers, or the size is beyond the book).
+/// no route exists or the submitted order could not cover estimated settlement costs.
 #[utoipa::path(
     post,
     path = "/v1/swap/quote",
     request_body = QuoteRequest,
     responses(
         (status = 200, body = Response<QuoteResponse>),
-        (status = 422, description = "No route for the pair and size"),
+        (status = 422, description = "No route for the pair and size, or order cannot cover estimated settlement costs"),
     )
 )]
 pub async fn quote(
@@ -81,6 +84,15 @@ pub async fn quote(
         }
         .into());
     }
+    if body
+        .slippage_bps
+        .is_some_and(|slippage_bps| slippage_bps >= 10_000)
+    {
+        return Err(Response::error(
+            "slippage_bps must be between 0 and 9,999",
+            StatusCode::BAD_REQUEST,
+        ));
+    }
 
     let (routing_input, executor_fee) = match body.protocol {
         SwapProtocol::Uniswapx => (amount_in, None),
@@ -94,8 +106,19 @@ pub async fn quote(
     };
 
     let started = Instant::now();
-    let mut result = state.quote.quote(token_in, token_out, routing_input).await;
-    if let (Some(quote), Some(fee)) = (&mut result, executor_fee) {
+    let mut outcome = match body.slippage_bps {
+        Some(slippage_bps) => {
+            state
+                .quote
+                .quote_for_order(token_in, token_out, routing_input, slippage_bps)
+                .await
+        }
+        None => match state.quote.quote(token_in, token_out, routing_input).await {
+            Some(quote) => QuoteOutcome::Quote(Box::new(quote)),
+            None => QuoteOutcome::NoRoute,
+        },
+    };
+    if let (QuoteOutcome::Quote(quote), Some(fee)) = (&mut outcome, executor_fee) {
         quote.executor_fee = Some(
             state
                 .valuation
@@ -107,20 +130,28 @@ pub async fn quote(
         chain_id: ChainId(state.config.chain_id),
         pair: TokenPair::new(token_in, token_out),
         latency_ms: started.elapsed().as_millis() as u64,
-        participants: result
-            .as_ref()
-            .map(|q| q.legs.iter().filter_map(participant).collect())
-            .unwrap_or_default(),
+        participants: match &outcome {
+            QuoteOutcome::Quote(quote) => quote.legs.iter().filter_map(participant).collect(),
+            _ => Vec::new(),
+        },
     };
     // Best-effort analytics: a log failure must never fail the quote.
     if let Err(err) = state.quote_log.record(&served).await {
         tracing::warn!(error = %err, "quote log record failed");
     }
 
-    match result {
-        Some(quote) => Ok(Response::ok(quote)),
-        None => Err(Response::error(
+    match outcome {
+        QuoteOutcome::Quote(quote) => Ok(Response::ok(*quote)),
+        QuoteOutcome::NoRoute => Err(Response::error(
             "no route for this pair and size",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        )),
+        QuoteOutcome::SettlementCostExceedsLimit => Err(Response::error(
+            "this amount cannot cover estimated settlement costs at the selected slippage; increase the amount or raise the slippage limit",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        )),
+        _ => Err(Response::error(
+            "could not price this trade",
             StatusCode::UNPROCESSABLE_ENTITY,
         )),
     }

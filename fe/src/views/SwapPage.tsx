@@ -94,7 +94,13 @@ export function SwapPage() {
   const fromUsdNum = amt * (from?.price ?? 0);
 
   // The output is the server's price for this size, not the mid — it carries fee and impact.
-  const { quote, pricing, problem } = useQuote(from, to, typed, protocol);
+  const { quote, pricing, problem } = useQuote(
+    from,
+    to,
+    typed,
+    protocol,
+    config.slippage,
+  );
   // Nothing in means nothing out; anything else without a price is unknown, not zero.
   const outStr = quote?.amountOut ?? (hasAmount && amt > 0 && to ? DASH : "");
   const dotAt = outStr.indexOf(".");

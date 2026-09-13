@@ -229,21 +229,7 @@ function orderTerms({
   swapper,
   slippagePct,
 }: SwapInput): OrderTerms {
-  if (!Number.isFinite(slippagePct)) {
-    throw new InputValidationError(
-      "slippage",
-      "invalid_decimal",
-      "Slippage must be a finite percentage",
-    );
-  }
-  const tolerance = BigInt(Math.round(slippagePct * 100));
-  if (tolerance < 0n || tolerance > 9_999n) {
-    throw new InputValidationError(
-      "slippage",
-      "out_of_range",
-      "Slippage must resolve to 0 through 9,999 basis points",
-    );
-  }
+  const tolerance = slippageBps(slippagePct);
   const amountIn = parseTokenAmount(amount, from.decimals, "Swap amount");
   if (
     quote.tokenIn.toLowerCase() !== from.address.toLowerCase() ||
@@ -276,6 +262,25 @@ function orderTerms({
   };
 }
 
+function slippageBps(slippagePct: number): bigint {
+  if (!Number.isFinite(slippagePct)) {
+    throw new InputValidationError(
+      "slippage",
+      "invalid_decimal",
+      "Slippage must be a finite percentage",
+    );
+  }
+  const tolerance = BigInt(Math.round(slippagePct * 100));
+  if (tolerance < 0n || tolerance > 9_999n) {
+    throw new InputValidationError(
+      "slippage",
+      "out_of_range",
+      "Slippage must resolve to 0 through 9,999 basis points",
+    );
+  }
+  return tolerance;
+}
+
 function erc7683OrderTerms(input: SwapInput): Erc7683OrderTerms {
   const executorFee = input.quote.executorFeeRaw;
   if (executorFee === undefined || executorFee <= 0n) {
@@ -289,7 +294,7 @@ function erc7683OrderTerms(input: SwapInput): Erc7683OrderTerms {
 }
 
 export const swapAdapter: SwapPort = {
-  async quote({ from, to, amount, protocol = "uniswapx" }) {
+  async quote({ from, to, amount, protocol = "uniswapx", slippagePct }) {
     if (from.chainId !== to.chainId) {
       return crossChainQuote({ from, to, amount });
     }
@@ -298,6 +303,9 @@ export const swapAdapter: SwapPort = {
       token_in: from.address,
       token_out: to.address,
       amount_in: amountInRaw.toString(),
+      ...(slippagePct === undefined
+        ? {}
+        : { slippage_bps: Number(slippageBps(slippagePct)) }),
     };
     const priced = await sameChainApi(from.chainId).quote(
       protocol === "erc7683" ? { ...request, protocol } : request,

@@ -886,7 +886,7 @@
         "tags": [
           "crate::http::app::swap"
         ],
-        "summary": "Route `amount_in` of `token_in` into `token_out`, returning the split and its impact. `422` when\nno route exists (no makers, or the size is beyond the book).",
+        "summary": "Route `amount_in` of `token_in` into `token_out`, returning the split and its impact. `422` when\nno route exists or the submitted order could not cover estimated settlement costs.",
         "operationId": "quote",
         "requestBody": {
           "content": {
@@ -910,7 +910,7 @@
             }
           },
           "422": {
-            "description": "No route for the pair and size"
+            "description": "No route for the pair and size, or order cannot cover estimated settlement costs"
           }
         }
       }
@@ -2579,6 +2579,15 @@
           },
           "protocol": {
             "$ref": "#/components/schemas/SwapProtocol"
+          },
+          "slippage_bps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The permitted price movement, in basis points. When present, the quote is also checked\nagainst the exact order bound used at submission.",
+            "minimum": 0
           },
           "token_in": {
             "type": "string"
