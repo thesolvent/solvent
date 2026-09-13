@@ -111,6 +111,7 @@ mod tests {
             chain_id: 1,
             symbol: String::new(),
             decimals,
+            logo_uri: None,
         }
     }
 

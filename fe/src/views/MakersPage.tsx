@@ -1,6 +1,7 @@
 import { Pagination } from "@/components/Pagination";
 import { RebateList } from "@/components/RebateList";
 import { useLoadedPagination } from "@/components/useLoadedPagination";
+import { Term } from "@/components/Tooltip";
 import { slug, usePools } from "@/services/pools";
 import { useAssets } from "@/services/assets";
 import { PERIODS, SPANS, makerView } from "@/lib/makers";
@@ -173,7 +174,9 @@ export function MakersPage() {
               backgroundImage: `linear-gradient(${k.sep}, ${k.sep})`,
             }}
           >
-            <div className={styles.kpiLabel}>{k.label}</div>
+            <div className={styles.kpiLabel}>
+              {k.term ? <Term term={k.term}>{k.label}</Term> : k.label}
+            </div>
             <div className={styles.kpiRow}>
               <span className={styles.kpiValue}>{k.value}</span>
               <span className={styles.kpiDelta} style={{ color: k.deltaFg }}>

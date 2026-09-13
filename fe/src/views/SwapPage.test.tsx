@@ -121,7 +121,7 @@ const ERC7683_CONFIG: AppConfig = {
   erc7683_settler: "0x5555555555555555555555555555555555555555",
   features: { earn: false, faucet: true, send_buy: false },
   filler: "0x6666666666666666666666666666666666666666",
-  networks: ["Ethereum"],
+  chains: [{ chain_id: 31337, name: "Ethereum", logo_uri: null }],
   permit2: "0x7777777777777777777777777777777777777777",
   reactor: "0x8888888888888888888888888888888888888888",
   taker_credential: "0x9999999999999999999999999999999999999999",
@@ -136,11 +136,13 @@ describe("SwapPage", () => {
 
     const amount = await screen.findByLabelText("Swap amount");
 
+    // A decimal still being typed is not a wrong one.
     for (const value of [".", "0.", "100.", "100.5"]) {
       fireEvent.change(amount, { target: { value } });
       expect(amount).toHaveValue(value);
     }
 
+    // A letter leaves the amount as it was, rather than reaching every consumer downstream.
     fireEvent.change(amount, { target: { value: "100.5x" } });
     expect(amount).toHaveValue("100.5");
     fireEvent.change(amount, { target: { value: "abc" } });
@@ -381,19 +383,6 @@ describe("SwapPage", () => {
     expect(
       await screen.findByLabelText("USDC token on Ethereum"),
     ).toBeInTheDocument();
-  });
-
-  it("shows the wallet's connected network in the card header", async () => {
-    renderWithServices(<SwapPage />, {
-      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
-      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
-    });
-
-    expect(
-      await screen.findByRole("button", {
-        name: "Connected network: Ethereum",
-      }),
-    ).toHaveTextContent("E");
   });
 
   it("uses ERC-7683 only when the deployment publishes its settler", async () => {

@@ -202,6 +202,8 @@ function tokenList(manifest: Manifest) {
       symbol,
       name: NAMES[symbol] ?? symbol,
       decimals: token.decimals,
+      // Keyed by symbol, not address: a devnet redeploy moves every address.
+      logoURI: `/tokens/${symbol.toLowerCase()}.png`,
       tags: [TAGS[symbol] ?? "other"],
     })),
   };
@@ -256,7 +258,6 @@ app_address = "${manifest.router}"
 
 default_fee_bps = 5
 block_explorer_url = "http://localhost:5100"
-networks = ["Ethereum"]
 faucet = true
 
 token_list = "${tokenListPath}"
@@ -283,7 +284,14 @@ wallet_state_db = "devnet/generated/filler-walletkit.redb"
 authorization_ttl_blocks = 90
 
 ${feeds}
-${uniswapAssets}`;
+${uniswapAssets}
+
+# The chain this process serves. Last in the file: an array-of-tables scopes every key under it.
+[[chains]]
+chain_id = ${manifest.chain_id}
+name = "Solvent Devnet"
+logo_uri = "/chains/ethereum.png"
+`;
 }
 
 function main(): void {

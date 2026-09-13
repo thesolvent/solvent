@@ -861,7 +861,20 @@ async fn aggregate_quote_cannot_be_staged_under_a_second_order() {
         .await
         .expect("proxy response");
 
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    // The chain-local service refuses this; a refusal belongs to the caller who asked, so it
+    // arrives as a client error carrying the reason rather than as an opaque gateway failure.
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let refusal = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read refusal")
+            .to_vec(),
+    )
+    .expect("utf-8 refusal");
+    assert!(
+        !refusal.is_empty() && !refusal.contains("unavailable"),
+        "the refusal must say why, not report an outage: {refusal}"
+    );
     assert!(scenario
         .saga_store
         .load(second_order)

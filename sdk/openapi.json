@@ -1266,7 +1266,7 @@
           "chain_id",
           "features",
           "default_fee_bps",
-          "networks",
+          "chains",
           "block_explorer_url",
           "aqua",
           "app",
@@ -1292,6 +1292,12 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "chains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Chain"
+            }
           },
           "cosigner": {
             "type": "string",
@@ -1320,12 +1326,6 @@
           "filler": {
             "type": "string",
             "description": "The public executor target for encoded rebate transactions."
-          },
-          "networks": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           },
           "permit2": {
             "type": "string",
@@ -1416,6 +1416,30 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "Chain": {
+        "type": "object",
+        "description": "A chain this process can name: the id its assets report, the name people read, and the mark\nthat stands for it. A process serves one chain, but may name the chains it bridges to, so the\nFE can label a counterpart's assets before it has called that deployment.",
+        "required": [
+          "chain_id",
+          "name"
+        ],
+        "properties": {
+          "chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
           }
         }
       },
@@ -2802,7 +2826,7 @@
               "chain_id",
               "features",
               "default_fee_bps",
-              "networks",
+              "chains",
               "block_explorer_url",
               "aqua",
               "app",
@@ -2828,6 +2852,12 @@
                 "type": "integer",
                 "format": "int64",
                 "minimum": 0
+              },
+              "chains": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Chain"
+                }
               },
               "cosigner": {
                 "type": "string",
@@ -2856,12 +2886,6 @@
               "filler": {
                 "type": "string",
                 "description": "The public executor target for encoded rebate transactions."
-              },
-              "networks": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
               },
               "permit2": {
                 "type": "string",
@@ -5243,6 +5267,13 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The token list's icon, when it carried one."
           },
           "symbol": {
             "type": "string"

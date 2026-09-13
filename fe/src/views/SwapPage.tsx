@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { chain } from "@/adapters/wallet/config";
 import { DASH, type Asset } from "@/data";
 import { fit, money } from "@/lib/format";
 import {
@@ -21,13 +20,22 @@ import { useSubmitSwap } from "@/services/swap";
 import { useConfig } from "@/services/system";
 import { type SwapProtocol, useApp } from "@/state";
 import { AssetIdentity } from "@/components/AssetIdentity";
+import { Term } from "@/components/Tooltip";
+import type { GlossaryKey } from "@/lib/glossary";
 import { useAssetBalances, useWalletAction } from "@/services/wallet";
 
 import styles from "./SwapPage.module.css";
 
-const SWAP_TABS = ["Swap"];
+/** Matches `.amountInput::placeholder`, so the caret is the height of the words it replaces. */
 const PLACEHOLDER_SIZE = "clamp(30px, 8cqi, 42px)";
 
+/**
+ * Whether a keystroke leaves something that is still on its way to being a number.
+ *
+ * `inputMode` only hints at which keyboard to raise; it refuses nothing, so a typed letter
+ * reaches the amount and every consumer downstream has to survive it. A partial entry — "", "0.",
+ * "." — is accepted because it is a decimal mid-typing, not a wrong one.
+ */
 function isAmountDraft(value: string): boolean {
   return /^\d*\.?\d*$/.test(value);
 }
@@ -91,24 +99,28 @@ export function SwapPage() {
   const outStr = quote?.amountOut ?? (hasAmount && amt > 0 && to ? DASH : "");
   const dotAt = outStr.indexOf(".");
 
-  const routeStats = [
+  const routeStats: { label: string; term: GlossaryKey; value: string }[] = [
     {
       label: "Fills",
+      term: "fills",
       value: quote
         ? `${quote.makersSourced} ${quote.makersSourced === 1 ? "maker" : "makers"}`
         : DASH,
     },
-    { label: "Price impact", value: quote?.priceImpact ?? DASH },
-    { label: "Max slippage", value: `${config.slippage}%` },
+    {
+      label: "Price impact",
+      term: "priceImpact",
+      value: quote?.priceImpact ?? DASH,
+    },
+    {
+      label: "Max slippage",
+      term: "maxSlippage",
+      value: `${config.slippage}%`,
+    },
   ];
 
   const wallet = useWalletAction();
   const balances = useAssetBalances(assets);
-  const walletNetwork =
-    wallet.connected && wallet.chainId !== undefined
-      ? (assets.find((asset) => asset.chainId === wallet.chainId)?.net ??
-        (wallet.chainId === chain.id ? chain.name : `Chain ${wallet.chainId}`))
-      : undefined;
   const submission = useSubmitSwap(
     {
       from,
@@ -222,33 +234,7 @@ export function SwapPage() {
     <div data-scroll="1" className={styles.root}>
       <section className={styles.card}>
         <div className={styles.cardHead}>
-          <div className={styles.tabs}>
-            {SWAP_TABS.map((t) => (
-              <button key={t} type="button" className={styles.tabActive}>
-                {t}
-              </button>
-            ))}
-          </div>
           <div className={styles.headActions}>
-            <button
-              type="button"
-              className={styles.iconButton}
-              aria-label={
-                walletNetwork
-                  ? `Connected network: ${walletNetwork}`
-                  : "Wallet network not connected"
-              }
-              title={walletNetwork}
-            >
-              <span
-                className={
-                  walletNetwork ? styles.networkGlyph : styles.iconGlyph
-                }
-                aria-hidden="true"
-              >
-                {walletNetwork?.slice(0, 1).toUpperCase()}
-              </span>
-            </button>
             {!crossChain && erc7683Available && (
               <div className={styles.protocolMenu}>
                 <button
@@ -338,6 +324,8 @@ export function SwapPage() {
             <div className={styles.amountBox}>
               <input
                 className={styles.amountInput}
+                // An empty field still carries the largest size, and the caret is drawn at the
+                // font size rather than the placeholder's, so it stands as tall as the box.
                 style={{
                   fontSize: state.amount ? fit(state.amount) : PLACEHOLDER_SIZE,
                 }}
@@ -408,7 +396,9 @@ export function SwapPage() {
           <div className={styles.route}>
             {routeStats.map((s) => (
               <div key={s.label} className={styles.routeCell}>
-                <div className={styles.routeLabel}>{s.label}</div>
+                <div className={styles.routeLabel}>
+                  <Term term={s.term}>{s.label}</Term>
+                </div>
                 <div className={styles.routeValue}>{s.value}</div>
               </div>
             ))}
@@ -488,6 +478,7 @@ export function SwapPage() {
                     >
                       <span className={styles.tokenChip}>
                         {t.symbol.slice(0, 2)}
+                        {t.logoUri && <img alt="" loading="lazy" src={t.logoUri} />}
                       </span>
                       <span className={styles.tokenMain}>
                         <span className={styles.tokenName}>{t.name}</span>

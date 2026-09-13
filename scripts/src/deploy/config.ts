@@ -96,6 +96,8 @@ function tokenList(manifest: Manifest) {
       symbol,
       name: NAMES[symbol] ?? symbol,
       decimals: token.decimals,
+      // Keyed by symbol, not address: a devnet redeploy moves every address.
+      logoURI: `/tokens/${symbol.toLowerCase()}.png`,
       tags: [TAGS[symbol] ?? "other"],
     })),
   };
@@ -211,6 +213,13 @@ authorization_ttl_blocks = 90
 
 ${feeds}
 ${uniswapAssets}
+
+# Without this, the backend falls back to a single default chain (id 1, "Ethereum") — the fe then
+# can't match this side's actual chain id and renders assets as "on Unknown" with no chain icon.
+[[chains]]
+chain_id = ${manifest.chain_id}
+name = "Solvent ${side === "origin" ? "Origin" : "Destination"}"
+logo_uri = "/chains/ethereum.png"
 
 # Private cross-chain service: exposed only to the other side's process (or a proxy between them
 # in a real multi-host deployment). SOLVENT_INTERNAL_TOKEN below is the shared Bearer credential.

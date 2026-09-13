@@ -173,6 +173,7 @@ impl AssetManager {
             chain_id: 0,
             symbol: String::new(),
             decimals: DEFAULT_DECIMALS,
+            logo_uri: None,
         })
     }
 
@@ -188,6 +189,7 @@ impl AssetManager {
             chain_id: meta.chain_id,
             symbol: meta.symbol.clone(),
             decimals: meta.decimals,
+            logo_uri: meta.logo_uri.clone(),
         }
     }
 

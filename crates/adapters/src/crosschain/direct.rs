@@ -189,7 +189,10 @@ impl AlloyDirectPlanAuthor {
             return invalid("authorization does not belong to this direct plan author");
         }
         let [source] = quote.destination.sources.as_slice() else {
-            return invalid("direct settlement requires exactly one destination source");
+            return invalid(&format!(
+                "this size fills from {} maker positions on the destination chain; cross-chain settlement can carry only one, so try a smaller amount",
+                quote.destination.sources.len()
+            ));
         };
         if source.maker.0 != self.maker.address() {
             return invalid("quoted destination maker does not match the configured signer");

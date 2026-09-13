@@ -125,6 +125,7 @@ mod tests {
             decimals,
             chain_id: 1,
             symbol: n.to_string(),
+            logo_uri: None,
         }
     }
     fn strategy() -> MakerStrategy {

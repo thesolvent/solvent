@@ -500,6 +500,13 @@ export const DASH = "—";
  * Distinct from `Token` below, whose sample rows carry neither an address nor decimals — a quote
  * cannot be asked for without both, so they are required here rather than optional.
  */
+/** A chain a deployment can name, as `/config` reports it. */
+export type ChainInfo = {
+  chainId: number;
+  name: string;
+  logoUri?: string | null;
+};
+
 export type Asset = {
   chainId: number;
   address: `0x${string}`;
@@ -513,6 +520,8 @@ export type Asset = {
   change: string;
   tags: string[];
   net: string;
+  /** The mark of the chain this asset lives on, when the deployment names one. */
+  chainLogoUri?: string | null;
   /** Pairs this asset is quotable in, as "BASE/QUOTE" labels. */
   pairs: string[];
 };

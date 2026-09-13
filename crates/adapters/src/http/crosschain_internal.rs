@@ -10,7 +10,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use serde::Deserialize;
 use solvent_core::crosschain::{LocalCrossChainService, LocalStepService};
-use solvent_core::deps::crosschain::{DirectPlanAuthor, RemoteProgress};
+use solvent_core::deps::crosschain::{DirectPlanAuthor, LegQuoterError, RemoteProgress};
 use solvent_core::primitives::crosschain::{
     ChainExecutionPlan, DirectExecutionPlans, DirectOrderAuthorization, LegQuote, LegQuoteRequest,
     Preparation, RemoteCommand, StepValidationContext,
@@ -77,21 +77,23 @@ pub fn crosschain_internal_router_with_author(
 async fn author_direct(
     State(state): State<InternalState>,
     Json(authorization): Json<DirectOrderAuthorization>,
-) -> Result<Json<DirectExecutionPlans>, StatusCode> {
-    let author = state
-        .direct_author
-        .as_ref()
-        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+) -> Result<Json<DirectExecutionPlans>, ErrorReply> {
+    let author = state.direct_author.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "direct settlement is not configured on this deployment".to_string(),
+        )
+    })?;
     author
         .author(&authorization)
         .await
         .map(Json)
         .map_err(|error| match error {
-            solvent_core::deps::crosschain::DirectPlanAuthorError::Invalid(_) => {
-                StatusCode::BAD_REQUEST
+            solvent_core::deps::crosschain::DirectPlanAuthorError::Invalid(reason) => {
+                (StatusCode::BAD_REQUEST, reason)
             }
-            solvent_core::deps::crosschain::DirectPlanAuthorError::Unavailable(_) => {
-                StatusCode::INTERNAL_SERVER_ERROR
+            solvent_core::deps::crosschain::DirectPlanAuthorError::Unavailable(reason) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, reason)
             }
         })
 }
@@ -143,7 +145,7 @@ struct CommandRequest {
 async fn leg_quote(
     State(state): State<InternalState>,
     Json(request): Json<LegQuoteRequest>,
-) -> Result<Json<LegQuote>, StatusCode> {
+) -> Result<Json<LegQuote>, ErrorReply> {
     state
         .local
         .quote(&request)
@@ -155,7 +157,7 @@ async fn leg_quote(
 async fn stage(
     State(state): State<InternalState>,
     Json(request): Json<StageRequest>,
-) -> Result<Json<()>, StatusCode> {
+) -> Result<Json<()>, ErrorReply> {
     state
         .local
         .validate_stage_context(&request.context)
@@ -172,7 +174,7 @@ async fn stage(
 async fn stage_cctp_completion(
     State(state): State<InternalState>,
     Json(request): Json<CompletionStageRequest>,
-) -> Result<Json<()>, StatusCode> {
+) -> Result<Json<()>, ErrorReply> {
     state
         .local
         .validate_stage_context(&request.context)
@@ -194,7 +196,7 @@ async fn stage_cctp_completion(
 async fn prepare(
     State(state): State<InternalState>,
     Json(request): Json<PrepareRequest>,
-) -> Result<Json<Preparation>, StatusCode> {
+) -> Result<Json<Preparation>, ErrorReply> {
     state
         .local
         .prepare(request.aggregate_id, &request.quote)
@@ -206,7 +208,7 @@ async fn prepare(
 async fn commit(
     State(state): State<InternalState>,
     Json(request): Json<TokenRequest>,
-) -> Result<Json<Preparation>, StatusCode> {
+) -> Result<Json<Preparation>, ErrorReply> {
     state
         .local
         .commit(request.token)
@@ -218,7 +220,7 @@ async fn commit(
 async fn release(
     State(state): State<InternalState>,
     Json(request): Json<TokenRequest>,
-) -> Result<Json<Preparation>, StatusCode> {
+) -> Result<Json<Preparation>, ErrorReply> {
     state
         .local
         .release(request.token)
@@ -230,7 +232,7 @@ async fn release(
 async fn inspect(
     State(state): State<InternalState>,
     Json(request): Json<TokenRequest>,
-) -> Result<Json<Preparation>, StatusCode> {
+) -> Result<Json<Preparation>, ErrorReply> {
     state
         .local
         .inspect(request.token)
@@ -242,7 +244,7 @@ async fn inspect(
 async fn command(
     State(state): State<InternalState>,
     Json(request): Json<CommandRequest>,
-) -> Result<Json<RemoteProgress>, StatusCode> {
+) -> Result<Json<RemoteProgress>, ErrorReply> {
     let preparation = state
         .local
         .inspect(request.preparation)
@@ -273,13 +275,22 @@ async fn command(
     Ok(Json(progress))
 }
 
-fn internal_error(error: SolventError) -> StatusCode {
-    match error {
+/// A refusal reaches the caller in the words the service used, not as a bare status.
+///
+/// The proxy is several hops from the browser, and each hop that keeps only a status code turns a
+/// precise refusal into an outage: "beyond the book" was arriving as "service unavailable".
+type ErrorReply = (StatusCode, String);
+
+fn internal_error(error: SolventError) -> ErrorReply {
+    let status = match error {
         SolventError::InvalidCrossChain(_)
         | SolventError::StepValidator(_)
         | SolventError::InvalidId { .. } => StatusCode::BAD_REQUEST,
+        // Not a failure: this pair and size simply cannot be filled from the book right now.
+        SolventError::LegQuote(LegQuoterError::NoRoute) => StatusCode::UNPROCESSABLE_ENTITY,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
-    }
+    };
+    (status, error.to_string())
 }
 
 #[cfg(test)]

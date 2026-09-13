@@ -40,6 +40,7 @@ use utoipa::OpenApi;
         crate::http::primitives::Status,
         crate::http::state::AppConfig,
         crate::http::state::Features,
+        crate::http::state::Chain,
         crate::http::app::stats::Stats,
         solvent_core::asset::Asset,
         solvent_core::asset::Token,

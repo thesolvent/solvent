@@ -13,6 +13,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use solvent_core::crosschain::CrossChainProxy;
+use solvent_core::deps::crosschain::RemoteSolventError;
 use solvent_core::deps::ledger::Clock;
 use solvent_core::primitives::crosschain::{
     AggregateQuote, ChainExecutionPlan, CrossChainRoute, CrossChainSaga, LegQuoteRequest, LegRole,
@@ -316,6 +317,11 @@ struct ErrorBody {
 fn proxy_error(error: SolventError) -> (StatusCode, Json<ErrorBody>) {
     match error {
         SolventError::InvalidCrossChain(message) => client_error(&message),
+        // A chain-local service that refused the request is answering it, not failing: the reason
+        // belongs to the person who asked, so it is passed on rather than reported as an outage.
+        SolventError::RemoteSolvent(RemoteSolventError::Rejected(message)) => {
+            client_error(&message)
+        }
         _ => (
             StatusCode::BAD_GATEWAY,
             Json(ErrorBody {
