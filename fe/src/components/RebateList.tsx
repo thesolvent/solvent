@@ -2,7 +2,9 @@ import type { Asset } from "@/data";
 import type { RebateRecord } from "@/data/rebates";
 import { loadedPageLabel } from "@/lib/pagination";
 import { rebateRow } from "@/lib/rebates";
+import { AssetIdentity } from "./AssetIdentity";
 import { Pagination } from "./Pagination";
+import { RetryNotice } from "./RetryNotice";
 import { useLoadedPagination } from "./useLoadedPagination";
 import styles from "./RebateList.module.css";
 
@@ -11,6 +13,7 @@ export interface RebateAction {
   completedId?: string;
   failedId?: string;
   pendingId?: string;
+  pendingLabel?: string;
   problem?: string;
   label: string;
   onExecute: (id: string) => void;
@@ -27,6 +30,8 @@ export function RebateList({
   onLoadMore,
   action,
   currentBlock,
+  highlightRowsOnHover = false,
+  onOpenTrade,
 }: {
   assets: Asset[];
   pages: RebateRecord[][];
@@ -38,6 +43,8 @@ export function RebateList({
   onLoadMore: () => Promise<boolean>;
   action?: RebateAction;
   currentBlock?: number;
+  highlightRowsOnHover?: boolean;
+  onOpenTrade?: (tradeId: string) => void;
 }) {
   const pagination = useLoadedPagination(pages, hasMore, onLoadMore);
   const rebates = pagination.items;
@@ -52,14 +59,14 @@ export function RebateList({
           </p>
         )}
         {error && (
-          <p className={styles.emptyNote} role="alert">
-            {rebates.length
-              ? "Couldn’t refresh rebates."
-              : "Couldn’t load rebates."}{" "}
-            <button type="button" onClick={onRetry}>
-              Try again
-            </button>
-          </p>
+          <RetryNotice
+            message={
+              rebates.length
+                ? "Couldn’t refresh rebates."
+                : "Couldn’t load rebates."
+            }
+            onRetry={onRetry}
+          />
         )}
         {!pending && !error && rows.length === 0 && (
           <p className={styles.emptyNote}>No rebates available yet.</p>
@@ -73,16 +80,55 @@ export function RebateList({
             row.status === "ready" &&
             (row.deadlineBlock == null ||
               (currentBlock != null && currentBlock >= row.deadlineBlock));
+          const canOpenTrade = Boolean(onOpenTrade && row.originTradeId);
+
+          function openOriginTrade() {
+            if (row.originTradeId) onOpenTrade?.(row.originTradeId);
+          }
+
           return (
-            <div key={row.id} className={styles.row}>
+            <div
+              key={row.id}
+              className={[
+                styles.row,
+                highlightRowsOnHover ? styles.rowHover : undefined,
+                canOpenTrade ? styles.rowNavigate : undefined,
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              role={canOpenTrade ? "link" : undefined}
+              tabIndex={canOpenTrade ? 0 : undefined}
+              aria-label={
+                canOpenTrade
+                  ? `View originating trade ${row.originTradeId}`
+                  : undefined
+              }
+              onClick={canOpenTrade ? openOriginTrade : undefined}
+              onKeyDown={
+                canOpenTrade
+                  ? (event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      openOriginTrade();
+                    }
+                  : undefined
+              }
+            >
               <span className={styles.pair}>
                 <span className={styles.pairName}>{row.pair}</span>
                 <span className={styles.sub}>{row.strategy}</span>
               </span>
               <span className={styles.flow}>
-                <span title={row.deposit}>{row.deposit}</span>
+                <span className={styles.flowAmount} title={row.deposit}>
+                  <AssetIdentity asset={row.inputAsset} />
+                  {row.deposit}
+                </span>
                 <span className={styles.arrow}>→</span>
-                <strong title={row.output}>{row.output}</strong>
+                <strong className={styles.flowAmount} title={row.output}>
+                  <AssetIdentity asset={row.outputAsset} />
+                  {row.output}
+                </strong>
               </span>
               <span className={styles.cell}>
                 <strong title={row.makerRebate}>{row.makerRebate}</strong>
@@ -105,10 +151,13 @@ export function RebateList({
                       type="button"
                       className={styles.earnButton}
                       disabled={executing || completed || !available || expired}
-                      onClick={() => action.onExecute(row.id)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        action.onExecute(row.id);
+                      }}
                     >
                       {executing
-                        ? "Confirming…"
+                        ? (action.pendingLabel ?? "Preparing rebate…")
                         : completed
                           ? "Earned"
                           : failed

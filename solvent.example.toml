@@ -51,6 +51,16 @@ decay_window_secs = 60     # the cosigner's decay window applied to each order
 # and reconciles them rather than losing track. Point it at a persistent volume in production.
 wallet_state_db = "walletkit.redb"
 
+# Enable this block on each chain-local process that participates in a configured cross-chain pair.
+# Expose this listener only to the proxy (normally behind mTLS); SOLVENT_INTERNAL_TOKEN supplies
+# the application-level Bearer credential. Set only the contracts deployed on this process's chain.
+# [crosschain]
+# bind_addr = "127.0.0.1:9080"
+# destination_app = "0x0000000000000000000000000000000000000000"
+# origin_settler = "0x0000000000000000000000000000000000000000"
+# proof_outbox = "0x0000000000000000000000000000000000000000"
+# quote_ttl_secs = 300
+
 [rebate]
 start_block = 0               # filler deployment block; avoids scanning older chain history
 deviation_threshold_bps = 50 # batch below 0.50%; guard and evaluate at or above it

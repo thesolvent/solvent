@@ -25,6 +25,10 @@ test-fork:
 abi:
     cd contracts && forge inspect src/UniswapXAquaFiller.sol:UniswapXAquaFiller abi --json > abi/UniswapXAquaFiller.json
     cd contracts && forge inspect src/DevToken.sol:DevToken abi --json > abi/DevToken.json
+    cd contracts && forge inspect src/CrossChainAquaApp.sol:CrossChainAquaApp abi --json > abi/CrossChainAquaApp.json
+    cd contracts && forge inspect src/CompactOriginSettler.sol:CompactOriginSettler abi --json > abi/CompactOriginSettler.json
+    cd contracts && forge inspect src/proof/CcipProofOutbox.sol:CcipProofOutbox abi --json > abi/CcipProofOutbox.json
+    cd contracts && forge inspect src/proof/CcipProofInbox.sol:CcipProofInbox abi --json > abi/CcipProofInbox.json
 
 fmt:
     cd contracts && forge fmt
@@ -72,12 +76,13 @@ COMPOSE := "docker compose -f devnet/docker-compose.yml"
 # Boot the devnet: chain + explorer + one-shot seed + faucet (builds the faucet image).
 devnet-up:
     {{COMPOSE}} up -d --build
-    @echo "devnet: RPC http://127.0.0.1:8545 · explorer http://127.0.0.1:5100 · faucet http://127.0.0.1:8080"
+    @echo "devnet: RPC http://127.0.0.1:8545 · explorer http://127.0.0.1:5100 · faucet http://127.0.0.1:8081"
     @echo "devnet: follow the deploy with 'just devnet-logs seed'"
 
-# Tear down and delete volumes (drops the deploy manifest).
+# Tear down and delete volumes plus host-generated deployment state.
 devnet-down:
     {{COMPOSE}} down -v
+    rm -f contracts/deployments/solvent-devnet.json devnet/generated/env.sh devnet/generated/tokens.json devnet/generated/solvent.db devnet/generated/filler-walletkit.redb devnet/generated/walletkit.redb
 
 devnet-logs service="":
     {{COMPOSE}} logs -f {{service}}
@@ -85,3 +90,19 @@ devnet-logs service="":
 # Smoke: finality advances, faucet drips, explorer reachable. Run after `devnet-up`.
 devnet-smoke:
     sh devnet/smoke.sh
+
+# --- cross-chain devnet: two chains, contracts, liquidity, both backends, one command ---
+
+# One-click: infra up, both chains deployed + wired, liquidity seeded, backends + relay running,
+# same-chain swaps smoke-tested on both sides. Safe to rerun after any failure. See
+# scripts/src/deploy/all.ts for exactly what it does.
+deploy-crosschain:
+    cd scripts && pnpm run deploy
+
+# Tear down and redeploy from a clean chain state on both sides.
+deploy-crosschain-reset:
+    cd scripts && pnpm run deploy:reset
+
+# Stop the backends + relay this deploy started (chain state is left running).
+deploy-crosschain-down:
+    cd scripts && pnpm run deploy:down

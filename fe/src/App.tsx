@@ -29,6 +29,7 @@ function Shell() {
         <Route path="/swap" element={<SwapPage />} />
         <Route path="/docs" element={<SwapPage />} />
         <Route path="/pools" element={<PoolsPage />} />
+        <Route path="/pools/new" element={<CreatePoolPage />} />
         <Route path="/pools/:pair" element={<PoolDetailPage />} />
         <Route path="/pools/:pair/new" element={<CreatePoolPage />} />
         <Route path="/makers" element={<MakersPage />} />

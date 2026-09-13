@@ -17,7 +17,7 @@ export function TransitionRoutes({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     const outgoing = previous.current;
     const leftCreatePosition =
-      /^\/pools\/[^/]+\/new$/.test(outgoing.pathname) &&
+      /^\/pools\/(?:[^/]+\/)?new$/.test(outgoing.pathname) &&
       outgoing.pathname !== location.pathname;
     const leftSwap =
       outgoing.pathname === "/swap" && outgoing.pathname !== location.pathname;

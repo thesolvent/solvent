@@ -9,8 +9,8 @@ import {
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { formatUnits } from "viem";
-import { useAccount } from "wagmi";
 
+import { AssetIdentity } from "@/components/AssetIdentity";
 import { Crumbs } from "@/components/Crumbs";
 import { BAND_K0 } from "@/data";
 import {
@@ -18,13 +18,18 @@ import {
   clampBand,
   createPosition,
 } from "@/lib/create-position";
-import type { CreatePair, PositionCurve } from "@/ports/positions";
+import type {
+  CreatePair,
+  PositionCreationStatus,
+  PositionCurve,
+} from "@/ports/positions";
 import type { Position } from "@/data/makers";
 import {
   useCreatePairs,
   useCreatePosition,
   usePairPriceHistory,
 } from "@/services/positions";
+import { useWalletAction } from "@/services/wallet";
 import { usePosition } from "@/services/makers";
 import { slug } from "@/services/pools";
 import { useApp, type AppState } from "@/state";
@@ -67,6 +72,28 @@ const PANE_SUBS = [
 const EMPTY_PAIRS: readonly CreatePair[] = [];
 
 type BandEdge = "max" | "min" | "body";
+
+function positionCreationLabel(
+  status: PositionCreationStatus | undefined,
+  pair: CreatePair | undefined,
+): string {
+  if (!status || status.kind === "preparing") return "Checking position…";
+  if (status.kind === "approving") {
+    const token = !pair
+      ? "token"
+      : pair.base.address.toLowerCase() === status.token.toLowerCase()
+        ? pair.base.symbol
+        : pair.quote.address.toLowerCase() === status.token.toLowerCase()
+          ? pair.quote.symbol
+          : "token";
+    return `Approve ${token} — step ${status.index + 1} of ${status.total + 1}`;
+  }
+  if (status.kind === "shipping") {
+    const step = status.approvalCount + 1;
+    return `Create position — step ${step} of ${step}`;
+  }
+  return "Confirming position…";
+}
 
 function pairDefaults(pair: CreatePair, corePair: number) {
   const minimum = pair.type === "Stable" ? MIN_PEGGED_BOUND_PERCENT : 0.004;
@@ -178,7 +205,8 @@ function cloneDefaults(
 
 export function CreatePoolPage() {
   const { state, set } = useApp();
-  const { isConnected: walletConnected } = useAccount();
+  const wallet = useWalletAction();
+  const walletConnected = wallet.connected;
   const navigate = useNavigate();
   const { pair: routePair } = useParams();
   const [searchParams] = useSearchParams();
@@ -186,6 +214,7 @@ export function CreatePoolPage() {
   const cloneQuery = usePosition(cloneHash);
   const pairQuery = useCreatePairs();
   const pairs = pairQuery.data ?? EMPTY_PAIRS;
+  const backPath = routePair ? `/pools/${routePair}` : "/pools";
   const selectedPair = pairs[state.corePair] ?? pairs[0];
   const historyQuery = usePairPriceHistory(selectedPair, state.createSpan);
   const c = createPosition(
@@ -194,6 +223,12 @@ export function CreatePoolPage() {
     pairQuery.isError ? "Couldn’t load supported pairs." : undefined,
     historyQuery.data,
   );
+  const selectedSlotA = c.walletRows.find(
+    (row) => row.token.sym === state.slotA,
+  )?.token;
+  const selectedSlotB = c.walletRows.find(
+    (row) => row.token.sym === state.slotB,
+  )?.token;
   const creation = useCreatePosition(
     c.pair
       ? {
@@ -215,9 +250,25 @@ export function CreatePoolPage() {
         state: { waitForStrategyIndex: true },
       }),
   );
+  const creationLabel = creation.problem
+    ? "Could not create — try again"
+    : creation.submitting
+      ? positionCreationLabel(creation.status, c.pair)
+      : !c.ctaDisabled && !wallet.connected
+        ? "Connect a wallet"
+        : !c.ctaDisabled && wallet.switchTo
+          ? `Switch to ${wallet.switchTo}`
+          : c.cta;
   const plotRef = useRef<HTMLDivElement>(null);
   const initializedRoute = useRef<string | null>(null);
   const initializedClone = useRef<string | null>(null);
+  const goBack = () => {
+    if (window.history.state?.idx > 0) {
+      navigate(-1);
+      return;
+    }
+    navigate(backPath, { replace: true });
+  };
 
   useLayoutEffect(() => {
     if (
@@ -488,11 +539,7 @@ export function CreatePoolPage() {
   return (
     <div className={styles.root}>
       <div className={styles.head}>
-        <button
-          type="button"
-          className={styles.back}
-          onClick={() => navigate(routePair ? `/pools/${routePair}` : "/pools")}
-        >
+        <button type="button" className={styles.back} onClick={goBack}>
           ←
         </button>
         <div className={styles.headTitle}>
@@ -614,14 +661,7 @@ export function CreatePoolPage() {
                       <div className={styles.slotA}>
                         {state.slotA ? (
                           <div className={styles.slotFilled}>
-                            <span
-                              className={styles.slotChip}
-                              style={{
-                                background: c.tintA,
-                              }}
-                            >
-                              {state.slotA}
-                            </span>
+                            <AssetIdentity asset={selectedSlotA} />
                             <span className={styles.slotSym}>
                               {state.slotA}
                             </span>
@@ -662,14 +702,7 @@ export function CreatePoolPage() {
                       <div className={styles.slotB}>
                         {state.slotB ? (
                           <div className={styles.slotFilledRight}>
-                            <span
-                              className={styles.slotChip}
-                              style={{
-                                background: c.tintB,
-                              }}
-                            >
-                              {state.slotB}
-                            </span>
+                            <AssetIdentity asset={selectedSlotB} />
                             <span className={styles.slotSym}>
                               {state.slotB}
                             </span>
@@ -761,14 +794,7 @@ export function CreatePoolPage() {
                           }}
                           onClick={() => pickWalletToken(row.token.sym)}
                         >
-                          <span
-                            className={styles.walletChip}
-                            style={{
-                              background: row.token.tint,
-                            }}
-                          >
-                            {row.token.sym}
-                          </span>
+                          <AssetIdentity asset={row.token} />
                           <span className={styles.walletMain}>
                             <span className={styles.walletName}>
                               {row.token.name}
@@ -1403,13 +1429,11 @@ export function CreatePoolPage() {
                       color: c.ctaFg,
                       cursor: creation.submitting ? "wait" : c.ctaCursor,
                     }}
-                    onClick={creation.send}
+                    onClick={() => {
+                      if (wallet.prepare()) creation.send();
+                    }}
                   >
-                    {creation.submitting
-                      ? "Creating position…"
-                      : creation.problem
-                        ? "Could not create — try again"
-                        : c.cta}
+                    {creationLabel}
                   </button>
                 </div>
               </div>

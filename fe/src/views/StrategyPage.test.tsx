@@ -1,6 +1,6 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { Link, Route } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { TransitionRoutes } from "@/components/TransitionRoutes";
 import { renderWithServices } from "@/test/harness";
@@ -32,6 +32,37 @@ function renderStrategy(route: string) {
 }
 
 describe("Strategy back navigation", () => {
+  it("scopes a chain-qualified strategy to its destination service", async () => {
+    const pending = new Promise<never>(() => {});
+    const position = vi.fn(() => pending);
+    const trades = vi.fn(() => pending);
+    renderWithServices(
+      <TransitionRoutes>
+        <Route
+          path="/explorer/strategies/:strategyHash"
+          element={<StrategyPage />}
+        />
+      </TransitionRoutes>,
+      {
+        makers: { position, history: () => pending },
+        explorer: { trades },
+      },
+      `${strategyPath}?chain=31338&source=direct`,
+    );
+
+    await waitFor(() => {
+      expect(position).toHaveBeenCalledWith("test-strategy", 31338, "direct");
+      expect(trades).toHaveBeenCalledWith(
+        {
+          status: "confirmed",
+          strategy_hash: "test-strategy",
+          chainId: 31338,
+        },
+        undefined,
+      );
+    });
+  });
+
   it("replaces a directly opened strategy with Explorer even while data is loading", async () => {
     window.history.pushState(null, "", "/outside-the-app");
     renderStrategy(strategyPath);

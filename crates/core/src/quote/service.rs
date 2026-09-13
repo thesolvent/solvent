@@ -19,11 +19,23 @@ use crate::primitives::registry::{curve_label, CurveSpec, Snapshot, TokenPair};
 use crate::primitives::routing::{RouteLeg, RouteRequest, RoutingConfig};
 use crate::primitives::{IntentId, StrategyHash};
 use crate::registry::SharedSnapshot;
-use crate::routing::{price_impact_pct, select, solve_sparse, LegCostResolver, StrategyGuard};
+use crate::routing::{
+    price_impact_pct, route, select, solve_sparse, LegCostResolver, RoutingBook, StrategyGuard,
+};
 use crate::valuation::Valuation;
 
 /// How far ahead a quote's advisory `expires_at` sits.
 const QUOTE_TTL_SECS: u64 = 30;
+const BPS: u16 = 10_000;
+
+/// The result of pricing an order-sized quote.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum QuoteOutcome {
+    Quote(Box<QuoteResponse>),
+    NoRoute,
+    SettlementCostExceedsLimit,
+}
 
 pub struct QuoteService {
     registry: Arc<SharedSnapshot>,
@@ -69,6 +81,32 @@ impl QuoteService {
         token_out: Address,
         amount_in: U256,
     ) -> Option<QuoteResponse> {
+        match self.quote_inner(token_in, token_out, amount_in, None).await {
+            QuoteOutcome::Quote(quote) => Some(*quote),
+            QuoteOutcome::NoRoute | QuoteOutcome::SettlementCostExceedsLimit => None,
+        }
+    }
+
+    /// Price a quote and verify that an order with `slippage_bps` can clear the same gas-aware
+    /// exact-output route that submission will use.
+    pub async fn quote_for_order(
+        &self,
+        token_in: Address,
+        token_out: Address,
+        amount_in: U256,
+        slippage_bps: u16,
+    ) -> QuoteOutcome {
+        self.quote_inner(token_in, token_out, amount_in, Some(slippage_bps))
+            .await
+    }
+
+    async fn quote_inner(
+        &self,
+        token_in: Address,
+        token_out: Address,
+        amount_in: U256,
+        slippage_bps: Option<u16>,
+    ) -> QuoteOutcome {
         let id = quote_hash(token_in, token_out, amount_in);
         let request = RouteRequest {
             intent: IntentId(id),
@@ -92,13 +130,44 @@ impl QuoteService {
         );
         let out_decimals = self.assets.decimals(&token_out);
         let per_leg_cost = self.leg_cost.for_request(&request).await;
-        let split = solve_sparse(
+        let Some(split) = solve_sparse(
             &selection.chosen,
             &request,
             per_leg_cost,
             self.config.max_legs,
             None,
-        )?;
+        ) else {
+            return QuoteOutcome::NoRoute;
+        };
+
+        if let Some(slippage_bps) = slippage_bps {
+            let Some(min_out) = min_amount_out(split.amount_out, slippage_bps) else {
+                return QuoteOutcome::NoRoute;
+            };
+            if min_out.is_zero() {
+                return QuoteOutcome::SettlementCostExceedsLimit;
+            }
+            let order_request = RouteRequest {
+                intent: IntentId(id),
+                token_in,
+                token_out,
+                amount: min_out,
+                exact_in: false,
+            };
+            let order_leg_cost = self.leg_cost.for_request(&order_request).await;
+            if route(
+                RoutingBook::new(&snapshot, &caps, &guards),
+                &order_request,
+                amount_in,
+                &self.config,
+                order_leg_cost,
+                None,
+            )
+            .is_none()
+            {
+                return QuoteOutcome::SettlementCostExceedsLimit;
+            }
+        }
 
         let labels = curve_labels(&snapshot, token_in, token_out);
         let mut legs = Vec::with_capacity(split.legs.len());
@@ -108,17 +177,18 @@ impl QuoteService {
             }
         }
 
-        Some(QuoteResponse {
+        QuoteOutcome::Quote(Box::new(QuoteResponse {
             quote_id: format!("{id:#x}"),
             amount_out: self
                 .valuation
                 .amount(split.amount_out, token_out, out_decimals)
                 .await,
+            executor_fee: None,
             price_impact_pct: price_impact_pct(&selection.chosen, amount_in, split.amount_out),
             makers_sourced: split.legs.len() as u32,
             legs,
             expires_at: self.expires_at(),
-        })
+        }))
     }
 
     /// Resolve one routed leg to its wire shape, or skip it if a token is missing from the catalog.
@@ -160,6 +230,11 @@ impl QuoteService {
             .and_then(|instant| instant.format(&Rfc3339).ok())
             .expect("a near-future unix timestamp formats as RFC-3339")
     }
+}
+
+fn min_amount_out(amount_out: U256, slippage_bps: u16) -> Option<U256> {
+    let retained_bps = BPS.checked_sub(slippage_bps)?;
+    Some(amount_out.checked_mul(U256::from(retained_bps))? / U256::from(BPS))
 }
 
 /// The deterministic quote id: `keccak256(token_in ‖ token_out ‖ amount_in)`, doubling as the
@@ -449,5 +524,26 @@ mod tests {
             .await
             .expect("still routes");
         assert_eq!(quote.makers_sourced, 1, "gas collapses the split");
+    }
+
+    #[tokio::test]
+    async fn rejects_a_quote_that_cannot_cover_settlement_costs() {
+        let market = Arc::new(FakeMarket {
+            // This leaves an indicative price, while the exact-output order cannot cover a
+            // single fill leg's gas from its fixed input bound.
+            gas_wei: 1_000_000_000_000_000_000,
+            prices: BTreeMap::from([
+                (addr(WETH), UsdPrice(Decimal::from(3000u64))),
+                (addr(USDC), UsdPrice(Decimal::from(1u64))),
+            ]),
+        });
+        let svc = service_with(vec![xyc(3, e(100, 18), e(300_000, 6))], market).await;
+
+        assert!(svc.quote(addr(WETH), addr(USDC), e(50, 18)).await.is_some());
+        assert!(matches!(
+            svc.quote_for_order(addr(WETH), addr(USDC), e(50, 18), 50)
+                .await,
+            QuoteOutcome::SettlementCostExceedsLimit
+        ));
     }
 }

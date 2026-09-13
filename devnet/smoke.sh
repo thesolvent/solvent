@@ -2,7 +2,7 @@
 # Devnet acceptance smoke — run after `just devnet-up`. Hits the host-exposed ports.
 set -e
 RPC=http://127.0.0.1:8545
-FAUCET=http://127.0.0.1:8080
+FAUCET=http://127.0.0.1:8081
 EXPLORER=http://127.0.0.1:5100
 
 echo "smoke: chain id = $(cast chain-id --rpc-url $RPC)"
@@ -13,10 +13,20 @@ echo "smoke: finalized block = $FINALIZED"
 
 echo "smoke: faucet health = $(curl -fsS $FAUCET/health)"
 
-echo "smoke: faucet drip ->"
-curl -fsS -X POST $FAUCET/faucet -H 'content-type: application/json' \
-  -d '{"address":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}' | head -c 600
-echo
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+echo "smoke: concurrent faucet drips ->"
+curl -fsS -X POST "$FAUCET/faucet" -H 'content-type: application/json' \
+  -d '{"address":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}' > "$TMPDIR/first.json" &
+FIRST_PID=$!
+curl -fsS -X POST "$FAUCET/faucet" -H 'content-type: application/json' \
+  -d '{"address":"0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"}' > "$TMPDIR/second.json" &
+SECOND_PID=$!
+wait "$FIRST_PID"
+wait "$SECOND_PID"
+grep -q '"minted"' "$TMPDIR/first.json"
+grep -q '"minted"' "$TMPDIR/second.json"
+echo "smoke: concurrent faucet drips confirmed"
 
 echo "smoke: explorer http = $(curl -fsS -o /dev/null -w '%{http_code}' $EXPLORER/)"
 echo "smoke: ok"

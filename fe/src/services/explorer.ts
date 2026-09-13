@@ -1,6 +1,7 @@
 import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
 import { SolventApiError } from "@solvent/sdk/client";
+import { CrossChainApiError } from "@solvent/sdk/cross-chain";
 import { isTerminalTrade } from "@/lib/trade-lifecycle";
 import { useServices } from "./context";
 import { LIVE_QUERY_OPTIONS } from "./live";
@@ -22,6 +23,15 @@ export function useActivity(filter: ActivityFilter) {
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => explorer.activity(filter, pageParam),
     getNextPageParam: (page) => page.nextCursor,
+  });
+}
+
+export function useUniswapXFeed(cursor?: string) {
+  const { explorer } = useServices();
+  return useQuery({
+    ...LIVE_QUERY_OPTIONS,
+    queryKey: ["uniswapx-feed", cursor],
+    queryFn: () => explorer.uniswapxFeed(cursor),
   });
 }
 
@@ -52,10 +62,13 @@ export function useTrade(id: string | undefined) {
 }
 
 function isMissingTrade(error: unknown): boolean {
-  return error instanceof SolventApiError && [400, 404].includes(error.status);
+  return (
+    (error instanceof SolventApiError || error instanceof CrossChainApiError) &&
+    [400, 404].includes(error.status)
+  );
 }
 
 export function tradeProblem(error: unknown): string {
   if (isMissingTrade(error)) return "Trade not found.";
-  return "Couldn’t load this trade. Try again.";
+  return "Couldn’t load this trade.";
 }

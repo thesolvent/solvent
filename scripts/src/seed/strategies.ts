@@ -4,7 +4,7 @@ import type {
     BuiltStrategy,
     Strategy as StrategyBuilder,
 } from "@solvent/sdk/construction";
-import { parseUnits, type Address, type Hex } from "viem";
+import { encodeFunctionData, parseUnits, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 import { type Manifest } from "../lib/manifest.ts";
@@ -17,16 +17,44 @@ import {
 import { PAIRS, type PairSpec } from "./pairs.ts";
 
 // Anvil dev accounts #2.. — #0 deploys and owns the filler, #1 cosigns, so makers start at #2.
-const MAKER_KEYS: readonly Hex[] = [
+export const MAKER_KEYS: readonly Hex[] = [
     "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
     "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
     "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a",
     "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
 ];
 
+const DIRECT_APP_ABI = [
+    {
+        type: "function",
+        name: "configureDirectStrategy",
+        stateMutability: "nonpayable",
+        inputs: [
+            { name: "strategyHash", type: "bytes32" },
+            { name: "outputToken", type: "address" },
+            { name: "maxOutstandingRepayment", type: "uint256" },
+            { name: "enabled", type: "bool" },
+        ],
+        outputs: [],
+    },
+] as const;
+
 /** Minted per token, well above what is shipped, so a maker keeps a wallet balance behind it. */
 const MINT_UNITS = 1_000_000;
 const COPIES_PER_PAIR = 2;
+
+export interface SeedPairOptions {
+    app?: Address;
+    copies?: number;
+    mintUnits?: number;
+    configureDirect?: boolean;
+}
+
+export interface SeededPair {
+    maker: Address;
+    strategyHashes: Hex[];
+    summary: string;
+}
 
 type Pricing = { kind: "pegged" } | { kind: "ranged"; mid: number };
 
@@ -101,6 +129,10 @@ function token(manifest: Manifest, symbol: string): TokenRef {
     return { address: found.address as Address, decimals: found.decimals };
 }
 
+function strategyApp(manifest: Manifest, app?: Address): Address {
+    return (app ?? process.env.SOLVENT_STRATEGY_APP ?? manifest.router) as Address;
+}
+
 function legs(manifest: Manifest, spec: PairSpec, pricing: Pricing): Legs {
     const base = token(manifest, spec.base);
     const quote = token(manifest, spec.quote);
@@ -142,12 +174,13 @@ async function tokensCount(
     maker: Address,
     strategyHash: Hex,
     token: Address,
+    app: Address,
 ): Promise<number> {
     const [, tokensCount] = await publicClient.readContract({
         address: manifest.aqua as Address,
         abi: AQUA_ABI,
         functionName: "rawBalances",
-        args: [maker, manifest.router as Address, strategyHash, token],
+        args: [maker, app, strategyHash, token],
     });
     return tokensCount;
 }
@@ -157,18 +190,24 @@ export async function seedPair(
     spec: PairSpec,
     key: Hex,
     pricing: Pricing,
-): Promise<string> {
+    options: SeedPairOptions = {},
+): Promise<SeededPair> {
     const { config, manifest } = env;
+    const app = strategyApp(manifest, options.app);
+    const copies = options.copies ?? COPIES_PER_PAIR;
+    const mintUnits = options.mintUnits ?? MINT_UNITS;
+    const configureDirect = options.configureDirect ?? Boolean(process.env.SOLVENT_STRATEGY_APP);
     const account = privateKeyToAccount(key);
     const pos = positions({
         aqua: manifest.aqua as Address,
-        app: manifest.router as Address,
+        app,
     });
     const sized = legs(manifest, spec, pricing);
     const strategy = strategyFor(spec, sized, pricing);
     const pending: BuiltStrategy[] = [];
+    const activeHashes: Hex[] = [];
     let active = 0;
-    for (let salt = 0n; active + pending.length < COPIES_PER_PAIR; salt += 1n) {
+    for (let salt = 0n; active + pending.length < copies; salt += 1n) {
         const built = strategy
             .salt(salt)
             .build(account.address, config.taker_credential as Address);
@@ -177,9 +216,13 @@ export async function seedPair(
             account.address,
             built.strategyHash,
             sized.base.address,
+            app,
         );
         if (count === 0) pending.push(built);
-        else if (count < 255) active += 1;
+        else if (count < 255) {
+            active += 1;
+            activeHashes.push(built.strategyHash);
+        }
     }
 
     const at =
@@ -188,14 +231,18 @@ export async function seedPair(
             : `mid ${pricing.mid.toLocaleString("en-US")}`;
     const label = `${spec.base}/${spec.quote}  ${at.padEnd(14)} maker ${account.address.slice(0, 10)}`;
     if (pending.length === 0) {
-        return `${label}  (${active} active copies; already shipped)`;
+        return {
+            maker: account.address,
+            strategyHashes: activeHashes,
+            summary: `${label}  (${active} active copies; already shipped)`,
+        };
     }
 
     const maker = env.wallet(account);
     for (const leg of [sized.base, sized.quote]) {
         await maker.mint(
             leg.address,
-            parseUnits(String(MINT_UNITS), leg.decimals),
+            parseUnits(String(mintUnits), leg.decimals),
         );
         await maker.send(
             pos.approve({ token: leg.address, amount: 2n ** 255n }),
@@ -212,9 +259,29 @@ export async function seedPair(
                 ],
             }),
         );
+        if (configureDirect) {
+            await maker.send({
+                to: app,
+                value: 0n,
+                data: encodeFunctionData({
+                    abi: DIRECT_APP_ABI,
+                    functionName: "configureDirectStrategy",
+                    args: [
+                        built.strategyHash,
+                        sized.quote.address,
+                        2n ** 255n,
+                        true,
+                    ],
+                }),
+            });
+        }
     }
 
-    return `${label}  (${pending.length} shipped; ${COPIES_PER_PAIR} active copies)`;
+    return {
+        maker: account.address,
+        strategyHashes: [...activeHashes, ...pending.map((built) => built.strategyHash)],
+        summary: `${label}  (${pending.length} shipped; ${copies} active copies)`,
+    };
 }
 
 async function main(): Promise<void> {
@@ -226,10 +293,11 @@ async function main(): Promise<void> {
     );
 
     for (const [index, spec] of PAIRS.entries()) {
-        const key = MAKER_KEYS[index % MAKER_KEYS.length];
+        const key = (process.env.SOLVENT_SEED_MAKER_KEY ??
+            MAKER_KEYS[index % MAKER_KEYS.length]) as Hex;
         try {
             const pricing = pricingFor(spec, mids);
-            console.log(`  ok    ${await seedPair(env, spec, key, pricing)}`);
+            console.log(`  ok    ${(await seedPair(env, spec, key, pricing)).summary}`);
         } catch (error) {
             console.log(
                 `  FAIL  ${spec.base}/${spec.quote}: ${failureMessage(error)}`,

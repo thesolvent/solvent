@@ -9,6 +9,7 @@ export default defineConfig({
         client: "src/client/index.ts",
         orders: "src/orders/index.ts",
         swap: "src/swap/index.ts",
+        "cross-chain": "src/cross-chain/index.ts",
         validation: "src/validation.ts",
     },
     format: ["esm", "cjs"],

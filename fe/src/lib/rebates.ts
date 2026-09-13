@@ -2,13 +2,11 @@ import { formatUnits } from "viem";
 import type { Asset } from "@/data";
 import type { RebateRecord } from "@/data/rebates";
 import { relativeTime, shortHash } from "./explorer";
+import { formatTokenAmount } from "./format";
 
 function amount(value: bigint, asset: Asset | undefined): string {
   if (!asset) return `${value.toLocaleString("en-US")} raw`;
-  const display = Number(formatUnits(value, asset.decimals)).toLocaleString(
-    "en-US",
-    { maximumSignificantDigits: 8 },
-  );
+  const display = formatTokenAmount(formatUnits(value, asset.decimals));
   return `${display} ${asset.symbol}`;
 }
 
@@ -21,7 +19,10 @@ export function rebateRow(rebate: RebateRecord, assets: Asset[]) {
   const at = rebate.executedAt ?? rebate.publishedAt;
   return {
     id: rebate.id,
+    originTradeId: rebate.originTradeId,
     pair: `${tokenIn?.symbol ?? shortHash(rebate.tokenIn)}/${tokenOut?.symbol ?? shortHash(rebate.tokenOut)}`,
+    inputAsset: tokenIn,
+    outputAsset: tokenOut,
     strategy: `strategy ${shortHash(rebate.strategyHash)}`,
     deposit: amount(rebate.amountIn + rebate.makerRebate, tokenIn),
     output: amount(rebate.amountOut, tokenOut),

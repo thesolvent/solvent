@@ -852,7 +852,7 @@
         "tags": [
           "crate::http::app::swap"
         ],
-        "summary": "Submit a taker-signed order: decode → verify the swapper signature → cosign → route → reserve →\npersist → fill. A malformed or unverifiable order is `400`; an unroutable one returns a\n`declined` trade (`200`).",
+        "summary": "Submit a taker-signed order: authenticate → route → reserve → persist → fill. A malformed or\nunverifiable order is `400`; an unroutable one returns a `declined` trade (`200`).",
         "operationId": "submit",
         "requestBody": {
           "content": {
@@ -886,7 +886,7 @@
         "tags": [
           "crate::http::app::swap"
         ],
-        "summary": "Route `amount_in` of `token_in` into `token_out`, returning the split and its impact. `422` when\nno route exists (no makers, or the size is beyond the book).",
+        "summary": "Route `amount_in` of `token_in` into `token_out`, returning the split and its impact. `422` when\nno route exists or the submitted order could not cover estimated settlement costs.",
         "operationId": "quote",
         "requestBody": {
           "content": {
@@ -910,7 +910,7 @@
             }
           },
           "422": {
-            "description": "No route for the pair and size"
+            "description": "No route for the pair and size, or order cannot cover estimated settlement costs"
           }
         }
       }
@@ -1034,6 +1034,48 @@
           },
           "404": {
             "description": "Unknown trade"
+          }
+        }
+      }
+    },
+    "/v1/uniswapx-feed": {
+      "get": {
+        "tags": [
+          "crate::http::app::uniswapx_feed"
+        ],
+        "operationId": "uniswapx_feed",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size (default 50, max 200)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque next-page cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response_List_UniswapXFeedOrderView"
+                }
+              }
+            }
           }
         }
       }
@@ -1260,12 +1302,30 @@
             "format": "int32",
             "minimum": 0
           },
+          "erc7683_filler": {
+            "type": "string",
+            "description": "The ERC-7683 filler selected by the backend execution dispatcher."
+          },
+          "erc7683_resolver": {
+            "type": "string",
+            "description": "The ERC-7683 resolver exposing the order through the standard interface."
+          },
+          "erc7683_settler": {
+            "type": "string",
+            "description": "The ERC-7683 same-chain settler used in user-signed order payloads."
+          },
           "features": {
             "$ref": "#/components/schemas/Features"
           },
           "filler": {
             "type": "string",
             "description": "The public executor target for encoded rebate transactions."
+          },
+          "network_logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "networks": {
             "type": "array",
@@ -2517,6 +2577,18 @@
             "type": "string",
             "description": "The input amount, in base units (a decimal integer string)."
           },
+          "protocol": {
+            "$ref": "#/components/schemas/SwapProtocol"
+          },
+          "slippage_bps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The permitted price movement, in basis points. When present, the quote is also checked\nagainst the exact order bound used at submission.",
+            "minimum": 0
+          },
           "token_in": {
             "type": "string"
           },
@@ -2539,6 +2611,16 @@
         "properties": {
           "amount_out": {
             "$ref": "#/components/schemas/Amount"
+          },
+          "executor_fee": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Amount"
+              }
+            ]
           },
           "expires_at": {
             "type": "string"
@@ -2771,12 +2853,30 @@
                 "format": "int32",
                 "minimum": 0
               },
+              "erc7683_filler": {
+                "type": "string",
+                "description": "The ERC-7683 filler selected by the backend execution dispatcher."
+              },
+              "erc7683_resolver": {
+                "type": "string",
+                "description": "The ERC-7683 resolver exposing the order through the standard interface."
+              },
+              "erc7683_settler": {
+                "type": "string",
+                "description": "The ERC-7683 same-chain settler used in user-signed order payloads."
+              },
               "features": {
                 "$ref": "#/components/schemas/Features"
               },
               "filler": {
                 "type": "string",
                 "description": "The public executor target for encoded rebate transactions."
+              },
+              "network_logo_uri": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "networks": {
                 "type": "array",
@@ -4003,6 +4103,109 @@
           }
         }
       },
+      "Response_List_UniswapXFeedOrderView": {
+        "type": "object",
+        "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "description": "A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an\noptional `total`. Carried inside the response envelope's `result`.",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "order_hash",
+                    "source_chain_id",
+                    "token_in",
+                    "token_out",
+                    "amount_in",
+                    "required_out",
+                    "market_out_per_in_q18",
+                    "simulated_amount_out",
+                    "simulated_batch_id",
+                    "observed_at",
+                    "last_seen_at"
+                  ],
+                  "properties": {
+                    "amount_in": {
+                      "type": "string"
+                    },
+                    "last_seen_at": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "market_out_per_in_q18": {
+                      "type": "string"
+                    },
+                    "observed_at": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "order_hash": {
+                      "type": "string"
+                    },
+                    "required_out": {
+                      "type": "string"
+                    },
+                    "simulated_amount_out": {
+                      "type": "string"
+                    },
+                    "simulated_batch_id": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "source_chain_id": {
+                      "type": "integer",
+                      "format": "int64",
+                      "minimum": 0
+                    },
+                    "token_in": {
+                      "$ref": "#/components/schemas/UniswapXFeedAssetView"
+                    },
+                    "token_out": {
+                      "$ref": "#/components/schemas/UniswapXFeedAssetView"
+                    }
+                  }
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "total": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          }
+        }
+      },
       "Response_MakerDashboard": {
         "type": "object",
         "description": "The envelope wrapping every response. `status_code` sets the HTTP status (never serialized).",
@@ -4438,6 +4641,16 @@
             "properties": {
               "amount_out": {
                 "$ref": "#/components/schemas/Amount"
+              },
+              "executor_fee": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Amount"
+                  }
+                ]
               },
               "expires_at": {
                 "type": "string"
@@ -4975,9 +5188,16 @@
           }
         }
       },
+      "SwapProtocol": {
+        "type": "string",
+        "enum": [
+          "uniswapx",
+          "erc7683"
+        ]
+      },
       "SwapRequest": {
         "type": "object",
-        "description": "A taker-signed order submission, mirroring the UniswapX Orders API (`{ encodedOrder, signature,\nchainId, quoteId? }`). The taker's client builds + signs the base order; the server cosigns.",
+        "description": "A taker-signed order submission. UniswapX remains the default when `protocol` is omitted.",
         "required": [
           "encodedOrder",
           "signature",
@@ -4991,6 +5211,9 @@
           },
           "encodedOrder": {
             "type": "string"
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/SwapProtocol"
           },
           "quoteId": {
             "type": [
@@ -5041,6 +5264,12 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "symbol": {
             "type": "string"
@@ -5239,6 +5468,92 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "UniswapXFeedAssetView": {
+        "type": "object",
+        "required": [
+          "address",
+          "symbol",
+          "decimals"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "decimals": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "logo_uri": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "symbol": {
+            "type": "string"
+          }
+        }
+      },
+      "UniswapXFeedOrderView": {
+        "type": "object",
+        "required": [
+          "order_hash",
+          "source_chain_id",
+          "token_in",
+          "token_out",
+          "amount_in",
+          "required_out",
+          "market_out_per_in_q18",
+          "simulated_amount_out",
+          "simulated_batch_id",
+          "observed_at",
+          "last_seen_at"
+        ],
+        "properties": {
+          "amount_in": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "market_out_per_in_q18": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "order_hash": {
+            "type": "string"
+          },
+          "required_out": {
+            "type": "string"
+          },
+          "simulated_amount_out": {
+            "type": "string"
+          },
+          "simulated_batch_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "source_chain_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "token_in": {
+            "$ref": "#/components/schemas/UniswapXFeedAssetView"
+          },
+          "token_out": {
+            "$ref": "#/components/schemas/UniswapXFeedAssetView"
           }
         }
       }

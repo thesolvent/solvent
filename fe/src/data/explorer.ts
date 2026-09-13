@@ -1,23 +1,29 @@
 export interface TokenQuantity {
   symbol: string;
   display: string;
+  net?: string;
+  logoUri?: string | null;
+  chainLogoUri?: string | null;
 }
 
 export interface TradeStage {
   status: string;
-  at: number;
+  at: number | null;
 }
 
 export interface TradeSource {
   curve: string | null;
   maker: string;
   strategyHash: string;
+  chainId?: number;
+  strategySource?: "direct";
   input: TokenQuantity;
   output: TokenQuantity;
   sharePct: number;
 }
 
 export interface TradeRecord {
+  flow: "same-chain" | "cross-chain";
   signaturePresent: boolean | null;
   id: string;
   status: string;
@@ -46,6 +52,18 @@ export interface ActivityRecord {
   at: number;
   blockNumber: number | null;
   txHash: string | null;
+}
+
+/** A public UniswapX Dutch order evaluated by Solvent's non-executable simulation. */
+export interface UniswapXFeedRecord {
+  orderHash: string;
+  sourceChainId: number;
+  input: TokenQuantity;
+  requiredOutput: TokenQuantity;
+  marketOutPerIn: string;
+  simulatedOutput: TokenQuantity;
+  simulatedBatchId: number;
+  lastSeenAt: number;
 }
 
 export interface ExplorerStats {

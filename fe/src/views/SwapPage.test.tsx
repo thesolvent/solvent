@@ -3,12 +3,21 @@ import { Route, useParams } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Asset, Quote, SubmittedSwap } from "@/data";
+import type { AppConfig } from "@solvent/sdk/client";
 import { INITIAL_STATE, useAppActions } from "@/state";
 import { useAppStore } from "@/store";
 import { renderWithServices } from "@/test/harness";
 import { TransitionRoutes } from "@/components/TransitionRoutes";
 import * as swapService from "@/services/swap";
 import { SwapPage } from "@/views/SwapPage";
+
+const walletReads = vi.hoisted(() => ({
+  data: [] as { result: bigint; status: "success" }[],
+}));
+
+vi.mock("@privy-io/react-auth", () => ({
+  usePrivy: () => ({ connectOrCreateWallet: vi.fn() }),
+}));
 
 vi.mock("wagmi", async (original) => ({
   ...(await original<typeof import("wagmi")>()),
@@ -19,16 +28,18 @@ vi.mock("wagmi", async (original) => ({
   }),
   useClient: () => ({}),
   useConnectorClient: () => ({ data: {} }),
+  useReadContracts: () => ({ data: walletReads.data }),
 }));
 
-beforeEach(() =>
+beforeEach(() => {
+  walletReads.data = [];
   useAppStore.setState({
     ...INITIAL_STATE,
     fromToken: "WETH",
     toToken: "USDC",
     amount: "1",
-  }),
-);
+  });
+});
 
 function TradeDestination() {
   const { tradeId } = useParams();
@@ -70,6 +81,7 @@ function asset(
   pairs: string[] = [],
 ): Asset {
   return {
+    chainId: 31337,
     address: `0x${symbol}`,
     symbol,
     name: symbol,
@@ -99,7 +111,59 @@ const ASSETS = [
   asset("USDC", 6, 1, ["WETH/USDC"]),
 ];
 
+const ERC7683_CONFIG: AppConfig = {
+  aqua: "0x2222222222222222222222222222222222222222",
+  app: "0x3333333333333333333333333333333333333333",
+  block_explorer_url: "http://localhost:5100",
+  chain_id: 31337,
+  cosigner: "0x4444444444444444444444444444444444444444",
+  default_fee_bps: 5,
+  erc7683_settler: "0x5555555555555555555555555555555555555555",
+  features: { earn: false, faucet: true, send_buy: false },
+  filler: "0x6666666666666666666666666666666666666666",
+  networks: ["Ethereum"],
+  permit2: "0x7777777777777777777777777777777777777777",
+  reactor: "0x8888888888888888888888888888888888888888",
+  taker_credential: "0x9999999999999999999999999999999999999999",
+};
+
 describe("SwapPage", () => {
+  it("rejects non-numeric amount input while keeping partial decimals", async () => {
+    renderWithServices(<SwapPage />, {
+      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    const amount = await screen.findByLabelText("Swap amount");
+
+    for (const value of [".", "0.", "100.", "100.5"]) {
+      fireEvent.change(amount, { target: { value } });
+      expect(amount).toHaveValue(value);
+    }
+
+    fireEvent.change(amount, { target: { value: "100.5x" } });
+    expect(amount).toHaveValue("100.5");
+    fireEvent.change(amount, { target: { value: "abc" } });
+    expect(amount).toHaveValue("100.5");
+  });
+
+  it("shows the connected wallet's balance in each picker row", async () => {
+    walletReads.data = [
+      { result: 1_500_000_000_000_000_000n, status: "success" },
+      { result: 399_300_000_000n, status: "success" },
+    ];
+    renderWithServices(<SwapPage />, {
+      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    await screen.findByText("2,477");
+    fireEvent.click(screen.getByText("WETH").closest("button")!);
+
+    expect(await screen.findByText("Balance 1.5 WETH")).toBeVisible();
+    expect(screen.getByText("Balance 399,300 USDC")).toBeVisible();
+  });
+
   it.each([false, true])(
     "transitions to the returned trade only after the backend accepts the order (same-page navigation: %s)",
     async (samePageNavigation) => {
@@ -163,7 +227,7 @@ describe("SwapPage", () => {
     },
   );
 
-  it("keeps a rejected submission on Swap without a route transition", async () => {
+  it("keeps a rejected submission visible and retryable", async () => {
     const submit = vi.fn().mockRejectedValue(new Error("Submission failed"));
     renderWithServices(
       swapRoutes(),
@@ -179,11 +243,12 @@ describe("SwapPage", () => {
     );
     await screen.findByText("2,477");
     fireEvent.click(screen.getAllByRole("button", { name: "Swap" }).at(-1)!);
-    expect(
-      await screen.findByRole("button", {
-        name: "Could not submit the swap — try again",
-      }),
-    ).toBeInTheDocument();
+    const retry = await screen.findByRole("button", {
+      name: "Could not submit the swap — try again",
+    });
+    expect(retry).not.toBeDisabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
     expect(screen.queryByTestId("route-transition")).not.toBeInTheDocument();
     expect(screen.queryByText(/Trade destination/)).not.toBeInTheDocument();
   });
@@ -242,6 +307,7 @@ describe("SwapPage", () => {
         return {
           send: vi.fn(),
           submitting: true,
+          status: { kind: "preparing" },
           result: undefined,
           problem: undefined,
         };
@@ -301,6 +367,86 @@ describe("SwapPage", () => {
     expect(await screen.findByText("2,477")).toBeInTheDocument();
     expect(await screen.findByText("0.12%")).toBeInTheDocument();
     expect(await screen.findByText("3 makers")).toBeInTheDocument();
+    expect(
+      screen.getByText("Makers included in this quote."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Quote difference from market price."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Maximum price movement allowed."),
+    ).toBeInTheDocument();
+  });
+
+  it("identifies the selected token and its chain on both swap legs", async () => {
+    renderWithServices(<SwapPage />, {
+      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    expect(
+      await screen.findByLabelText("WETH token on Ethereum"),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText("USDC token on Ethereum"),
+    ).toBeInTheDocument();
+  });
+
+  it("uses ERC-7683 only when the deployment publishes its settler", async () => {
+    const quote = vi.fn().mockResolvedValue(QUOTE);
+    renderWithServices(<SwapPage />, {
+      assets: { list: vi.fn().mockResolvedValue(ASSETS) },
+      swap: { quote },
+      system: { config: vi.fn().mockResolvedValue(ERC7683_CONFIG) },
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select swap protocol" }),
+    );
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^ERC-7683/ }));
+    expect(
+      screen.getByRole("button", { name: "Select swap protocol" }),
+    ).toHaveTextContent("ERC-7683");
+    await waitFor(() =>
+      expect(quote).toHaveBeenLastCalledWith(
+        expect.objectContaining({ protocol: "erc7683" }),
+      ),
+    );
+  });
+
+  it("loads both catalogs in SolventX and selects an output on Base", async () => {
+    useAppStore.setState({ productMode: "SolventX" });
+    const baseWeth = {
+      ...ASSETS[0],
+      chainId: 31338,
+      address: "0xbase-weth" as `0x${string}`,
+      net: "Base",
+    };
+    const baseUsdc = {
+      ...ASSETS[1],
+      chainId: 31338,
+      address: "0xbase-usdc" as `0x${string}`,
+      net: "Base",
+    };
+    const list = vi
+      .fn()
+      .mockResolvedValue([
+        { ...ASSETS[0], pairs: [] },
+        { ...ASSETS[1], pairs: [] },
+        baseWeth,
+        baseUsdc,
+      ]);
+    renderWithServices(<SwapPage />, {
+      assets: { list },
+      swap: { quote: vi.fn().mockResolvedValue(QUOTE) },
+    });
+
+    await waitFor(() => expect(list).toHaveBeenCalledWith(true));
+    fireEvent.click(await screen.findByRole("button", { name: "Select ▾" }));
+    fireEvent.click(screen.getByRole("button", { name: /USDC.*Base/ }));
+
+    expect(screen.getByLabelText("USDC token on Base")).toBeInTheDocument();
+    expect(useAppStore.getState().toToken).toBe("31338:0xbase-usdc");
   });
 
   it("puts the server's reason on the button and stops the trade", async () => {

@@ -2,6 +2,7 @@ import { skipToken, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { parseTokenAmount } from "@solvent/sdk/validation";
 import type { Asset, Quote } from "@/data";
+import type { SwapProtocol } from "@/state";
 import { useServices } from "./context";
 
 /** Long enough that typing an amount does not price every keystroke. */
@@ -9,6 +10,9 @@ const SETTLE_MS = 300;
 
 /** Refresh this far ahead of the server's own expiry, so what is on screen is never past it. */
 const REFRESH_MARGIN_MS = 5_000;
+
+/** Cross-chain authorization can include approval and deposit transactions before signing. */
+const CROSS_CHAIN_REFRESH_MARGIN_MS = 120_000;
 
 /** Never poll faster than this, however short a life the server gives a quote. */
 const MIN_REFRESH_MS = 5_000;
@@ -30,7 +34,10 @@ function useSettled<T>(value: T, ms: number): T {
  *  on a cadence when there is no price at all, so a failure heals on its own. */
 function refreshIn(quote: Quote | undefined): number {
   if (!quote) return RETRY_MS;
-  const remaining = quote.expiresAt - Date.now() - REFRESH_MARGIN_MS;
+  const margin = quote.crossChain
+    ? CROSS_CHAIN_REFRESH_MARGIN_MS
+    : REFRESH_MARGIN_MS;
+  const remaining = quote.expiresAt - Date.now() - margin;
   // An unreadable expiry must not leave the price frozen on screen.
   return Number.isFinite(remaining)
     ? Math.max(MIN_REFRESH_MS, remaining)
@@ -57,6 +64,8 @@ export function useQuote(
   from: Asset | undefined,
   to: Asset | undefined,
   amount: string,
+  protocol: SwapProtocol = "uniswapx",
+  slippagePct?: number,
 ): QuoteState {
   const { swap } = useServices();
   const settled = useSettled(amount, SETTLE_MS);
@@ -72,14 +81,24 @@ export function useQuote(
   const quotable =
     from !== undefined &&
     to !== undefined &&
-    from.address.toLowerCase() !== to.address.toLowerCase() &&
+    (from.chainId !== to.chainId ||
+      from.address.toLowerCase() !== to.address.toLowerCase()) &&
     inputProblem === undefined &&
     settled !== "";
 
   const { data, isFetching, error, failureReason } = useQuery({
-    queryKey: ["quote", from?.address, to?.address, settled],
+    queryKey: [
+      "quote",
+      from?.chainId,
+      from?.address,
+      to?.chainId,
+      to?.address,
+      settled,
+      protocol,
+      slippagePct,
+    ],
     queryFn: quotable
-      ? () => swap.quote({ from, to, amount: settled })
+      ? () => swap.quote({ from, to, amount: settled, protocol, slippagePct })
       : skipToken,
     staleTime: 0,
     refetchInterval: ({ state }) => refreshIn(state.data),

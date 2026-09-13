@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
-use alloy::primitives::{address, Address};
+use alloy::primitives::{address, Address, B256};
 use serde::Deserialize;
 use solvent_adapters::http::state::{AppConfig, Features};
 use solvent_core::asset::TokenList;
@@ -29,6 +29,8 @@ pub struct Config {
     pub block_explorer_url: String,
     #[serde(default = "default_networks")]
     pub networks: Vec<String>,
+    #[serde(default = "default_network_logo")]
+    pub network_logo_uri: Option<String>,
     #[serde(default = "default_true")]
     pub faucet: bool,
     #[serde(default = "default_token_list")]
@@ -53,9 +55,21 @@ pub struct Config {
     /// price cache at boot so every supported asset values.
     #[serde(default)]
     pub usd_stable_pegs: Vec<Address>,
+    /// Mainnet UniswapX tokens the isolated read-only simulation recognizes.
+    #[serde(default)]
+    pub uniswap_assets: Vec<UniswapAsset>,
     /// The resolver's Aqua filler contract the swap path fills through.
     #[serde(default)]
     pub filler: Address,
+    /// Same-chain ERC-7683 contracts deployed with the filler stack.
+    #[serde(default)]
+    pub erc7683_settler: Address,
+    #[serde(default)]
+    pub erc7683_filler: Address,
+    #[serde(default)]
+    pub erc7683_resolver: Address,
+    #[serde(default = "default_erc7683_executor_fee_bps")]
+    pub erc7683_executor_fee_bps: u32,
     /// The UniswapX reactor a taker's order settles through; published so a client can name it.
     pub reactor: Address,
     /// The canonical Permit2 (same on every chain); overridable for a bespoke devnet deploy.
@@ -73,8 +87,34 @@ pub struct Config {
     /// Path to the tx engine's durable state (redb), so in-flight fills survive a restart.
     #[serde(default = "default_wallet_state_db")]
     pub wallet_state_db: String,
+    /// Optional private listener and allow-listed contracts for cross-chain coordination.
+    #[serde(default)]
+    pub crosschain: Option<CrossChainConfig>,
     #[serde(default)]
     pub rebate: RebateConfig,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CrossChainConfig {
+    pub bind_addr: SocketAddr,
+    #[serde(default)]
+    pub destination_app: Address,
+    #[serde(default)]
+    pub origin_settler: Address,
+    #[serde(default)]
+    pub proof_outbox: Address,
+    #[serde(default = "default_crosschain_quote_ttl_secs")]
+    pub quote_ttl_secs: u64,
+    #[serde(default)]
+    pub direct_author: Option<DirectAuthorConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DirectAuthorConfig {
+    pub origin_chain_id: u64,
+    pub origin_proof_outbox: Address,
+    pub destination_proof_outbox: Address,
+    pub origin_strategy_hash: B256,
 }
 
 /// One Binance price symbol and the tokens whose USD price it feeds.
@@ -82,6 +122,19 @@ pub struct Config {
 pub struct PriceSymbol {
     pub symbol: String,
     pub tokens: Vec<Address>,
+}
+
+/// One mainnet UniswapX token and the price source for its read-only simulation.
+#[derive(Clone, Debug, Deserialize)]
+pub struct UniswapAsset {
+    pub source_address: Address,
+    pub symbol: String,
+    pub logo_uri: Option<String>,
+    pub decimals: u8,
+    #[serde(default)]
+    pub market_symbol: Option<String>,
+    #[serde(default)]
+    pub usd_peg: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,6 +151,13 @@ pub struct RebateConfig {
     pub market_max_age_secs: u64,
     #[serde(default = "default_rebate_authorization_ttl_blocks")]
     pub authorization_ttl_blocks: u64,
+}
+
+#[derive(Clone, Copy)]
+pub struct Erc7683Contracts {
+    pub settler: Address,
+    pub filler: Address,
+    pub resolver: Address,
 }
 
 impl Default for RebateConfig {
@@ -122,7 +182,7 @@ impl Config {
         Ok(loaded.try_deserialize()?)
     }
 
-    /// The price feed's `symbol → tokens` map, as the `BinanceFeed` consumes it.
+    /// The price feed's `symbol → tokens` map, as the product `BinanceFeed` consumes it.
     pub fn price_feed_symbols(&self) -> HashMap<String, Vec<Address>> {
         self.price_symbols
             .iter()
@@ -130,8 +190,36 @@ impl Config {
             .collect()
     }
 
+    /// The isolated UniswapX feed's `symbol → mainnet token identities` map.
+    pub fn uniswap_price_feed_symbols(&self) -> HashMap<String, Vec<Address>> {
+        let mut symbols = HashMap::new();
+        for asset in &self.uniswap_assets {
+            let Some(symbol) = &asset.market_symbol else {
+                continue;
+            };
+            symbols
+                .entry(symbol.clone())
+                .or_insert_with(Vec::new)
+                .push(asset.source_address);
+        }
+        symbols
+    }
+
+    /// Mainnet tokens held at par by the isolated UniswapX simulation.
+    pub fn uniswap_usd_stable_pegs(&self) -> impl Iterator<Item = Address> + '_ {
+        self.uniswap_assets
+            .iter()
+            .filter(|asset| asset.usd_peg)
+            .map(|asset| asset.source_address)
+    }
+
     /// The subset the FE reads at bootstrap (the `/config` payload). `earn`/`send_buy` are MVP-off.
-    pub fn app_config(&self, cosigner: Address, taker_credential: Address) -> AppConfig {
+    pub fn app_config(
+        &self,
+        cosigner: Address,
+        taker_credential: Address,
+        erc7683: Option<Erc7683Contracts>,
+    ) -> AppConfig {
         AppConfig {
             chain_id: self.chain_id,
             features: Features {
@@ -141,19 +229,47 @@ impl Config {
             },
             default_fee_bps: self.default_fee_bps,
             networks: self.networks.clone(),
+            network_logo_uri: self.network_logo_uri.clone(),
             block_explorer_url: self.block_explorer_url.clone(),
             aqua: self.aqua_address,
             app: self.app_address,
             reactor: self.reactor,
             permit2: self.permit2,
             filler: self.filler,
+            erc7683_settler: erc7683.map(|contracts| contracts.settler),
+            erc7683_filler: erc7683.map(|contracts| contracts.filler),
+            erc7683_resolver: erc7683.map(|contracts| contracts.resolver),
             taker_credential,
             cosigner,
         }
     }
+
+    pub fn erc7683_contracts(&self) -> Result<Option<Erc7683Contracts>, StartupError> {
+        let configured = [
+            self.erc7683_settler,
+            self.erc7683_filler,
+            self.erc7683_resolver,
+        ];
+        if configured.iter().all(|address| address.is_zero()) {
+            return Ok(None);
+        }
+        if configured.iter().any(|address| address.is_zero()) {
+            return Err(StartupError::FillerConfiguration(
+                "ERC-7683 settler, filler, and resolver must be configured together".to_string(),
+            ));
+        }
+        Ok(Some(Erc7683Contracts {
+            settler: self.erc7683_settler,
+            filler: self.erc7683_filler,
+            resolver: self.erc7683_resolver,
+        }))
+    }
 }
 
 fn default_fee_bps() -> u32 {
+    5
+}
+fn default_erc7683_executor_fee_bps() -> u32 {
     5
 }
 fn default_explorer() -> String {
@@ -161,6 +277,9 @@ fn default_explorer() -> String {
 }
 fn default_networks() -> Vec<String> {
     vec!["Ethereum".to_string()]
+}
+fn default_network_logo() -> Option<String> {
+    Some("https://cdn.garden.finance/catalog/chain_images/ethereum.svg".to_string())
 }
 fn default_true() -> bool {
     true
@@ -191,6 +310,9 @@ fn default_decay_secs() -> u64 {
 }
 fn default_wallet_state_db() -> String {
     "walletkit.redb".to_string()
+}
+fn default_crosschain_quote_ttl_secs() -> u64 {
+    300
 }
 fn default_rebate_deviation_bps() -> u64 {
     50
@@ -232,6 +354,8 @@ pub enum StartupError {
     WalletStore(String),
     #[error("filler configuration: {0}")]
     FillerConfiguration(String),
+    #[error("UniswapX feed: {0}")]
+    UniswapFeed(String),
     #[error("token list: {0}")]
     TokenList(String),
     #[error(transparent)]

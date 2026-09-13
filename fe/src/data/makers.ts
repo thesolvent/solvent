@@ -104,6 +104,7 @@ export interface InventoryLeg {
 export interface InventoryAsset {
   address: string;
   symbol: string;
+  logoUri?: string | null;
   wallet: ValuedAmount;
   shared: ValuedAmount;
   feesUsd: number | null;

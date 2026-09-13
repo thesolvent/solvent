@@ -18,12 +18,35 @@
   display: grid;
   grid-template-columns:
     minmax(100px, 0.9fr) minmax(170px, 1.35fr) minmax(100px, 0.9fr)
-    minmax(100px, 0.9fr) minmax(120px, 1fr) 102px;
+    minmax(100px, 0.9fr) minmax(120px, 1fr) 152px;
   align-items: center;
   padding: 11px 16px;
   border-bottom: 1px solid var(--surface);
   min-width: 0;
   composes: row200 from "../styles/animations.module.css";
+}
+
+.rowHover {
+  background: var(--paper);
+  transition: background 140ms ease;
+}
+
+.rowHover:hover {
+  background: var(--lime-wash-faint);
+  color: var(--green-deep);
+}
+
+.rowHover:hover .flow strong {
+  color: var(--ink);
+}
+
+.rowNavigate {
+  cursor: pointer;
+}
+
+.rowNavigate:focus-visible {
+  outline: 2px solid var(--green-deep);
+  outline-offset: -2px;
 }
 
 .pair,
@@ -67,6 +90,13 @@
   overflow: hidden;
 }
 
+.flowAmount {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .flow strong,
 .cell strong {
   overflow: hidden;
@@ -93,6 +123,9 @@
 }
 
 .earnButton {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--line);
   background: var(--paper);
   color: var(--text-strong);
@@ -102,10 +135,12 @@
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 
-.earnButton:hover {
+.earnButton:hover:not(:disabled) {
   border-color: var(--ink);
   background: var(--ink);
   color: var(--paper);
@@ -141,9 +176,13 @@
 }
 
 .error {
+  min-width: 0;
+  max-width: 100%;
   color: var(--err-ink);
   font-size: 9.5px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .emptyNote {
@@ -153,21 +192,11 @@
   font-size: 12px;
 }
 
-.emptyNote button {
-  border: 0;
-  border-bottom: 1px solid var(--line-mid);
-  background: none;
-  padding: 0;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-}
-
 @container (max-width: 900px) {
   .row {
     grid-template-columns:
       minmax(90px, 0.8fr) minmax(150px, 1.2fr) minmax(100px, 0.9fr)
-      minmax(110px, 1fr) 82px;
+      minmax(110px, 1fr) 132px;
   }
 
   .row > :nth-child(4) {

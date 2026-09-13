@@ -7,6 +7,7 @@ export type {
     MakerTradesQuery,
     TradesQuery,
     ActivityQuery,
+    UniswapXFeedQuery,
     PoolDepthQuery,
     PositionDepthQuery,
     PairHistoryQuery,
@@ -40,6 +41,7 @@ export type {
     Rebate,
     RebateStatus,
     RebateAllocation,
+    UniswapXFeedOrder,
 } from "./client";
 export { SolventApiError, SolventNetworkError } from "./errors";
 export { defaultTransport } from "./transport";

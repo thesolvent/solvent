@@ -4,7 +4,7 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: var(--paper);
+  background: var(--page-wash);
   display: flex;
   flex-direction: column;
   padding: 0 20px;
@@ -14,7 +14,7 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: var(--surface-alt);
+  background: var(--page-wash);
   padding: 12px 20px 16px;
   display: flex;
   flex-direction: column;
@@ -99,6 +99,20 @@
   font-size: clamp(18px, 1.9vw, 25px);
 }
 
+.strategyTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.strategyIdentity {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
 .statusPill {
   padding: 4px 11px;
   border-radius: 3px;
@@ -106,6 +120,12 @@
   font-weight: 700;
   white-space: nowrap;
   flex: none;
+}
+
+.simulatedPill {
+  composes: statusPill;
+  background: var(--lime-wash-soft);
+  color: var(--green-darkest);
 }
 
 .statePill {
@@ -280,6 +300,18 @@
   text-overflow: ellipsis;
 }
 
+.crossChainFlow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: clamp(15px, 1.35vw, 20px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
 .statValueXs {
   composes: statValueSm;
   font-size: clamp(14px, 1.25vw, 18px);
@@ -316,6 +348,39 @@
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 2px 7px;
+}
+
+.statHelp {
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+
+.statHelp:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+
+.statTooltip {
+  display: none;
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 220px;
+  padding: 12px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  pointer-events: none;
+}
+
+.statHelp:hover .statTooltip,
+.statHelp:focus .statTooltip {
+  display: block;
 }
 
 /* ---------- Filter bar ---------- */
@@ -356,6 +421,36 @@
   composes: tab;
   background: var(--ink);
   color: var(--paper);
+}
+
+.tabHelp {
+  position: relative;
+}
+
+.tabTooltip {
+  display: none;
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 8px);
+  left: 50%;
+  width: 220px;
+  padding: 12px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  pointer-events: none;
+  text-align: left;
+  transform: translateX(-50%);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tabHelp:hover .tabTooltip,
+.tabHelp:focus-visible .tabTooltip {
+  display: block;
 }
 
 .drops {
@@ -453,79 +548,6 @@
   flex-direction: column;
 }
 
-.activityRow {
-  color: inherit;
-  text-decoration: none;
-  width: 100%;
-  text-align: left;
-  border: 0;
-  border-bottom: 1px solid var(--surface);
-  background: var(--paper);
-  padding: 11px 18px;
-  font-family: inherit;
-  cursor: pointer;
-  min-width: 0;
-  flex: none;
-  transition: background 140ms ease;
-  composes: row200 from "../styles/animations.module.css";
-}
-
-.activityRow:hover {
-  background: var(--lime-wash-faint);
-}
-
-.activityTop {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 4px;
-  min-width: 0;
-}
-
-.mono {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.kindTag {
-  padding: 1px 8px;
-  font-size: 10px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.who {
-  font-size: 11.5px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-.when {
-  font-size: 10.5px;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
-.activityBottom {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-}
-
-.flow {
-  font-size: 13.5px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .tradeLinkWrap {
   flex: 0 0 auto;
   align-self: flex-end;
@@ -537,12 +559,6 @@
   color: var(--text-strong);
   white-space: nowrap;
   border-bottom: 1px solid var(--line-mid);
-}
-
-.activityText {
-  font-size: 11px;
-  color: var(--text-dim);
-  white-space: nowrap;
 }
 
 .tradeRow {
@@ -567,6 +583,18 @@
 
 .tradeRow:hover {
   background: var(--lime-wash-faint);
+  color: var(--green-deep);
+}
+
+.feedRow {
+  composes: tradeRow;
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(0, 1.5fr)
+    minmax(0, 1fr)
+    minmax(0, 1fr)
+    150px;
+  cursor: default;
 }
 
 .tradePair {
@@ -595,9 +623,10 @@
 
 .tradeFlow {
   min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 7px;
   padding: 0 14px;
   background-image: linear-gradient(var(--surface), var(--surface));
   background-size: 1px 68%;
@@ -606,8 +635,14 @@
 }
 
 .tradeIn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-size: 13px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tradeArrow {
@@ -616,6 +651,10 @@
 }
 
 .tradeOut {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--ink);
@@ -637,6 +676,10 @@
 }
 
 .tradeCellValue {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
@@ -653,6 +696,43 @@
   composes: tradeCell;
   align-items: flex-start;
   gap: 3px;
+}
+
+.activityRow {
+  composes: tradeRow;
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(0, 1.5fr)
+    minmax(0, 1fr)
+    minmax(0, 1fr)
+    150px;
+  cursor: default;
+}
+
+.activityRowLink {
+  cursor: pointer;
+}
+
+.activityKindCell {
+  composes: tradePair;
+  gap: 6px;
+}
+
+.activityFlow {
+  composes: tradeFlow;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.kindTag {
+  align-self: flex-start;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .tradeTx {
@@ -759,6 +839,40 @@
   font-weight: 700;
   letter-spacing: -0.02em;
   white-space: nowrap;
+}
+
+.detailHelp {
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+
+.detailHelp:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.detailTooltip {
+  display: none;
+  position: absolute;
+  z-index: 7;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 220px;
+  padding: 12px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  pointer-events: none;
+  white-space: normal;
+}
+
+.detailHelp:hover .detailTooltip,
+.detailHelp:focus-visible .detailTooltip {
+  display: block;
 }
 
 .lifecycleCount {
@@ -1092,6 +1206,16 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.crossChainLegFlow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .legCurve {

@@ -2,7 +2,7 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: var(--paper);
+  background: var(--page-wash);
 }
 
 * {
@@ -11,6 +11,29 @@ body {
 
 body {
   -webkit-font-smoothing: antialiased;
+}
+
+.startupError {
+  display: grid;
+  min-height: 100dvh;
+  place-content: center;
+  gap: 8px;
+  padding: 32px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.startupError h1,
+.startupError p {
+  margin: 0;
+}
+
+.startupError h1 {
+  font-size: 24px;
+}
+
+.startupError p {
+  color: var(--text-muted);
 }
 
 a {

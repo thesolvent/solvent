@@ -2,6 +2,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
 import type { Pool } from "@/data";
+import { AssetIdentity } from "@/components/AssetIdentity";
 import { Pagination } from "@/components/Pagination";
 
 import {
@@ -12,7 +13,7 @@ import {
   poolTypeOptions,
   sortPools,
 } from "@/lib/pools";
-import { useAssetSymbols } from "@/services/assets";
+import { useAssets, useAssetSymbols } from "@/services/assets";
 import { slug, usePools } from "@/services/pools";
 import { useApp, type PoolQuery } from "@/state";
 
@@ -63,6 +64,7 @@ export function PoolsPage() {
   const { state, set } = useApp();
   const navigate = useNavigate();
   const pools = usePools();
+  const assets = useAssets();
   const cells = queryCells(useAssetSymbols(), pools);
   const ptype = state.poolQuery.ptype;
 
@@ -272,51 +274,72 @@ export function PoolsPage() {
           </div>
 
           <div className={styles.poolList}>
-            {page.map((p) => (
-              <button
-                key={p.pair}
-                type="button"
-                className={styles.pool}
-                onClick={() => navigate(`/pools/${slug(p.pair)}`)}
-              >
-                <div className={styles.poolMain}>
-                  <div className={styles.poolRule}>
-                    <span className={styles.poolRuleTag}>Pair</span>
-                    <span className={styles.poolRuleLine} />
-                    <span className={styles.poolRuleValue}>{p.range}</span>
-                    <span className={styles.poolRuleLine} />
-                    <span className={styles.poolRuleTag}>Depth</span>
-                  </div>
-                  <div className={styles.poolFigures}>
-                    <div style={{ minWidth: 0 }}>
-                      <div className={styles.poolBig}>{p.pair}</div>
-                      <div className={styles.poolSub}>{p.venue}</div>
+            {page.map((p) => {
+              const base = p.ref
+                ? assets.find(
+                    (asset) =>
+                      asset.address.toLowerCase() === p.ref!.base.toLowerCase(),
+                  )
+                : undefined;
+              const quote = p.ref
+                ? assets.find(
+                    (asset) =>
+                      asset.address.toLowerCase() ===
+                      p.ref!.quote.toLowerCase(),
+                  )
+                : undefined;
+              return (
+                <button
+                  key={p.pair}
+                  type="button"
+                  className={styles.pool}
+                  onClick={() => navigate(`/pools/${slug(p.pair)}`)}
+                >
+                  <div className={styles.poolMain}>
+                    <div className={styles.poolRule}>
+                      <span className={styles.poolRuleTag}>Pair</span>
+                      <span className={styles.poolRuleLine} />
+                      <span className={styles.poolRuleValue}>{p.range}</span>
+                      <span className={styles.poolRuleLine} />
+                      <span className={styles.poolRuleTag}>Depth</span>
                     </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div className={styles.poolBig}>{p.tvl}</div>
-                      <div className={styles.poolSub}>Depth</div>
+                    <div className={styles.poolFigures}>
+                      <div style={{ minWidth: 0 }}>
+                        <div className={styles.poolBig}>
+                          <span className={styles.poolIdentity}>
+                            <AssetIdentity asset={base} />
+                            <AssetIdentity asset={quote} />
+                          </span>
+                          {p.pair}
+                        </div>
+                        <div className={styles.poolSub}>{p.venue}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div className={styles.poolBig}>{p.tvl}</div>
+                        <div className={styles.poolSub}>Depth</div>
+                      </div>
+                    </div>
+                    <div className={styles.poolFoot}>
+                      <span>{p.vol} 24h vol</span>
+                      <span>{p.fills} fills</span>
                     </div>
                   </div>
-                  <div className={styles.poolFoot}>
-                    <span>{p.vol} 24h vol</span>
-                    <span>{p.fills} fills</span>
-                  </div>
-                </div>
-                <div className={styles.poolSide}>
-                  <div className={styles.poolFee}>
-                    <span className={styles.poolFeeChip} />
-                    <div style={{ minWidth: 0 }}>
-                      <div className={styles.poolMicro}>Fee tier</div>
-                      <div className={styles.poolFeeValue}>{p.fee}</div>
+                  <div className={styles.poolSide}>
+                    <div className={styles.poolFee}>
+                      <span className={styles.poolFeeChip} />
+                      <div style={{ minWidth: 0 }}>
+                        <div className={styles.poolMicro}>Fee tier</div>
+                        <div className={styles.poolFeeValue}>{p.fee}</div>
+                      </div>
+                    </div>
+                    <div className={styles.poolApr}>
+                      <div className={styles.poolMicro}>Net APR</div>
+                      <div className={styles.poolAprValue}>{p.apr}</div>
                     </div>
                   </div>
-                  <div className={styles.poolApr}>
-                    <div className={styles.poolMicro}>Net APR</div>
-                    <div className={styles.poolAprValue}>{p.apr}</div>
-                  </div>
-                </div>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
 
           <Pagination

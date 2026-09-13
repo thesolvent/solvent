@@ -1,4 +1,3 @@
-import { useAccount } from "wagmi";
 import { Pagination } from "@/components/Pagination";
 import { RebateList } from "@/components/RebateList";
 import { useLoadedPagination } from "@/components/useLoadedPagination";
@@ -15,12 +14,32 @@ import {
 } from "@/services/makers";
 import { useManagePosition } from "@/services/positions";
 import { useRebates } from "@/services/rebates";
+import { useWalletAction } from "@/services/wallet";
 import { useApp } from "@/state";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { MakerAssets } from "./MakerAssets";
 import { MakerPositions } from "./MakerPositions";
 import styles from "./MakersPage.module.css";
+
+const KPI_HELP: Record<string, string> = {
+  "Shared liquidity": "Capital committed to active maker positions.",
+  "Volume, total":
+    "Trade value routed through this maker in the selected period.",
+  "Wallet balance": "Uncommitted token value held by this maker.",
+  Pullable: "Liquidity available for new fills right now.",
+  "Shared-liq ratio":
+    "Committed liquidity divided by the available wallet balance.",
+  "Active positions": "Live positions currently quoting for this maker.",
+};
+
+function HelpTooltip({ id, text }: { id: string; text: string }) {
+  return (
+    <span id={id} role="tooltip" className={styles.helpTooltip}>
+      {text}
+    </span>
+  );
+}
 
 function ChartTooltip({
   label,
@@ -50,7 +69,8 @@ export function MakersPage() {
   const navigate = useNavigate();
   const { state, set } = useApp();
   const { maker } = useParams();
-  const { address: walletAddress } = useAccount();
+  const wallet = useWalletAction();
+  const walletAddress = wallet.address;
   const roster = useMakers();
   const makers = [...(roster.data ?? [])].sort(
     (left, right) =>
@@ -163,24 +183,33 @@ export function MakersPage() {
       </div>
 
       <div className={styles.kpis}>
-        {mk.kpis.map((k) => (
-          <div
-            key={k.label}
-            className={styles.kpi}
-            style={{
-              backgroundColor: k.bg,
-              backgroundImage: `linear-gradient(${k.sep}, ${k.sep})`,
-            }}
-          >
-            <div className={styles.kpiLabel}>{k.label}</div>
-            <div className={styles.kpiRow}>
-              <span className={styles.kpiValue}>{k.value}</span>
-              <span className={styles.kpiDelta} style={{ color: k.deltaFg }}>
-                {k.delta}
-              </span>
+        {mk.kpis.map((k) => {
+          const id = `maker-${k.label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}-tooltip`;
+          const help = k.label.startsWith("Fees")
+            ? "Fees earned by this maker in the selected period."
+            : KPI_HELP[k.label];
+          return (
+            <div
+              key={k.label}
+              className={`${styles.kpi} ${styles.helpTarget}`}
+              tabIndex={0}
+              aria-describedby={id}
+              style={{
+                backgroundColor: k.bg,
+                backgroundImage: `linear-gradient(${k.sep}, ${k.sep})`,
+              }}
+            >
+              <HelpTooltip id={id} text={help} />
+              <div className={styles.kpiLabel}>{k.label}</div>
+              <div className={styles.kpiRow}>
+                <span className={styles.kpiValue}>{k.value}</span>
+                <span className={styles.kpiDelta} style={{ color: k.deltaFg }}>
+                  {k.delta}
+                </span>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className={styles.body}>
@@ -214,6 +243,10 @@ export function MakersPage() {
               key={address}
               positions={mk.positions}
               canManage={canManage}
+              walletAction={canManage ? wallet.switchTo : undefined}
+              onPrepareWallet={
+                canManage && wallet.switchTo ? wallet.prepare : undefined
+              }
               actionStatus={positionActions.status}
               onClearAction={positionActions.clear}
               onOpenPosition={(hash) =>
@@ -327,7 +360,15 @@ export function MakersPage() {
 
         <div data-scroll="1" className={styles.rail}>
           <section className={styles.card}>
-            <div className={styles.cardHead}>
+            <div
+              className={`${styles.cardHead} ${styles.helpTarget}`}
+              tabIndex={0}
+              aria-describedby="maker-fill-share-tooltip"
+            >
+              <HelpTooltip
+                id="maker-fill-share-tooltip"
+                text="Your share of completed fills compared with other makers."
+              />
               <span className={styles.swatch} />
               <span className={styles.cardTitle}>Fill share</span>
               <span className={styles.spacer} />
@@ -399,7 +440,15 @@ export function MakersPage() {
           </section>
 
           <section className={styles.card}>
-            <div className={styles.cardHead}>
+            <div
+              className={`${styles.cardHead} ${styles.helpTarget}`}
+              tabIndex={0}
+              aria-describedby="maker-fills-tooltip"
+            >
+              <HelpTooltip
+                id="maker-fills-tooltip"
+                text="Completed fills during the selected period."
+              />
               <span className={styles.swatch} />
               <span className={styles.cardTitle}>Fills</span>
               <span className={styles.spacer} />
@@ -441,7 +490,15 @@ export function MakersPage() {
           </section>
 
           <section className={styles.cardLast}>
-            <div className={styles.cardHead}>
+            <div
+              className={`${styles.cardHead} ${styles.helpTarget}`}
+              tabIndex={0}
+              aria-describedby="maker-fill-latency-tooltip"
+            >
+              <HelpTooltip
+                id="maker-fill-latency-tooltip"
+                text="Median time from a fill to confirmation."
+              />
               <span className={styles.swatch} />
               <span className={styles.cardTitle}>Fill latency</span>
               <span className={styles.spacer} />

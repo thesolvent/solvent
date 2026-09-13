@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import type { TradeRecord } from "@/data/explorer";
-import { tradeLifecycle } from "@/lib/trade-lifecycle";
+import { isTerminalTrade, tradeLifecycle } from "@/lib/trade-lifecycle";
 import styles from "./explorer.module.css";
 
 export function TradeLifecycle({ trade }: { trade: TradeRecord }) {
@@ -18,7 +18,20 @@ export function TradeLifecycle({ trade }: { trade: TradeRecord }) {
       </span>
       <div className={styles.lifecycleHead}>
         <div className={styles.lifecycleTitleRow}>
-          <span className={styles.sectionTitle}>Lifecycle</span>
+          <span
+            className={`${styles.sectionTitle} ${styles.detailHelp}`}
+            tabIndex={0}
+            aria-describedby="trade-lifecycle-tooltip"
+          >
+            <span
+              id="trade-lifecycle-tooltip"
+              role="tooltip"
+              className={styles.detailTooltip}
+            >
+              Progress from quote creation to final settlement.
+            </span>
+            Lifecycle
+          </span>
           <span className={styles.lifecycleCount}>
             <span className={styles.lifecycleCountStrong}>
               {lifecycle.recordedCount}
@@ -28,7 +41,9 @@ export function TradeLifecycle({ trade }: { trade: TradeRecord }) {
         </div>
         <span className={styles.lifecycleTotal}>
           {lifecycle.elapsedSeconds === null
-            ? "pending"
+            ? isTerminalTrade(trade.status)
+              ? "—"
+              : "pending"
             : `${lifecycle.elapsedSeconds}s`}{" "}
           total
         </span>

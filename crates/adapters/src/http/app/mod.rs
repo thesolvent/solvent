@@ -13,3 +13,4 @@ pub mod rebates;
 pub mod stats;
 pub mod swap;
 pub mod trades;
+pub mod uniswapx_feed;

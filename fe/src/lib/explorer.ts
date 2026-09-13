@@ -3,7 +3,9 @@ import type {
   ExplorerStats,
   TokenQuantity,
   TradeRecord,
+  UniswapXFeedRecord,
 } from "@/data/explorer";
+import { formatTokenAmount } from "@/lib/format";
 
 const STATUS_TONE: Record<string, { background: string; color: string }> = {
   confirmed: {
@@ -20,10 +22,7 @@ export function shortHash(value: string | null): string {
 }
 
 export function tokenText(quantity: TokenQuantity): string {
-  const amount = Number(quantity.display).toLocaleString("en-US", {
-    maximumSignificantDigits: 12,
-  });
-  return `${amount} ${quantity.symbol}`;
+  return `${formatTokenAmount(quantity.display)} ${quantity.symbol}`;
 }
 
 function timestamp(at: number | null): string {
@@ -119,11 +118,39 @@ export function tradeRow(trade: TradeRecord) {
         : `blk ${numberText(trade.blockNumber)}`,
     input: tokenText(trade.input),
     output: `${trade.status === "confirmed" ? "" : "min. "}${tokenText(trade.output)}`,
+    inputQuantity: trade.input,
+    outputQuantity: trade.output,
     makers: numberText(trade.makers),
     impact: percent(trade.priceImpactPct),
     status: trade.status,
     transactionLabel: shortHash(trade.txHash),
     statusStyle: STATUS_TONE[trade.status] ?? STATUS_TONE.pending,
+  };
+}
+
+function rateText(value: string): string {
+  const rate = Number(value);
+  return Number.isFinite(rate)
+    ? rate.toLocaleString("en-US", { maximumSignificantDigits: 8 })
+    : value;
+}
+
+export function uniswapXFeedRow(record: UniswapXFeedRecord) {
+  return {
+    id: record.orderHash,
+    pair: `${record.input.symbol}/${record.requiredOutput.symbol}`,
+    source:
+      record.sourceChainId === 1
+        ? "UniswapX · Ethereum"
+        : `UniswapX · Chain ${record.sourceChainId}`,
+    input: tokenText(record.input),
+    requiredOutput: `min. ${tokenText(record.requiredOutput)}`,
+    inputQuantity: record.input,
+    requiredOutputQuantity: record.requiredOutput,
+    market: `${rateText(record.marketOutPerIn)} ${record.requiredOutput.symbol}/${record.input.symbol}`,
+    simulatedOutput: tokenText(record.simulatedOutput),
+    simulatedOutputQuantity: record.simulatedOutput,
+    batch: `batch #${record.simulatedBatchId} · ${relativeTime(record.lastSeenAt)}`,
   };
 }
 
@@ -158,13 +185,17 @@ export function activityRow(record: ActivityRecord) {
     kindFg: kind.color,
     who: shortHash(record.maker),
     tx: shortHash(record.txHash),
-    when: `${record.blockNumber == null ? "block unknown" : `blk ${numberText(record.blockNumber)}`} · ${relativeTime(record.at)}`,
+    block:
+      record.blockNumber == null
+        ? "block unknown"
+        : `blk ${numberText(record.blockNumber)}`,
+    age: relativeTime(record.at),
     flow: record.amount
       ? tokenText(record.amount)
       : record.kind === "docked"
         ? "Position closed"
         : `Strategy ${shortHash(record.strategyHash)}`,
-    text: `strategy ${shortHash(record.strategyHash)}`,
+    position: shortHash(record.strategyHash),
   };
 }
 
@@ -192,10 +223,14 @@ export function tradeDetail(trade: TradeRecord) {
       curve: leg.curve ?? "—",
       maker: leg.maker,
       hash: leg.strategyHash,
+      chainId: leg.chainId,
+      strategySource: leg.strategySource,
       name: shortHash(leg.maker),
       shortHash: shortHash(leg.strategyHash),
       tag: leg.maker.slice(2, 4).toUpperCase(),
       amt: `${tokenText(leg.input)} → ${tokenText(leg.output)}`,
+      input: leg.input,
+      output: leg.output,
       share: `${leg.sharePct.toFixed(1)}%`,
       barW: `${leg.sharePct}%`,
     })),
@@ -212,7 +247,9 @@ export function tradeDetail(trade: TradeRecord) {
     profit: trade.surplus ? tokenText(trade.surplus) : "—",
     profitTag: ["declined", "failed"].includes(trade.status)
       ? `not earned — ${trade.status}`
-      : "route estimate · net of estimated gas",
+      : trade.flow === "cross-chain"
+        ? "market-value estimate · before gas"
+        : "route estimate · net of estimated gas",
     empty: trade.legs.length === 0,
     emptyText: "No maker legs recorded for this order.",
   };

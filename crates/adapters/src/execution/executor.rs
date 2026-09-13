@@ -11,7 +11,10 @@
 
 use std::sync::Arc;
 
-use alloy::primitives::{B256, U256};
+use alloy::{
+    primitives::B256,
+    providers::{DynProvider, Provider},
+};
 use async_trait::async_trait;
 use walletkit::core::deps::SubmissionOpts;
 use walletkit::core::wallet::{HandleId, SimOutcome, TxIntent, TxStatus};
@@ -28,17 +31,61 @@ use solvent_core::primitives::{IntentId, ReservationId};
 /// local chain with no relay. Durable tracking lives behind the [`FillStore`] port.
 pub struct WalletkitExecutor {
     wallet: Wallet,
+    provider: DynProvider,
     submission: SubmissionOpts,
     store: Arc<dyn FillStore>,
 }
 
 impl WalletkitExecutor {
-    pub fn new(wallet: Wallet, submission: SubmissionOpts, store: Arc<dyn FillStore>) -> Self {
+    pub fn new(
+        wallet: Wallet,
+        provider: DynProvider,
+        submission: SubmissionOpts,
+        store: Arc<dyn FillStore>,
+    ) -> Self {
         Self {
             wallet,
+            provider,
             submission,
             store,
         }
+    }
+
+    async fn status_for(
+        &self,
+        handle: walletkit::core::wallet::TxHandle,
+    ) -> Result<ExecStatus, ExecutionError> {
+        let status = match handle.status {
+            TxStatus::Confirmed { block } => ExecStatus::Confirmed {
+                block,
+                tx: self.mined_broadcast(&handle.broadcasts, block).await?,
+            },
+            status => to_exec_status(
+                status,
+                handle.broadcasts.last().copied().unwrap_or_default(),
+            ),
+        };
+        Ok(status)
+    }
+
+    async fn mined_broadcast(
+        &self,
+        broadcasts: &[B256],
+        block: u64,
+    ) -> Result<B256, ExecutionError> {
+        for tx in broadcasts.iter().rev() {
+            let receipt = self
+                .provider
+                .get_transaction_receipt(*tx)
+                .await
+                .map_err(engine)?;
+            if receipt.is_some_and(|receipt| receipt.block_number == Some(block)) {
+                return Ok(*tx);
+            }
+        }
+        Err(ExecutionError::Engine(format!(
+            "walletkit confirmed fill has no receipt at block {block}"
+        )))
     }
 }
 
@@ -53,7 +100,7 @@ fn fill_to_intent(fill: &FillTx) -> TxIntent {
         fill.chain_id,
         fill.filler_owner,
         fill.filler,
-        U256::ZERO,
+        fill.value,
         fill.calldata.clone(),
     )
 }
@@ -129,19 +176,36 @@ impl Execution for WalletkitExecutor {
             .await
             .map_err(engine)?
         else {
-            return Ok(None);
+            return self
+                .store
+                .terminal(IntentId(handle.0))
+                .await
+                .map_err(engine);
         };
         let id: HandleId = serde_json::from_slice(&bytes).map_err(engine)?;
-        // Read the full handle, not just the status: the mined hash lives in `broadcasts` (its last
-        // entry survives an RBF bump), and the settlement reader keys off it.
+        // Settlement needs the broadcast whose receipt mined, not just WalletKit's finalized block.
         let tracked = self.wallet.handle(id).await.map_err(engine)?;
-        Ok(tracked.map(|h| {
-            let mined = h.broadcasts.last().copied().unwrap_or_default();
-            to_exec_status(h.status, mined)
-        }))
+        match tracked {
+            Some(h) => Ok(Some(self.status_for(h).await?)),
+            None => self
+                .store
+                .terminal(IntentId(handle.0))
+                .await
+                .map_err(engine),
+        }
     }
 
     async fn forget(&self, intent: IntentId) -> Result<(), ExecutionError> {
+        if let Some(bytes) = self.store.handle(intent).await.map_err(engine)? {
+            let id: HandleId = serde_json::from_slice(&bytes).map_err(engine)?;
+            if let Some(handle) = self.wallet.handle(id).await.map_err(engine)? {
+                let status = self.status_for(handle).await?;
+                self.store
+                    .record_terminal(intent, &status)
+                    .await
+                    .map_err(engine)?;
+            }
+        }
         self.store.untrack(intent).await.map_err(engine)
     }
 
@@ -170,6 +234,28 @@ impl SimGate for WalletkitExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy::{
+        network::{EthereumWallet, TransactionBuilder},
+        node_bindings::Anvil,
+        primitives::{Address, Bytes, U256},
+        providers::{Provider, ProviderBuilder},
+        rpc::types::TransactionRequest,
+        signers::local::PrivateKeySigner,
+    };
+    use sqlx::SqlitePool;
+    use tempfile::tempdir;
+    use walletkit::{
+        adapters::{
+            policy::{AllowAll, DefaultPolicyEngine},
+            LocalSigner, RedbStateStore, SystemClock, Transport,
+        },
+        core::{
+            deps::StateStore,
+            wallet::{GasEnvelope, TxHandle},
+        },
+    };
+
+    use crate::execution::SqliteFillStore;
 
     #[test]
     fn status_projection_decides_post_vs_void() {
@@ -216,5 +302,102 @@ mod tests {
             ))),
             SimVerdict::Reject { .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn status_uses_the_broadcast_with_the_mined_receipt() {
+        let anvil = Anvil::new().try_spawn().expect("spawn anvil");
+        let signer: PrivateKeySigner = anvil.keys()[0].clone().into();
+        let account = signer.address();
+        let provider = ProviderBuilder::new()
+            .wallet(EthereumWallet::from(signer.clone()))
+            .connect_http(anvil.endpoint_url());
+        let receipt = provider
+            .send_transaction(
+                TransactionRequest::default()
+                    .with_to(Address::repeat_byte(0x42))
+                    .with_value(U256::from(1)),
+            )
+            .await
+            .expect("send original")
+            .get_receipt()
+            .await
+            .expect("mine original");
+        let original = receipt.transaction_hash;
+        let block = receipt.block_number.expect("receipt block");
+        let bump = B256::repeat_byte(0x99);
+
+        let dir = tempdir().expect("tempdir");
+        let state_store = Arc::new(
+            RedbStateStore::open(dir.path().join("wallet.redb")).expect("open state store"),
+        );
+        let intent = TxIntent::transfer(31337, account, Address::repeat_byte(0x42), U256::from(1));
+        let intent_hash = intent.hash();
+        let handle = TxHandle {
+            id: HandleId::new(intent_hash, 0),
+            account,
+            intent,
+            intent_hash,
+            nonce: 0,
+            status: TxStatus::Confirmed { block },
+            envelope: GasEnvelope::DEFAULT,
+            signed: Bytes::new(),
+            broadcasts: vec![original, bump],
+            last_broadcast_at: 0,
+            cancelled: false,
+            submission: SubmissionOpts::public(),
+            meta: None,
+        };
+        state_store.put_handle(&handle).await.expect("store handle");
+
+        let database_url = format!(
+            "sqlite://{}?mode=rwc",
+            dir.path().join("fills.db").display()
+        );
+        let pool = SqlitePool::connect(&database_url)
+            .await
+            .expect("open fill store");
+        let fill_store = Arc::new(SqliteFillStore::new(pool));
+        fill_store.migrate().await.expect("migrate fill store");
+        let fill_intent = IntentId(B256::repeat_byte(0x01));
+        fill_store
+            .track(
+                fill_intent,
+                ReservationId(B256::repeat_byte(0x02)),
+                &serde_json::to_vec(&handle.id).expect("serialize handle id"),
+            )
+            .await
+            .expect("track fill");
+
+        let key = format!("0x{}", alloy::hex::encode(signer.to_bytes()));
+        let wallet_signer = LocalSigner::from_private_key(&key).expect("wallet signer");
+        let transport = Transport::url(anvil.endpoint_url()).expect("transport");
+        let policy = DefaultPolicyEngine::new(vec![Box::new(AllowAll)], Arc::new(SystemClock));
+        let wallet = Wallet::builder(
+            Arc::new(transport),
+            Arc::new(wallet_signer),
+            Arc::new(policy),
+        )
+        .store(state_store)
+        .confirmations(1)
+        .build();
+        let executor = WalletkitExecutor::new(
+            wallet,
+            provider.erased(),
+            SubmissionOpts::public(),
+            fill_store,
+        );
+
+        assert_eq!(
+            executor
+                .status(ExecHandle(fill_intent.0))
+                .await
+                .expect("execution status"),
+            Some(ExecStatus::Confirmed {
+                block,
+                tx: original
+            }),
+            "a receiptless later bump must not replace the hash used for settlement",
+        );
     }
 }

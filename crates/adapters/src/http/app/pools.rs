@@ -190,6 +190,7 @@ mod tests {
             address: addr(n),
             chain_id: 31337,
             symbol: format!("T{n}"),
+            logo_uri: None,
             decimals: 18,
         }
     }

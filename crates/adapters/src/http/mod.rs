@@ -4,6 +4,8 @@
 //! business logic lives in core services.
 
 pub mod app;
+pub mod crosschain_internal;
+pub mod crosschain_proxy;
 mod depth;
 pub mod dto;
 pub mod error;
@@ -11,6 +13,8 @@ pub mod openapi;
 pub mod primitives;
 pub mod state;
 
+pub use crosschain_internal::{crosschain_internal_router, crosschain_internal_router_with_author};
+pub use crosschain_proxy::{crosschain_proxy_router, crosschain_proxy_router_with_drafts};
 pub use depth::DepthReader;
 
 use std::time::Duration;
@@ -43,6 +47,7 @@ pub fn router(state: AppState) -> Router {
         .route("/swap", post(app::swap::submit))
         .route("/trades", get(app::trades::trades))
         .route("/trades/{id}", get(app::trades::trade_detail))
+        .route("/uniswapx-feed", get(app::uniswapx_feed::uniswapx_feed))
         .route("/activity", get(app::activity::activity))
         .route("/makers", get(app::makers::makers))
         .route("/makers/{maker}", get(app::makers::maker_dashboard))
@@ -95,7 +100,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap};
 
     use alloy::primitives::{Address, Bytes, B256, U256};
     use alloy::signers::local::PrivateKeySigner;
@@ -520,8 +525,11 @@ mod tests {
             _: &Intent,
             _: &RoutePlan,
             _: &Snapshot,
-        ) -> Result<Bytes, FillBuilderError> {
-            Ok(Bytes::new())
+        ) -> Result<solvent_core::deps::ingest::PreparedFill, FillBuilderError> {
+            Ok(solvent_core::deps::ingest::PreparedFill::new(
+                Address::ZERO,
+                Bytes::new(),
+            ))
         }
     }
 
@@ -610,7 +618,6 @@ mod tests {
             SwapConfig {
                 routing: RoutingConfig::new(16, 4, 0),
                 chain_id: 31337,
-                filler: Address::ZERO,
                 filler_owner: Address::ZERO,
                 reservation_ttl_secs: 60,
             },
@@ -655,12 +662,16 @@ mod tests {
                 },
                 default_fee_bps: 5,
                 networks: vec!["Ethereum".to_string()],
+                network_logo_uri: Some("https://example.com/ethereum.svg".to_string()),
                 block_explorer_url: "http://localhost:5100".to_string(),
                 aqua: Address::ZERO,
                 app: Address::ZERO,
                 reactor: Address::ZERO,
                 permit2: Address::ZERO,
                 filler: Address::ZERO,
+                erc7683_settler: None,
+                erc7683_filler: None,
+                erc7683_resolver: None,
                 taker_credential: Address::ZERO,
                 cosigner: Address::ZERO,
             }),
@@ -675,11 +686,15 @@ mod tests {
             swap,
             rebates,
             cosigner,
+            erc7683: None,
+            erc7683_fee_policy: None,
             trades: trade_svc,
             registry: Arc::clone(&registry),
             registry_store: Arc::new(NoopEventStore),
             valuation,
             quote_log: Arc::new(NoopQuoteLog),
+            uniswap_feed: None,
+            uniswap_feed_assets: Arc::new(HashMap::new()),
         }
     }
 
@@ -861,6 +876,22 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(json["status"], "Error");
+    }
+
+    #[tokio::test]
+    async fn erc7683_quote_is_rejected_when_the_contract_stack_is_not_configured() {
+        let (status, json) = post(
+            "/v1/swap/quote",
+            serde_json::json!({
+                "protocol": "erc7683",
+                "token_in": Address::from([1; 20]).to_string(),
+                "token_out": Address::from([2; 20]).to_string(),
+                "amount_in": "1000",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(json["status"], "Error");
     }
 

@@ -32,6 +32,7 @@ export type PreviewResponse = Schemas["PreviewResponse"];
 export type Rebate = Schemas["RebateWork"];
 export type RebateStatus = Schemas["RebateStatus"];
 export type RebateAllocation = Schemas["RebateAllocationView"];
+export type UniswapXFeedOrder = Schemas["UniswapXFeedOrderView"];
 
 /** A page of a collection (mirrors the wire `List<T>`). */
 export interface List<T> {
@@ -62,6 +63,9 @@ export type TradesQuery = NonNullable<
 export type ActivityQuery = NonNullable<
     operations["activity"]["parameters"]["query"]
 >;
+export type UniswapXFeedQuery = NonNullable<
+    operations["uniswapx_feed"]["parameters"]["query"]
+>;
 export type PoolDepthQuery = NonNullable<
     operations["pool_depth"]["parameters"]["query"]
 >;
@@ -89,6 +93,7 @@ export interface SolventClient {
     swap(body: SwapRequest): Promise<SwapResponse>;
     trades(query?: TradesQuery): Promise<List<Trade>>;
     tradeDetail(id: string): Promise<Trade>;
+    uniswapxFeed(query?: UniswapXFeedQuery): Promise<List<UniswapXFeedOrder>>;
     activity(query?: ActivityQuery): Promise<List<ActivityEvent>>;
     stats(): Promise<Stats>;
     makers(): Promise<List<MakerSummary>>;
@@ -179,6 +184,8 @@ export function createSolventClient(
         swap: (body) => post<SwapResponse>("/v1/swap", body),
         trades: (query) => get<List<Trade>>("/v1/trades", query),
         tradeDetail: (id) => get<Trade>(`/v1/trades/${id}`),
+        uniswapxFeed: (query) =>
+            get<List<UniswapXFeedOrder>>("/v1/uniswapx-feed", query),
         activity: (query) => get<List<ActivityEvent>>("/v1/activity", query),
         stats: () => get<Stats>("/v1/stats"),
         makers: () => get<List<MakerSummary>>("/v1/makers"),

@@ -15,11 +15,18 @@ function signed(pct?: number | null): string {
  * The network name comes from config rather than from the asset: a deployment names the chain it
  * serves, while the asset only reports the id.
  */
-export function toAsset(api: ApiAsset, network: string): Asset {
+export function toAsset(
+  api: ApiAsset,
+  network: string,
+  chainLogoUri?: string | null,
+): Asset {
   return {
+    chainId: api.chain_id,
     address: api.address as `0x${string}`,
     symbol: api.symbol,
     name: api.name,
+    logoUri: api.logo_uri,
+    chainLogoUri,
     decimals: api.decimals,
     price: api.price_usd ?? 0,
     change: signed(api.change_24h_pct),

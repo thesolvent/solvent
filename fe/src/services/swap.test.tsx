@@ -2,6 +2,7 @@ import { onlineManager } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SolventApiError } from "@solvent/sdk/client";
 import type { Asset, Quote, SubmittedSwap } from "@/data";
 import { renderWithServices } from "@/test/harness";
 import { useQuote } from "./quote";
@@ -17,6 +18,7 @@ vi.mock("wagmi", async (original) => ({
   useConnectorClient: () => ({ data: {} }),
 }));
 const ASSET = {
+  chainId: 31337,
   address: "0x2222222222222222222222222222222222222222",
   symbol: "WETH",
   name: "Wrapped Ether",
@@ -151,6 +153,20 @@ describe("swap submission", () => {
     expect(submit).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps synchronous intent construction failures in mutation state", async () => {
+    renderWithServices(<Probe />, {
+      swap: {
+        createIntent: () => {
+          throw new SolventApiError(409, "Quote expired");
+        },
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "send" }));
+
+    expect(await screen.findByText("Quote expired")).toBeInTheDocument();
+  });
+
   it("creates a fresh intent after a known decline", async () => {
     const declined = Object.assign(new Error("declined"), {
       name: "SwapDeclinedError",
@@ -215,4 +231,25 @@ it("does not query a value that exceeds the input token precision", async () => 
     await screen.findByText("Swap amount supports at most 18 decimal places"),
   ).toBeInTheDocument();
   expect(quoteRequest).not.toHaveBeenCalled();
+});
+
+it("quotes matching token addresses when their chains differ", async () => {
+  function PriceProbe() {
+    const { quote } = useQuote(
+      ASSET,
+      { ...ASSET, chainId: 31338, net: "Base" },
+      "1",
+    );
+    return <p>{quote?.amountOut ?? "pending"}</p>;
+  }
+  const quoteRequest = vi.fn().mockResolvedValue(QUOTE);
+  renderWithServices(<PriceProbe />, { swap: { quote: quoteRequest } });
+
+  expect(await screen.findByText("100")).toBeInTheDocument();
+  expect(quoteRequest).toHaveBeenCalledWith(
+    expect.objectContaining({
+      from: expect.objectContaining({ chainId: 31337 }),
+      to: expect.objectContaining({ chainId: 31338 }),
+    }),
+  );
 });

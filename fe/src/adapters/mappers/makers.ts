@@ -127,6 +127,7 @@ export function toInventory(api: ApiInventory): InventoryAsset {
   return {
     address: api.token.address,
     symbol: api.token.symbol,
+    logoUri: api.token.logo_uri,
     wallet: amount(api.wallet),
     shared: amount(api.shared),
     feesUsd: api.fees_usd ?? null,

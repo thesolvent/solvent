@@ -352,9 +352,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Submit a taker-signed order: decode → verify the swapper signature → cosign → route → reserve →
-         *     persist → fill. A malformed or unverifiable order is `400`; an unroutable one returns a
-         *     `declined` trade (`200`).
+         * Submit a taker-signed order: authenticate → route → reserve → persist → fill. A malformed or
+         *     unverifiable order is `400`; an unroutable one returns a `declined` trade (`200`).
          */
         post: operations["submit"];
         delete?: never;
@@ -374,7 +373,7 @@ export interface paths {
         put?: never;
         /**
          * Route `amount_in` of `token_in` into `token_out`, returning the split and its impact. `422` when
-         *     no route exists (no makers, or the size is beyond the book).
+         *     no route exists or the submitted order could not cover estimated settlement costs.
          */
         post: operations["quote"];
         delete?: never;
@@ -409,6 +408,22 @@ export interface paths {
         };
         /** One trade's full detail, or `404` if the id is unknown. */
         get: operations["trade_detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/uniswapx-feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["uniswapx_feed"];
         put?: never;
         post?: never;
         delete?: never;
@@ -496,9 +511,16 @@ export interface components {
             cosigner: string;
             /** Format: int32 */
             default_fee_bps: number;
+            /** @description The ERC-7683 filler selected by the backend execution dispatcher. */
+            erc7683_filler?: string;
+            /** @description The ERC-7683 resolver exposing the order through the standard interface. */
+            erc7683_resolver?: string;
+            /** @description The ERC-7683 same-chain settler used in user-signed order payloads. */
+            erc7683_settler?: string;
             features: components["schemas"]["Features"];
             /** @description The public executor target for encoded rebate transactions. */
             filler: string;
+            network_logo_uri?: string | null;
             networks: string[];
             /** @description The Permit2 contract verifying the taker witness. */
             permit2: string;
@@ -951,6 +973,13 @@ export interface components {
         QuoteRequest: {
             /** @description The input amount, in base units (a decimal integer string). */
             amount_in: string;
+            protocol?: components["schemas"]["SwapProtocol"];
+            /**
+             * Format: int32
+             * @description The permitted price movement, in basis points. When present, the quote is also checked
+             *     against the exact order bound used at submission.
+             */
+            slippage_bps?: number | null;
             token_in: string;
             token_out: string;
         };
@@ -961,6 +990,7 @@ export interface components {
          */
         QuoteResponse: {
             amount_out: components["schemas"]["Amount"];
+            executor_fee?: null | components["schemas"]["Amount"];
             expires_at: string;
             legs: components["schemas"]["QuoteLeg"][];
             /** Format: int32 */
@@ -1021,9 +1051,16 @@ export interface components {
                 cosigner: string;
                 /** Format: int32 */
                 default_fee_bps: number;
+                /** @description The ERC-7683 filler selected by the backend execution dispatcher. */
+                erc7683_filler?: string;
+                /** @description The ERC-7683 resolver exposing the order through the standard interface. */
+                erc7683_resolver?: string;
+                /** @description The ERC-7683 same-chain settler used in user-signed order payloads. */
+                erc7683_settler?: string;
                 features: components["schemas"]["Features"];
                 /** @description The public executor target for encoded rebate transactions. */
                 filler: string;
+                network_logo_uri?: string | null;
                 networks: string[];
                 /** @description The Permit2 contract verifying the taker witness. */
                 permit2: string;
@@ -1393,6 +1430,37 @@ export interface components {
             status: components["schemas"]["Status"];
         };
         /** @description The envelope wrapping every response. `status_code` sets the HTTP status (never serialized). */
+        Response_List_UniswapXFeedOrderView: {
+            error?: string | null;
+            /**
+             * @description A page of a collection: the items plus an opaque `next_cursor` (absent on the last page) and an
+             *     optional `total`. Carried inside the response envelope's `result`.
+             */
+            result?: {
+                items: {
+                    amount_in: string;
+                    /** Format: int64 */
+                    last_seen_at: number;
+                    market_out_per_in_q18: string;
+                    /** Format: int64 */
+                    observed_at: number;
+                    order_hash: string;
+                    required_out: string;
+                    simulated_amount_out: string;
+                    /** Format: int64 */
+                    simulated_batch_id: number;
+                    /** Format: int64 */
+                    source_chain_id: number;
+                    token_in: components["schemas"]["UniswapXFeedAssetView"];
+                    token_out: components["schemas"]["UniswapXFeedAssetView"];
+                }[];
+                next_cursor?: string | null;
+                /** Format: int64 */
+                total?: number | null;
+            };
+            status: components["schemas"]["Status"];
+        };
+        /** @description The envelope wrapping every response. `status_code` sets the HTTP status (never serialized). */
         Response_MakerDashboard: {
             error?: string | null;
             /**
@@ -1528,6 +1596,7 @@ export interface components {
              */
             result?: {
                 amount_out: components["schemas"]["Amount"];
+                executor_fee?: null | components["schemas"]["Amount"];
                 expires_at: string;
                 legs: components["schemas"]["QuoteLeg"][];
                 /** Format: int32 */
@@ -1686,14 +1755,14 @@ export interface components {
             at: number;
             price?: string | null;
         };
-        /**
-         * @description A taker-signed order submission, mirroring the UniswapX Orders API (`{ encodedOrder, signature,
-         *     chainId, quoteId? }`). The taker's client builds + signs the base order; the server cosigns.
-         */
+        /** @enum {string} */
+        SwapProtocol: "uniswapx" | "erc7683";
+        /** @description A taker-signed order submission. UniswapX remains the default when `protocol` is omitted. */
         SwapRequest: {
             /** Format: int64 */
             chainId: number;
             encodedOrder: string;
+            protocol?: components["schemas"]["SwapProtocol"];
             quoteId?: string | null;
             signature: string;
         };
@@ -1712,6 +1781,7 @@ export interface components {
             chain_id: number;
             /** Format: int32 */
             decimals: number;
+            logo_uri?: string | null;
             symbol: string;
         };
         /** @description One token paired with an amount. */
@@ -1777,6 +1847,30 @@ export interface components {
             surplus?: null | components["schemas"]["Amount"];
             taker: string;
             tx_hash?: string | null;
+        };
+        UniswapXFeedAssetView: {
+            address: string;
+            /** Format: int32 */
+            decimals: number;
+            logo_uri?: string | null;
+            symbol: string;
+        };
+        UniswapXFeedOrderView: {
+            amount_in: string;
+            /** Format: int64 */
+            last_seen_at: number;
+            market_out_per_in_q18: string;
+            /** Format: int64 */
+            observed_at: number;
+            order_hash: string;
+            required_out: string;
+            simulated_amount_out: string;
+            /** Format: int64 */
+            simulated_batch_id: number;
+            /** Format: int64 */
+            source_chain_id: number;
+            token_in: components["schemas"]["UniswapXFeedAssetView"];
+            token_out: components["schemas"]["UniswapXFeedAssetView"];
         };
     };
     responses: never;
@@ -2388,7 +2482,7 @@ export interface operations {
                     "application/json": components["schemas"]["Response_QuoteResponse"];
                 };
             };
-            /** @description No route for the pair and size */
+            /** @description No route for the pair and size, or order cannot cover estimated settlement costs */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -2457,6 +2551,30 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    uniswapx_feed: {
+        parameters: {
+            query?: {
+                /** @description Page size (default 50, max 200) */
+                limit?: number;
+                /** @description Opaque next-page cursor */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Response_List_UniswapXFeedOrderView"];
+                };
             };
         };
     };

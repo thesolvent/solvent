@@ -25,6 +25,45 @@
   white-space: nowrap;
 }
 
+.depthTitleHint,
+.impactKeyHint {
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+
+.depthTitleHint:focus-visible,
+.impactKeyHint:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.depthTitleTooltip,
+.impactKeyTooltip {
+  display: none;
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 220px;
+  padding: 12px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  pointer-events: none;
+  white-space: normal;
+}
+
+.depthTitleHint:hover .depthTitleTooltip,
+.depthTitleHint:focus .depthTitleTooltip,
+.impactKeyHint:hover .impactKeyTooltip,
+.impactKeyHint:focus .impactKeyTooltip {
+  display: block;
+}
+
 .depthSub {
   font-size: 12px;
   color: var(--text-dim);
@@ -41,6 +80,34 @@
   flex: none;
   margin-top: 10px;
   min-width: 0;
+}
+
+.impactControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.impactKey {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.impactKeyMark {
+  width: 8px;
+  height: 8px;
+  background: var(--lime);
+  flex: none;
+}
+
+.impactKeyTooltip {
+  left: auto;
+  right: 0;
 }
 
 .depthLegend {
@@ -276,6 +343,44 @@
 .impactLast {
   composes: impact;
   padding: 12px 0 2px 14px;
+}
+
+.metricHint {
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+
+.metricHint:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+
+.metricTooltip {
+  display: none;
+  position: absolute;
+  z-index: 6;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 220px;
+  padding: 12px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  pointer-events: none;
+}
+
+.metricHint:hover .metricTooltip,
+.metricHint:focus .metricTooltip {
+  display: block;
+}
+
+.impactLast .metricTooltip {
+  right: 0;
+  left: auto;
 }
 
 .impactLabel {

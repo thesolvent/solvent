@@ -13,6 +13,7 @@
   --lime-wash-soft: #eef7d9;
   --lime-wash-faint: #fbfdf4;
   --lime-wash-mid: #f6faec;
+  --page-wash: linear-gradient(180deg, #f6fbeb 0%, var(--paper) 55%);
 
   /* Greens — links, positive deltas, fill progress */
   --green: #63c31c;

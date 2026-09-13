@@ -18,9 +18,11 @@ ARG VITE_DESTINATION_CHAIN_NAME
 ARG VITE_DESTINATION_RPC_URL
 ARG VITE_SOLVENTX_BASE_API_URL
 ARG VITE_SOLVENTX_ORIGIN_API_URL
+ARG VITE_SOLVENTX_DIRECT_API_URL
 ARG VITE_SOLVENTX_PROXY_URL
 RUN pnpm --filter @solvent/fe run build
 
 FROM nginx:alpine
 COPY --from=build /src/fe/dist /usr/share/nginx/html
+COPY fe/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80

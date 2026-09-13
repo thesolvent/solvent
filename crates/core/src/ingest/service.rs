@@ -133,6 +133,7 @@ mod tests {
             IntentId(B256::from([id; 32])),
             ProtocolId::UniswapXV2,
             IntentInput::new(addr(1), AmountCurve::scalar(U256::from(in_amt))),
+            None,
             vec![IntentOutput::new(
                 addr(2),
                 AmountCurve::scalar(U256::from(out_amt)),

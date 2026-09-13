@@ -110,6 +110,7 @@ mod tests {
             address: Address::from([tag; 20]),
             chain_id: 1,
             symbol: String::new(),
+            logo_uri: None,
             decimals,
         }
     }

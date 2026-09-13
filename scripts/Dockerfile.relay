@@ -1,0 +1,9 @@
+# Build context is the workspace root: pnpm needs the whole workspace's lockfile to resolve deps,
+# even though relay.ts itself only needs viem (no @solvent/sdk import on its runtime path).
+FROM node:22.18-slim
+RUN corepack enable && corepack prepare pnpm@10.17.1 --activate
+WORKDIR /repo
+COPY . .
+RUN pnpm install --frozen-lockfile --filter @solvent/scripts...
+WORKDIR /repo/scripts
+CMD ["node", "src/crosschain/relay.ts"]

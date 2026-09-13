@@ -1,10 +1,26 @@
+import type {
+  PositionCreationStatus,
+  PositionSubmissionOptions,
+  PositionTransactionStatus,
+  PositionTransactionSubmissionOptions,
+} from "@solvent/sdk/positions";
 import type { WalletClients } from "@solvent/sdk/swap";
+
+export type {
+  PositionCreationStatus,
+  PositionSubmissionOptions,
+  PositionTransactionStatus,
+  PositionTransactionSubmissionOptions,
+};
 
 export interface CreateToken {
   address: `0x${string}`;
   decimals: number;
   symbol: string;
   name: string;
+  logoUri?: string | null;
+  net?: string;
+  chainLogoUri?: string | null;
   tags: string[];
   balance: number;
   balanceRaw: bigint;
@@ -57,7 +73,7 @@ export interface PairPricePoint {
 }
 
 export interface PositionIntent {
-  submit(): Promise<CreatedPosition>;
+  submit(options?: PositionSubmissionOptions): Promise<CreatedPosition>;
 }
 
 export interface PositionTokenInput {
@@ -84,7 +100,9 @@ export interface PositionActionResult {
 }
 
 export interface PositionActionIntent {
-  submit(): Promise<PositionActionResult>;
+  submit(
+    options?: PositionTransactionSubmissionOptions,
+  ): Promise<PositionActionResult>;
 }
 
 export interface PositionsPort {

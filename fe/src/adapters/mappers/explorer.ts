@@ -1,28 +1,48 @@
-import type { ActivityEvent, Stats, Trade } from "@solvent/sdk/client";
+import type {
+  ActivityEvent,
+  Stats,
+  Trade,
+  UniswapXFeedOrder,
+} from "@solvent/sdk/client";
+import type { CrossChainOrder, SagaState } from "@solvent/sdk/cross-chain";
+import { formatUnits } from "viem";
+import type { Asset } from "@/data";
 import type {
   ActivityRecord,
   ExplorerStats,
   TradeRecord,
+  UniswapXFeedRecord,
 } from "@/data/explorer";
 
-export function toTrade(api: Trade): TradeRecord {
+type ChainIdentity = { name: string; logoUri?: string | null };
+
+function tokenQuantity(
+  token: { symbol: string; logo_uri?: string | null },
+  display: string,
+  chain?: ChainIdentity,
+) {
+  return {
+    symbol: token.symbol,
+    display,
+    net: chain?.name,
+    logoUri: token.logo_uri,
+    chainLogoUri: chain?.logoUri,
+  };
+}
+
+export function toTrade(api: Trade, chain?: ChainIdentity): TradeRecord {
   const legs = api.legs ?? [];
   const total = legs.reduce((sum, leg) => sum + BigInt(leg.amount_out.raw), 0n);
   return {
+    flow: "same-chain",
     signaturePresent: api.signature_present ?? null,
     id: api.id,
     status: api.status,
     taker: api.taker,
-    input: {
-      symbol: api.input.token.symbol,
-      display: api.input.amount.display,
-    },
-    output: {
-      symbol: api.output.token.symbol,
-      display: api.output.amount.display,
-    },
+    input: tokenQuantity(api.input.token, api.input.amount.display, chain),
+    output: tokenQuantity(api.output.token, api.output.amount.display, chain),
     surplus: api.surplus
-      ? { symbol: api.input.token.symbol, display: api.surplus.display }
+      ? tokenQuantity(api.input.token, api.surplus.display, chain)
       : null,
     priceImpactPct: api.price_impact_pct ?? null,
     makers:
@@ -40,11 +60,8 @@ export function toTrade(api: Trade): TradeRecord {
       maker: leg.maker,
       strategyHash: leg.strategy_hash,
       curve: leg.curve ?? null,
-      input: { symbol: api.input.token.symbol, display: leg.amount_in.display },
-      output: {
-        symbol: api.output.token.symbol,
-        display: leg.amount_out.display,
-      },
+      input: tokenQuantity(api.input.token, leg.amount_in.display, chain),
+      output: tokenQuantity(api.output.token, leg.amount_out.display, chain),
       sharePct:
         total === 0n
           ? 0
@@ -53,7 +70,158 @@ export function toTrade(api: Trade): TradeRecord {
   };
 }
 
-export function toActivity(api: ActivityEvent): ActivityRecord {
+function crossChainStatus(state: SagaState): string {
+  if (state === "complete") return "confirmed";
+  if (state === "failed_before_delivery") return "failed";
+  if (state === "quoted") return "quoted";
+  if (["preparing", "prepared"].includes(state)) return "reserved";
+  return "submitted";
+}
+
+function crossChainLifecycle(order: CrossChainOrder) {
+  const recordedAt = new Map(
+    (order.lifecycle ?? []).map((event) => [event.stage, event.at]),
+  );
+  const stages = [
+    ["quoted", "quoted", true],
+    ["destination fill", "destination_fill", order.destination != null],
+    ["proof relay", "proof_relay", order.fill_proof != null],
+    ["origin claim", "origin_claim", order.origin != null],
+    ["repayment", "repayment", order.repayment != null],
+    ["complete", "complete", order.state === "complete"],
+  ] as const;
+  return stages
+    .filter(([, , recorded]) => recorded)
+    .map(([status, stage]) => ({ status, at: recordedAt.get(stage) ?? null }));
+}
+
+function servedAsset(assets: Asset[], address: string): Asset | undefined {
+  return assets.find(
+    (asset) => asset.address.toLowerCase() === address.toLowerCase(),
+  );
+}
+
+function crossChainProfit(
+  amountIn: bigint,
+  input: Asset | undefined,
+  amountOut: bigint,
+  output: Asset | undefined,
+) {
+  if (!input || !output || input.price <= 0 || output.price <= 0) return null;
+  const inputUsd = Number(formatUnits(amountIn, input.decimals)) * input.price;
+  const outputUsd =
+    Number(formatUnits(amountOut, output.decimals)) * output.price;
+  const estimate = inputUsd - outputUsd;
+  return Number.isFinite(estimate)
+    ? { symbol: "USD", display: String(estimate) }
+    : null;
+}
+
+/** Adapt a durable SolventX saga to the already-reviewed trade details layout. */
+export function toCrossChainTrade(
+  order: CrossChainOrder,
+  originAssets: Asset[],
+  destinationAssets: Asset[],
+): TradeRecord {
+  const input = servedAsset(originAssets, order.quote.origin.input_token);
+  const destinationInput = servedAsset(
+    destinationAssets,
+    order.quote.destination.input_token,
+  );
+  const output = servedAsset(
+    destinationAssets,
+    order.quote.destination.output_token,
+  );
+  const inputDecimals = input?.decimals ?? 18;
+  const destinationInputDecimals = destinationInput?.decimals ?? 18;
+  const outputDecimals = output?.decimals ?? 18;
+  const sources = order.quote.destination.sources;
+  const total = sources.reduce(
+    (sum, source) => sum + BigInt(source.amount),
+    0n,
+  );
+  const amountOut = BigInt(order.quote.amount_out);
+  const amountIn = BigInt(order.quote.amount_in);
+  // Historical sagas predate recorded lifecycle timestamps, so their quote expiry is the only clock.
+  const createdAt = Math.max(0, order.quote.expires_at_unix - 600);
+  const status = crossChainStatus(order.state);
+  const evidence = order.origin ?? order.destination;
+  const lifecycle = crossChainLifecycle(order);
+  const quotedAt = lifecycle.find((stage) => stage.status === "quoted")?.at;
+  const completedAt = lifecycle.find(
+    (stage) => stage.status === "complete",
+  )?.at;
+
+  return {
+    flow: "cross-chain",
+    signaturePresent: true,
+    id: order.order_id,
+    status,
+    taker: order.taker ?? "",
+    input: {
+      symbol: input?.symbol ?? "TOKEN",
+      display: formatUnits(BigInt(order.quote.amount_in), inputDecimals),
+      net: input?.net ?? `Chain ${order.quote.origin.local_chain}`,
+      logoUri: input?.logoUri,
+      chainLogoUri: input?.chainLogoUri,
+    },
+    output: {
+      symbol: output?.symbol ?? "TOKEN",
+      display: formatUnits(amountOut, outputDecimals),
+      net: output?.net ?? `Chain ${order.quote.destination.local_chain}`,
+      logoUri: output?.logoUri,
+      chainLogoUri: output?.chainLogoUri,
+    },
+    surplus: crossChainProfit(amountIn, input, amountOut, output),
+    priceImpactPct: null,
+    makers: new Set(sources.map((source) => source.maker.toLowerCase())).size,
+    txHash: evidence?.transaction_hash ?? null,
+    blockNumber: evidence?.block_number ?? null,
+    createdAt: quotedAt ?? createdAt,
+    settledAt: completedAt ?? null,
+    deadlineAt: order.quote.expires_at_unix,
+    orderHash: order.order_id,
+    lifecycle,
+    legs: sources.map((source) => {
+      const sourceOutput = BigInt(source.amount);
+      const destinationAmountIn = BigInt(order.quote.destination.amount_in);
+      const sourceInput =
+        total === 0n ? 0n : (destinationAmountIn * sourceOutput) / total;
+      return {
+        maker: source.maker,
+        strategyHash: source.strategy_hash,
+        chainId: order.quote.destination.local_chain,
+        strategySource:
+          order.quote.destination.route === "direct" ? "direct" : undefined,
+        curve: null,
+        input: {
+          symbol: destinationInput?.symbol ?? "TOKEN",
+          display: formatUnits(sourceInput, destinationInputDecimals),
+          net:
+            destinationInput?.net ??
+            `Chain ${order.quote.destination.local_chain}`,
+          logoUri: destinationInput?.logoUri,
+          chainLogoUri: destinationInput?.chainLogoUri,
+        },
+        output: {
+          symbol: output?.symbol ?? "TOKEN",
+          display: formatUnits(sourceOutput, outputDecimals),
+          net: output?.net ?? `Chain ${order.quote.destination.local_chain}`,
+          logoUri: output?.logoUri,
+          chainLogoUri: output?.chainLogoUri,
+        },
+        sharePct:
+          total === 0n ? 0 : Number((sourceOutput * 10_000n) / total) / 100,
+      };
+    }),
+  };
+}
+
+export function toActivity(
+  api: ActivityEvent,
+  chain?: ChainIdentity | number,
+): ActivityRecord {
+  const identity = typeof chain === "number" ? undefined : chain;
   return {
     id: [
       api.tx_hash,
@@ -68,11 +236,39 @@ export function toActivity(api: ActivityEvent): ActivityRecord {
     maker: api.maker,
     strategyHash: api.strategy_hash,
     amount: api.token
-      ? { symbol: api.token.token.symbol, display: api.token.amount.display }
+      ? tokenQuantity(api.token.token, api.token.amount.display, identity)
       : null,
     at: api.at,
     blockNumber: api.block_number ?? null,
     txHash: api.tx_hash ?? null,
+  };
+}
+
+export function toUniswapXFeed(
+  api: UniswapXFeedOrder,
+  chain: ChainIdentity = { name: "Ethereum" },
+): UniswapXFeedRecord {
+  return {
+    orderHash: api.order_hash,
+    sourceChainId: api.source_chain_id,
+    input: tokenQuantity(
+      api.token_in,
+      formatUnits(BigInt(api.amount_in), api.token_in.decimals),
+      chain,
+    ),
+    requiredOutput: tokenQuantity(
+      api.token_out,
+      formatUnits(BigInt(api.required_out), api.token_out.decimals),
+      chain,
+    ),
+    marketOutPerIn: formatUnits(BigInt(api.market_out_per_in_q18), 18),
+    simulatedOutput: tokenQuantity(
+      api.token_out,
+      formatUnits(BigInt(api.simulated_amount_out), api.token_out.decimals),
+      chain,
+    ),
+    simulatedBatchId: api.simulated_batch_id,
+    lastSeenAt: api.last_seen_at,
   };
 }
 

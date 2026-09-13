@@ -143,11 +143,16 @@ describe("token approval orchestration", () => {
                 confirm = resolve;
             }),
         );
-        const pending = session.sign(order);
+        const statuses: string[] = [];
+        const pending = session.sign(order, {
+            onStatus: (status) => statuses.push(status.kind),
+        });
         await vi.waitFor(() => expect(rpc.receipt).toHaveBeenCalledOnce());
         expect(rpc.sign).not.toHaveBeenCalled();
+        expect(statuses).toEqual(["approving", "confirming"]);
         confirm({ status: "success" });
         await expect(pending).resolves.toBe("0xsigned");
+        expect(statuses).toEqual(["approving", "confirming", "signing"]);
     });
 
     it.each([
@@ -193,7 +198,9 @@ describe("transaction preflight", () => {
     };
 
     it("simulates the exact transaction before broadcasting", async () => {
-        await expect(session.sendTransaction(transaction)).resolves.toBe("0xsent");
+        await expect(session.sendTransaction(transaction)).resolves.toBe(
+            "0xsent",
+        );
         expect(rpc.call).toHaveBeenCalledWith(client, {
             account: transaction.owner,
             to: transaction.to,

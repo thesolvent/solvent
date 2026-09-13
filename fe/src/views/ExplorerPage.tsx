@@ -1,16 +1,28 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { useAccount, useSwitchChain } from "wagmi";
+import { Link, useNavigate } from "react-router-dom";
 import { Pagination } from "@/components/Pagination";
+import { AssetIdentity } from "@/components/AssetIdentity";
 import { RebateList } from "@/components/RebateList";
+import { RetryNotice } from "@/components/RetryNotice";
 import { useLoadedPagination } from "@/components/useLoadedPagination";
-import { chain } from "@/adapters/wallet/config";
-import { activityRow, explorerStats, tradeRow } from "@/lib/explorer";
+import {
+  activityRow,
+  explorerUrl,
+  explorerStats,
+  tradeRow,
+  uniswapXFeedRow,
+} from "@/lib/explorer";
 import { loadedPageLabel } from "@/lib/pagination";
 import type { ActivityFilter, TradeFilter } from "@/ports/explorer";
+import type { RebateSubmissionStatus } from "@/ports/rebates";
 import { useAssets } from "@/services/assets";
-import { useActivity, useExplorerStats, useTrades } from "@/services/explorer";
+import {
+  useActivity,
+  useExplorerStats,
+  useTrades,
+  useUniswapXFeed,
+} from "@/services/explorer";
+import { useConfig } from "@/services/system";
 import { usePools } from "@/services/pools";
 import {
   useActiveRebatePages,
@@ -19,9 +31,49 @@ import {
 } from "@/services/rebates";
 import type { RebateExplorerStatus } from "@/state";
 import { useApp } from "@/state";
+import { useWalletAction } from "@/services/wallet";
 import styles from "./explorer.module.css";
 
-const TABS = ["Trades", "Activity", "Rebates"];
+const TABS = ["Trades", "Activity", "Rebates", "UniswapX Feed"];
+
+const STAT_HELP: Record<string, string> = {
+  "Block height": "Latest block indexed by the protocol.",
+  "Events, 24h": "Protocol events recorded during the past 24 hours.",
+  "Trades settled": "Trades that completed settlement on-chain.",
+  "Median impact": "Median price movement across settled trades.",
+  "Active makers": "Makers with at least one strategy currently quoting.",
+};
+
+const TAB_HELP: Record<(typeof TABS)[number], string> = {
+  Trades: "Solvent trades and their settlement status.",
+  Activity: "Maker and strategy events recorded on Aqua.",
+  Rebates: "Available and completed protected-strategy rebates.",
+  "UniswapX Feed": "Public UniswapX orders evaluated by Solvent makers.",
+};
+
+function HelpTooltip({ id, text }: { id: string; text: string }) {
+  return (
+    <span id={id} role="tooltip" className={styles.statTooltip}>
+      {text}
+    </span>
+  );
+}
+
+function rebateSubmissionLabel(status: RebateSubmissionStatus | undefined) {
+  switch (status?.kind) {
+    case "approving":
+      return "Approve input token…";
+    case "signing":
+      return "Sign rebate…";
+    case "submitting":
+      return "Submitting rebate…";
+    case "confirming":
+      return "Confirming rebate…";
+    case "preparing":
+    default:
+      return "Preparing rebate…";
+  }
+}
 
 const DROP_OPTIONS = {
   xpType: ["All types", "pull", "push", "dock", "register"],
@@ -116,12 +168,12 @@ function TradeList({ filter }: { filter: TradeFilter }) {
           </p>
         )}
         {query.isError && (
-          <p className={styles.emptyNote} role="alert">
-            {query.data ? "Couldn’t refresh trades." : "Couldn’t load trades."}{" "}
-            <button type="button" onClick={() => void query.refetch()}>
-              Try again
-            </button>
-          </p>
+          <RetryNotice
+            message={
+              query.data ? "Couldn’t refresh trades." : "Couldn’t load trades."
+            }
+            onRetry={() => void query.refetch()}
+          />
         )}
         {!query.isPending && !query.isError && rows.length === 0 && (
           <p className={styles.emptyNote}>No trades match these filters.</p>
@@ -138,9 +190,19 @@ function TradeList({ filter }: { filter: TradeFilter }) {
               <span className={styles.tradeBlk}>{trade.blockLabel}</span>
             </span>
             <span className={styles.tradeFlow}>
-              <span className={styles.tradeIn}>{trade.input}</span>
+              <span className={styles.tradeIn}>
+                {trade.inputQuantity.net && (
+                  <AssetIdentity asset={trade.inputQuantity} />
+                )}
+                {trade.input}
+              </span>
               <span className={styles.tradeArrow}>→</span>
-              <span className={styles.tradeOut}>{trade.output}</span>
+              <span className={styles.tradeOut}>
+                {trade.outputQuantity.net && (
+                  <AssetIdentity asset={trade.outputQuantity} />
+                )}
+                {trade.output}
+              </span>
             </span>
             <span className={styles.tradeCell}>
               <span className={styles.tradeCellValue}>{trade.makers}</span>
@@ -173,6 +235,7 @@ function TradeList({ filter }: { filter: TradeFilter }) {
 
 function ActivityList({ filter }: { filter: ActivityFilter }) {
   const query = useActivity(filter);
+  const config = useConfig();
   const pages = query.data?.pages.map(({ items }) => items) ?? [];
   const pagination = useLoadedPagination(
     pages,
@@ -189,14 +252,14 @@ function ActivityList({ filter }: { filter: ActivityFilter }) {
           </p>
         )}
         {query.isError && (
-          <p className={styles.emptyNote} role="alert">
-            {query.data
-              ? "Couldn’t refresh activity."
-              : "Couldn’t load activity."}{" "}
-            <button type="button" onClick={() => void query.refetch()}>
-              Try again
-            </button>
-          </p>
+          <RetryNotice
+            message={
+              query.data
+                ? "Couldn’t refresh activity."
+                : "Couldn’t load activity."
+            }
+            onRetry={() => void query.refetch()}
+          />
         )}
         {!query.isPending && !query.isError && rows.length === 0 && (
           <p className={styles.emptyNote}>
@@ -205,36 +268,67 @@ function ActivityList({ filter }: { filter: ActivityFilter }) {
               : "No activity matches these filters."}
           </p>
         )}
-        {rows.map((row) => (
-          <Link
-            key={row.id}
-            className={styles.activityRow}
-            to={`/explorer/strategies/${row.strategyHash}`}
-            aria-label={`View ${row.kind} transaction ${row.tx}`}
-          >
-            <div className={styles.activityTop}>
-              <span className={styles.mono}>{row.tx}</span>
-              <span
-                className={styles.kindTag}
-                style={{ background: row.kindBg, color: row.kindFg }}
-              >
-                {row.kind}
+        {rows.map((row) => {
+          const txUrl = explorerUrl(
+            config.data?.block_explorer_url,
+            "tx",
+            row.txHash,
+          );
+          const content = (
+            <>
+              <span className={styles.activityKindCell}>
+                <span
+                  className={styles.tradeCellValue}
+                  title={row.strategyHash}
+                >
+                  {row.position}
+                </span>
+                <span className={styles.tradeCellLabel}>position</span>
               </span>
-              <span className={styles.who} title={row.maker}>
-                {row.who}
+              <span className={styles.activityFlow}>
+                {row.amount?.net && <AssetIdentity asset={row.amount} />}
+                {row.flow}
               </span>
-              <span className={styles.spacer} />
-              <span className={styles.when}>{row.when}</span>
+              <span className={styles.tradeCell}>
+                <span className={styles.tradeCellValue} title={row.maker}>
+                  {row.who}
+                </span>
+                <span className={styles.tradeCellLabel}>maker</span>
+              </span>
+              <span className={styles.tradeCell}>
+                <span className={styles.tradeBlk}>{row.tx}</span>
+                <span className={styles.tradeCellLabel}>transaction</span>
+              </span>
+              <span className={styles.tradeStatusCell}>
+                <span
+                  className={styles.kindTag}
+                  style={{ background: row.kindBg, color: row.kindFg }}
+                >
+                  {row.kind}
+                </span>
+                <span className={styles.tradeTx}>
+                  {row.block} · {row.age}
+                </span>
+              </span>
+            </>
+          );
+          return txUrl ? (
+            <a
+              key={row.id}
+              className={`${styles.activityRow} ${styles.activityRowLink}`}
+              href={txUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`View ${row.kind} transaction on chain explorer`}
+            >
+              {content}
+            </a>
+          ) : (
+            <div key={row.id} className={styles.activityRow}>
+              {content}
             </div>
-            <div className={styles.activityBottom}>
-              <span className={styles.flow}>{row.flow}</span>
-              <span className={styles.spacer} />
-              <span className={styles.activityText} title={row.strategyHash}>
-                {row.text}
-              </span>
-            </div>
-          </Link>
-        ))}
+          );
+        })}
       </div>
       <Pagination
         label={loadedPageLabel(
@@ -252,6 +346,95 @@ function ActivityList({ filter }: { filter: ActivityFilter }) {
   );
 }
 
+function UniswapXFeedList() {
+  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
+  const query = useUniswapXFeed(cursors.at(-1));
+  const rows = query.data?.items.map(uniswapXFeedRow) ?? [];
+  const page = cursors.length - 1;
+  const hasNextPage = Boolean(query.data?.nextCursor);
+  const first = page * 10 + 1;
+  const last = page * 10 + rows.length;
+  const pageLabel = rows.length
+    ? `Showing ${first}–${last}${hasNextPage ? "" : ` of ${last}`} feed orders`
+    : "No feed orders on this page";
+
+  function selectPage(nextPage: number) {
+    if (nextPage < page) {
+      setCursors((previous) => previous.slice(0, nextPage + 1));
+      return;
+    }
+    if (nextPage === page + 1 && query.data?.nextCursor) {
+      setCursors((previous) => [...previous, query.data.nextCursor]);
+    }
+  }
+
+  return (
+    <>
+      <div data-scroll="1" className={styles.list} aria-busy={query.isFetching}>
+        {query.isPending && (
+          <p className={styles.emptyNote} role="status">
+            Loading UniswapX feed…
+          </p>
+        )}
+        {query.isError && (
+          <RetryNotice
+            message={
+              query.data
+                ? "Couldn’t refresh the UniswapX feed."
+                : "Couldn’t load the UniswapX feed."
+            }
+            onRetry={() => void query.refetch()}
+          />
+        )}
+        {!query.isPending && !query.isError && rows.length === 0 && (
+          <p className={styles.emptyNote}>No simulated orders available yet.</p>
+        )}
+        {rows.map((row) => (
+          <div key={row.id} className={styles.feedRow}>
+            <span className={styles.tradePair}>
+              <span className={styles.tradePairName}>{row.pair}</span>
+              <span className={styles.tradeBlk}>{row.source}</span>
+            </span>
+            <span className={styles.tradeFlow}>
+              <span className={styles.tradeIn}>
+                <AssetIdentity asset={row.inputQuantity} />
+                {row.input}
+              </span>
+              <span className={styles.tradeArrow}>→</span>
+              <span className={styles.tradeOut}>
+                <AssetIdentity asset={row.requiredOutputQuantity} />
+                {row.requiredOutput}
+              </span>
+            </span>
+            <span className={styles.tradeCell}>
+              <span className={styles.tradeCellValue}>{row.market}</span>
+              <span className={styles.tradeCellLabel}>market rate</span>
+            </span>
+            <span className={styles.tradeCell}>
+              <span className={styles.tradeCellValue}>
+                <AssetIdentity asset={row.simulatedOutputQuantity} />
+                {row.simulatedOutput}
+              </span>
+              <span className={styles.tradeCellLabel}>simulated output</span>
+            </span>
+            <span className={styles.tradeStatusCell}>
+              <span className={styles.simulatedPill}>simulated</span>
+              <span className={styles.tradeTx}>{row.batch}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+      <Pagination
+        label={pageLabel}
+        page={page}
+        pageCount={cursors.length + Number(hasNextPage)}
+        disabled={query.isFetching || query.isError}
+        onPage={selectPage}
+      />
+    </>
+  );
+}
+
 function ExplorerRebates({
   currentBlock,
   status,
@@ -259,6 +442,7 @@ function ExplorerRebates({
   currentBlock?: number;
   status: RebateExplorerStatus;
 }) {
+  const navigate = useNavigate();
   const assets = useAssets();
   const active = status === "Active";
   const query = useRebates({ status: active ? "ready" : "executed" });
@@ -267,15 +451,10 @@ function ExplorerRebates({
     query.dataUpdatedAt,
   );
   const execution = useExecuteRebate();
-  const { isConnected, chainId } = useAccount();
-  const { openConnectModal } = useConnectModal();
-  const { switchChain } = useSwitchChain();
-  const wrongChain = isConnected && chainId !== chain.id;
+  const wallet = useWalletAction();
 
   function execute(id: string) {
-    if (!isConnected) return openConnectModal?.();
-    if (wrongChain) return switchChain({ chainId: chain.id });
-    execution.execute(id);
+    if (wallet.prepare()) execution.execute(id);
   }
 
   return (
@@ -296,13 +475,14 @@ function ExplorerRebates({
         active
           ? {
               availableIds: continuity.availableIds,
-              label: !isConnected
+              label: !wallet.connected
                 ? "Connect"
-                : wrongChain
-                  ? "Switch network"
+                : wallet.switchTo
+                  ? `Switch to ${wallet.switchTo}`
                   : "Earn",
               onExecute: execute,
               pendingId: execution.pendingId,
+              pendingLabel: rebateSubmissionLabel(execution.status),
               completedId: execution.completedId,
               failedId: execution.failedId,
               problem: execution.problem,
@@ -310,6 +490,10 @@ function ExplorerRebates({
           : undefined
       }
       currentBlock={currentBlock}
+      highlightRowsOnHover
+      onOpenTrade={(tradeId) =>
+        navigate(`/explorer/trades/${encodeURIComponent(tradeId)}`)
+      }
     />
   );
 }
@@ -320,6 +504,7 @@ export function ExplorerPage() {
   const stats = useExplorerStats();
   const isTrades = state.xpTab === "Trades";
   const isActivity = state.xpTab === "Activity";
+  const isUniswapXFeed = state.xpTab === "UniswapX Feed";
   const pairs = [...new Set(pools.map((pool) => pool.pair.replace(/\s/g, "")))];
   const pair = pools.find(
     (pool) => pool.pair.replace(/\s/g, "") === state.xpPair,
@@ -338,7 +523,13 @@ export function ExplorerPage() {
         <div className={styles.headTitle}>
           <div className={styles.eyebrow}>Explorer</div>
           <div className={styles.titleLg}>
-            {isTrades ? "Trades" : isActivity ? "Protocol activity" : "Rebates"}
+            {isTrades
+              ? "Trades"
+              : isActivity
+                ? "Protocol activity"
+                : isUniswapXFeed
+                  ? "UniswapX feed"
+                  : "Rebates"}
           </div>
         </div>
         <span className={styles.limeSquare} />
@@ -347,29 +538,37 @@ export function ExplorerPage() {
             ? "Every intent through Solvent: pair, in → out, makers sourced, status, price impact and tx."
             : isActivity
               ? "Aqua-level events: makers registering strategies, pushing and pulling balance, and docking positions."
-              : "Protected strategies share profitable price restoration between their maker and executor."}
+              : isUniswapXFeed
+                ? "Public UniswapX Dutch orders evaluated against eight virtual makers using cached market pricing."
+                : "Protected strategies share profitable price restoration between their maker and executor."}
         </p>
       </div>
       <div className={styles.stats5}>
-        {explorerStats(stats.data).map((stat) => (
-          <div
-            key={stat.label}
-            className={styles.stat}
-            style={{
-              backgroundImage: `linear-gradient(${stat.sep}, ${stat.sep})`,
-            }}
-          >
-            <div className={styles.statLabel}>{stat.label}</div>
-            <div className={styles.statRow}>
-              <span className={styles.statValue}>{stat.value}</span>
-              <span className={styles.statSub} style={{ color: stat.accent }}>
-                {stats.isError && stat.label === "Block height"
-                  ? "updates delayed"
-                  : stat.sub}
-              </span>
+        {explorerStats(stats.data).map((stat) => {
+          const id = `explorer-${stat.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tooltip`;
+          return (
+            <div
+              key={stat.label}
+              className={`${styles.stat} ${styles.statHelp}`}
+              tabIndex={0}
+              aria-describedby={id}
+              style={{
+                backgroundImage: `linear-gradient(${stat.sep}, ${stat.sep})`,
+              }}
+            >
+              <HelpTooltip id={id} text={STAT_HELP[stat.label]} />
+              <div className={styles.statLabel}>{stat.label}</div>
+              <div className={styles.statRow}>
+                <span className={styles.statValue}>{stat.value}</span>
+                <span className={styles.statSub} style={{ color: stat.accent }}>
+                  {stats.isError && stat.label === "Block height"
+                    ? "updates delayed"
+                    : stat.sub}
+                </span>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {stats.isError && (
         <p role="alert" className={styles.srOnly}>
@@ -382,10 +581,18 @@ export function ExplorerPage() {
             <button
               key={tab}
               type="button"
-              className={tab === state.xpTab ? styles.tabOn : styles.tab}
+              className={`${tab === state.xpTab ? styles.tabOn : styles.tab} ${styles.tabHelp}`}
+              aria-describedby={`explorer-${tab.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tooltip`}
               onClick={() => set({ xpTab: tab, xpOpen: null })}
             >
               {tab}
+              <span
+                id={`explorer-${tab.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-tooltip`}
+                role="tooltip"
+                className={styles.tabTooltip}
+              >
+                {TAB_HELP[tab]}
+              </span>
             </button>
           ))}
         </div>
@@ -400,7 +607,7 @@ export function ExplorerPage() {
               <FilterDrop dkey="xpType" options={DROP_OPTIONS.xpType} />
               <FilterDrop dkey="xpEnt" options={DROP_OPTIONS.xpEnt} />
             </>
-          ) : (
+          ) : isUniswapXFeed ? null : (
             <FilterDrop
               dkey="xpRebateStatus"
               options={DROP_OPTIONS.xpRebateStatus}
@@ -419,6 +626,8 @@ export function ExplorerPage() {
           key={JSON.stringify(activityFilter)}
           filter={activityFilter}
         />
+      ) : isUniswapXFeed ? (
+        <UniswapXFeedList />
       ) : (
         <ExplorerRebates
           key={state.xpRebateStatus}
