@@ -10,6 +10,14 @@
     "@openzeppelin/contracts" "5.4.0"
     forge-std "github:foundry-rs/forge-std#v1.11.0"
 
+"@1inch/aqua@github:1inch/aqua#v1.0.1":
+  version "1.0.1"
+  uid "7219b1763b0099e7ab1e76b0f21053d95a6b69e5"
+  resolved "https://codeload.github.com/1inch/aqua/tar.gz/7219b1763b0099e7ab1e76b0f21053d95a6b69e5"
+  dependencies:
+    "@1inch/solidity-utils" "6.9.9"
+    "@openzeppelin/contracts" "5.4.0"
+
 "@1inch/solidity-utils@6.9.5":
   version "6.9.5"
   resolved "https://registry.yarnpkg.com/@1inch/solidity-utils/-/solidity-utils-6.9.5.tgz#922b45f3f721042a97449adb5d46656169d5c765"
@@ -34,6 +42,26 @@
   version "6.9.7"
   resolved "https://registry.yarnpkg.com/@1inch/solidity-utils/-/solidity-utils-6.9.7.tgz#788660e358da4c753a0aa8e617513c5a64579027"
   integrity sha512-2vKx7+EGw+IS/UoyHW3+9d0TPb+F+018KEJ9sQVqMy9Xd3Q3VxypdSYklUgYF9YmrjNxRtCPTRll28sFEeqNiQ==
+  dependencies:
+    "@metamask/eth-sig-util" "8.0.0"
+    "@nomicfoundation/hardhat-ethers" "3.0.8"
+    "@nomicfoundation/hardhat-network-helpers" "1.0.12"
+    "@nomicfoundation/hardhat-verify" "2.0.14"
+    "@openzeppelin/contracts" "5.1.0"
+    "@uniswap/permit2-sdk" "1.3.0"
+    chai "4.5.0"
+    dotenv "16.4.5"
+    ethereumjs-util "7.1.5"
+    ethers "6.13.4"
+    hardhat "2.23.0"
+    hardhat-deploy "0.14.0"
+    mocha-chai-jest-snapshot "1.1.6"
+    node-fetch "2.7.0"
+
+"@1inch/solidity-utils@6.9.9":
+  version "6.9.9"
+  resolved "https://registry.yarnpkg.com/@1inch/solidity-utils/-/solidity-utils-6.9.9.tgz#f117fe087b6ec0ac43f225287eab49a36cf52f5e"
+  integrity sha512-zs6mN3z7RwFomzncTqzAfWG6Av/QplUikVniljacu1esbqdHbDKOOj52/vi2x7EbV03uNsdXVc6OLJrNh0ANvQ==
   dependencies:
     "@metamask/eth-sig-util" "8.0.0"
     "@nomicfoundation/hardhat-ethers" "3.0.8"
